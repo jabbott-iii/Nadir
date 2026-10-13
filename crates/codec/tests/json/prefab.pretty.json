@@ -1,0 +1,41 @@
+{
+  "name": "slime",
+  "extends": "enemy_base",
+  "components": {
+    "Sprite": {
+      "atlas": "atlas/enemies",
+      "region": "slime_idle_0"
+    },
+    "Health": {
+      "current": 12,
+      "max": 12
+    },
+    "Mover": {
+      "speed": 22.5,
+      "friction": 0.01,
+      "flying": false
+    },
+    "Collider": {
+      "shape": {
+        "Circle": {
+          "radius": 6
+        }
+      },
+      "layer": [
+        "Enemy"
+      ],
+      "mask": [
+        "World",
+        "Player"
+      ],
+      "offset": [
+        0,
+        -3.0
+      ]
+    },
+    "Loot": {
+      "table": null,
+      "note": "50% → \"gel\"\t(tab), url: http://example.com/a//b"
+    }
+  }
+}

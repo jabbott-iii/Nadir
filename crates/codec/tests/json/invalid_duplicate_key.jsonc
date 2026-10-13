@@ -1,0 +1,8 @@
+{
+  "components": {
+    "Health": { "current": 12, "max": 12 },
+    "Sprite": { "atlas": "atlas/enemies" },
+    /* Pasted twice. */
+    "Health": { "current": 20, "max": 20 }
+  }
+}

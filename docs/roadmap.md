@@ -119,7 +119,20 @@ enforced by tooling from day one.
     - A failing `check` prints a reproducible seed.
   - Verify: `cargo test -p nadir-core --all-features`
 
-- [ ] **M0.5 — codec: JSON/JSONC parser and writer**
+- [x] **M0.5 — codec: JSON/JSONC parser and writer**
+  - Note: the supported subset is documented in
+    `docs/subsystems/assets-and-codecs.md` ("JSON and JSONC subset").
+    Numbers split into `Int(i64)` and `Float(f64)`, as KBJ needs;
+    duplicate keys are an error.
+  - Note: `Limits` has only the three fields JSON uses (`max_depth`,
+    `max_string_bytes`, `max_entries`). Later decoders add theirs.
+  - Note: `nadir-codec` depends on `nadir-core` as a dev-dependency only,
+    for the property-test harness.
+  - Note: the parser and writers were cross-checked against Python's
+    `json` module on 6,000 random documents, in both directions, with no
+    differences. That check is not part of the test suite.
+  - Note: the `xtask fuzz-smoke` target and `fuzz/corpus/json/` that the
+    parser rules require are M0.7's job.
   - Depends: M0.1
   - Do: `nadir_codec::json` per `docs/subsystems/assets-and-codecs.md`:
     `Value`, `parse(&str, Limits)`, `to_string_pretty`, `to_string_compact`.

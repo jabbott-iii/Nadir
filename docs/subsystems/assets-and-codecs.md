@@ -74,6 +74,53 @@ match_len = (token & 15) + 4 + extras
   specification. Its exact bytes are defined by this document and the test
   vectors in `crates/codec/tests/klz/`.
 
+### JSON and JSONC subset (documented, tested)
+
+`json::parse(&str, Limits)` reads RFC 8259 JSON plus the JSONC extensions
+into a `Value` tree. It takes `&str` rather than bytes because JSON is text.
+`to_string_compact` and `to_string_pretty` write strict RFC 8259 JSON.
+
+```rust
+pub enum Value {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+    Array(Vec<Value>),
+    Object(Vec<(String, Value)>),   // members in document order
+}
+```
+
+- **Accepted beyond RFC 8259:**
+  - `//` and `/* */` comments wherever whitespace is allowed; block comments
+    do not nest
+  - one trailing comma after the last entry of an array or object
+  - a leading byte-order mark
+- **Numbers:**
+  - Written as an integer and fits `i64`: `Int`.
+  - Anything else: `Float`. That includes a fraction or exponent, an integer
+    too large for `i64`, and `-0`.
+  - Too large for `f64`: an error.
+  - The writers always give a float a `.` or an exponent, so `Int` and
+    `Float` survive a round trip. KBJ relies on that distinction.
+  - NaN and the infinities cannot be written as JSON; the writers emit
+    `null` for them.
+- **Rejected, although some parsers allow it:**
+  - the same key twice in one object
+  - a `\uXXXX` escape that is half of a surrogate pair
+  - raw control characters in strings, including tabs and newlines
+  - leading zeros, a leading `+`, hex numbers, `NaN`, `Infinity`
+  - single quotes and unquoted keys
+- **Limits** (see the table below): nesting depth, string length in decoded
+  bytes (keys included), and entries per array or object. A document of
+  only scalars has depth 0. Exceeding a limit is an error.
+- **Errors:** `CodecError::Json { line, column, kind }`. Lines and columns
+  start at 1, and columns count characters, not bytes.
+- **Not preserved:** comments and layout are lost when a document is parsed
+  and written back. Member order is kept.
+- **Vectors:** `crates/codec/tests/json/`.
+
 ### KBJ (binary JSON value tree)
 
 ```

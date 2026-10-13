@@ -21,6 +21,9 @@ version = "0.1.0"
 [[package]]
 name = "nadir-codec"
 version = "0.1.0"
+dependencies = [
+ "nadir-core",
+]
 
 [[package]]
 name = "nadir-collision"
