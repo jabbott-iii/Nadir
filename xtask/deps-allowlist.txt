@@ -1,0 +1,8 @@
+# Third-party packages approved under docs/02-dependency-policy.md.
+# `cargo xtask deps` fails for any package that is not listed here.
+#
+# One package per line, with the exact version and the ADR that approved it:
+#
+#     name version ADR-NNNN
+#
+# The approved set is empty.

@@ -142,7 +142,30 @@ enforced by tooling from day one.
     - Malformed input returns errors with line and column; it never panics.
   - Verify: `cargo test -p nadir-codec`
 
-- [ ] **M0.6 — xtask: guardrail checks**
+- [x] **M0.6 — xtask: guardrail checks**
+  - Note: negative demonstrations, run in a scratch copy on 2026-10-12 and
+    reverted. Each made its check exit with status 1:
+    - `nadir-core` given a path dependency on `nadir-render`: `layers`
+      reports the edge.
+    - an `unsafe` block added to `nadir-ecs`: `unsafe-audit` reports the
+      file and line.
+    - `left-pad-demo = "1"` added to `nadir-ecs`: `deps` reports the
+      package. crates.io was replaced by a local directory source for
+      this, so nothing was downloaded; cargo still reports the crates.io
+      source for the package.
+    - `fmt`, `clippy`, `test` and `release-no-dev` were also made to fail
+      once each.
+  - Note: stricter than the one-line descriptions, and now recorded in
+    `docs/04-quality.md`: `deps` also rejects a path package from outside
+    the workspace and requires the exact version; `layers` counts dev and
+    build dependencies and fails a workspace crate that has no row;
+    `unsafe-audit` fails any `unsafe` outside the three FFI crates.
+  - Note: `layers` cannot tell that `sandbox` reaches `nadir-debug` only
+    behind `dev`; `release-no-dev` covers that.
+  - Note: `cargo metadata` runs without `--locked` or `--offline`, as
+    specified. M0.8 may want `--locked` in CI.
+  - Note: run on Linux only. Nothing in `xtask` is OS-specific, but the
+    Windows and macOS runs first happen in M0.8's CI.
   - Depends: M0.4, M0.5
   - Do: `xtask` subcommands `fmt`, `clippy`, `test`, `deps` (+
     `xtask/deps-allowlist.txt`, empty), `layers` (matrix as a `const`),

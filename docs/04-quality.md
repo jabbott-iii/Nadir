@@ -127,11 +127,15 @@ pub fn check_sized<T: std::fmt::Debug>(
 | `fmt` | `cargo fmt --all -- --check` |
 | `clippy` | `cargo clippy --workspace --all-targets --all-features -- -D warnings` |
 | `test` | `cargo test --workspace --all-features` |
-| `deps` | `cargo metadata --format-version 1`, parsed with `nadir-codec::json`; every package with a non-null `source` must appear in `xtask/deps-allowlist.txt` |
-| `layers` | Same metadata; each workspace crate's dependencies must be a subset of its row in the dependency matrix. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md` |
-| `unsafe-audit` | Scans `*.rs`: `#![allow(unsafe_code)]` only in `sys`/`platform`/`gfx` roots; every `unsafe {` / `unsafe impl` preceded by `// SAFETY:` within 3 lines; prints a per-crate `unsafe` count (reviewed if it grows) |
+| `deps` | `cargo metadata --format-version 1`, parsed with `nadir-codec::json`; every package with a non-null `source` must appear in `xtask/deps-allowlist.txt` with its exact version. A path package from outside the workspace also fails (vendored code) |
+| `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |
+| `unsafe-audit` | Scans `*.rs`, ignoring comments and string literals: no `unsafe` outside `sys`/`platform`/`gfx`; `allow`, `expect` or `warn(unsafe_code)` only in those three crate roots; every `unsafe {` / `unsafe impl` preceded by a `// SAFETY:` comment that ends at most 3 lines above it; prints a per-crate `unsafe` count (reviewed if it grows) |
 | `release-no-dev` | Runs `cargo tree -p sandbox -e normal --prefix none` without the `dev` feature and fails if `nadir-debug` appears |
 | `ci` | All of the above in order; stops at the first failure and prints a summary table |
+
+Each check is also a subcommand (`cargo xtask deps`). The exit status is 0
+when the check passes, 1 when it fails, and 2 when the command line is not
+understood.
 
 ## CI (GitHub Actions)
 
