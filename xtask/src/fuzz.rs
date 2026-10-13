@@ -555,9 +555,12 @@ mod tests {
         assert_eq!(lines.len(), 6, "{output}");
         assert_eq!(lines[0], "fuzz-smoke: 1 target, 60 s each, seed 0x7");
         assert_eq!(lines[1], "short: 1 seed, 3000 inputs in ? s (? per second)");
+        // The panic site is the source path as the compiler was given it,
+        // which has `\` between components on Windows.
+        let finding = lines[2].replace('\\', "/");
         assert!(
-            lines[2].starts_with("finding: short: panic at xtask/src/fuzz.rs:")
-                && lines[2].ends_with(": more than 40 bytes"),
+            finding.starts_with("finding: short: panic at xtask/src/fuzz.rs:")
+                && finding.ends_with(": more than 40 bytes"),
             "{output}"
         );
         // The path is relative to the root, and the file is there.
