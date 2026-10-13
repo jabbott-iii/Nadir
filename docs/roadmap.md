@@ -255,7 +255,22 @@ CI runners. `Cargo.lock` contains zero third-party packages.
 **Goal:** `Platform` opens a window, pumps events and runs the fixed-tick
 loop on Linux, Windows and macOS. No GPU yet.
 
-- [ ] **M1.1 — sys: dynlib + Linux libc + X11 declarations**
+- [x] **M1.1 — sys: dynlib + Linux libc + X11 declarations**
+  - Note: `Xlib` has 23 functions, chosen from the `Do` list of M1.2 and
+    the fields of `WindowConfig`. Left for the task that first calls them:
+    text input (`XOpenIM`, `XCreateIC`, `Xutf8LookupString`), visuals
+    (`XGetVisualInfo`, M2.2), pointer grab, and minimize detection.
+  - Note: the layout numbers come from the headers of libx11-dev 1.8.7,
+    printed by a C program built with gcc 13.3 for x86_64 Linux. The
+    assertions are compile-time and were built on Linux only.
+  - Note: a throwaway script also compared every function type, constant
+    value, field type and field offset with the headers, through gcc static
+    assertions. All matched. The script is not in the repository.
+  - Note: `dynlib!` is compiled only on Linux and in tests, until another
+    OS has a table: an unused macro would fail `clippy -D warnings` there.
+  - Note: the test that looks every function up in the installed
+    `libX11.so.6` passes without checking anything on a machine that has
+    no Xlib.
   - Depends: M0.6
   - Do: the `dynlib!` macro; `linux/libc.rs` (`dlopen`/`dlsym`/`dlerror`);
     `linux/x11.rs` with only the calls needed for M1.2. Use the

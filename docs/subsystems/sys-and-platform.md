@@ -15,7 +15,7 @@ crate structure and the API every other crate sees.
 crates/sys/src/
 ├── lib.rs                # #![allow(unsafe_code)], cfg-gated modules
 ├── gl.rs                 # GL types, enums, fn-pointer types (shared by all OSes)
-├── dynlib.rs             # dynlib! macro: struct of fn pointers + load(&Library) -> Result<Self, MissingSymbol>
+├── dynlib.rs             # dynlib! macro: struct of fn pointers + load(&dyn Library) -> Result<Self, MissingSymbols>
 ├── windows/
 │   ├── types.rs          # HWND, HRESULT, GUID, RECT, MSG, WNDCLASSEXW, ...
 │   ├── kernel32.rs user32.rs gdi32.rs shell32.rs winmm.rs ole32.rs
@@ -51,6 +51,15 @@ crates/sys/src/
 - Prefer `dlopen`/`LoadLibraryW` for anything not guaranteed present
   (XInput, X11, EGL, ALSA, avrt, dbghelp), so the game can report a clear
   error.
+- `nadir-sys` declares symbol tables but never opens a library:
+  - `dynlib.rs` declares the `Library` trait, whose one method looks a
+    symbol up by name. `nadir-platform` implements it for what `dlopen` and
+    `LoadLibraryW` return.
+  - A table's `load` is `unsafe`: the caller promises that the library is
+    the one the table was written for. If symbols are missing, the
+    `MissingSymbols` error names every one of them.
+  - A loaded library stays loaded until the process exits, so the function
+    pointers in a table never dangle. `dlclose` is not declared.
 
 ## `nadir-platform`: safe OS behavior
 
