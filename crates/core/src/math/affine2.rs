@@ -125,7 +125,8 @@ impl Mul for Affine2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::for_cases;
+    use crate::test_support::{random_affine2, random_vec2};
+    use crate::testing::check;
     use std::f32::consts::FRAC_PI_2;
 
     #[test]
@@ -197,37 +198,48 @@ mod tests {
 
     #[test]
     fn multiplication_composes_right_to_left() {
-        for_cases("affine2 composition", 500, |rng| {
-            let a = rng.affine2();
-            let b = rng.affine2();
-            let p = rng.vec2(-50.0, 50.0);
-            let composed = (a * b).transform_point(p);
-            let stepwise = a.transform_point(b.transform_point(p));
-            if !composed.approx_eq(stepwise, 1e-2) {
-                return Err(format!(
-                    "(a * b)(p) = {composed:?}, a(b(p)) = {stepwise:?}\na = {a:?}\nb = {b:?}"
-                ));
-            }
-            Ok(())
-        });
+        check(
+            "affine2 composition",
+            500,
+            |rng| {
+                (
+                    random_affine2(rng),
+                    random_affine2(rng),
+                    random_vec2(rng, -50.0, 50.0),
+                )
+            },
+            |&(a, b, p)| {
+                let composed = (a * b).transform_point(p);
+                let stepwise = a.transform_point(b.transform_point(p));
+                if !composed.approx_eq(stepwise, 1e-2) {
+                    return Err(format!(
+                        "(a * b)(p) = {composed:?}, but a(b(p)) = {stepwise:?}"
+                    ));
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]
     fn inverse_round_trips() {
-        for_cases("affine2 inverse round-trip", 1000, |rng| {
-            let m = rng.affine2();
-            let inverse = m.inverse().ok_or_else(|| format!("no inverse for {m:?}"))?;
-            for product in [m * inverse, inverse * m] {
-                if !product.approx_eq(Affine2::IDENTITY, 1e-3) {
-                    return Err(format!("{m:?} times its inverse is {product:?}"));
+        check(
+            "affine2 inverse round-trip",
+            1000,
+            |rng| (random_affine2(rng), random_vec2(rng, -50.0, 50.0)),
+            |&(m, p)| {
+                let inverse = m.inverse().ok_or("no inverse")?;
+                for product in [m * inverse, inverse * m] {
+                    if !product.approx_eq(Affine2::IDENTITY, 1e-3) {
+                        return Err(format!("the transform times its inverse is {product:?}"));
+                    }
                 }
-            }
-            let p = rng.vec2(-50.0, 50.0);
-            let back = inverse.transform_point(m.transform_point(p));
-            if !back.approx_eq(p, 1e-2) {
-                return Err(format!("{p:?} came back as {back:?} through {m:?}"));
-            }
-            Ok(())
-        });
+                let back = inverse.transform_point(m.transform_point(p));
+                if !back.approx_eq(p, 1e-2) {
+                    return Err(format!("the point came back as {back:?}"));
+                }
+                Ok(())
+            },
+        );
     }
 }

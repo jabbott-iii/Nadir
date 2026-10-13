@@ -54,6 +54,10 @@ impl Pcg32 {
     ///
     /// Works for `u32`, `i32` and `f32` ranges. An empty or inverted range
     /// returns `range.start` without consuming any randomness.
+    ///
+    /// The range's own type decides which kind of value is drawn, so an
+    /// unsuffixed integer range such as `0..10` yields an `i32`. Write
+    /// `0..10u32` for a `u32`.
     pub fn range<R: SampleRange>(&mut self, range: R) -> R::Output {
         range.sample(self)
     }
@@ -163,7 +167,7 @@ impl SampleRange for Range<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::for_cases;
+    use crate::testing::check;
 
     fn take<const N: usize>(rng: &mut Pcg32) -> [u32; N] {
         std::array::from_fn(|_| rng.next_u32())
@@ -328,34 +332,53 @@ mod tests {
 
     #[test]
     fn ranges_stay_in_bounds() {
-        for_cases("pcg32 range bounds", 500, |case| {
-            let mut rng = Pcg32::new(u64::from(case.next_u32()), u64::from(case.next_u32()));
+        /// A seed and stream for the generator under test, and two bounds of
+        /// each kind, in no particular order.
+        #[derive(Debug)]
+        struct Case {
+            seed: u64,
+            stream: u64,
+            unsigned: (u32, u32),
+            signed: (i32, i32),
+            float: (f32, f32),
+        }
 
-            let (a, b) = (case.next_u32(), case.next_u32());
-            let (low, high) = (a.min(b), a.max(b));
-            let value = rng.range(low..high);
-            if low < high && !(low..high).contains(&value) {
-                return Err(format!("{value} is outside {low}..{high}"));
-            }
+        check(
+            "pcg32 range bounds",
+            500,
+            |rng| Case {
+                seed: u64::from(rng.next_u32()),
+                stream: u64::from(rng.next_u32()),
+                unsigned: (rng.next_u32(), rng.next_u32()),
+                signed: (rng.next_u32() as i32, rng.next_u32() as i32),
+                float: (rng.range(-1000.0..1000.0f32), rng.range(-1000.0..1000.0f32)),
+            },
+            |case| {
+                let mut rng = Pcg32::new(case.seed, case.stream);
 
-            let (a, b) = (case.next_u32() as i32, case.next_u32() as i32);
-            let (low, high) = (a.min(b), a.max(b));
-            let value = rng.range(low..high);
-            if low < high && !(low..high).contains(&value) {
-                return Err(format!("{value} is outside {low}..{high}"));
-            }
+                let (a, b) = case.unsigned;
+                let (low, high) = (a.min(b), a.max(b));
+                let value = rng.range(low..high);
+                if low < high && !(low..high).contains(&value) {
+                    return Err(format!("{value} is outside {low}..{high}"));
+                }
 
-            let (a, b) = (
-                case.range_f32(-1000.0, 1000.0),
-                case.range_f32(-1000.0, 1000.0),
-            );
-            let (low, high) = (a.min(b), a.max(b));
-            let value = rng.range(low..high);
-            if !(low..=high).contains(&value) {
-                return Err(format!("{value} is outside {low}..{high}"));
-            }
-            Ok(())
-        });
+                let (a, b) = case.signed;
+                let (low, high) = (a.min(b), a.max(b));
+                let value = rng.range(low..high);
+                if low < high && !(low..high).contains(&value) {
+                    return Err(format!("{value} is outside {low}..{high}"));
+                }
+
+                let (a, b) = case.float;
+                let (low, high) = (a.min(b), a.max(b));
+                let value = rng.range(low..high);
+                if !(low..=high).contains(&value) {
+                    return Err(format!("{value} is outside {low}..{high}"));
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]
@@ -390,18 +413,21 @@ mod tests {
 
     #[test]
     fn shuffle_keeps_every_element() {
-        for_cases("pcg32 shuffle is a permutation", 200, |case| {
-            let mut rng = Pcg32::new(u64::from(case.next_u32()), 0);
-            let len = case.next_u32() as usize % 50;
-            let mut items: Vec<usize> = (0..len).collect();
-            rng.shuffle(&mut items);
-            let mut sorted = items.clone();
-            sorted.sort_unstable();
-            if sorted != (0..len).collect::<Vec<_>>() {
-                return Err(format!("shuffling 0..{len} gave {items:?}"));
-            }
-            Ok(())
-        });
+        check(
+            "pcg32 shuffle is a permutation",
+            200,
+            |rng| (u64::from(rng.next_u32()), rng.range(0..50u32) as usize),
+            |&(seed, len)| {
+                let mut items: Vec<usize> = (0..len).collect();
+                Pcg32::new(seed, 0).shuffle(&mut items);
+                let mut sorted = items.clone();
+                sorted.sort_unstable();
+                if sorted != (0..len).collect::<Vec<_>>() {
+                    return Err(format!("shuffling gave {items:?}"));
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]

@@ -15,8 +15,8 @@ dependencies.
 | `hash` | `fnv1a64`; `FxLikeHasher` with `FastHashMap` / `FastHashSet` aliases (deterministic, non-cryptographic); `crc32` (IEEE, table-driven), shared by `codec` (PNG chunks) and `assets` (pack integrity) |
 | `handle` | `GenIndex { index: u32, generation: NonZeroU32 }`, `GenArena<T>` (insert/remove/get/iter, free list), typed `Handle<T>` built on it |
 | `keys` | `Key` (physical keys, USB-HID-usage order), `MouseButton`, `GamepadButton`, `GamepadAxis` (standard layout, Xbox naming), `Modifiers` |
-| `profile` | `profile_scope!("name")`: compiles to nothing unless feature `profile` is on; when on, records begin/end with `Instant` into a thread-local buffer; `profile::take_frame()` collects them |
-| `testing` | Property-test harness (`check`), golden comparison helpers (pure pixel diff), `assert_approx!` |
+| `profile` | `profile_scope!("name")`: compiles to nothing unless feature `profile` is on; when on, records begin/end with `Instant` into a thread-local buffer; `profile::take_frame(&mut out)` moves the calling thread's records into a reused `Vec` |
+| `testing` | Property-test harness (`check`, `check_sized`), golden comparison helpers (pure pixel diff), `assert_approx!` |
 | `cli` | Minimal argument parser for `xtask`, `cook` and the game binary (`--flag`, `--key value`, positional) |
 | `civil` | UTC date/time from `SystemTime` (days-to-civil conversion) for log and crash-file names |
 | `error` | `CoreError` and the `ErrorContext` helper for adding "while doing X" context to errors |

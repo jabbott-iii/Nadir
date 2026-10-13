@@ -170,7 +170,8 @@ fn hex_digit(byte: u8) -> Result<u8, CoreError> {
 mod tests {
     use super::*;
     use crate::math::approx_eq;
-    use crate::test_support::for_cases;
+    use crate::rng::Pcg32;
+    use crate::testing::check;
 
     fn channel_error(a: Color, b: Color) -> u8 {
         [
@@ -316,52 +317,66 @@ mod tests {
 
     #[test]
     fn srgb_round_trips_within_one() {
-        for_cases("sRGB round-trip", 2000, |rng| {
-            let [r, g, b, a] = rng.next_u32().to_le_bytes();
-            let color = Color::rgba(r, g, b, a);
-            let back = color.to_linear().to_srgb();
-            if channel_error(color, back) > 1 {
-                return Err(format!("{color:?} came back as {back:?}"));
-            }
-            Ok(())
-        });
+        check(
+            "sRGB round-trip",
+            2000,
+            |rng| {
+                let [r, g, b, a] = rng.next_u32().to_le_bytes();
+                Color::rgba(r, g, b, a)
+            },
+            |&color| {
+                let back = color.to_linear().to_srgb();
+                if channel_error(color, back) > 1 {
+                    return Err(format!("came back as {back:?}"));
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]
     fn linear_round_trips_through_8_bit_within_one_step() {
-        for_cases("linear round-trip", 2000, |rng| {
-            let linear = LinearColor::new(
-                rng.range_f32(0.0, 1.0),
-                rng.range_f32(0.0, 1.0),
-                rng.range_f32(0.0, 1.0),
-                rng.range_f32(0.0, 1.0),
-            );
-            let encoded = linear.to_srgb();
-            // Once quantized to 8 bits, decoding and re-encoding must stay
-            // within one step.
-            let again = encoded.to_linear().to_srgb();
-            if channel_error(encoded, again) > 1 {
-                return Err(format!(
-                    "{linear:?} encoded to {encoded:?}, then to {again:?}"
-                ));
-            }
-            Ok(())
-        });
+        check(
+            "linear round-trip",
+            2000,
+            |rng| {
+                LinearColor::new(
+                    rng.next_f32(),
+                    rng.next_f32(),
+                    rng.next_f32(),
+                    rng.next_f32(),
+                )
+            },
+            |&linear| {
+                let encoded = linear.to_srgb();
+                // Once quantized to 8 bits, decoding and re-encoding must stay
+                // within one step.
+                let again = encoded.to_linear().to_srgb();
+                if channel_error(encoded, again) > 1 {
+                    return Err(format!("encoded to {encoded:?}, then to {again:?}"));
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]
     fn transfer_functions_are_inverses() {
-        for_cases("transfer functions are inverses", 2000, |rng| {
-            let x = rng.range_f32(0.0, 1.0);
-            let there_and_back = srgb_to_linear(linear_to_srgb(x));
-            if !approx_eq(there_and_back, x, 1e-5) {
-                return Err(format!("linear {x} came back as {there_and_back}"));
-            }
-            let back_and_there = linear_to_srgb(srgb_to_linear(x));
-            if !approx_eq(back_and_there, x, 1e-5) {
-                return Err(format!("sRGB {x} came back as {back_and_there}"));
-            }
-            Ok(())
-        });
+        check(
+            "transfer functions are inverses",
+            2000,
+            Pcg32::next_f32,
+            |&x| {
+                let there_and_back = srgb_to_linear(linear_to_srgb(x));
+                if !approx_eq(there_and_back, x, 1e-5) {
+                    return Err(format!("as linear, it came back as {there_and_back}"));
+                }
+                let back_and_there = linear_to_srgb(srgb_to_linear(x));
+                if !approx_eq(back_and_there, x, 1e-5) {
+                    return Err(format!("as sRGB, it came back as {back_and_there}"));
+                }
+                Ok(())
+            },
+        );
     }
 }

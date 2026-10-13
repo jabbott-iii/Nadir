@@ -2,12 +2,17 @@
 //! RNG, hashing, generational handles, key enums, profiling scopes, errors and
 //! test helpers.
 
+pub mod civil;
+pub mod cli;
 pub mod color;
 pub mod error;
 pub mod handle;
 pub mod hash;
+pub mod log;
 pub mod math;
+pub mod profile;
 pub mod rng;
+pub mod testing;
 
 #[cfg(test)]
 mod test_support;

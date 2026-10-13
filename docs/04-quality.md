@@ -23,22 +23,34 @@ below is our own code (dependency policy items 26–28).
 ### Property testing — `nadir_core::testing`
 
 ```rust
-/// Runs `f` with `cases` generated inputs from a seeded PCG32. On failure,
-/// panics with the seed and case index so the failure can be replayed exactly.
+/// Runs `property` on `cases` inputs generated from a seeded PCG32. On
+/// failure, panics with the seed and case index so the failure can be
+/// replayed exactly.
 pub fn check<T: std::fmt::Debug>(
     name: &str,
     cases: u32,
-    gen: impl Fn(&mut Pcg32) -> T,
-    f: impl Fn(&T) -> Result<(), String>,
+    generate: impl Fn(&mut Pcg32) -> T,
+    property: impl Fn(&T) -> Result<(), String>,
+);
+
+/// The same, for inputs with a natural size. `generate` also receives a
+/// size from 0 to `MAX_SIZE` (100), which grows over the run.
+pub fn check_sized<T: std::fmt::Debug>(
+    name: &str,
+    cases: u32,
+    generate: impl Fn(&mut Pcg32, u32) -> T,
+    property: impl Fn(&T) -> Result<(), String>,
 );
 ```
 
 - The default seed comes from `NADIR_SEED`, or from a fixed value in CI so
   runs are reproducible.
 - A nightly job runs with random seeds and prints the seeds it used.
-- Shrinking is deliberately minimal: generators take a "size" parameter, and
-  the harness retries a failing seed at smaller sizes and reports the
-  smallest failure.
+- Shrinking is deliberately minimal, and only `check_sized` does it: the
+  harness retries a failing case at every smaller size and reports the
+  smallest size that still fails.
+- A property or generator that panics is reported like any other failure,
+  with its seed.
 
 ### Golden-image tests
 

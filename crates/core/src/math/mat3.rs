@@ -155,13 +155,15 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{TestRng, for_cases};
+    use crate::rng::Pcg32;
+    use crate::test_support::{random_affine2, random_vec2};
+    use crate::testing::check;
 
     /// A general (not necessarily affine) matrix with elements in `[-1, 1)`
     /// and a determinant well away from zero.
-    fn random_invertible(rng: &mut TestRng) -> Mat3 {
+    fn random_invertible(rng: &mut Pcg32) -> Mat3 {
         loop {
-            let m = Mat3::from_cols_array(std::array::from_fn(|_| rng.range_f32(-1.0, 1.0)));
+            let m = Mat3::from_cols_array(std::array::from_fn(|_| rng.range(-1.0..1.0f32)));
             if m.determinant().abs() >= 0.1 {
                 return m;
             }
@@ -231,63 +233,81 @@ mod tests {
 
     #[test]
     fn matches_affine2() {
-        for_cases("mat3 matches affine2", 500, |rng| {
-            let a = rng.affine2();
-            let b = rng.affine2();
-            let p = rng.vec2(-50.0, 50.0);
-            let (ma, mb) = (Mat3::from(a), Mat3::from(b));
-            if ma.transform_point(p) != a.transform_point(p)
-                || ma.transform_vector(p) != a.transform_vector(p)
-            {
-                return Err(format!("Mat3 and Affine2 disagree for {a:?} at {p:?}"));
-            }
-            if !(ma * mb).approx_eq(Mat3::from(a * b), 1e-3) {
-                return Err(format!("products disagree for\na = {a:?}\nb = {b:?}"));
-            }
-            if !crate::math::approx_eq(ma.determinant(), a.determinant(), 1e-3) {
-                return Err(format!("determinants disagree for {a:?}"));
-            }
-            Ok(())
-        });
+        check(
+            "mat3 matches affine2",
+            500,
+            |rng| {
+                (
+                    random_affine2(rng),
+                    random_affine2(rng),
+                    random_vec2(rng, -50.0, 50.0),
+                )
+            },
+            |&(a, b, p)| {
+                let (ma, mb) = (Mat3::from(a), Mat3::from(b));
+                if ma.transform_point(p) != a.transform_point(p)
+                    || ma.transform_vector(p) != a.transform_vector(p)
+                {
+                    return Err("Mat3 and Affine2 transform the point differently".to_string());
+                }
+                if !(ma * mb).approx_eq(Mat3::from(a * b), 1e-3) {
+                    return Err("the products disagree".to_string());
+                }
+                if !crate::math::approx_eq(ma.determinant(), a.determinant(), 1e-3) {
+                    return Err("the determinants disagree".to_string());
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]
     fn inverse_round_trips_for_affine_matrices() {
-        for_cases("mat3 affine inverse round-trip", 1000, |rng| {
-            let m = Mat3::from(rng.affine2());
-            let inverse = m.inverse().ok_or_else(|| format!("no inverse for {m:?}"))?;
-            for product in [m * inverse, inverse * m] {
-                if !product.approx_eq(Mat3::IDENTITY, 1e-3) {
-                    return Err(format!("{m:?} times its inverse is {product:?}"));
+        check(
+            "mat3 affine inverse round-trip",
+            1000,
+            |rng| {
+                (
+                    Mat3::from(random_affine2(rng)),
+                    random_vec2(rng, -50.0, 50.0),
+                )
+            },
+            |&(m, p)| {
+                let inverse = m.inverse().ok_or("no inverse")?;
+                for product in [m * inverse, inverse * m] {
+                    if !product.approx_eq(Mat3::IDENTITY, 1e-3) {
+                        return Err(format!("the matrix times its inverse is {product:?}"));
+                    }
                 }
-            }
-            let p = rng.vec2(-50.0, 50.0);
-            let back = inverse.transform_point(m.transform_point(p));
-            if !back.approx_eq(p, 1e-2) {
-                return Err(format!("{p:?} came back as {back:?} through {m:?}"));
-            }
-            Ok(())
-        });
+                let back = inverse.transform_point(m.transform_point(p));
+                if !back.approx_eq(p, 1e-2) {
+                    return Err(format!("the point came back as {back:?}"));
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]
     fn inverse_round_trips_for_general_matrices() {
-        for_cases("mat3 general inverse round-trip", 1000, |rng| {
-            let m = random_invertible(rng);
-            let inverse = m.inverse().ok_or_else(|| format!("no inverse for {m:?}"))?;
-            for product in [m * inverse, inverse * m] {
-                if !product.approx_eq(Mat3::IDENTITY, 1e-3) {
-                    return Err(format!("{m:?} times its inverse is {product:?}"));
+        check(
+            "mat3 general inverse round-trip",
+            1000,
+            random_invertible,
+            |&m| {
+                let inverse = m.inverse().ok_or("no inverse")?;
+                for product in [m * inverse, inverse * m] {
+                    if !product.approx_eq(Mat3::IDENTITY, 1e-3) {
+                        return Err(format!("the matrix times its inverse is {product:?}"));
+                    }
                 }
-            }
-            // Inverting twice squares the conditioning, so allow more error.
-            let twice = inverse
-                .inverse()
-                .ok_or_else(|| format!("no inverse for {inverse:?}"))?;
-            if !twice.approx_eq(m, 1e-2) {
-                return Err(format!("inverting {m:?} twice gave {twice:?}"));
-            }
-            Ok(())
-        });
+                // Inverting twice squares the conditioning, so allow more error.
+                let twice = inverse.inverse().ok_or("the inverse has no inverse")?;
+                if !twice.approx_eq(m, 1e-2) {
+                    return Err(format!("inverting twice gave {twice:?}"));
+                }
+                Ok(())
+            },
+        );
     }
 }

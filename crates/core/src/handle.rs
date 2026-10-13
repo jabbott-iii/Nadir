@@ -263,7 +263,8 @@ impl<T> fmt::Debug for Handle<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{TestRng, for_cases};
+    use crate::rng::Pcg32;
+    use crate::testing::check_sized;
     use std::collections::hash_map::DefaultHasher;
 
     fn generation(n: u32) -> NonZeroU32 {
@@ -472,21 +473,54 @@ mod tests {
         }
     }
 
-    fn pick(rng: &mut TestRng, len: usize) -> usize {
-        rng.next_u32() as usize % len
+    /// One step of the model test. A `pick` chooses among whatever indices
+    /// exist when the step runs, so a list of operations is meaningful
+    /// whatever came before it.
+    #[derive(Clone, Copy, Debug)]
+    enum Op {
+        Insert { value: u32 },
+        Remove { pick: u32 },
+        Set { pick: u32, value: u32 },
+        UseStale { pick: u32 },
     }
 
-    #[test]
-    fn matches_a_reference_model() {
-        for_cases("gen arena model", 200, |rng| {
-            let mut arena = GenArena::new();
-            let mut model = Model::default();
-            // Bias toward growth in some cases and toward churn in others.
-            let insert_weight = 2 + rng.next_u32() % 5;
-            for step in 0..200 {
-                let op = rng.next_u32() % 10;
-                if op < insert_weight || model.live.is_empty() {
-                    let value = rng.next_u32();
+    /// Two operations per unit of size. A shorter list is a prefix of a
+    /// longer one from the same case, so shrinking finds the shortest
+    /// failing prefix.
+    fn random_ops(rng: &mut Pcg32, size: u32) -> Vec<Op> {
+        // Bias toward growth in some cases and toward churn in others.
+        let insert_weight = rng.range(2..7u32);
+        (0..size * 2)
+            .map(|_| match rng.range(0..10u32) {
+                kind if kind < insert_weight => Op::Insert {
+                    value: rng.next_u32(),
+                },
+                kind if kind < 8 => Op::Remove {
+                    pick: rng.next_u32(),
+                },
+                8 => Op::Set {
+                    pick: rng.next_u32(),
+                    value: rng.next_u32(),
+                },
+                _ => Op::UseStale {
+                    pick: rng.next_u32(),
+                },
+            })
+            .collect()
+    }
+
+    /// Applies `ops` to an arena and to the model, comparing them after
+    /// every step.
+    fn run_ops(ops: &[Op]) -> Result<(), String> {
+        fn pick_from<T>(list: &[T], pick: u32) -> Option<usize> {
+            (!list.is_empty()).then(|| pick as usize % list.len())
+        }
+
+        let mut arena = GenArena::new();
+        let mut model = Model::default();
+        for (step, &op) in ops.iter().enumerate() {
+            match op {
+                Op::Insert { value } => {
                     let id = arena.insert(value);
                     if model.live.iter().any(|&(live, _)| live == id) || model.dead.contains(&id) {
                         return Err(format!(
@@ -494,36 +528,50 @@ mod tests {
                         ));
                     }
                     model.live.push((id, value));
-                } else if op < 8 {
-                    let (id, value) = model.live.swap_remove(pick(rng, model.live.len()));
-                    let removed = arena.remove(id);
-                    if removed != Some(value) {
-                        return Err(format!(
-                            "step {step}: remove({id:?}) gave {removed:?}, expected {value}"
-                        ));
-                    }
-                    model.dead.push(id);
-                } else if op == 8 {
-                    let slot = pick(rng, model.live.len());
-                    let (id, _) = model.live[slot];
-                    let value = rng.next_u32();
-                    match arena.get_mut(id) {
-                        Some(stored) => *stored = value,
-                        None => return Err(format!("step {step}: get_mut({id:?}) found nothing")),
-                    }
-                    model.live[slot].1 = value;
-                } else if !model.dead.is_empty() {
-                    // Stale indices must be inert for every operation.
-                    let id = model.dead[pick(rng, model.dead.len())];
-                    if arena.remove(id).is_some() || arena.get_mut(id).is_some() {
-                        return Err(format!("step {step}: stale {id:?} still resolves"));
+                }
+                Op::Remove { pick } => {
+                    if let Some(slot) = pick_from(&model.live, pick) {
+                        let (id, value) = model.live.swap_remove(slot);
+                        let removed = arena.remove(id);
+                        if removed != Some(value) {
+                            return Err(format!(
+                                "step {step}: remove({id:?}) gave {removed:?}, expected {value}"
+                            ));
+                        }
+                        model.dead.push(id);
                     }
                 }
-                model
-                    .check(&arena)
-                    .map_err(|message| format!("step {step}: {message}"))?;
+                Op::Set { pick, value } => {
+                    if let Some(slot) = pick_from(&model.live, pick) {
+                        let id = model.live[slot].0;
+                        match arena.get_mut(id) {
+                            Some(stored) => *stored = value,
+                            None => {
+                                return Err(format!("step {step}: get_mut({id:?}) found nothing"));
+                            }
+                        }
+                        model.live[slot].1 = value;
+                    }
+                }
+                // Stale indices must be inert for every operation.
+                Op::UseStale { pick } => {
+                    if let Some(slot) = pick_from(&model.dead, pick) {
+                        let id = model.dead[slot];
+                        if arena.remove(id).is_some() || arena.get_mut(id).is_some() {
+                            return Err(format!("step {step}: stale {id:?} still resolves"));
+                        }
+                    }
+                }
             }
-            Ok(())
-        });
+            model
+                .check(&arena)
+                .map_err(|message| format!("step {step}: {message}"))?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn matches_a_reference_model() {
+        check_sized("gen arena model", 200, random_ops, |ops| run_ops(ops));
     }
 }

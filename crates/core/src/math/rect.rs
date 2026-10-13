@@ -181,7 +181,8 @@ impl IRect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{TestRng, for_cases};
+    use crate::rng::Pcg32;
+    use crate::testing::check;
 
     fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Rect {
         Rect::new(Vec2::new(x0, y0), Vec2::new(x1, y1))
@@ -194,9 +195,9 @@ mod tests {
     /// A rectangle with whole-number coordinates, so that shared edges and
     /// exact containment come up often. One in four has unordered corners
     /// and is usually inverted, and so empty; the rest are never empty.
-    fn random_irect(rng: &mut TestRng) -> IRect {
+    fn random_irect(rng: &mut Pcg32) -> IRect {
         if rng.next_u32().is_multiple_of(4) {
-            let mut corner = || IVec2::new(rng.range_i32(-8, 9), rng.range_i32(-8, 9));
+            let mut corner = || IVec2::new(rng.range(-8..9), rng.range(-8..9));
             IRect::new(corner(), corner())
         } else {
             random_solid_irect(rng)
@@ -204,13 +205,13 @@ mod tests {
     }
 
     /// A rectangle that is never empty.
-    fn random_solid_irect(rng: &mut TestRng) -> IRect {
-        let min = IVec2::new(rng.range_i32(-8, 8), rng.range_i32(-8, 8));
-        let size = IVec2::new(rng.range_i32(1, 9), rng.range_i32(1, 9));
+    fn random_solid_irect(rng: &mut Pcg32) -> IRect {
+        let min = IVec2::new(rng.range(-8..8), rng.range(-8..8));
+        let size = IVec2::new(rng.range(1..9), rng.range(1..9));
         IRect::from_min_size(min, size)
     }
 
-    fn random_rect(rng: &mut TestRng) -> Rect {
+    fn random_rect(rng: &mut Pcg32) -> Rect {
         random_irect(rng).as_rect()
     }
 
@@ -310,83 +311,86 @@ mod tests {
 
     #[test]
     fn rect_intersection_is_symmetric() {
-        for_cases("rect intersection symmetry", 2000, |rng| {
-            let a = random_rect(rng);
-            let b = random_rect(rng);
-            let (ab, ba) = (a.intersection(b), b.intersection(a));
-            if ab != ba {
-                return Err(format!("{a:?} ∩ {b:?} = {ab:?}, but reversed = {ba:?}"));
-            }
-            if a.intersects(b) != b.intersects(a) || a.intersects(b) != ab.is_some() {
-                return Err(format!(
-                    "intersects disagrees with intersection for {a:?} and {b:?}"
-                ));
-            }
-            if a.union(b) != b.union(a) {
-                return Err(format!("union is not symmetric for {a:?} and {b:?}"));
-            }
-            Ok(())
-        });
+        check(
+            "rect intersection symmetry",
+            2000,
+            |rng| (random_rect(rng), random_rect(rng)),
+            |&(a, b)| {
+                let (ab, ba) = (a.intersection(b), b.intersection(a));
+                if ab != ba {
+                    return Err(format!("a ∩ b = {ab:?}, but b ∩ a = {ba:?}"));
+                }
+                if a.intersects(b) != b.intersects(a) || a.intersects(b) != ab.is_some() {
+                    return Err("intersects disagrees with intersection".to_string());
+                }
+                if a.union(b) != b.union(a) {
+                    return Err("union is not symmetric".to_string());
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]
     fn irect_intersection_is_symmetric() {
-        for_cases("irect intersection symmetry", 2000, |rng| {
-            let a = random_irect(rng);
-            let b = random_irect(rng);
-            let (ab, ba) = (a.intersection(b), b.intersection(a));
-            if ab != ba {
-                return Err(format!("{a:?} ∩ {b:?} = {ab:?}, but reversed = {ba:?}"));
-            }
-            if a.intersects(b) != b.intersects(a) || a.intersects(b) != ab.is_some() {
-                return Err(format!(
-                    "intersects disagrees with intersection for {a:?} and {b:?}"
-                ));
-            }
-            Ok(())
-        });
+        check(
+            "irect intersection symmetry",
+            2000,
+            |rng| (random_irect(rng), random_irect(rng)),
+            |&(a, b)| {
+                let (ab, ba) = (a.intersection(b), b.intersection(a));
+                if ab != ba {
+                    return Err(format!("a ∩ b = {ab:?}, but b ∩ a = {ba:?}"));
+                }
+                if a.intersects(b) != b.intersects(a) || a.intersects(b) != ab.is_some() {
+                    return Err("intersects disagrees with intersection".to_string());
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]
     fn intersection_matches_point_membership() {
-        for_cases("intersection matches point membership", 500, |rng| {
-            let a = random_solid_irect(rng);
-            let b = random_solid_irect(rng);
-            let overlap = a.intersection(b);
-            let (fa, fb) = (a.as_rect(), b.as_rect());
-            let foverlap = fa.intersection(fb);
-            if foverlap != overlap.map(|r| r.as_rect()) {
-                return Err(format!("Rect and IRect disagree for {a:?} and {b:?}"));
-            }
-            // A point is in the overlap exactly when it is in both inputs.
-            for y in -9..18 {
-                for x in -9..18 {
-                    let p = IVec2::new(x, y);
-                    let in_both = a.contains(p) && b.contains(p);
-                    if overlap.is_some_and(|r| r.contains(p)) != in_both {
-                        return Err(format!(
-                            "{p:?} membership is wrong for {a:?} ∩ {b:?} = {overlap:?}"
-                        ));
-                    }
-                    let fp = p.as_vec2() + Vec2::splat(0.5);
-                    if foverlap.is_some_and(|r| r.contains(fp))
-                        != (fa.contains(fp) && fb.contains(fp))
-                    {
-                        return Err(format!(
-                            "{fp:?} membership is wrong for {fa:?} ∩ {fb:?} = {foverlap:?}"
-                        ));
+        check(
+            "intersection matches point membership",
+            500,
+            |rng| (random_solid_irect(rng), random_solid_irect(rng)),
+            |&(a, b)| {
+                let overlap = a.intersection(b);
+                let (fa, fb) = (a.as_rect(), b.as_rect());
+                let foverlap = fa.intersection(fb);
+                if foverlap != overlap.map(|r| r.as_rect()) {
+                    return Err("Rect and IRect disagree".to_string());
+                }
+                // A point is in the overlap exactly when it is in both inputs.
+                for y in -9..18 {
+                    for x in -9..18 {
+                        let p = IVec2::new(x, y);
+                        let in_both = a.contains(p) && b.contains(p);
+                        if overlap.is_some_and(|r| r.contains(p)) != in_both {
+                            return Err(format!(
+                                "{p:?} membership is wrong for a ∩ b = {overlap:?}"
+                            ));
+                        }
+                        let fp = p.as_vec2() + Vec2::splat(0.5);
+                        if foverlap.is_some_and(|r| r.contains(fp))
+                            != (fa.contains(fp) && fb.contains(fp))
+                        {
+                            return Err(format!(
+                                "{fp:?} membership is wrong for a ∩ b = {foverlap:?}"
+                            ));
+                        }
                     }
                 }
-            }
-            if let Some(r) = overlap {
-                let bounds = a.union(b);
-                if r.union(bounds) != bounds || r.is_empty() {
-                    return Err(format!(
-                        "{a:?} ∩ {b:?} = {r:?} is empty or outside the union"
-                    ));
+                if let Some(r) = overlap {
+                    let bounds = a.union(b);
+                    if r.union(bounds) != bounds || r.is_empty() {
+                        return Err(format!("a ∩ b = {r:?} is empty or outside the union"));
+                    }
                 }
-            }
-            Ok(())
-        });
+                Ok(())
+            },
+        );
     }
 }

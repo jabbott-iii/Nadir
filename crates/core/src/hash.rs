@@ -143,7 +143,7 @@ pub type FastHashSet<T> = HashSet<T, FastBuildHasher>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::for_cases;
+    use crate::testing::check;
     use std::hash::{BuildHasher, Hash};
 
     fn fx(feed: impl FnOnce(&mut FxLikeHasher)) -> u64 {
@@ -183,19 +183,23 @@ mod tests {
 
     #[test]
     fn crc32_detects_any_single_bit_flip() {
-        for_cases("crc32 single bit flip", 200, |rng| {
-            let len = 1 + rng.next_u32() as usize % 64;
-            let mut data: Vec<u8> = (0..len).map(|_| rng.next_u32() as u8).collect();
-            let original = crc32(&data);
-            let bit = rng.next_u32() as usize % (len * 8);
-            data[bit / 8] ^= 1 << (bit % 8);
-            if crc32(&data) == original {
-                return Err(format!(
-                    "flipping bit {bit} of {len} bytes kept CRC {original:#010x}"
-                ));
-            }
-            Ok(())
-        });
+        check(
+            "crc32 single bit flip",
+            200,
+            |rng| {
+                let len = rng.range(1..65u32);
+                let data: Vec<u8> = (0..len).map(|_| rng.next_u32() as u8).collect();
+                (data, rng.range(0..len * 8) as usize)
+            },
+            |(data, bit)| {
+                let mut flipped = data.clone();
+                flipped[bit / 8] ^= 1 << (bit % 8);
+                if crc32(&flipped) == crc32(data) {
+                    return Err(format!("flipping the bit kept CRC {:#010x}", crc32(data)));
+                }
+                Ok(())
+            },
+        );
     }
 
     #[test]
@@ -271,28 +275,35 @@ mod tests {
 
     #[test]
     fn iteration_order_depends_only_on_operation_history() {
-        for_cases("fast hash map iteration order", 50, |rng| {
-            let ops: Vec<(bool, u32)> = (0..300)
-                .map(|_| (rng.next_u32() % 4 != 0, rng.next_u32() % 128))
-                .collect();
-            let build = || {
-                let mut map = FastHashMap::default();
-                for &(insert, key) in &ops {
-                    if insert {
-                        map.insert(key, key.wrapping_mul(3));
-                    } else {
-                        map.remove(&key);
+        check(
+            "fast hash map iteration order",
+            50,
+            // Each operation is (insert rather than remove, key).
+            |rng| {
+                (0..300)
+                    .map(|_| (rng.range(0..4u32) != 0, rng.range(0..128u32)))
+                    .collect::<Vec<_>>()
+            },
+            |ops| {
+                let build = || {
+                    let mut map = FastHashMap::default();
+                    for &(insert, key) in ops {
+                        if insert {
+                            map.insert(key, key.wrapping_mul(3));
+                        } else {
+                            map.remove(&key);
+                        }
                     }
+                    map.into_iter().collect::<Vec<_>>()
+                };
+                let (first, second) = (build(), build());
+                if first != second {
+                    return Err(format!(
+                        "same operations, different order:\n{first:?}\n{second:?}"
+                    ));
                 }
-                map.into_iter().collect::<Vec<_>>()
-            };
-            let (first, second) = (build(), build());
-            if first != second {
-                return Err(format!(
-                    "same operations, different order:\n{first:?}\n{second:?}"
-                ));
-            }
-            Ok(())
-        });
+                Ok(())
+            },
+        );
     }
 }

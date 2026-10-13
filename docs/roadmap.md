@@ -94,7 +94,22 @@ enforced by tooling from day one.
     - `crc32("123456789") == 0xCBF43926`.
   - Verify: `cargo test -p nadir-core`
 
-- [ ] **M0.4 — core: logging, civil time, CLI, test harness, profile scopes**
+- [x] **M0.4 — core: logging, civil time, CLI, test harness, profile scopes**
+  - Note: the harness is `check` plus `check_sized` (user decision,
+    2026-10-12). Only `check_sized` shrinks. `docs/04-quality.md` was
+    updated to match. The M0.2/M0.3 property tests now use it, and the
+    stand-in generator is gone.
+  - Note: the log macros are `nadir_core::log::{error, warn, info, debug,
+    trace}`. The file sink can rotate by size and on open
+    (`FileConfig`); the defaults are 4 MiB, 3 copies, append. M1.4 picks
+    the policy for the game.
+  - Note: `profile::take_frame(&mut Vec<ScopeRecord>)` drains the calling
+    thread only, and each thread keeps at most 65 536 records. Collecting
+    from other threads is left to M7.3.
+  - Note: the stderr sink has no automated test.
+  - Note: `assert_approx!` and the golden comparison helpers from
+    `core.md`'s `testing` row are not part of this task. The golden
+    helpers fit M2.4 (golden harness); no task lists either explicitly.
   - Depends: M0.2, M0.3
   - Do: the `log` macros and sinks (stderr, file rotation, ring buffer),
     `civil`, `cli`, `testing::check`, and `profile_scope!` (feature-gated).

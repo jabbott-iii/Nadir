@@ -346,7 +346,8 @@ impl_vec2_ops!(UVec2, u32);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::for_cases;
+    use crate::test_support::random_vec2;
+    use crate::testing::check;
     use std::f32::consts::{FRAC_PI_2, PI};
 
     #[test]
@@ -524,21 +525,30 @@ mod tests {
 
     #[test]
     fn rotation_preserves_length_and_round_trips() {
-        for_cases("vec2 rotation round-trip", 500, |rng| {
-            let v = rng.vec2(-100.0, 100.0);
-            let angle = rng.range_f32(-4.0 * PI, 4.0 * PI);
-            let rotated = v.rotate(angle);
-            if !crate::math::approx_eq(rotated.length(), v.length(), 1e-3) {
-                return Err(format!(
-                    "{v:?} rotated by {angle} changed length to {}",
-                    rotated.length()
-                ));
-            }
-            let back = rotated.rotate(-angle);
-            if !back.approx_eq(v, 1e-3) {
-                return Err(format!("{v:?} rotated by ±{angle} came back as {back:?}"));
-            }
-            Ok(())
-        });
+        check(
+            "vec2 rotation round-trip",
+            500,
+            |rng| {
+                (
+                    random_vec2(rng, -100.0, 100.0),
+                    rng.range(-4.0 * PI..4.0 * PI),
+                )
+            },
+            |&(v, angle)| {
+                let rotated = v.rotate(angle);
+                if !crate::math::approx_eq(rotated.length(), v.length(), 1e-3) {
+                    return Err(format!(
+                        "the length changed from {} to {}",
+                        v.length(),
+                        rotated.length()
+                    ));
+                }
+                let back = rotated.rotate(-angle);
+                if !back.approx_eq(v, 1e-3) {
+                    return Err(format!("rotating there and back gave {back:?}"));
+                }
+                Ok(())
+            },
+        );
     }
 }
