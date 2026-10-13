@@ -1,0 +1,72 @@
+# The gate for every push and pull request. It is specified in
+# docs/04-quality.md, under "CI (GitHub Actions)".
+#
+# Rules for this file:
+# - Pin every action by its full commit SHA, with the tag in a comment.
+# - Use no actions other than actions/checkout, actions/cache and
+#   actions/upload-artifact / download-artifact.
+# - Install the toolchain with rustup, not with an action.
+# - The token may only read the repository.
+
+name: CI
+
+on:
+  # Branches only: a pushed tag starts the release workflow, not this one.
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # The same shell on all three systems, so each step means the same thing.
+    shell: bash
+
+jobs:
+  ci:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      # Let every system finish: a failure on one says nothing of the others.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      # Git on the Windows runners would otherwise check text files out with
+      # CRLF line endings, and the tests that compare against committed
+      # files byte for byte would fail.
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # With no toolchain named, rustup installs the one that
+      # rust-toolchain.toml pins, with the components listed there.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --profile minimal --no-self-update
+
+      - name: Show the toolchain
+        run: cargo --version --verbose
+
+      - name: Restore the build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+
+      - name: Run the checks
+        run: cargo xtask ci
+
+      # `--secs` is the time for each fuzz target.
+      - name: Fuzz smoke
+        if: runner.os == 'Linux'
+        run: cargo xtask fuzz-smoke --secs 120

@@ -214,7 +214,24 @@ enforced by tooling from day one.
   - Verify: `cargo xtask fuzz-smoke --secs 60 --target json`;
     `cargo xtask bench json`
 
-- [ ] **M0.8 — CI workflow**
+- [x] **M0.8 — CI workflow**
+  - Note: no `TODO(pin)` placeholders. The pins were looked up on
+    2026-10-13 and were then the latest release of each action:
+    - `actions/checkout` v7.0.1 = `3d3c42e5aac5ba805825da76410c181273ba90b1`
+    - `actions/cache` v6.1.0 = `55cc8345863c7cc4c66a329aec7e433d2d1c52a9`
+  - Note: verified by parsing with Python's `yaml` module (PyYAML 6.0.1),
+    by a script that checks the structure and compares each pin with the
+    upstream tag, and by running the workflow's own commands in order in a
+    clean clone on Linux (`cargo xtask ci` passed; 120 s of fuzz smoke ran
+    clean).
+  - Note: **the workflow has not run on GitHub yet**, so the Windows and
+    macOS legs are untested. The first push will show whether the M0 exit
+    criterion holds.
+  - Note: the workflow turns `core.autocrlf` off before the checkout. In a
+    CRLF checkout, which is Git's default on Windows, one test fails:
+    `layers::tests::the_matrix_mirrors_the_architecture_document`.
+  - Note: the Mesa and golden steps of the Linux leg belong to M2.5. There
+    is no nightly workflow yet.
   - Depends: M0.6
   - Do: `.github/workflows/ci.yml` per `docs/04-quality.md`:
     - matrix of 3 OSes, `permissions: contents: read`

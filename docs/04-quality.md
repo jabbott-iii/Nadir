@@ -167,13 +167,18 @@ understood.
 
 ## CI (GitHub Actions)
 
-- **Every PR / push, matrix `ubuntu-latest`, `windows-latest`, `macos-latest`:**
+- **Every PR / push, matrix `ubuntu-latest`, `windows-latest`, `macos-latest`**
+  (`.github/workflows/ci.yml`):
   1. Install the pinned toolchain (from `rust-toolchain.toml`).
   2. `cargo xtask ci`.
   3. Linux only:
      - install Mesa (`libegl1`, `libgl1-mesa-dri`, `libasound2`, `libx11-6`)
      - `cargo xtask golden`
      - `cargo xtask fuzz-smoke --secs 120`
+
+  Before the checkout, the workflow turns Git's `core.autocrlf` off. A
+  Windows runner would otherwise check the files out with CRLF line
+  endings, and tests that read committed files expect them as committed.
 - **Nightly:**
   - `xtask bench` (report only)
   - fuzz smoke for 30 minutes per parser
