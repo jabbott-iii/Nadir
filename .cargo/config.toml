@@ -1,0 +1,3 @@
+[alias]
+xtask = "run --package xtask --"
+dev   = "run --package sandbox --features dev --"

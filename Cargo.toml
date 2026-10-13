@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/sys",
+    "crates/platform",
+    "crates/gfx",
+    "crates/codec",
+    "crates/ecs",
+    "crates/input",
+    "crates/render",
+    "crates/audio",
+    "crates/assets",
+    "crates/collision",
+    "crates/scene",
+    "crates/debug",
+    "crates/engine",
+    "tools/cook",
+    "xtask",
+    "games/sandbox",
+    "bench",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "Apache-2.0"
+
+[workspace.lints.rust]
+unsafe_code = "deny"              # sys, platform, gfx override with #![allow(unsafe_code)]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+unwrap_used = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
+todo = "deny"

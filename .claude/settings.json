@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(cargo build *)",
+      "Bash(cargo check *)",
+      "Bash(cargo test *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo doc *)",
+      "Bash(cargo tree *)",
+      "Bash(cargo metadata *)",
+      "Bash(cargo run *)",
+      "Bash(cargo xtask *)",
+      "Bash(cargo dev *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)"
+    ],
+    "ask": [
+      "Bash(cargo add *)",
+      "Bash(cargo remove *)",
+      "Bash(cargo update *)",
+      "Bash(cargo install *)"
+    ],
+    "deny": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)",
+      "Bash(git tag *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git am *)",
+      "Bash(git reset --hard *)",
+      "Bash(git filter-branch *)",
+      "Bash(git filter-repo *)",
+      "Bash(cargo publish *)",
+      "Bash(cargo login *)"
+    ]
+  }
+}
