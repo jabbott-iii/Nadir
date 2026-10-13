@@ -281,15 +281,12 @@ loop on Linux, Windows and macOS. No GPU yet.
     - `dynlib!` reports every missing symbol by name.
   - Verify: `cargo test -p nadir-sys` (Linux)
 
-- [ ] **M1.2 — platform (Linux): X11 window and events**
-  - ⏳ needs a person at the keyboard, on an X11 or XWayland session: run
-    `cargo run -p nadir-platform --example events` and check that
-    - the key right of Tab reports `Q`, whatever the layout prints on it
-    - a held key reports presses with `repeat: true`, then one release
-    - `C` hides the pointer over the window, and `C` again shows it
-    - the window's close button reports `CloseRequested`
-    - dragging an edge of the window reports `Resized`
-  - Note: everything else is done and passed here. The example ran on
+- [x] **M1.2 — platform (Linux): X11 window and events**
+  - Note: confirmed by hand on 2026-10-13, on XWayland under COSMIC: real
+    key presses and releases (`Q`, `C`), `repeat: true` while `W` is held,
+    real clicks, `C` hiding and showing the pointer, `Resized` while an
+    edge is dragged, and `CloseRequested` from the close button.
+  - Note: the automated checks passed in the same session. The example ran on
     2026-10-13 on XWayland under COSMIC. Real events seen: the scale
     factor first, focus in and out, pointer motion, and resizes, including
     the ones for entering and leaving fullscreen. Key, button and wheel
