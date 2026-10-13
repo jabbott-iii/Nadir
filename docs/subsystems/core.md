@@ -27,6 +27,10 @@ dependencies.
   entry. Generations wrap at `u32::MAX` back to 1, never to 0, and a slot that
   wraps is retired permanently.
 - All math is `f32`. No implicit `f64` promotion in hot paths.
+- The value of a `Key` is its id in the USB HID usage tables (keyboard page
+  `0x07`), so `Key::A as u8` is `0x04`. The enum has the keys of ANSI and ISO
+  keyboards, including the keypad and F1 to F24. The keys that only Japanese
+  and Korean keyboards have, and media keys, are not in it yet.
 - `Pcg32` output is identical across OSes for the same seed (unit-tested
   against fixed vectors).
 - `FastHashMap` iteration order depends only on insertion history, not on

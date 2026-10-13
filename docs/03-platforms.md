@@ -258,6 +258,14 @@ directly: no locks that can block, and no allocation.
   watch for `ClientMessage`.
 - Poll with `XPending` / `XNextEvent`. Handle `ConfigureNotify` (resize),
   `FocusIn`/`FocusOut`, key, button and motion events.
+- Ignore a `FocusIn` or `FocusOut` whose mode is `NotifyGrab` or
+  `NotifyUngrab`. A window manager takes a keyboard grab for its own
+  shortcuts, and that is not a change of focus.
+- Title: set `_NET_WM_NAME` (UTF-8) and the older `WM_NAME`.
+- Size limits go in `WM_NORMAL_HINTS`. A window of fixed size has its
+  minimum equal to its maximum. The limits come off while the window is
+  fullscreen, because a window manager will not make a fixed-size window
+  fullscreen.
 - **Auto-repeat:** call `XkbSetDetectableAutoRepeat(display, True, ...)` so
   held keys don't generate fake release/press pairs.
 - Fullscreen: `_NET_WM_STATE_FULLSCREEN` via a `ClientMessage` to the root

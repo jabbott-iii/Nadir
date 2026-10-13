@@ -282,6 +282,36 @@ loop on Linux, Windows and macOS. No GPU yet.
   - Verify: `cargo test -p nadir-sys` (Linux)
 
 - [ ] **M1.2 — platform (Linux): X11 window and events**
+  - ⏳ needs a person at the keyboard, on an X11 or XWayland session: run
+    `cargo run -p nadir-platform --example events` and check that
+    - the key right of Tab reports `Q`, whatever the layout prints on it
+    - a held key reports presses with `repeat: true`, then one release
+    - `C` hides the pointer over the window, and `C` again shows it
+    - the window's close button reports `CloseRequested`
+    - dragging an edge of the window reports `Resized`
+  - Note: everything else is done and passed here. The example ran on
+    2026-10-13 on XWayland under COSMIC. Real events seen: the scale
+    factor first, focus in and out, pointer motion, and resizes, including
+    the ones for entering and leaving fullscreen. Key, button and wheel
+    events, the focus rules and the close message were sent to the window
+    as synthetic events with `XSendEvent`, and came out right. `xprop`
+    showed the title, `WM_PROTOCOLS`, the size limits and the fullscreen
+    state as intended.
+  - Note: `nadir_core::keys` is new here, because no earlier task made it:
+    `Key` (118 keys, numbered by USB HID usage) and `MouseButton`.
+    `GamepadButton`, `GamepadAxis` and `Modifiers` wait for their first
+    user.
+  - Note: the key table has no exceptions: every `Key` has an evdev code.
+    A test checks that against the kernel's own HID table.
+  - Note: `nadir-sys` gained `linux/evdev.rs`: the 118 `KEY_*` codes the
+    table uses, compared with the kernel header through gcc static
+    assertions.
+  - Note: not done here, and left to the task that first needs each:
+    `Event::Text`, `Event::Minimized` and `is_minimized`, pointer grab,
+    and the `vsync` and `gpu` fields of `WindowConfig` (M2.2). The scale
+    factor is read once, when the window opens.
+  - Note: on Windows and macOS, `Platform::new` returns
+    `PlatformError::Unsupported` until M1.5 and M1.6.
   - Depends: M1.1, M0.2
   - Do: following `docs/03-platforms.md`:
     - window creation, `WM_DELETE_WINDOW`, the event pump, the evdev → `Key`

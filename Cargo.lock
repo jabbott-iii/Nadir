@@ -60,6 +60,10 @@ version = "0.1.0"
 [[package]]
 name = "nadir-platform"
 version = "0.1.0"
+dependencies = [
+ "nadir-core",
+ "nadir-sys",
+]
 
 [[package]]
 name = "nadir-render"
