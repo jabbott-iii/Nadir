@@ -105,9 +105,9 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | `cargo xtask layers` | Fails if a crate depends on a crate the dependency matrix forbids |
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the allowed crates or lacks a `SAFETY:` comment |
 | `cargo xtask golden [--bless] [--backend gl\|metal]` | Renders golden scenes offscreen and compares them to references |
-| `cargo xtask fuzz-smoke [--secs N]` | Runs the dependency-free mutation fuzzer over every parser |
+| `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the dependency-free mutation fuzzer over every parser, or over one |
 | `cargo xtask cook` | Cooks `assets/` into `target/cooked/` |
-| `cargo xtask bench` | Runs the benchmark harness in release mode |
+| `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
 | `cargo run -p sandbox` | Runs the sandbox game (opens a window) |
 
 `xtask` never uploads, publishes or signs with real credentials. Publishing

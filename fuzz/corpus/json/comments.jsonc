@@ -1,0 +1,14 @@
+// A line comment before the value.
+/* A block comment
+   over two lines. */
+{
+    "window": { // after an opening brace
+        "size": [480, /* between elements */ 270,],
+        "title": "// not a comment", /* "not a string" */
+    },
+    "tags": [
+        "a", // trailing commas follow
+        "b",
+    ], /**/
+}
+// A line comment after the value.

@@ -85,11 +85,31 @@ pub fn check_sized<T: std::fmt::Debug>(
 ### Fuzz smoke (stable Rust, no dependencies)
 
 - `xtask fuzz-smoke --secs 60` loads `fuzz/corpus/<parser>/` seeds.
+  - `--secs N` is the time for **each** target (default 60).
+    `--target NAME` runs one target instead of all of them.
+  - Every seed runs unchanged first, even with `--secs 0`. After that each
+    input is a random seed with 1 to 16 random mutations.
 - Mutations: bit flips, byte insert/delete, splice, length-field tweaks,
   "interesting" integers (0, 1, 255, 65535, `u32::MAX`).
 - Each mutated input goes to the parser inside `catch_unwind`, with a
   watchdog for hangs and the allocation counter for blow-ups.
-- Crashes are saved to `fuzz/crashes/`.
+  - A panic does not stop the run. Panics raised at the same source
+    location count as one finding.
+  - A hang is an input the target does not finish within 10 s. It ends the
+    whole run, because the stuck thread cannot be stopped.
+  - The allocation counter is not wired in yet: it arrives with the dev
+    allocator in M3.5.
+  - A stack overflow or an aborted allocation kills the fuzzer, and the
+    input is then not saved.
+- Crashes are saved to `fuzz/crashes/`, which Git ignores, as
+  `<target>/panic-<hash>.bin` or `<target>/hang-<hash>.bin`. Only the first
+  input of each finding is saved.
+  - To see a finding again, or to keep it as a regression test, copy the
+    file into `fuzz/corpus/<target>/`.
+- The run is reproducible: the seed is fixed unless `NADIR_SEED` is set,
+  as for property tests, and it is printed. How far a run gets in its time
+  still depends on the machine.
+- The exit status is 0 for a clean run and 1 if there is a finding.
 - Every parser in `nadir-codec`, `nadir-assets`, the save loader and the
   settings loader registers a fuzz target.
 - The optional coverage-guided fuzzing (`cargo fuzz`) is a separate,
@@ -105,11 +125,19 @@ pub fn check_sized<T: std::fmt::Debug>(
 
 ### Benchmarks — `nadir-bench`
 
-- Run with `cargo xtask bench [filter]`.
+- Run with `cargo xtask bench [filter]`, which builds in release mode and
+  runs the benchmarks whose name contains the filter.
 - Each benchmark: warm-up for 0.5 s, then 50 samples of an auto-scaled
   iteration count. Report median and p95.
+  - The iteration count is scaled so that one sample takes about 10 ms.
+  - The times are per iteration. p95 is the 48th of the 50 samples in
+    ascending order.
 - Results go to `target/bench/latest.json` and are compared against
   `bench/baseline.json`. A slowdown above 10% is flagged; it is not a failure.
+  - Medians are compared. A benchmark without a baseline entry is reported
+    as such.
+  - To record a baseline, copy `latest.json` to `bench/baseline.json`. The
+    numbers only mean something on the machine that recorded them.
 - Required benchmarks:
   - sprite sort + batch for 10k sprites
   - tilemap chunk rebuild

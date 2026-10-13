@@ -1,0 +1,21 @@
+// A prefab as a designer would write it: comments, trailing commas, and
+// keys in an order that means something to them.
+{
+  "name": "slime",
+  "extends": "enemy_base",   // resolved at load
+
+  /* Components are applied in this order,
+     which is why objects keep their member order. */
+  "components": {
+    "Sprite": { "atlas": "atlas/enemies", "region": "slime_idle_0", },
+    "Health": { "current": 12, "max": 12 },
+    "Mover": { "speed": 22.5, "friction": 1e-2, "flying": false, },
+    "Collider": {
+      "shape": { "Circle": { "radius": 6 } },
+      "layer": ["Enemy"],
+      "mask": ["World", "Player",],   // trailing comma on purpose
+      "offset": [0, -3.0],
+    },
+    "Loot": { "table": null, "note": "50% → \"gel\"\t(tab), url: http://example.com/a//b" },
+  },
+}

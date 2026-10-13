@@ -179,7 +179,28 @@ enforced by tooling from day one.
   - Verify: `cargo xtask ci`, plus the three negative demonstrations
     (describe the results in the summary)
 
-- [ ] **M0.7 — fuzz smoke and bench harness skeletons**
+- [x] **M0.7 — fuzz smoke and bench harness skeletons**
+  - Note: measured on 2026-10-13 (Linux, debug build of `xtask`): 60 s on
+    the `json` target ran clean over 8.7 million inputs. `json_parse`:
+    median 1.5 ms, p95 1.5 ms.
+  - Note: the planted-panic check ran in a scratch copy and was reverted.
+    Three bugs were planted in the JSON parser: a slice that was not
+    bounds-checked, a subtraction that could underflow, and a `panic!` in
+    place of an error. A 20 s run reported all three, with one saved
+    input each. A planted endless loop was reported as a hang after the
+    10 s limit, with its input saved.
+  - Note: `--secs N` is the time for each target, not for the whole run,
+    and defaults to 60. `docs/04-quality.md` records this and the other
+    details: seeds run first and unchanged, one finding per panic
+    location, a hang ends the run, `NADIR_SEED` sets the seed.
+  - Note: failing inputs go to `fuzz/crashes/<target>/`, which Git now
+    ignores. Copying one into `fuzz/corpus/<target>/` makes it a
+    regression test.
+  - Note: not caught: the allocation counter is not wired in until M3.5,
+    and a stack overflow or an aborted allocation ends the fuzzer without
+    saving the input.
+  - Note: the bench compares against `bench/baseline.json` when that file
+    exists. None is recorded yet; M3.5 records the first.
   - Depends: M0.6
   - Do:
     - `xtask fuzz-smoke [--secs N] [--target T]` with a mutation engine,

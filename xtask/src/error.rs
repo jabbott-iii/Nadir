@@ -45,6 +45,20 @@ pub(crate) enum Error {
     },
     /// Writing to standard output failed.
     Output(io::Error),
+    /// A file could not be written.
+    Write {
+        /// The file.
+        path: PathBuf,
+        /// What the OS reported.
+        source: io::Error,
+    },
+    /// A fuzz target has no seed files to start from.
+    NoSeeds {
+        /// The corpus directory of the target.
+        path: PathBuf,
+    },
+    /// This tool could not do something that should always work.
+    Internal(String),
 }
 
 impl fmt::Display for Error {
@@ -70,6 +84,11 @@ impl fmt::Display for Error {
                 write!(f, "unexpected output from `{command}`: {detail}")
             }
             Self::Output(source) => write!(f, "cannot write to standard output: {source}"),
+            Self::Write { path, source } => {
+                write!(f, "cannot write `{}`: {source}", path.display())
+            }
+            Self::NoSeeds { path } => write!(f, "no seed files in `{}`", path.display()),
+            Self::Internal(message) => f.write_str(message),
         }
     }
 }
@@ -77,10 +96,15 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Read { source, .. } | Self::Spawn { source, .. } | Self::Output(source) => {
-                Some(source)
-            }
-            Self::Usage(_) | Self::CommandFailed { .. } | Self::UnexpectedOutput { .. } => None,
+            Self::Read { source, .. }
+            | Self::Spawn { source, .. }
+            | Self::Write { source, .. }
+            | Self::Output(source) => Some(source),
+            Self::Usage(_)
+            | Self::CommandFailed { .. }
+            | Self::UnexpectedOutput { .. }
+            | Self::NoSeeds { .. }
+            | Self::Internal(_) => None,
         }
     }
 }

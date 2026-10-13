@@ -2,7 +2,8 @@
 //! packaging.
 //!
 //! Run it as `cargo xtask <command>`; `cargo xtask --help` lists the
-//! commands. The checks are specified in `docs/04-quality.md`.
+//! commands. The checks, the fuzzer and the benchmarks are specified in
+//! `docs/04-quality.md`.
 //!
 //! This tool never uploads, publishes or signs anything, and makes no
 //! network calls of its own.
@@ -11,6 +12,7 @@ mod cargo;
 mod check;
 mod deps;
 mod error;
+mod fuzz;
 mod layers;
 mod metadata;
 mod release_no_dev;
@@ -21,6 +23,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use nadir_core::CoreError;
 use nadir_core::cli::Args;
 
 use crate::check::CHECKS;
@@ -49,23 +52,31 @@ fn main() -> ExitCode {
 /// whether it passed.
 fn run(mut args: Args, root: &Path, out: &mut dyn Write) -> Result<bool, Error> {
     let command = args.subcommand();
-    let help = args.flag("--help");
-    let extra = args
-        .finish()
-        .map_err(|error| Error::Usage(error.to_string()))?;
-    if help {
+    if args.flag("--help") {
         out.write_all(usage().as_bytes()).map_err(Error::Output)?;
         return Ok(true);
     }
+    let usage = |error: CoreError| Error::Usage(error.to_string());
     let Some(command) = command else {
+        args.finish().map_err(usage)?;
         return Err(Error::Usage("no command given".to_string()));
     };
+    match command.as_str() {
+        "fuzz-smoke" => return fuzz::command(args, root, out),
+        "bench" => {
+            let filter = args.finish().map_err(usage)?;
+            cargo::run(root, &bench_command(&filter))?;
+            return Ok(true);
+        }
+        _ => {}
+    }
+
+    let extra = args.finish().map_err(usage)?;
     if let Some(argument) = extra.first() {
         return Err(Error::Usage(format!(
             "`{command}` takes no arguments, but got `{argument}`"
         )));
     }
-
     let passed = if command == "ci" {
         check::run_all(CHECKS, root, out)
     } else if let Some(check) = CHECKS.iter().find(|check| check.name == command) {
@@ -76,6 +87,15 @@ fn run(mut args: Args, root: &Path, out: &mut dyn Write) -> Result<bool, Error> 
     passed.map_err(Error::Output)
 }
 
+/// The cargo arguments behind `cargo xtask bench [FILTER]`: the benchmarks
+/// run in release mode. The harness is the `nadir-bench` binary, which
+/// checks the filter and reports for itself.
+fn bench_command(filter: &[String]) -> Vec<&str> {
+    let mut command = vec!["run", "--release", "--package", "nadir-bench", "--"];
+    command.extend(filter.iter().map(String::as_str));
+    command
+}
+
 /// The workspace root: the directory above this crate's manifest.
 fn workspace_root() -> PathBuf {
     let xtask = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -84,13 +104,20 @@ fn workspace_root() -> PathBuf {
 
 fn usage() -> String {
     let mut text = String::from("Usage: cargo xtask <command>\n\nCommands:\n");
-    let commands = CHECKS
-        .iter()
-        .map(|check| (check.name, check.about))
-        .chain([(
+    let commands = CHECKS.iter().map(|check| (check.name, check.about)).chain([
+        (
             "ci",
             "All of the above in order, stopping at the first failure",
-        )]);
+        ),
+        (
+            "fuzz-smoke",
+            "Fuzz the parsers: [--secs N] for each target, [--target NAME] for one",
+        ),
+        (
+            "bench",
+            "Run the benchmarks in release mode: [FILTER] for those whose name contains it",
+        ),
+    ]);
     for (name, about) in commands {
         // Writing to a `String` cannot fail.
         let _ = writeln!(text, "  {name:<14}  {about}");
@@ -130,6 +157,8 @@ mod tests {
             "unsafe-audit",
             "release-no-dev",
             "ci",
+            "fuzz-smoke",
+            "bench",
         ] {
             assert!(
                 text.lines()
@@ -203,6 +232,47 @@ mod tests {
         assert!(
             text.ends_with("unsafe-audit: FAILED (3 violations)\n"),
             "{text}"
+        );
+    }
+
+    #[test]
+    fn fuzz_smoke_takes_its_own_options() {
+        assert_eq!(
+            usage_error(&["fuzz-smoke", "--target", "nope"]),
+            "unknown fuzz target `nope`; the targets are: json"
+        );
+        assert_eq!(
+            usage_error(&["fuzz-smoke", "--secs"]),
+            "option `--secs` needs a value"
+        );
+
+        // With no time, only the seeds in `fuzz/corpus/json/` run.
+        let mut out = Vec::new();
+        let args = Args::new(["fuzz-smoke", "--secs", "0", "--target", "json"]);
+        let passed = run(args, &workspace_root(), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(passed, "{text}");
+        assert!(
+            text.starts_with("fuzz-smoke: 1 target, 0 s each, seed 0x"),
+            "{text}"
+        );
+        assert!(text.ends_with("fuzz-smoke: ok\n"), "{text}");
+    }
+
+    #[test]
+    fn bench_passes_its_filter_to_the_harness_in_release_mode() {
+        assert_eq!(
+            bench_command(&["json".to_string()]),
+            ["run", "--release", "--package", "nadir-bench", "--", "json"]
+        );
+        assert_eq!(
+            bench_command(&[]),
+            ["run", "--release", "--package", "nadir-bench", "--"]
+        );
+        // Options are not passed on.
+        assert_eq!(
+            usage_error(&["bench", "--fast"]),
+            "unexpected argument `--fast`"
         );
     }
 

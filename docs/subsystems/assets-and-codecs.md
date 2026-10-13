@@ -120,6 +120,7 @@ pub enum Value {
 - **Not preserved:** comments and layout are lost when a document is parsed
   and written back. Member order is kept.
 - **Vectors:** `crates/codec/tests/json/`.
+- **Fuzz target:** `json`, with seeds in `fuzz/corpus/json/`.
 
 ### KBJ (binary JSON value tree)
 

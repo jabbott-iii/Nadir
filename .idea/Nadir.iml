@@ -6,8 +6,10 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/assets/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/audio/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/codec/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/codec/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/collision/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/core/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/debug/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/ecs/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/engine/src" isTestSource="false" />

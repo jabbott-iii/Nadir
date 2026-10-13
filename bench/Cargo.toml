@@ -4,5 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[dependencies]
+nadir-core = { path = "../crates/core" }
+nadir-codec = { path = "../crates/codec" }
+
 [lints]
 workspace = true

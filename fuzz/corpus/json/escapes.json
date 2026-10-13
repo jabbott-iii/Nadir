@@ -1,0 +1,8 @@
+{
+  "simple": "quote \" backslash \\ slash \/ \b\f\n\r\t",
+  "bmp": "\u0041\u00e9\u20AC",
+  "pair": "\ud83d\ude00\uD83D\uDE00",
+  "control": "\u0000\u001f\u007F",
+  "mixed": "a\u0062c é \u00e9 😀 \ud83d\ude00",
+  "\u006bey": "escapes work in keys too"
+}
