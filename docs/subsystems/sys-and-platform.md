@@ -91,7 +91,7 @@ impl Platform {
     pub fn gpu_surface(&self) -> GpuSurface<'_>;
     pub fn poll_gamepads(&mut self, out: &mut Vec<Event>);       // connect/disconnect + state changes
     pub fn gamepad_state(&self, id: GamepadId) -> Option<&GamepadState>;
-    pub fn set_modal_frame_callback(&mut self, cb: Box<dyn FnMut(ModalFrame<'_>)>);
+    pub fn set_modal_frame_callback(&mut self, cb: Box<dyn FnMut(ModalFrame)>);
     pub fn open_audio(&mut self, cfg: AudioConfig, render: Box<dyn AudioRender>)
         -> Result<AudioStream, PlatformError>;
 }
@@ -141,7 +141,8 @@ pub fn create_headless_gl() -> Result<HeadlessGl, PlatformError>;               
 ### Modal frames (Windows move/resize, macOS live resize)
 
 - While the OS runs a modal loop, the platform calls the registered callback
-  with a `ModalFrame` (current size, scale, a way to present). This lets the
+  with a `ModalFrame` (current size and scale; a way to present comes with
+  the GPU surface, and with it a lifetime). This lets the
   facade run one simulation/render iteration.
 - The facade keeps its state in a structure the callback can reach without
   borrowing `Platform` mutably. For example, `Rc<RefCell<EngineCore>>` held

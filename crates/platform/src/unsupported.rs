@@ -5,7 +5,7 @@
 
 use nadir_core::UVec2;
 
-use crate::{Event, PlatformError, UserDirs, WindowConfig};
+use crate::{Event, ModalFrame, PlatformError, UserDirs, WindowConfig};
 
 /// The user's folders are unknown without a backend.
 pub(crate) fn user_dirs(_studio: &str, _game: &str) -> Result<UserDirs, PlatformError> {
@@ -40,6 +40,10 @@ impl Backend {
     }
 
     pub(crate) fn set_cursor_visible(&mut self, _visible: bool) {
+        match *self {}
+    }
+
+    pub(crate) fn set_modal_frame_callback(&mut self, _callback: Box<dyn FnMut(ModalFrame)>) {
         match *self {}
     }
 }

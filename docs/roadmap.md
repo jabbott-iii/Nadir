@@ -379,6 +379,47 @@ loop on Linux, Windows and macOS. No GPU yet.
   - Verify: `cargo test -p nadir-platform`
 
 - [ ] **M1.5 — sys + platform (Windows)**
+  - ⏳ needs Windows: `cargo test -p nadir-sys -p nadir-platform` (the
+    `windows-latest` CI job runs it within `cargo xtask ci`). It is the
+    first real compile of the Windows code, and the first call of every
+    Win32 function.
+  - ⏳ needs Windows: the events example checklist (`cargo run -p
+    nadir-platform --example events`):
+    - keys by position on a non-QWERTY layout, repeats, side buttons, the
+      wheel
+    - pointer positions in physical pixels from the top left
+    - resizes, and the size limit of `--fixed`
+    - a DPI change when the window moves to a monitor of another scale
+    - focus loss releasing held keys
+    - F, C and T
+    - Alt alone not freezing the window, and Alt+F4 and the close button
+      giving `CloseRequested`
+    - "modal frames ran" after dragging the window
+  - ⏳ needs Windows: `cargo run -p sandbox` ticks at 60 Hz ± 1% over 10 s
+    (`precise_sleep` relies on `std::thread::sleep`, which on Windows 10
+    1803+ should use a high-resolution waitable timer), and keeps ticking
+    while the window is dragged.
+  - Note: written on Linux on 2026-10-17, without a Windows target or SDK
+    headers. A copy of the workspace with the OS `cfg`s swapped compiled the
+    Windows code on Linux:
+    - `cargo check`, `clippy -D warnings` and `rustdoc -D warnings` passed
+      on it
+    - the 31 tests that need no Windows (key table, message decoding, the
+      translator, styles, sizes, UTF-16) passed there; the four that call
+      Windows were skipped
+    - it showed nothing about the Win32 calls themselves
+  - Note: the struct layouts, constants and signatures come from
+    Microsoft's documented declarations; the layout assertions were worked
+    out from them, not from Windows. The scan codes follow Microsoft's
+    table in "Keyboard Input Overview", read on 2026-10-17.
+  - Note: the modal-loop timer runs frames through a new
+    `Platform::set_modal_frame_callback`. `ModalFrame` has the size and the
+    scale, and no lifetime until it can present (M2.6). The facade keeps
+    its loop state in an `Rc<RefCell<EngineCore>>`, which the callback
+    shares; Linux never calls it. Three crates: sys, platform, nadir.
+  - Note: not done here, and left to the task that first needs each: text
+    (`WM_CHAR`), `Minimized`, `ClipCursor`, Raw Input, the embedded
+    manifest, and the fake Left Control that comes with Alt Gr.
   - Depends: M1.3
   - Do:
     - Win32 declarations with layout tests

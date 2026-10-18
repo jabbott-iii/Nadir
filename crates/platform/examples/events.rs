@@ -16,10 +16,16 @@
 //! - `C`: hide or show the pointer.
 //! - `T`: change the title.
 //! - `Escape`: quit. So does closing the window.
+//!
+//! While the system holds the event loop (on Windows, while the window is
+//! dragged or resized), it counts modal frames, and says how many ran once
+//! the loop is back.
 
+use std::cell::Cell;
 use std::error::Error;
 use std::io::{self, Write};
 use std::process::ExitCode;
+use std::rc::Rc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -66,6 +72,10 @@ fn run(mut args: Args, out: &mut dyn Write) -> Result<(), Box<dyn Error>> {
     )?;
     writeln!(out, "keys: F fullscreen, C pointer, T title, Escape quit")?;
 
+    let modal_frames = Rc::new(Cell::new(0u64));
+    let counter = Rc::clone(&modal_frames);
+    platform.set_modal_frame_callback(Box::new(move |_frame| counter.set(counter.get() + 1)));
+
     let start = Instant::now();
     let mut events = Vec::new();
     let mut fullscreen = config.fullscreen;
@@ -99,6 +109,14 @@ fn run(mut args: Args, out: &mut dyn Write) -> Result<(), Box<dyn Error>> {
                 },
                 _ => {}
             }
+        }
+        let held = modal_frames.replace(0);
+        if held > 0 {
+            writeln!(
+                out,
+                "{:9.3}  {held} modal frames ran while the system held the loop",
+                start.elapsed().as_secs_f64()
+            )?;
         }
         // Show the events now, also when the output is a pipe.
         out.flush()?;

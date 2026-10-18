@@ -2,9 +2,9 @@
 //! GL/Metal surfaces, audio device output, paths and dynamic loading.
 //!
 //! So far there is a window with its events and the user's folders
-//! ([`user_dirs`]) on Linux (X11, and Wayland sessions through XWayland),
-//! and [`precise_sleep`] and [`show_error_dialog`] on every system. On other
-//! systems [`Platform::new`] and [`user_dirs`] return
+//! ([`user_dirs`]) on Linux (X11, and Wayland sessions through XWayland) and
+//! Windows, and [`precise_sleep`] and [`show_error_dialog`] on every system.
+//! On macOS [`Platform::new`] and [`user_dirs`] return
 //! [`PlatformError::Unsupported`].
 
 // One of the three crates allowed to contain `unsafe` (AGENTS.md, rule 3). The
@@ -19,8 +19,10 @@ mod sleep;
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 mod unsupported;
+#[cfg(target_os = "windows")]
+mod windows;
 
 use nadir_core::UVec2;
 
@@ -32,8 +34,10 @@ pub use sleep::precise_sleep;
 
 #[cfg(target_os = "linux")]
 use linux::Backend;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 use unsupported::Backend;
+#[cfg(target_os = "windows")]
+use windows::Backend;
 
 /// What window to open.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +55,16 @@ pub struct WindowConfig {
     /// Whether the window starts fullscreen. Fullscreen is borderless: the
     /// window covers the monitor, and the video mode does not change.
     pub fullscreen: bool,
+}
+
+/// What a modal frame callback is told: see
+/// [`Platform::set_modal_frame_callback`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModalFrame {
+    /// The size of the inside of the window, in physical pixels.
+    pub size: UVec2,
+    /// The window's scale factor, as [`Platform::scale_factor`] gives it.
+    pub scale_factor: f32,
 }
 
 /// The game's window and its connection to the operating system.
@@ -103,5 +117,17 @@ impl Platform {
     /// Shows or hides the pointer while it is over the window.
     pub fn set_cursor_visible(&mut self, visible: bool) {
         self.backend.set_cursor_visible(visible);
+    }
+
+    /// Sets what to call while the operating system runs an event loop of
+    /// its own, and [`Platform::pump_events`] therefore does not return:
+    /// while the user drags or resizes the window on Windows. It is called
+    /// every 10 to 16 ms then, so that the game can run frames. It replaces
+    /// any callback set before.
+    ///
+    /// The events of that time come from the next pump, after the loop.
+    /// On Linux there is no such loop, and the callback is never called.
+    pub fn set_modal_frame_callback(&mut self, callback: Box<dyn FnMut(ModalFrame)>) {
+        self.backend.set_modal_frame_callback(callback);
     }
 }

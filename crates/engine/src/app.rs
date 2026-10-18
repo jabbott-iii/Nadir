@@ -1,11 +1,13 @@
 //! [`App`]: the game's configuration, its systems, and the main loop.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use nadir_core::UVec2;
 use nadir_core::log::{debug, error};
 use nadir_core::time::{FixedClock, Frame, Stopwatch, Tick};
-use nadir_platform::{Event, Platform, WindowConfig, precise_sleep, show_error_dialog};
+use nadir_platform::{Event, ModalFrame, Platform, WindowConfig, precise_sleep, show_error_dialog};
 
 use crate::Error;
 use crate::limiter::FrameLimiter;
@@ -91,11 +93,35 @@ struct System<T> {
 trait EventSource {
     /// Appends the events that arrived since the last call. Does not wait.
     fn pump_events(&mut self, out: &mut Vec<Event>);
+
+    /// Sets what to call while the system's own event loop keeps
+    /// [`EventSource::pump_events`] from returning.
+    fn set_modal_frame_callback(&mut self, callback: Box<dyn FnMut(ModalFrame)>);
 }
 
 impl EventSource for Platform {
     fn pump_events(&mut self, out: &mut Vec<Event>) {
         Platform::pump_events(self, out);
+    }
+
+    fn set_modal_frame_callback(&mut self, callback: Box<dyn FnMut(ModalFrame)>) {
+        Platform::set_modal_frame_callback(self, callback);
+    }
+}
+
+/// Everything a frame needs, shared by the main loop and the modal frame
+/// callback.
+struct EngineCore {
+    app: App,
+    clock: FixedClock,
+    stopwatch: Stopwatch,
+}
+
+impl EngineCore {
+    /// Runs one frame, for the time since the last.
+    fn frame(&mut self) {
+        let elapsed = self.stopwatch.lap();
+        self.app.step(&mut self.clock, elapsed);
     }
 }
 
@@ -183,7 +209,7 @@ impl App {
     ///
     /// Fails if the window cannot be opened. Before it returns the error,
     /// it logs it and shows it to the player with [`show_error_dialog`].
-    pub fn run(mut self) -> Result<(), Error> {
+    pub fn run(self) -> Result<(), Error> {
         log_file::start(&self.config.studio, &self.config.game);
         let mut platform = Platform::new(&self.config.window())
             .map_err(|error| fatal(&self.config.title, error.into()))?;
@@ -192,15 +218,31 @@ impl App {
     }
 
     /// The main loop: events, then the ticks that are due, then the frame.
-    fn run_loop(&mut self, window: &mut dyn EventSource) {
+    ///
+    /// While the system runs an event loop of its own, as Windows does while
+    /// the window is dragged, the pump does not return. Frames then run from
+    /// the modal frame callback, unpaced: the system calls it every 10 to
+    /// 16 ms.
+    fn run_loop(self, window: &mut dyn EventSource) {
         debug!(
             "main loop: fixed systems {:?}, frame systems {:?}",
             names(&self.fixed_systems),
             names(&self.frame_systems)
         );
-        let mut clock = FixedClock::new(TICK_HZ, MAX_FRAME);
-        let mut stopwatch = Stopwatch::start();
         let mut limiter = FrameLimiter::new(self.config.frame_rate_limit, Instant::now());
+        let core = Rc::new(RefCell::new(EngineCore {
+            app: self,
+            clock: FixedClock::new(TICK_HZ, MAX_FRAME),
+            stopwatch: Stopwatch::start(),
+        }));
+        let modal_core = Rc::clone(&core);
+        window.set_modal_frame_callback(Box::new(move |_frame| {
+            // The loop borrows the core only between pumps, and this runs
+            // during one, so the borrow always succeeds.
+            if let Ok(mut core) = modal_core.try_borrow_mut() {
+                core.frame();
+            }
+        }));
         let mut events = Vec::with_capacity(256);
         loop {
             window.pump_events(&mut events);
@@ -210,7 +252,7 @@ impl App {
                 break;
             }
 
-            self.step(&mut clock, stopwatch.lap());
+            core.borrow_mut().frame();
 
             if let Some(due) = limiter.end_of_frame(Instant::now()) {
                 precise_sleep(due);
@@ -438,11 +480,15 @@ mod tests {
     // -- the loop -----------------------------------------------------------
 
     /// A window that reports a few events and asks to close when its script
-    /// says so.
+    /// says so. During a pump, it can also hold the loop as a system's own
+    /// event loop does, and run modal frames.
     struct Script {
         pumps: u32,
         close: Box<dyn FnMut(u32) -> bool>,
         asked_to_close: bool,
+        /// How many modal frames to run during the pump of this number.
+        modal_frames: Box<dyn FnMut(u32) -> u32>,
+        modal_frame_callback: Option<Box<dyn FnMut(ModalFrame)>>,
     }
 
     impl Script {
@@ -451,7 +497,14 @@ mod tests {
                 pumps: 0,
                 close: Box::new(close),
                 asked_to_close: false,
+                modal_frames: Box::new(|_| 0),
+                modal_frame_callback: None,
             }
+        }
+
+        fn with_modal_frames(mut self, modal_frames: impl FnMut(u32) -> u32 + 'static) -> Self {
+            self.modal_frames = Box::new(modal_frames);
+            self
         }
     }
 
@@ -460,6 +513,14 @@ mod tests {
             // A loop that missed the request would never end. Fail instead.
             assert!(!self.asked_to_close, "the loop went on after a close");
             self.pumps += 1;
+            let frame = ModalFrame {
+                size: UVec2::new(800, 600),
+                scale_factor: 1.0,
+            };
+            for _ in 0..(self.modal_frames)(self.pumps) {
+                let callback = self.modal_frame_callback.as_mut();
+                (callback.expect("the loop set a modal frame callback"))(frame);
+            }
             // Other events do not end the loop.
             out.push(Event::Focused(true));
             out.push(Event::Resized(UVec2::new(800, 600)));
@@ -467,6 +528,10 @@ mod tests {
                 self.asked_to_close = true;
                 out.push(Event::CloseRequested);
             }
+        }
+
+        fn set_modal_frame_callback(&mut self, callback: Box<dyn FnMut(ModalFrame)>) {
+            self.modal_frame_callback = Some(callback);
         }
     }
 
@@ -486,9 +551,46 @@ mod tests {
     #[test]
     fn a_close_request_on_the_first_pump_runs_no_frame() {
         let (ticks, frames) = (Rc::default(), Rc::default());
-        let mut app = counting_app(&ticks, &frames);
+        let app = counting_app(&ticks, &frames);
         app.run_loop(&mut Script::closing_when(|_| true));
         assert_eq!((ticks.get(), frames.get()), (0, 0));
+    }
+
+    #[test]
+    fn while_the_system_holds_the_loop_frames_run_from_the_callback() {
+        let (ticks, frames) = (Rc::default(), Rc::default());
+        let mut app = counting_app(&ticks, &frames);
+        app.config.frame_rate_limit = None;
+        // The second pump holds the loop for five modal frames, as a drag
+        // of the window does on Windows.
+        let mut window = Script::closing_when(|pumps| pumps == 3)
+            .with_modal_frames(|pumps| if pumps == 2 { 5 } else { 0 });
+        app.run_loop(&mut window);
+        // One frame after the first pump, five during the second and one
+        // after it, and none after the third.
+        assert_eq!(frames.get(), 7);
+    }
+
+    #[test]
+    fn modal_frames_keep_the_simulation_on_time() {
+        let (ticks, frames) = (Rc::default(), Rc::default());
+        let mut app = counting_app(&ticks, &frames);
+        app.config.frame_rate_limit = None;
+        // The first pump holds the loop for 300 ms or more, in modal frames
+        // of at least 10 ms.
+        let start = Instant::now();
+        let mut window = Script::closing_when(|pumps| pumps == 2)
+            .with_modal_frames(|pumps| if pumps == 1 { 30 } else { 0 });
+        let wait = move |_: &Frame| thread::sleep(Duration::from_millis(10));
+        app = app.add_frame_system("wait", wait);
+        app.run_loop(&mut window);
+        let elapsed = start.elapsed();
+        assert_eq!(frames.get(), 30 + 1);
+        // The ticks kept up with real time while the loop was held: 60 a
+        // second for 300 ms is 18, less one for rounding. Without modal
+        // frames, the frame after the hold would have counted only a
+        // quarter of a second: 15.
+        assert!(ticks.get() >= 17, "{} ticks in {elapsed:?}", ticks.get());
     }
 
     #[test]
@@ -524,7 +626,7 @@ mod tests {
         let frame_since = Rc::clone(&frames_since_stall);
         let script_since = Rc::clone(&frames_since_stall);
 
-        let mut app = app()
+        let app = app()
             .add_fixed_system("stall_once", move |tick| {
                 tick_counter.set(tick_counter.get() + 1);
                 // The hitch: the third tick takes a second.

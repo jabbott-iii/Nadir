@@ -32,7 +32,7 @@ use nadir_sys::linux::x11::{
 use self::connection::Connection;
 use self::input::{CloseMessage, Incoming, Translator};
 use super::xresources;
-use crate::{Event, PlatformError, WindowConfig};
+use crate::{Event, ModalFrame, PlatformError, WindowConfig};
 
 /// The events we ask the server for.
 const EVENT_MASK: c_long = KeyPressMask
@@ -241,6 +241,11 @@ impl Backend {
             self.connection.define_cursor(self.window, cursor);
         }
         self.cursor_visible = visible;
+    }
+
+    pub(crate) fn set_modal_frame_callback(&mut self, _callback: Box<dyn FnMut(ModalFrame)>) {
+        // X11 has no event loop of its own that would keep the pump from
+        // returning, so there is nothing to call it for.
     }
 
     fn apply_size_hints(&self) {

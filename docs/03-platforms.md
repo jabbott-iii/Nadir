@@ -54,13 +54,26 @@ The code should not assume x86_64, so adding them is a packaging task.
   from `MonitorFromWindow` + `GetMonitorInfoW`. Exclusive fullscreen is not
   supported (ADR-0001 notes).
 - Cursor: `ShowCursor` for hide/show; `ClipCursor` for confinement.
+- `SetTimer` makes 1 ms into at least 10 ms, and the system clock rounds
+  that up, so modal frames come every 10 to 16 ms.
+- The window procedure catches panics, which must not unwind into Windows,
+  and the pump resumes them after `DispatchMessageW` returns.
+- A DPI change while fullscreen keeps the monitor's rectangle; the
+  suggested one is for a framed window.
+- `WM_SYSCOMMAND` with `SC_KEYMENU` is swallowed: Alt or F10 alone would open
+  the window menu and stop the game until it closed. Alt+F4 still closes.
 
 ### Input
 
 - **Keyboard:** handle `WM_KEYDOWN`/`WM_KEYUP`/`WM_SYSKEYDOWN`/`WM_SYSKEYUP`.
   - The physical key comes from the scan code: `lParam` bits 16–23, plus the
     extended flag in bit 24. A table maps it to `nadir_core::Key` (USB HID
-    usage based).
+    usage based), following Microsoft's scan code table. Key messages give
+    Num Lock as `0xE045` and Pause as `0x45`.
+  - Windows keeps the press of Print Screen for itself and posts only the
+    release. A release with no press is reported as a press and a release.
+  - While a mouse button is down the window holds the capture, so that the
+    release arrives even outside it.
   - Text comes from `WM_CHAR`. Join UTF-16 surrogate pairs.
 - **Mouse:** position and buttons from `WM_MOUSEMOVE`, the button messages and
   `WM_MOUSEWHEEL`/`WM_MOUSEHWHEEL`. Relative motion (for future aim modes)

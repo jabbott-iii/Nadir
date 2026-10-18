@@ -6,8 +6,10 @@ use crate::PlatformError;
 
 #[cfg(target_os = "linux")]
 use crate::linux::user_dirs as system_dirs;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 use crate::unsupported::user_dirs as system_dirs;
+#[cfg(target_os = "windows")]
+use crate::windows::user_dirs as system_dirs;
 
 /// The longest name allowed, in bytes. Linux allows 255 bytes in one file
 /// name, and Windows 255 UTF-16 units, which is never fewer.
@@ -59,8 +61,9 @@ pub struct UserDirs {
 ///     `COM1`, with or without an extension
 /// - [`PlatformError::NoHomeDirectory`] if the home directory is unknown
 ///   and a path needs it.
-/// - [`PlatformError::Unsupported`] on Windows and macOS, until they have
-///   backends.
+/// - [`PlatformError::CallFailed`] on Windows, if the shell does not know
+///   the folders.
+/// - [`PlatformError::Unsupported`] on macOS, until it has a backend.
 pub fn user_dirs(studio: &str, game: &str) -> Result<UserDirs, PlatformError> {
     check_name(studio)?;
     check_name(game)?;
@@ -191,7 +194,7 @@ mod tests {
         assert_eq!(user_dirs("Studio", ".."), invalid(".."));
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     #[test]
     fn other_systems_have_no_paths_yet() {
         assert_eq!(user_dirs("Studio", "Game"), Err(PlatformError::Unsupported));
