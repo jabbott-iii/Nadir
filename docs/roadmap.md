@@ -379,10 +379,9 @@ loop on Linux, Windows and macOS. No GPU yet.
   - Verify: `cargo test -p nadir-platform`
 
 - [ ] **M1.5 — sys + platform (Windows)**
-  - ⏳ needs Windows: `cargo test -p nadir-sys -p nadir-platform` (the
-    `windows-latest` CI job runs it within `cargo xtask ci`). It is the
-    first real compile of the Windows code, and the first call of every
-    Win32 function.
+  - Note: CI, which runs `cargo xtask ci` (tests included) on
+    `windows-latest`, was green on 2026-10-18, as the user reported; the
+    session could not see CI itself.
   - ⏳ needs Windows: the events example checklist (`cargo run -p
     nadir-platform --example events`):
     - keys by position on a non-QWERTY layout, repeats, side buttons, the
@@ -433,10 +432,11 @@ loop on Linux, Windows and macOS. No GPU yet.
     through CI.
 
 - [ ] **M1.6 — sys + platform (macOS)**
-  - ⏳ needs macOS: `cargo test -p nadir-sys -p nadir-platform` (the
-    `macos-latest` CI job runs it within `cargo xtask ci`). It is the first
-    real compile, and the `nadir-sys` tests send real messages: objects,
-    `double`s, and an `NSRect` both ways.
+  - Note: CI, which runs `cargo xtask ci` (tests included) on
+    `macos-latest`, was green on 2026-10-18 after the user's fix of an
+    arm64-only clippy error in `sender` (commit 177d736), as the user
+    reported; the session could not see CI itself. The swapped-`cfg` build
+    could not have caught that error: it compiles the x86_64 path only.
   - ⏳ needs macOS: the events example checklist (`cargo run -p
     nadir-platform --example events`):
     - keys by position on a non-QWERTY layout, ⌘ held while another key
@@ -515,7 +515,42 @@ The sandbox ticks at 60 Hz ± 1%.
 **Goal:** the `gfx` RHI on OpenGL 3.3 core everywhere, with golden-image
 testing in CI.
 
-- [ ] **M2.1 — sys: GL types/enums, EGL, WGL, NSOpenGL declarations**
+- [x] **M2.1 — sys: GL types/enums, EGL, WGL, NSOpenGL declarations**
+  - Note: `gl.rs` (shared by every system) declares 11 types, 66 constants
+    and 60 function types (`PFNGL…PROC`, `extern "system"`, each with its
+    GL version; 17 are GL 1.0/1.1, which Windows takes from
+    `opengl32.dll`). `linux/egl.rs` declares 10 types, 41 constants and the
+    `Egl` table of 18 functions, all of EGL 1.4 or earlier.
+    `eglGetPlatformDisplay` (EGL 1.5) is a function type, to look up with
+    `eglGetProcAddress` after a version check.
+  - Note: the list is what M2.2–M2.4 will call. Four independent passes
+    (EGL; GL by feature, by API method, and by pitfall) and a critic chose
+    it, and a review then cut five items that no spec calls for. Deferred
+    to the task that first calls them:
+    - WGL to M2.6, and NSOpenGL to M2.7
+    - the X11 visual declarations (`XGetVisualInfo`, `XVisualInfo`, a
+      colormap) to M2.2
+    - GPU timer queries to M7.3
+    - the check of an sRGB default framebuffer, which no spec asks for
+  - Note: generated on 2026-10-18 from the installed headers (libglvnd
+    1.7.0: `glcorearb.h`, `egl.h`, `eglext.h`, `eglplatform.h`,
+    `khrplatform.h`), with hand-written descriptions. The checks, which
+    are not in the repository:
+    - gcc static assertions, against the headers, on every type alias,
+      function type, table signature and constant value, and on the type
+      of the five constants whose header gives one
+    - a separate comparison of all 78 signatures with the header text,
+      parameter by parameter, by alias name and position, which catches a
+      swapped `GLenum` and `GLuint` that gcc cannot
+    - planted errors, which both checks caught
+    - an adversarial review (five angles, each finding refuted twice):
+      its 43 confirmed findings, all about the documentation's accuracy
+      or scope, were fixed
+  - Note: no struct is declared, so the only layout assertion is that an
+    `EGLNativeWindowType` is the size of an X `Window`. The test loads
+    `Egl` from the installed `libEGL.so.1`, checks that `eglGetProcAddress`
+    returns the exported `eglGetPlatformDisplay`, and that the client
+    library reports EGL 1.5 or later.
   - Depends: M1.1
   - Do: GL types and fn-pointer types (shared); `linux/egl.rs` dynlib;
     WGL and NSOpenGL declarations as they are needed.

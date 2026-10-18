@@ -10,6 +10,7 @@
 #![allow(unsafe_code)]
 
 pub mod dynlib;
+pub mod gl;
 
 #[cfg(target_os = "linux")]
 pub mod linux;

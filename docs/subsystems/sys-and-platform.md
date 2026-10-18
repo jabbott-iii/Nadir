@@ -56,6 +56,14 @@ crates/sys/src/
 - Prefer `dlopen`/`LoadLibraryW` for anything not guaranteed present
   (XInput, X11, EGL, ALSA, avrt, dbghelp), so the game can report a clear
   error.
+- A symbol table holds only functions that every version of its library we
+  support exports. A newer one (EGL 1.5's `eglGetPlatformDisplay`) gets a
+  function-pointer type and is looked up apart, after a version check, so an
+  older library still loads.
+- GL functions are never linked or tabled in `nadir-sys`: `gl.rs` declares
+  the type of each one we call, named like the header's typedef
+  (`PFNGLCLEARPROC`), with `extern "system"`, and says which GL version
+  brought it. `nadir-gfx` loads them through `GlContext::get_proc_address`.
 - `nadir-sys` declares symbol tables but never opens a library:
   - `dynlib.rs` declares the `Library` trait, whose one method looks a
     symbol up by name. `nadir-platform` implements it for what `dlopen` and

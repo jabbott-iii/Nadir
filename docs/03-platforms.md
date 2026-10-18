@@ -336,7 +336,9 @@ directly: no locks that can block, and no allocation.
 
 - `dlopen("libEGL.so.1")`.
 - `eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, display)`, falling back to
-  `eglGetDisplay`.
+  `eglGetDisplay`. It is EGL 1.5: look it up with `eglGetProcAddress` once
+  `eglQueryString(EGL_NO_DISPLAY, EGL_VERSION)` reports 1.5 or later (an
+  older library returns null there).
 - `eglBindAPI(EGL_OPENGL_API)`.
 - Choose a config with `EGL_RENDERABLE_TYPE = EGL_OPENGL_BIT`.
 - Create the context with major 3, minor 3,
