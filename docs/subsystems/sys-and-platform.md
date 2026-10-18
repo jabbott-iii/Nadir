@@ -87,8 +87,8 @@ pub struct WindowConfig {
     pub min_size: UVec2,
     pub resizable: bool,
     pub fullscreen: bool,      // borderless
-    pub vsync: bool,
-    pub gpu: GpuPreference,    // Gl33 | Metal | Auto
+    pub vsync: bool,           // swap interval 1, or else 0
+    pub gpu: GpuPreference,    // Gl33 | Metal | Auto; comes with the Metal backend (M10)
 }
 
 impl Platform {
@@ -126,17 +126,20 @@ pub enum Event {
     GamepadAxis { id: GamepadId, axis: GamepadAxis, value: f32 },   // -1..1 raw, no deadzone
 }
 
+#[non_exhaustive]
 pub enum GpuSurface<'a> {
     Gl(&'a dyn GlContext),
     #[cfg(target_os = "macos")]
     Metal(MetalLayerRef<'a>),
 }
 
-pub trait GlContext {
+/// # Safety: the promises of ADR-0015 (real functions, a 3.3 core context
+/// current on the creating thread, neither Send nor Sync).
+pub unsafe trait GlContext {
     fn get_proc_address(&self, name: &core::ffi::CStr) -> *const core::ffi::c_void;
     fn swap_buffers(&self) -> Result<(), PlatformError>;
-    fn set_swap_interval(&self, interval: i32) -> bool;   // false if unsupported
-    fn drawable_size(&self) -> UVec2;
+    fn set_swap_interval(&self, interval: i32) -> bool;   // true only if the driver took exactly this interval
+    fn drawable_size(&self) -> UVec2;                     // physical px; zero if there is no default framebuffer
 }
 
 pub trait AudioRender: Send + 'static {
@@ -148,8 +151,28 @@ pub trait AudioRender: Send + 'static {
 pub fn user_dirs(studio: &str, game: &str) -> Result<UserDirs, PlatformError>;  // config, data, logs
 pub fn show_error_dialog(title: &str, message: &str);
 pub fn precise_sleep(until: std::time::Instant);
-pub fn create_headless_gl() -> Result<HeadlessGl, PlatformError>;               // tests/goldens
+pub fn create_headless_gl() -> Result<HeadlessGl, PlatformError>;               // tests/goldens; HeadlessGl: GlContext, !Send, !Sync
 ```
+
+### GPU surfaces
+
+- **One OpenGL context a thread** (ADR-0015): the window's, on the thread
+  that opened it, or a `HeadlessGl`. It is current there from creation
+  until it is dropped. A second one fails with
+  `PlatformError::GlContextExists`.
+- **`HeadlessGl`** draws only into render targets. It has no default
+  framebuffer: `drawable_size` is zero, `swap_buffers` does nothing, and
+  `set_swap_interval` returns `false`.
+- **`set_swap_interval`** returns `true` only if the driver accepted exactly
+  that interval. EGL would quietly clamp it to the range of the config. A
+  `true` promises no pacing: llvmpipe takes an interval of 1 and does not
+  wait at all, and under XWayland (COSMIC, 144 Hz) an interval of 1 held
+  swaps to about 288 a second, not to the display. `WindowConfig::vsync` is
+  applied once, when the window opens. If
+  the driver refuses it, a warning is logged and the window opens anyway.
+- **Until M2.6 and M2.7**, Windows and macOS have no OpenGL context. Their
+  `gpu_surface` is a context with no functions, whose swaps fail with
+  `Unsupported`, and `create_headless_gl` returns `Unsupported`.
 
 ### Modal frames (Windows move/resize, macOS live resize)
 
@@ -179,6 +202,11 @@ it requires `unsafe impl GlobalAlloc`.
   OS.
 - `GpuSurface` stays valid for the lifetime of `Platform`. Window recreation
   is not supported (fullscreen toggling reuses the window).
+- A thread has at most one OpenGL context (ADR-0015).
+- On Linux, the EGL display of headless contexts is the same for the whole
+  process and is never terminated: one `eglTerminate` would end it for
+  every thread. The window's X11 EGL display is terminated before its X
+  connection closes.
 - The audio thread is created by `open_audio`. Dropping `AudioStream` stops
   and joins it.
 - `user_dirs` only works out paths; it creates no folder. It rejects a
@@ -194,4 +222,9 @@ it requires `unsafe impl GlobalAlloc`.
     based, in temp dirs)
   - a manual interactive test binary, `cargo run -p nadir-platform --example events`,
     which prints every event; used in milestone exit checks on each OS
-- **Headless GL** creation is tested in Linux CI.
+- **Headless GL** creation is tested in Linux CI: the tests behind the
+  `headless-test` feature, which `cargo xtask ci` turns on, fail without a
+  working driver. `NADIR_EXPECT_GL_RENDERER` (such as `llvmpipe`) makes
+  them also require that renderer.
+- **The window's context:** an ignored test, run with `--ignored` on an X11
+  or XWayland session, opens a window three times.

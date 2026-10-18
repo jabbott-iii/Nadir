@@ -8,5 +8,11 @@ license.workspace = true
 nadir-core = { path = "../core" }
 nadir-sys = { path = "../sys" }
 
+[features]
+# Builds the tests that need an EGL driver with OpenGL 3.3 (core profile),
+# which then fail, not skip, if there is none. Linux only: elsewhere it adds
+# nothing. `cargo xtask ci` turns it on, as it does every feature.
+headless-test = []
+
 [lints]
 workspace = true

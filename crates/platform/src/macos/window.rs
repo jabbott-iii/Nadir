@@ -51,7 +51,8 @@ use super::input::{self, Incoming, Translator};
 use super::runtime::{
     self, AutoreleasePool, Method, Owned, RETURNS_BOOL, as_id, class, ns_string, sel,
 };
-use crate::{Event, ModalFrame, PlatformError, WindowConfig};
+use crate::no_gl::NO_GL;
+use crate::{Event, GpuSurface, ModalFrame, PlatformError, WindowConfig};
 
 /// The modal frame callback, as the platform takes it.
 type ModalFrameCallback = Box<dyn FnMut(ModalFrame)>;
@@ -829,6 +830,11 @@ impl Backend {
 
     pub(crate) fn set_modal_frame_callback(&mut self, callback: ModalFrameCallback) {
         self.state.modal_frame.set(Some(callback));
+    }
+
+    pub(crate) fn gpu_surface(&self) -> GpuSurface<'_> {
+        // No OpenGL context yet.
+        GpuSurface::Gl(&NO_GL)
     }
 
     /// Unwinds with a panic that a method of ours caught, if it caught one.

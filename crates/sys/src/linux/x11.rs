@@ -44,7 +44,7 @@
 // so that each one can be compared with its header.
 #![allow(non_upper_case_globals)]
 
-use core::ffi::{c_char, c_int, c_long, c_short, c_uchar, c_uint, c_ulong, c_ushort};
+use core::ffi::{c_char, c_int, c_long, c_short, c_uchar, c_uint, c_ulong, c_ushort, c_void};
 use core::marker::{PhantomData, PhantomPinned};
 use core::mem::offset_of;
 
@@ -72,6 +72,10 @@ pub type Cursor = XID;
 
 /// A color table. `X11/X.h`: `typedef XID Colormap;`
 pub type Colormap = XID;
+
+/// The id of a visual: a way of turning pixel values into colors.
+/// `X11/X.h`: `typedef unsigned long VisualID;`
+pub type VisualID = c_ulong;
 
 /// A number the server assigns to a name.
 /// `X11/X.h`: `typedef unsigned long Atom;`
@@ -115,11 +119,6 @@ pub struct Visual {
 // Creating a window
 // ---------------------------------------------------------------------------
 
-/// Take the value from the parent window. As the `depth` of `XCreateWindow`
-/// it is this number; as the `visual` it is a null pointer.
-/// `X11/X.h`: `#define CopyFromParent 0L`
-pub const CopyFromParent: c_long = 0;
-
 /// The `class` of a window that can be drawn to, for `XCreateWindow`.
 /// `X11/X.h`: `#define InputOutput 1`
 pub const InputOutput: c_uint = 1;
@@ -127,6 +126,19 @@ pub const InputOutput: c_uint = 1;
 /// A bit of the `valuemask` of `XCreateWindow`: `background_pixel` is set.
 /// `X11/X.h`: `#define CWBackPixel (1L<<1)`
 pub const CWBackPixel: c_long = 1 << 1;
+
+/// A bit of the `valuemask` of `XCreateWindow`: `border_pixel` is set. A
+/// window of a depth other than its parent's needs it (or a border pixmap),
+/// because the default copies the parent's border, which needs the same
+/// depth. Without one the server refuses the window.
+/// `X11/X.h`: `#define CWBorderPixel (1L<<3)`
+pub const CWBorderPixel: c_long = 1 << 3;
+
+/// A bit of the `valuemask` of `XCreateWindow`: `colormap` is set. A window
+/// of a visual other than its parent's needs a colormap of that visual, or
+/// the server refuses the window.
+/// `X11/X.h`: `#define CWColormap (1L<<13)`
+pub const CWColormap: c_long = 1 << 13;
 
 /// The attributes of a new window, for `XCreateWindow`. The function reads
 /// only the fields that its `valuemask` names.
@@ -169,6 +181,67 @@ pub struct XSetWindowAttributes {
 const _: () = assert!(size_of::<XSetWindowAttributes>() == 112);
 const _: () = assert!(align_of::<XSetWindowAttributes>() == 8);
 const _: () = assert!(offset_of!(XSetWindowAttributes, background_pixel) == 8);
+const _: () = assert!(offset_of!(XSetWindowAttributes, border_pixel) == 24);
+const _: () = assert!(offset_of!(XSetWindowAttributes, colormap) == 96);
+
+// ---------------------------------------------------------------------------
+// Visuals and colormaps
+// ---------------------------------------------------------------------------
+
+/// A visual and what it is like, as `XGetVisualInfo` describes it.
+/// `X11/Xutil.h`: `typedef struct { ... } XVisualInfo;`
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct XVisualInfo {
+    /// The visual. It belongs to the display, and lives until the display
+    /// is closed.
+    pub visual: *mut Visual,
+    /// The id of the visual.
+    pub visualid: VisualID,
+    /// The number of the screen the visual is on.
+    pub screen: c_int,
+    /// The bits in a pixel of a window of this visual.
+    pub depth: c_int,
+    /// How pixel values become colors: [`TrueColor`] and others. `class` in
+    /// C, and `c_class` in C++.
+    pub class: c_int,
+    /// The bits of a pixel value that hold red.
+    pub red_mask: c_ulong,
+    /// The bits that hold green.
+    pub green_mask: c_ulong,
+    /// The bits that hold blue.
+    pub blue_mask: c_ulong,
+    /// The number of entries in a colormap of the visual.
+    pub colormap_size: c_int,
+    /// The bits of each of red, green and blue.
+    pub bits_per_rgb: c_int,
+}
+
+const _: () = assert!(size_of::<XVisualInfo>() == 64);
+const _: () = assert!(align_of::<XVisualInfo>() == 8);
+const _: () = assert!(offset_of!(XVisualInfo, visual) == 0);
+const _: () = assert!(offset_of!(XVisualInfo, visualid) == 8);
+const _: () = assert!(offset_of!(XVisualInfo, screen) == 16);
+const _: () = assert!(offset_of!(XVisualInfo, depth) == 20);
+const _: () = assert!(offset_of!(XVisualInfo, class) == 24);
+const _: () = assert!(offset_of!(XVisualInfo, red_mask) == 32);
+const _: () = assert!(offset_of!(XVisualInfo, colormap_size) == 56);
+const _: () = assert!(offset_of!(XVisualInfo, bits_per_rgb) == 60);
+
+/// A bit of the `vinfo_mask` of `XGetVisualInfo`: match the `visualid` of
+/// the template.
+/// `X11/Xutil.h`: `#define VisualIDMask 0x1`
+pub const VisualIDMask: c_long = 0x1;
+
+/// A [`XVisualInfo::class`]: a pixel value is red, green and blue bits,
+/// which mean fixed intensities. Desktops draw in visuals of this class.
+/// `X11/X.h`: `#define TrueColor 4`
+pub const TrueColor: c_int = 4;
+
+/// The `alloc` of `XCreateColormap`: allocate no entries, which is what a
+/// colormap of a [`TrueColor`] visual needs.
+/// `X11/X.h`: `#define AllocNone 0`
+pub const AllocNone: c_int = 0;
 
 /// A bit of [`XSizeHints::flags`]: `min_width` and `min_height` are set.
 /// `X11/Xutil.h`: `#define PMinSize (1L << 4)`
@@ -702,6 +775,44 @@ dynlib! {
         /// `X11/Xlib.h`: `Window XRootWindow(Display *display, int
         /// screen_number)`
         fn XRootWindow(display: *mut Display, screen_number: c_int) -> Window;
+
+        /// Returns the visuals that match the fields of `vinfo_template`
+        /// that `vinfo_mask` names ([`VisualIDMask`] and others), and writes
+        /// their number to `nitems_return`. Returns null if none match.
+        /// `X11/Xutil.h`: `XVisualInfo *XGetVisualInfo(Display *display, long
+        /// vinfo_mask, XVisualInfo *vinfo_template, int *nitems_return)`
+        ///
+        /// The array is ours. Free it with `XFree`. The visuals it points to
+        /// belong to the display, and live until it is closed.
+        fn XGetVisualInfo(
+            display: *mut Display,
+            vinfo_mask: c_long,
+            vinfo_template: *mut XVisualInfo,
+            nitems_return: *mut c_int,
+        ) -> *mut XVisualInfo;
+
+        /// Frees memory that Xlib allocated for us, such as what
+        /// `XGetVisualInfo` returns.
+        /// `X11/Xlib.h`: `int XFree(void *data)`
+        fn XFree(data: *mut c_void) -> c_int;
+
+        /// Creates a colormap of `visual` on the screen of the window `w`.
+        /// `X11/Xlib.h`: `Colormap XCreateColormap(Display *display, Window w,
+        /// Visual *visual, int alloc)`
+        ///
+        /// The colormap is ours. Free it with `XFreeColormap`.
+        fn XCreateColormap(
+            display: *mut Display,
+            w: Window,
+            visual: *mut Visual,
+            alloc: c_int,
+        ) -> Colormap;
+
+        /// Frees a colormap. A window that still uses it has no colormap
+        /// after this.
+        /// `X11/Xlib.h`: `int XFreeColormap(Display *display, Colormap
+        /// colormap)`
+        fn XFreeColormap(display: *mut Display, colormap: Colormap) -> c_int;
 
         /// Creates a window, which is not shown until it is mapped, and
         /// returns its id. `attributes` may be null if `valuemask` is 0.

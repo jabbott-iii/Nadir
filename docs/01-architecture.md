@@ -171,8 +171,9 @@ Rules:
   `prev → current` by `alpha`.
 - **Pacing:**
   - Use vsync (swap interval 1) when available.
-  - Otherwise use a limiter that sleeps to about 1 ms before the deadline and
-    then spins.
+  - Keep a limiter as well, which sleeps to about 1 ms before the deadline
+    and then spins. A driver can accept an interval of 1 and not wait for
+    the display: llvmpipe, and XWayland (see `GlContext::set_swap_interval`).
   - The limiter keeps a schedule: each frame is due one interval after the
     last was due. A frame that overruns starts the schedule again from where
     it ended, so no frames hurry to make up for it.

@@ -9,6 +9,7 @@
 //! - `--seconds N`: close after N seconds.
 //! - `--fullscreen`: start fullscreen.
 //! - `--fixed`: do not let the user resize the window.
+//! - `--no-vsync`: ask for a swap interval of 0.
 //!
 //! Keys, named by their place on a US keyboard:
 //!
@@ -31,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use nadir_core::cli::Args;
 use nadir_core::{Key, UVec2};
-use nadir_platform::{Event, Platform, WindowConfig};
+use nadir_platform::{Event, GpuSurface, Platform, WindowConfig};
 
 /// How long to wait between looks at the event queue.
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
@@ -55,6 +56,7 @@ fn run(mut args: Args, out: &mut dyn Write) -> Result<(), Box<dyn Error>> {
         min_size: UVec2::new(320, 180),
         resizable: !args.flag("--fixed"),
         fullscreen: args.flag("--fullscreen"),
+        vsync: !args.flag("--no-vsync"),
     };
     if let Some(extra) = args.finish()?.first() {
         return Err(format!("unexpected argument `{extra}`").into());
@@ -70,6 +72,13 @@ fn run(mut args: Args, out: &mut dyn Write) -> Result<(), Box<dyn Error>> {
         size.y,
         platform.scale_factor()
     )?;
+    match platform.gpu_surface() {
+        GpuSurface::Gl(gl) => {
+            let drawable = gl.drawable_size();
+            writeln!(out, "gpu: OpenGL, drawable {}x{}", drawable.x, drawable.y)?;
+        }
+        _ => writeln!(out, "gpu: not OpenGL")?,
+    }
     writeln!(out, "keys: F fullscreen, C pointer, T title, Escape quit")?;
 
     let modal_frames = Rc::new(Cell::new(0u64));

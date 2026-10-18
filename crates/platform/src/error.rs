@@ -49,6 +49,28 @@ pub enum PlatformError {
     /// The window was to be opened on a thread other than the main one,
     /// which macOS does not allow.
     NotMainThread,
+    /// A call to EGL or OpenGL failed.
+    GpuCallFailed {
+        /// The function that failed.
+        call: &'static str,
+        /// What went wrong: the error that the call reported, such as
+        /// `EGL_BAD_MATCH`, or what was wrong with what it returned.
+        error: String,
+    },
+    /// The graphics driver has no OpenGL frame buffer format with 8 bits
+    /// each of red, green and blue that suits the window, or offscreen
+    /// drawing.
+    NoGlConfig,
+    /// The graphics driver does not offer OpenGL 3.3 with the core profile.
+    GlTooOld {
+        /// The version that the driver did give, as its `GL_VERSION`
+        /// string, if a context could be made at all.
+        found: Option<String>,
+    },
+    /// This thread already has an OpenGL context: the window's, or one from
+    /// [`create_headless_gl`](crate::create_headless_gl). A thread can have
+    /// one at a time.
+    GlContextExists,
 }
 
 impl fmt::Display for PlatformError {
@@ -83,6 +105,19 @@ impl fmt::Display for PlatformError {
                 f.write_str("could not find the home directory: set `HOME` to an absolute path")
             }
             Self::NotMainThread => f.write_str("the window can only be opened on the main thread"),
+            Self::GpuCallFailed { call, error } => write!(f, "{call} failed: {error}"),
+            Self::NoGlConfig => f.write_str(
+                "the graphics driver has no OpenGL frame buffer format with 8-bit red, green and \
+                 blue",
+            ),
+            Self::GlTooOld { found: None } => {
+                f.write_str("the graphics driver does not offer OpenGL 3.3 (core profile)")
+            }
+            Self::GlTooOld { found: Some(found) } => write!(
+                f,
+                "the graphics driver does not offer OpenGL 3.3 (core profile): it gave `{found}`"
+            ),
+            Self::GlContextExists => f.write_str("this thread already has an OpenGL context"),
         }
     }
 }
@@ -143,6 +178,33 @@ mod tests {
             (
                 PlatformError::NotMainThread,
                 "the window can only be opened on the main thread",
+            ),
+            (
+                PlatformError::GpuCallFailed {
+                    call: "eglCreateWindowSurface",
+                    error: "EGL_BAD_MATCH".to_string(),
+                },
+                "eglCreateWindowSurface failed: EGL_BAD_MATCH",
+            ),
+            (
+                PlatformError::NoGlConfig,
+                "the graphics driver has no OpenGL frame buffer format with 8-bit red, green and \
+                 blue",
+            ),
+            (
+                PlatformError::GlTooOld { found: None },
+                "the graphics driver does not offer OpenGL 3.3 (core profile)",
+            ),
+            (
+                PlatformError::GlTooOld {
+                    found: Some("3.1 Mesa 24.0.5".to_string()),
+                },
+                "the graphics driver does not offer OpenGL 3.3 (core profile): it gave `3.1 Mesa \
+                 24.0.5`",
+            ),
+            (
+                PlatformError::GlContextExists,
+                "this thread already has an OpenGL context",
             ),
         ];
         for (error, message) in cases {

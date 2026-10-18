@@ -1,5 +1,9 @@
 //! The window and its events, on X11.
 //!
+//! The window draws with OpenGL, through EGL ([`super::egl`]). EGL chooses
+//! the frame buffer config first, and the window is made with the X visual
+//! of that config.
+//!
 //! What this backend does not do yet, because nothing has needed it:
 //!
 //! - It reports no typed text. Key events say which physical keys moved,
@@ -18,21 +22,22 @@
 mod connection;
 mod input;
 
-use core::ffi::{c_int, c_long};
+use core::ffi::{CStr, c_int, c_long, c_void};
 
 use nadir_core::UVec2;
 use nadir_core::log::{debug, error, warn};
 use nadir_sys::linux::x11::{
-    Atom, ButtonPressMask, ButtonReleaseMask, Cursor, FocusChangeMask, KeyPressMask,
+    Atom, ButtonPressMask, ButtonReleaseMask, Colormap, Cursor, FocusChangeMask, KeyPressMask,
     KeyReleaseMask, PMaxSize, PMinSize, PointerMotionMask, StructureNotifyMask,
-    SubstructureNotifyMask, SubstructureRedirectMask, Window, XA_ATOM, XA_STRING, XA_WM_NAME,
-    XAspectRatio, XSizeHints,
+    SubstructureNotifyMask, SubstructureRedirectMask, TrueColor, Window, XA_ATOM, XA_STRING,
+    XA_WM_NAME, XAspectRatio, XSizeHints,
 };
 
-use self::connection::Connection;
+use self::connection::{Connection, VisualFormat};
 use self::input::{CloseMessage, Incoming, Translator};
+use super::egl::WindowGl;
 use super::xresources;
-use crate::{Event, ModalFrame, PlatformError, WindowConfig};
+use crate::{Event, GlContext, GpuSurface, ModalFrame, PlatformError, WindowConfig};
 
 /// The events we ask the server for.
 const EVENT_MASK: c_long = KeyPressMask
@@ -85,9 +90,12 @@ impl Atoms {
 /// The X11 window of the game.
 pub(crate) struct Backend {
     // The connection is declared last so that it is dropped last: `Drop`
-    // below uses it, and so would any field that held server resources.
+    // below uses it, and so does `gl`, whose EGL display must be terminated
+    // before the connection closes.
     root: Window,
     window: Window,
+    /// The colormap of the window's visual.
+    colormap: Colormap,
     atoms: Atoms,
     translator: Translator,
     /// The size the window was asked to have, in physical pixels.
@@ -100,6 +108,8 @@ pub(crate) struct Backend {
     cursor_visible: bool,
     /// The empty pointer shape, once it has been needed.
     blank_cursor: Option<Cursor>,
+    /// The window's OpenGL context, current on this thread.
+    gl: WindowGl,
     connection: Connection,
 }
 
@@ -116,7 +126,21 @@ impl Backend {
         let requested_size = physical_size(config.size, scale);
         let root = connection.root();
         let atoms = Atoms::intern(&connection);
-        let window = connection.create_window(root, requested_size);
+        // SAFETY: the connection is open, and closes only after `gl` is
+        // dropped: here `gl` is declared after it, so it is dropped first,
+        // and in the backend it is a field before the connection.
+        let gl = unsafe {
+            WindowGl::open(connection.display(), |visual| {
+                connection
+                    .visual_format(visual)
+                    .is_some_and(is_opaque_true_color)
+            })
+        }?;
+        let (window, colormap) = connection
+            .create_window(root, requested_size, gl.visual())
+            .ok_or(PlatformError::CallFailed {
+                call: "XGetVisualInfo",
+            })?;
         let close = CloseMessage {
             wm_protocols: atoms.wm_protocols,
             wm_delete_window: atoms.wm_delete_window,
@@ -125,6 +149,7 @@ impl Backend {
         let mut backend = Self {
             root,
             window,
+            colormap,
             atoms,
             translator: Translator::new(close, requested_size, scale),
             requested_size,
@@ -133,6 +158,7 @@ impl Backend {
             fullscreen: config.fullscreen,
             cursor_visible: true,
             blank_cursor: None,
+            gl,
             connection,
         };
 
@@ -155,6 +181,12 @@ impl Backend {
                 &[backend.atoms.net_wm_state_fullscreen],
             );
         }
+        // The context is made before the window is shown, so that a failure
+        // shows no window.
+        // SAFETY: the window is of the connection's display and of the
+        // config's visual, and `Drop` releases the context before it destroys
+        // the window.
+        unsafe { backend.gl.make_current(window, config.vsync) }?;
         backend.connection.map_window(window);
         debug!(
             "opened an X11 window of {}x{} pixels at scale {scale}",
@@ -248,6 +280,10 @@ impl Backend {
         // returning, so there is nothing to call it for.
     }
 
+    pub(crate) fn gpu_surface(&self) -> GpuSurface<'_> {
+        GpuSurface::Gl(self)
+    }
+
     fn apply_size_hints(&self) {
         let hints = size_hints(
             self.requested_size,
@@ -261,12 +297,48 @@ impl Backend {
 
 impl Drop for Backend {
     fn drop(&mut self) {
+        // The window's surface goes before the window does.
+        self.gl.release();
         if let Some(cursor) = self.blank_cursor.take() {
             self.connection.free_cursor(cursor);
         }
         self.connection.destroy_window(self.window);
-        // The connection closes when the field is dropped, after this.
+        self.connection.free_colormap(self.colormap);
+        // The fields drop after this: `gl` terminates the EGL display, and
+        // then the connection closes.
     }
+}
+
+// SAFETY: a backend exists only once `WindowGl::make_current` has made the
+// window's context current on this thread, with the thread's claim, and has
+// checked that it is OpenGL 3.3 core. It stays current until the backend is
+// dropped, and the functions come from EGL or libOpenGL for it. A backend
+// holds raw pointers, so it is neither `Send` nor `Sync`.
+unsafe impl GlContext for Backend {
+    fn get_proc_address(&self, name: &CStr) -> *const c_void {
+        self.gl.get_proc_address(name)
+    }
+
+    fn swap_buffers(&self) -> Result<(), PlatformError> {
+        self.gl.swap_buffers()
+    }
+
+    fn set_swap_interval(&self, interval: i32) -> bool {
+        self.gl.set_swap_interval(interval)
+    }
+
+    fn drawable_size(&self) -> UVec2 {
+        // On X11 the drawable is the inside of the window.
+        self.translator.size()
+    }
+}
+
+/// Whether a window of this visual is opaque, in plain 24-bit color. A
+/// compositor blends a window of depth 32 with what is behind it, and the
+/// colors of a visual of another class depend on a colormap that we leave
+/// empty.
+fn is_opaque_true_color(format: VisualFormat) -> bool {
+    format.depth == 24 && format.class == TrueColor
 }
 
 /// Converts a logical window size to physical pixels, within what X can
@@ -486,6 +558,42 @@ mod tests {
         // Latin-1 could hold the first of these, but not as these bytes.
         assert_eq!(legacy_title_type("Café", UTF8_STRING), UTF8_STRING);
         assert_eq!(legacy_title_type("ナディア", UTF8_STRING), UTF8_STRING);
+    }
+
+    #[test]
+    fn only_an_opaque_true_color_visual_is_taken() {
+        // The classes are those of `X11/X.h`.
+        let (true_color, direct_color) = (4, 5);
+        let format = |depth, class| VisualFormat { depth, class };
+        assert!(is_opaque_true_color(format(24, true_color)));
+        assert!(!is_opaque_true_color(format(32, true_color)));
+        assert!(!is_opaque_true_color(format(30, true_color)));
+        assert!(!is_opaque_true_color(format(24, direct_color)));
+    }
+
+    #[test]
+    #[ignore = "opens windows: run it with --ignored in an X11 or XWayland session"]
+    fn a_window_gets_an_opengl_3_3_core_context_each_time() {
+        // Three times, because an EGL display that is not terminated before
+        // its connection closes breaks a later window (seen on Mesa's iris).
+        for _ in 0..3 {
+            let config = WindowConfig {
+                title: "Nadir test".to_string(),
+                size: UVec2::new(320, 180),
+                min_size: UVec2::ZERO,
+                resizable: true,
+                fullscreen: false,
+                vsync: true,
+            };
+            let backend = Backend::new(&config).unwrap();
+            let GpuSurface::Gl(gl) = backend.gpu_surface();
+            super::super::egl::gl_test::check_context_and_draw(gl);
+            assert_eq!(gl.drawable_size(), backend.window_size());
+            assert!(!gl.set_swap_interval(-1));
+            for _ in 0..3 {
+                gl.swap_buffers().unwrap();
+            }
+        }
     }
 
     #[test]

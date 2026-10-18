@@ -7,9 +7,10 @@ use std::ffi::OsStr;
 
 use nadir_core::UVec2;
 use nadir_sys::linux::x11::{
-    Atom, CWBackPixel, ClientMessage, CopyFromParent, Cursor, Display, False, InputOutput,
-    PropModeReplace, True, Window, XClientMessageData, XClientMessageEvent, XColor, XEvent,
-    XSetWindowAttributes, XSizeHints, Xlib,
+    AllocNone, Atom, CWBackPixel, CWBorderPixel, CWColormap, ClientMessage, Colormap, Cursor,
+    Display, False, InputOutput, PropModeReplace, True, VisualID, VisualIDMask, Window,
+    XClientMessageData, XClientMessageEvent, XColor, XEvent, XSetWindowAttributes, XSizeHints,
+    XVisualInfo, Xlib,
 };
 
 use super::super::library::Library;
@@ -34,7 +35,8 @@ const XLIB_NAME: &str = "libX11.so.6";
 ///
 /// A window, cursor or atom that does not belong to the display is not a
 /// memory error: the server rejects the request, and Xlib then ends the
-/// process. The methods that take one are therefore safe to call.
+/// process. The methods that take one are therefore safe to call. A
+/// `Visual *`, which is a pointer into the display, never leaves this file.
 pub(super) struct Connection {
     xlib: Xlib,
     display: NonNull<Display>,
@@ -76,6 +78,63 @@ impl Connection {
         }
     }
 
+    /// The display, for EGL. It is open for as long as this value exists.
+    pub(super) fn display(&self) -> NonNull<Display> {
+        self.display
+    }
+
+    /// Returns the depth and class of the visual `id`, or `None` if the
+    /// server has no such visual.
+    pub(super) fn visual_format(&self, id: VisualID) -> Option<VisualFormat> {
+        let info = self.visual_info(id)?;
+        Some(VisualFormat {
+            depth: info.depth,
+            class: info.class,
+        })
+    }
+
+    /// Returns what Xlib says of the visual `id`, or `None` if the server
+    /// has no such visual. Its `visual` lives until the display is closed.
+    fn visual_info(&self, id: VisualID) -> Option<XVisualInfo> {
+        let mut template = XVisualInfo {
+            visual: ptr::null_mut(),
+            visualid: id,
+            screen: 0,
+            depth: 0,
+            class: 0,
+            red_mask: 0,
+            green_mask: 0,
+            blue_mask: 0,
+            colormap_size: 0,
+            bits_per_rgb: 0,
+        };
+        let mut count = 0;
+        // SAFETY: the display is open, and the template and the count are
+        // live. With this mask, Xlib reads only the template's `visualid`.
+        let infos = unsafe {
+            (self.xlib.XGetVisualInfo)(
+                self.display.as_ptr(),
+                VisualIDMask,
+                &raw mut template,
+                &raw mut count,
+            )
+        };
+        if infos.is_null() {
+            return None;
+        }
+        let info = if count > 0 {
+            // SAFETY: Xlib returned an array of `count` visuals.
+            Some(unsafe { infos.read() })
+        } else {
+            None
+        };
+        // SAFETY: Xlib allocated the array for us, and it is not used after
+        // this. The visual that `info` points to belongs to the display, not
+        // to the array. Xlib gives the result no meaning.
+        unsafe { (self.xlib.XFree)(infos.cast()) };
+        info
+    }
+
     /// Returns the root window of the default screen.
     pub(super) fn root(&self) -> Window {
         // SAFETY: the display is open.
@@ -115,9 +174,23 @@ impl Connection {
         unsafe { (self.xlib.XInternAtom)(self.display.as_ptr(), name.as_ptr(), False) }
     }
 
-    /// Creates a top-level window with a black background. It is not shown
-    /// until [`Connection::map_window`].
-    pub(super) fn create_window(&self, root: Window, size: UVec2) -> Window {
+    /// Creates a top-level window of the visual `visual`, with a black
+    /// background, and a colormap of that visual for it. Returns `None` if
+    /// the server has no such visual. The window is not shown until
+    /// [`Connection::map_window`]. The caller frees the colormap with
+    /// [`Connection::free_colormap`] once the window is destroyed.
+    pub(super) fn create_window(
+        &self,
+        root: Window,
+        size: UVec2,
+        visual: VisualID,
+    ) -> Option<(Window, Colormap)> {
+        let info = self.visual_info(visual)?;
+        // SAFETY: the display is open, and the visual came from Xlib for it
+        // and lives until it is closed.
+        let colormap = unsafe {
+            (self.xlib.XCreateColormap)(self.display.as_ptr(), root, info.visual, AllocNone)
+        };
         let mut attributes = XSetWindowAttributes {
             background_pixmap: 0,
             // Black on every visual a desktop uses.
@@ -133,13 +206,18 @@ impl Connection {
             event_mask: 0,
             do_not_propagate_mask: 0,
             override_redirect: False,
-            colormap: 0,
+            colormap,
             cursor: 0,
         };
-        // SAFETY: the display is open, and `attributes` is a live struct, of
-        // which the mask names one field. The depth and the visual (a null
-        // pointer) are both "copy from the parent".
-        unsafe {
+        // A window of a visual other than the root's needs a colormap of its
+        // visual, and one of a depth other than the root's (24 on a root of
+        // 30) a border pixel. The server refuses the window otherwise, so
+        // both are always set.
+        let mask = CWBackPixel | CWBorderPixel | CWColormap;
+        // SAFETY: the display is open, `attributes` is a live struct, of which
+        // the mask names three fields, and the visual came from Xlib for the
+        // display. The depth is the visual's.
+        let window = unsafe {
             (self.xlib.XCreateWindow)(
                 self.display.as_ptr(),
                 root,
@@ -148,13 +226,20 @@ impl Connection {
                 size.x as c_uint,
                 size.y as c_uint,
                 0,
-                CopyFromParent as c_int,
+                info.depth,
                 InputOutput,
-                ptr::null_mut(),
-                CWBackPixel as c_ulong,
+                info.visual,
+                mask as c_ulong,
                 &raw mut attributes,
             )
-        }
+        };
+        Some((window, colormap))
+    }
+
+    /// Frees a colormap.
+    pub(super) fn free_colormap(&self, colormap: Colormap) {
+        // SAFETY: the display is open. Xlib gives the result no meaning.
+        unsafe { (self.xlib.XFreeColormap)(self.display.as_ptr(), colormap) };
     }
 
     /// Destroys a window.
@@ -378,6 +463,15 @@ impl Drop for Connection {
         // first. Xlib gives the result no meaning.
         unsafe { (self.xlib.XCloseDisplay)(self.display.as_ptr()) };
     }
+}
+
+/// The depth and class of a visual.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct VisualFormat {
+    /// The bits in a pixel.
+    pub(super) depth: c_int,
+    /// [`TrueColor`](nadir_sys::linux::x11::TrueColor) and others.
+    pub(super) class: c_int,
 }
 
 /// Returns the error to report if the environment names no X server.

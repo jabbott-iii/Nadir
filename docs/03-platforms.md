@@ -339,18 +339,54 @@ directly: no locks that can block, and no allocation.
   `eglGetDisplay`. It is EGL 1.5: look it up with `eglGetProcAddress` once
   `eglQueryString(EGL_NO_DISPLAY, EGL_VERSION)` reports 1.5 or later (an
   older library returns null there).
-- `eglBindAPI(EGL_OPENGL_API)`.
+  - Fall back only for an older library. After `eglGetPlatformDisplay`
+    returns `EGL_NO_DISPLAY`, `eglGetDisplay` with an Xlib display crashes in
+    a Wayland session: it takes the display for a Wayland one.
+  - Under XWayland, NVIDIA's EGL takes no X display without PRIME offload.
+    libglvnd then tries Mesa.
+- `eglBindAPI(EGL_OPENGL_API)` before every `eglCreateContext`: the API is a
+  setting of each thread, and starts as OpenGL ES.
 - Choose a config with `EGL_RENDERABLE_TYPE = EGL_OPENGL_BIT`.
+  - Ask for `EGL_SURFACE_TYPE`, and for 8 bits of red, green and blue, but
+    not for alpha. Take the first config in EGL's order with exactly 8
+    bits of each, whose X visual is of depth 24 and class `TrueColor`.
+  - Mesa lists 10-bit configs first. On NVIDIA every config with alpha has a
+    visual of depth 32, which a compositor blends with what is behind the
+    window.
+- Create the window with that visual and a colormap of it (`AllocNone`).
+  Pass `CWColormap`, which a visual other than the root's needs, and
+  `CWBorderPixel`, which a depth other than the root's needs (24 on a root
+  of 30). The server refuses the window otherwise.
 - Create the context with major 3, minor 3,
   `EGL_CONTEXT_OPENGL_PROFILE_MASK = EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT`.
+  Then check `GL_MAJOR_VERSION`, `GL_MINOR_VERSION` and the core bit of
+  `GL_CONTEXT_PROFILE_MASK`. Mesa gives 4.6, and NVIDIA exactly 3.3.
+- The window surface asks for `EGL_GL_COLORSPACE_SRGB` (ADR-0013), and is
+  linear, with a warning, if the driver refuses.
 - Load GL with `eglGetProcAddress`, falling back to `dlsym` on
-  `libOpenGL.so.0`.
-- Vsync with `eglSwapInterval(1)`.
+  `libOpenGL.so.0`. libglvnd gives a stub for every name that starts with
+  `gl`, so a pointer that is not null proves nothing.
+- Vsync with `eglSwapInterval(1)`, if the config's
+  `EGL_MIN_SWAP_INTERVAL`..`EGL_MAX_SWAP_INTERVAL` allows it. llvmpipe
+  allows only 1, and paces nothing. Under XWayland (COSMIC, 144 Hz), an
+  interval of 1 held swaps to about 288 a second with iris and NVIDIA,
+  which is not the display's rate.
+- Teardown: release the context, destroy the surface and the context, then
+  the window, then `eglTerminate`, then `XCloseDisplay`. Without the
+  terminate, a later window gets the old display for a new connection at
+  the same address, and Mesa's iris breaks.
 - **Headless (CI):**
-  - Use EGL with `EGL_MESA_platform_surfaceless` or a pbuffer, rendering into
-    an FBO.
+  - Use EGL with `EGL_MESA_platform_surfaceless` and a context with no
+    surface (`EGL_KHR_surfaceless_context`), or a 1×1 pbuffer, rendering
+    into an FBO. The config needs `EGL_SURFACE_TYPE = EGL_PBUFFER_BIT`:
+    there are no window configs on that platform.
+  - The surfaceless display is shared by the whole process and is never
+    terminated.
   - Golden tests run this way on Mesa llvmpipe, with
-    `LIBGL_ALWAYS_SOFTWARE=1` in CI.
+    `LIBGL_ALWAYS_SOFTWARE=1` in CI. Where libglvnd also has NVIDIA's EGL,
+    NVIDIA takes the surfaceless platform and ignores that variable. Choose
+    Mesa with
+    `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
 
 ### Audio (ALSA via `dlopen("libasound.so.2")`)
 

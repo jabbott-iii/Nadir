@@ -335,3 +335,59 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   (tighter coupling across the dependency graph).
 - **Revisit when:** the facade becomes unwieldy. Then split it into
   per-subsystem glue crates, still in layer 5.
+
+## ADR-0015 — GlContext is an unsafe trait, with one OpenGL context per thread
+
+- **Status:** Accepted
+- **Date:** 2026-10-18
+- **Context:**
+  - `nadir-gfx` calls the GL functions that
+    `GlContext::get_proc_address` returns, in `unsafe` blocks. Those calls
+    are sound only if each pointer is the named function, and a 3.3 core
+    context is current on the thread.
+  - The API sketch made `GlContext` a safe trait. Safe code in any crate
+    could then implement it to return any address, and gfx would call it.
+  - Under libglvnd the GL functions are dispatch stubs. Every context gets
+    the same addresses, and each call goes to whichever context is current
+    on the thread. libglvnd also gives a stub for any name that starts with
+    `gl` (seen on 2026-10-18 with Mesa and NVIDIA).
+  - A context that is current on one thread cannot be made current on
+    another until the first releases it: `EGL_BAD_ACCESS` on Mesa and
+    NVIDIA.
+- **Decision:**
+  - `pub unsafe trait GlContext`. An implementor promises that whenever
+    `get_proc_address` returns a pointer that is not null:
+    - the pointer is that function, valid until the process exits, and
+      callable through the type that `nadir_sys::gl` declares for it
+    - the context is OpenGL 3.3 or later with the core profile, current on
+      the thread that made the value, with no other context made current
+      there while the value exists
+    - the value is neither `Send` nor `Sync`
+
+    Every method is sound to call at any time on that thread.
+  - A thread has at most one context of `nadir-platform`'s: the window's
+    (Linux, for now) or a `HeadlessGl`. A second fails with
+    `PlatformError::GlContextExists`.
+  - `HeadlessGl` is neither `Send` nor `Sync` on every system. A marker
+    field ensures this, and `compile_fail` doctests check it.
+- **Consequences:**
+  - gfx's `SAFETY` comments can rest on these promises, and gfx can still
+    write a mock context for its tests, with an `unsafe impl` of its own.
+  - Only `nadir-sys`, `nadir-platform` and `nadir-gfx` can implement the
+    trait, because every other crate denies `unsafe_code`.
+  - A thread that holds the window cannot also make a headless context.
+    libtest runs each test on its own thread.
+  - A pointer that is not null does not prove that the driver has the
+    function. The version check is what guards against a missing one.
+  - WGL (M2.6) and NSOpenGL (M2.7) must keep the same promises.
+- **Alternatives considered:**
+  - A safe trait, as sketched: unsound, for the reason above.
+  - A safe trait sealed by a private supertrait: sound, but gfx could not
+    mock it. Its "a missing function is an error" path could then not be
+    tested on Linux, where libglvnd gives a stub for every `gl` name.
+  - `make_current` in the trait, or making the context current in every
+    method: neither covers the GL calls that gfx makes directly through
+    the stubs.
+- **Revisit when:** something needs two OpenGL contexts on one thread,
+  such as a second window or contexts that share objects for a loader
+  thread.

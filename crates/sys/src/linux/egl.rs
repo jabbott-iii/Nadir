@@ -332,11 +332,11 @@ pub const EGL_GL_COLORSPACE: EGLint = 0x309D;
 /// `EGL/egl.h` (EGL 1.5): `#define EGL_GL_COLORSPACE_SRGB 0x3089`
 pub const EGL_GL_COLORSPACE_SRGB: EGLint = 0x3089;
 
-/// A pbuffer attribute, and a surface query: the width in pixels.
+/// A pbuffer attribute: the width in pixels.
 /// `EGL/egl.h` (EGL 1.0): `#define EGL_WIDTH 0x3057`
 pub const EGL_WIDTH: EGLint = 0x3057;
 
-/// A pbuffer attribute, and a surface query: the height in pixels.
+/// A pbuffer attribute: the height in pixels.
 /// `EGL/egl.h` (EGL 1.0): `#define EGL_HEIGHT 0x3056`
 pub const EGL_HEIGHT: EGLint = 0x3056;
 
@@ -454,17 +454,6 @@ dynlib! {
             config: EGLConfig,
             attrib_list: *const EGLint,
         ) -> EGLSurface;
-
-        /// Writes the value of one attribute of a surface, such as `EGL_WIDTH`,
-        /// to `value`.
-        /// `EGL/egl.h` (EGL 1.0): `EGLBoolean eglQuerySurface (EGLDisplay dpy,
-        /// EGLSurface surface, EGLint attribute, EGLint *value);`
-        fn eglQuerySurface(
-            dpy: EGLDisplay,
-            surface: EGLSurface,
-            attribute: EGLint,
-            value: *mut EGLint,
-        ) -> EGLBoolean;
 
         /// Destroys a surface, once it is not current on any thread.
         /// `EGL/egl.h` (EGL 1.0): `EGLBoolean eglDestroySurface (EGLDisplay

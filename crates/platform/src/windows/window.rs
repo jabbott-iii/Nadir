@@ -54,7 +54,8 @@ use nadir_sys::windows::user32::{
 
 use super::input::{Incoming, Translator};
 use super::wide;
-use crate::{Event, ModalFrame, PlatformError, WindowConfig};
+use crate::no_gl::NO_GL;
+use crate::{Event, GpuSurface, ModalFrame, PlatformError, WindowConfig};
 
 /// The widest and tallest window we ask for, in pixels.
 const MAX_DIMENSION: u32 = 32767;
@@ -318,6 +319,11 @@ impl Backend {
 
     pub(crate) fn set_modal_frame_callback(&mut self, callback: ModalFrameCallback) {
         self.state.modal_frame.set(Some(callback));
+    }
+
+    pub(crate) fn gpu_surface(&self) -> GpuSurface<'_> {
+        // No OpenGL context yet.
+        GpuSurface::Gl(&NO_GL)
     }
 
     /// Unwinds with a panic that the window procedure caught, if it caught

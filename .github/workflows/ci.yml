@@ -63,8 +63,20 @@ jobs:
             target
           key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
 
+      # The OpenGL tests of nadir-platform (feature headless-test, which the
+      # checks turn on) need EGL and Mesa's software renderer, llvmpipe.
+      - name: Install EGL and Mesa
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libegl1 libgl1-mesa-dri
+
       - name: Run the checks
         run: cargo xtask ci
+        env:
+          # Mesa renders on the CPU, and the tests fail on any other renderer.
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          NADIR_EXPECT_GL_RENDERER: ${{ runner.os == 'Linux' && 'llvmpipe' || '' }}
 
       # `--secs` is the time for each fuzz target.
       - name: Fuzz smoke

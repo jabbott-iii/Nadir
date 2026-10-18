@@ -557,17 +557,87 @@ testing in CI.
   - Accept: layout tests; header citations.
   - Verify: `cargo test -p nadir-sys`
 
-- [ ] **M2.2 — platform (Linux): EGL context, vsync, headless GL**
+- [x] **M2.2 — platform (Linux): EGL context, vsync, headless GL**
+  - Note: verified on 2026-10-18 on Linux under XWayland, on a machine
+    whose libglvnd has both Mesa and NVIDIA EGL. The acceptance was run with
+    no display server and Mesa forced:
+    `env -u DISPLAY -u WAYLAND_DISPLAY
+    __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+    LIBGL_ALWAYS_SOFTWARE=1 NADIR_EXPECT_GL_RENDERER=llvmpipe cargo test -p
+    nadir-platform --features headless-test`. The renderer was `llvmpipe
+    (LLVM 20.1.2, 256 bits)`, giving OpenGL 4.6 core. Without the vendor
+    override, NVIDIA takes Mesa's surfaceless platform and ignores
+    `LIBGL_ALWAYS_SOFTWARE`. The tests then pass on the GPU, and
+    `NADIR_EXPECT_GL_RENDERER` is what catches it.
+  - Note: the window's context, run with `--ignored`, three windows in a
+    row each time, passed on Mesa iris (4.6 core), llvmpipe, and NVIDIA
+    with PRIME offload (exactly 3.3 core). Without PRIME offload, NVIDIA's
+    EGL takes no X display, and `Platform::new` fails with a message that
+    says so. `xwininfo` showed the window at depth 24, in the logged
+    TrueColor visual, with a colormap of its own.
+  - Note: the API, chosen by the user, follows ADR-0015:
+    - `GlContext` is an `unsafe trait`.
+    - A thread has one context at a time. A second gives the new error
+      `PlatformError::GlContextExists`.
+    - `HeadlessGl` is neither `Send` nor `Sync` on every system.
+    - `GpuSurface` is `#[non_exhaustive]`.
+    - `WindowConfig` gained `vsync`, and `gpu` waits for M10.
+    - Windows and macOS return a stand-in context with no functions, and
+      `create_headless_gl` returns `Unsupported` there, until M2.6 and
+      M2.7.
+
+    There are four new errors: `GpuCallFailed`, `NoGlConfig`, `GlTooOld`
+    and `GlContextExists`.
+  - Note: `set_swap_interval` returns `true` only for an interval that the
+    config allows, because EGL clamps any other one silently. llvmpipe
+    allows only 1, and does not pace even then. Under XWayland (COSMIC,
+    144 Hz), interval 1 held iris and NVIDIA to about 288 swaps a second.
+    The facade passes `vsync: true`, but nothing swaps yet, so the M1.3
+    frame limiter still paces the loop. It stays on as a cap once there is
+    rendering.
+  - Note: changes to `nadir-sys`:
+    - Xlib gained `XGetVisualInfo`, `XFree`, `XCreateColormap` and
+      `XFreeColormap`, now 27 functions, plus `XVisualInfo` with layout
+      asserts from gcc.
+    - Also new in Xlib: `VisualID`, `VisualIDMask`, `TrueColor`,
+      `AllocNone`, `CWBorderPixel`, `CWColormap`, and offset asserts for the
+      two new fields Xlib reads.
+    - Removed, since nothing calls them now: `CopyFromParent`, and
+      `eglQuerySurface`, which leaves 17 functions in the `Egl` table. The
+      drawable size is the window size from `ConfigureNotify`.
+  - Note: CI installs `libegl1` and `libgl1-mesa-dri` on Linux from here,
+    and not from M2.5, because `cargo xtask ci` turns on `headless-test`.
+    It runs with `LIBGL_ALWAYS_SOFTWARE=1`, and on Linux with
+    `NADIR_EXPECT_GL_RENDERER=llvmpipe`. Only a YAML review was possible
+    here: the session cannot see a CI run. The Windows and macOS code
+    compiled in copies with the OS `cfg`s swapped. Clippy, rustdoc and the
+    stand-in tests passed there, and so did the `compile_fail` doctests,
+    which fail once the marker that keeps `HeadlessGl` on its thread is
+    removed.
+  - Note: an adversarial review (five angles, two refuters for each
+    finding) confirmed nine findings, all about docs or tests, and all were
+    fixed. One of them showed that the threaded test caught a planted
+    `eglTerminate` in the headless drop only by chance. A two-thread test
+    with a fixed order now catches it in 10 runs of 10. Three crates were
+    touched: sys, platform and nadir.
   - Depends: M2.1, M1.2
   - Do:
     - EGL on X11 with a matching visual
     - a 3.3 core context, swap interval
     - `create_headless_gl()` via surfaceless or pbuffer
   - Accept: headless context creation works under Mesa llvmpipe.
-  - Verify: `LIBGL_ALWAYS_SOFTWARE=1 cargo test -p nadir-platform --features headless-test`
-    (or the equivalent test name)
+  - Verify: `LIBGL_ALWAYS_SOFTWARE=1 NADIR_EXPECT_GL_RENDERER=llvmpipe cargo test -p nadir-platform --features headless-test`
+    (or the equivalent test name). Where libglvnd also has NVIDIA's EGL,
+    add `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
 
 - [ ] **M2.3 — gfx: GL backend core**
+  - Note (from M2.2): under libglvnd, `get_proc_address` gives a stub for
+    every name that starts with `gl`. A null check therefore never finds a
+    missing function on Linux, so the version check is the guard, and
+    nothing beyond 3.3 core may be called without an extension check. Set
+    the viewport in every pass: `GL_VIEWPORT` does not follow a resize. The
+    platform's context is current from creation until it is dropped
+    (ADR-0015).
   - Depends: M2.2
   - Do: following `docs/subsystems/gfx.md`:
     - the `gl_fns!` loader and the `Device`
@@ -582,6 +652,12 @@ testing in CI.
   - Verify: `cargo test -p nadir-gfx` (headless)
 
 - [ ] **M2.4 — codec QOI + golden harness**
+  - Note (from M2.2): where libglvnd also has NVIDIA's EGL,
+    `LIBGL_ALWAYS_SOFTWARE=1` does not choose llvmpipe: NVIDIA takes the
+    surfaceless platform. Choose Mesa with
+    `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
+    The vendors round differently: NVIDIA reads 0.5 back as 127, and Mesa
+    as 128.
   - Depends: M2.3, M0.7
   - Do:
     - `nadir_codec::qoi` (encode/decode)
@@ -599,6 +675,9 @@ testing in CI.
     `LIBGL_ALWAYS_SOFTWARE=1 cargo xtask golden`
 
 - [ ] **M2.5 — CI golden job (Linux)**
+  - Note (from M2.2): CI already installs EGL and Mesa (`libegl1`,
+    `libgl1-mesa-dri`), with `LIBGL_ALWAYS_SOFTWARE=1` on `cargo xtask
+    ci`. What is left here is the golden step.
   - Depends: M2.4, M0.8
   - Do: install Mesa and run `cargo xtask golden` in the Linux CI job.
     Investigate whether the hosted Windows and macOS runners expose usable

@@ -78,6 +78,10 @@ impl Config {
             min_size: self.min_window_size,
             resizable: self.resizable,
             fullscreen: self.fullscreen,
+            // Ask for a swap interval of 1 (docs/01-architecture.md, "Pacing").
+            // The loop does not swap yet, so `frame_rate_limit` is still all
+            // that paces it.
+            vsync: true,
         }
     }
 }
@@ -358,6 +362,7 @@ mod tests {
             min_size: UVec2::new(480, 270),
             resizable: false,
             fullscreen: true,
+            vsync: true,
         };
         assert_eq!(config.window(), expected);
     }

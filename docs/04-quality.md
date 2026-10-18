@@ -45,6 +45,9 @@ pub fn check_sized<T: std::fmt::Debug>(
 
 - The default seed comes from `NADIR_SEED`, or from a fixed value in CI so
   runs are reproducible.
+- `NADIR_EXPECT_GL_RENDERER`, when set and not empty, makes the headless
+  OpenGL tests of `nadir-platform` fail unless the renderer's name contains
+  it (`llvmpipe` in CI). Otherwise they log the renderer and take any.
 - A nightly job runs with random seeds and prints the seeds it used.
 - Shrinking is deliberately minimal, and only `check_sized` does it: the
   harness retries a failing case at every smaller size and reports the
@@ -170,9 +173,13 @@ understood.
 - **Every PR / push, matrix `ubuntu-latest`, `windows-latest`, `macos-latest`**
   (`.github/workflows/ci.yml`):
   1. Install the pinned toolchain (from `rust-toolchain.toml`).
-  2. `cargo xtask ci`.
-  3. Linux only:
-     - install Mesa (`libegl1`, `libgl1-mesa-dri`, `libasound2`, `libx11-6`)
+  2. Linux only: install EGL and Mesa (`libegl1`, `libgl1-mesa-dri`; from
+     M2.2, because `cargo xtask ci` runs the headless OpenGL tests).
+  3. `cargo xtask ci`, with `LIBGL_ALWAYS_SOFTWARE=1` and, on Linux,
+     `NADIR_EXPECT_GL_RENDERER=llvmpipe`: the OpenGL tests fail on any other
+     renderer.
+  4. Linux only:
+     - install the rest (`libasound2`, `libx11-6`)
      - `cargo xtask golden`
      - `cargo xtask fuzz-smoke --secs 120`
 
