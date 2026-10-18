@@ -123,6 +123,7 @@ pub fn run(mut app: App) -> Result<(), Error> {
     let mut gfx = gfx::Device::new(platform.gpu_surface())?;
     let mut renderer = Renderer::new(&mut gfx, &app.config.render)?;
     let mut clock = FixedClock::new(TICK_HZ /* 60 */, MAX_FRAME /* 0.25 s */);
+    let mut stopwatch = Stopwatch::start();
     let mut events = Vec::with_capacity(256);
 
     loop {
@@ -131,17 +132,17 @@ pub fn run(mut app: App) -> Result<(), Error> {
         app.input.ingest(&events);                           // edges accumulate here
         events.clear();
 
-        let frame = clock.begin_frame();                     // clamps hitches
-        while clock.consume_tick() {
+        let frame = clock.begin_frame(stopwatch.lap());      // clamps hitches
+        while let Some(tick) = clock.consume_tick() {
             app.world.snapshot_prev_transforms();            // for interpolation
             app.input.latch_tick();                          // edges -> this tick
-            app.schedule.run_fixed(&app.world, clock.tick());
+            app.schedule.run_fixed(&app.world, &tick);
             app.world.apply_commands();                      // structural changes
         }
-        app.schedule.run_frame(&app.world, frame.dt, clock.alpha());
+        app.schedule.run_frame(&app.world, &frame);          // frame.dt, frame.alpha
         app.world.apply_commands();
 
-        let draw = app.extract(clock.alpha());               // ECS -> RenderFrame
+        let draw = app.extract(frame.alpha);                 // ECS -> RenderFrame
         renderer.render(&mut gfx, &draw)?;
         gfx.end_frame()?;                                    // present: GL swap or Metal drawable, vsync-paced
 
@@ -162,12 +163,19 @@ Rules:
     stages.
 - **Hitch clamp:** a frame longer than 250 ms is clamped. The game slows down
   briefly instead of running dozens of catch-up ticks (the "spiral of death").
+- **The clock is exact and does not read the time.** `FixedClock` is told how
+  long each frame took, so the same frame lengths give the same ticks on
+  every machine. It accumulates in nanoseconds times the tick rate, which
+  makes a tick a whole number of units: the rate does not drift.
 - **Interpolation:** `PrevTransform` is copied before each tick. Extract lerps
   `prev → current` by `alpha`.
 - **Pacing:**
   - Use vsync (swap interval 1) when available.
   - Otherwise use a limiter that sleeps to about 1 ms before the deadline and
     then spins.
+  - The limiter keeps a schedule: each frame is due one interval after the
+    last was due. A frame that overruns starts the schedule again from where
+    it ended, so no frames hurry to make up for it.
   - On Windows the sleep uses a high-resolution waitable timer; see
     `docs/03-platforms.md`.
 - **Minimized windows** sleep instead of spinning, because some drivers stop

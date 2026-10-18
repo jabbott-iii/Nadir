@@ -322,7 +322,21 @@ loop on Linux, Windows and macOS. No GPU yet.
     `cargo run -p nadir-platform --example events` (manual, on an X11 or
     XWayland session; describe the observed events)
 
-- [ ] **M1.3 — facade: App skeleton and fixed-tick loop**
+- [x] **M1.3 — facade: App skeleton and fixed-tick loop**
+  - Note: measured with `cargo run -p sandbox` on 2026-10-13 (Linux,
+    XWayland, debug build): 606 ticks in 10.1 s, which is 60.00 Hz. Each
+    one-second report was between 59.96 and 60.01 Hz.
+  - Note: the hitch test stalls one tick for a real second, through the
+    real loop. The next frame runs 15 ticks, not 60, and the lost three
+    quarters of a second are never made up.
+  - Note: `nadir_core::time` is new here, because no earlier task made it:
+    `FixedClock`, `Tick`, `Frame`, `Stopwatch`. With `precise_sleep` in
+    `nadir-platform` and the sandbox, the task touched four crates.
+  - Note: systems are closures for now: `add_fixed_system(name, FnMut(&Tick))`
+    and `add_frame_system(name, FnMut(&Frame))`. M4.4 gives them the world.
+  - Note: `Config::frame_rate_limit` (default 60) is all that paces the
+    loop until M2.2 brings vsync. The loop does not call `is_minimized`:
+    the limiter also paces a hidden window.
   - Depends: M1.2, M0.4
   - Do:
     - `nadir::App` with `Config`, `run()` and `FixedClock` integration, as

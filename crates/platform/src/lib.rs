@@ -2,8 +2,8 @@
 //! GL/Metal surfaces, audio device output, paths and dynamic loading.
 //!
 //! So far there is a window with its events, on Linux (X11, and Wayland
-//! sessions through XWayland). On other systems [`Platform::new`] returns
-//! [`PlatformError::Unsupported`].
+//! sessions through XWayland), and [`precise_sleep`] on every system. On
+//! other systems [`Platform::new`] returns [`PlatformError::Unsupported`].
 
 // One of the three crates allowed to contain `unsafe` (AGENTS.md, rule 3). The
 // workspace denies `unsafe_code` everywhere else.
@@ -11,6 +11,7 @@
 
 mod error;
 mod event;
+mod sleep;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -21,6 +22,7 @@ use nadir_core::UVec2;
 
 pub use error::PlatformError;
 pub use event::Event;
+pub use sleep::precise_sleep;
 
 #[cfg(target_os = "linux")]
 use linux::Backend;

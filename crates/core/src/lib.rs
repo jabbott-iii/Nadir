@@ -14,6 +14,7 @@ pub mod math;
 pub mod profile;
 pub mod rng;
 pub mod testing;
+pub mod time;
 
 #[cfg(test)]
 mod test_support;
@@ -25,3 +26,4 @@ pub use hash::{FastHashMap, FastHashSet};
 pub use keys::{Key, MouseButton};
 pub use math::{Affine2, IRect, IVec2, Mat3, Rect, UVec2, Vec2};
 pub use rng::Pcg32;
+pub use time::{FixedClock, Frame, Stopwatch, Tick};
