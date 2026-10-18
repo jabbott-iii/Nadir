@@ -255,12 +255,23 @@ pub trait MessageArguments: Sized {
 /// that system's C convention returns through memory. (A `long double`
 /// would need `objc_msgSend_fpret`; nothing returns one here.)
 fn sender<R>() -> Imp {
-    #[cfg(target_arch = "x86_64")]
-    if size_of::<R>() > 16 {
-        return objc_msgSend_stret;
+    // A `#[cfg]` here would leave `R` unused on arm64, which clippy rejects
+    // (`extra_unused_type_parameters`), so `STRET_SENDER` makes the choice
+    // of system instead.
+    match STRET_SENDER {
+        Some(stret) if size_of::<R>() > 16 => stret,
+        _ => objc_msgSend,
     }
-    objc_msgSend
 }
+
+/// `objc_msgSend_stret`, for [`sender`] on x86_64.
+#[cfg(target_arch = "x86_64")]
+const STRET_SENDER: Option<Imp> = Some(objc_msgSend_stret);
+
+/// None: arm64 has no `_stret`, and `objc_msgSend` sends every message
+/// there, whatever its result.
+#[cfg(not(target_arch = "x86_64"))]
+const STRET_SENDER: Option<Imp> = None;
 
 /// Implements [`MessageArguments`] for tuples of these types.
 macro_rules! message_arguments {
