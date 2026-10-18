@@ -333,6 +333,10 @@ ALSA plugins. A native PipeWire backend is backlog.
 
 - Config: `$XDG_CONFIG_HOME/<game>/`, default `~/.config/<game>/`.
 - Data/saves/logs: `$XDG_DATA_HOME/<game>/`, default `~/.local/share/<game>/`.
+- An `XDG_` variable that is empty or not an absolute path counts as unset,
+  as the XDG Base Directory specification says.
+- `~` is `HOME`, or the user database's entry if `HOME` is unset or empty.
+  A relative `HOME` is an error, unless both variables are set.
 
 ### Release specifics
 

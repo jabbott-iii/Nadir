@@ -167,6 +167,9 @@ it requires `unsafe impl GlobalAlloc`.
   is not supported (fullscreen toggling reuses the window).
 - The audio thread is created by `open_audio`. Dropping `AudioStream` stops
   and joins it.
+- `user_dirs` only works out paths; it creates no folder. It rejects a
+  studio or game name that is not a valid folder name on all three OSes,
+  whichever OS it runs on, so a name that works on one works on all.
 
 ## Tests
 

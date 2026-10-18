@@ -1,16 +1,20 @@
 //! OS behavior for the Nadir engine: windows, the event loop, input devices,
 //! GL/Metal surfaces, audio device output, paths and dynamic loading.
 //!
-//! So far there is a window with its events, on Linux (X11, and Wayland
-//! sessions through XWayland), and [`precise_sleep`] on every system. On
-//! other systems [`Platform::new`] returns [`PlatformError::Unsupported`].
+//! So far there is a window with its events and the user's folders
+//! ([`user_dirs`]) on Linux (X11, and Wayland sessions through XWayland),
+//! and [`precise_sleep`] and [`show_error_dialog`] on every system. On other
+//! systems [`Platform::new`] and [`user_dirs`] return
+//! [`PlatformError::Unsupported`].
 
 // One of the three crates allowed to contain `unsafe` (AGENTS.md, rule 3). The
 // workspace denies `unsafe_code` everywhere else.
 #![allow(unsafe_code)]
 
+mod dialog;
 mod error;
 mod event;
+mod paths;
 mod sleep;
 
 #[cfg(target_os = "linux")]
@@ -20,8 +24,10 @@ mod unsupported;
 
 use nadir_core::UVec2;
 
+pub use dialog::show_error_dialog;
 pub use error::PlatformError;
 pub use event::Event;
+pub use paths::{UserDirs, user_dirs};
 pub use sleep::precise_sleep;
 
 #[cfg(target_os = "linux")]

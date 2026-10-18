@@ -287,6 +287,10 @@ not appear in the sandbox's non-dev dependency tree.
   fall back to defaults with a logged warning, never a crash.
 - Saves live in the user data directory: binary format, versioned, written
   atomically (see `docs/subsystems/scene.md`).
-- Logs: `nadir.log` plus 3 rotated copies, in the user data directory.
+- Logs: `nadir.log` plus 3 rotated copies, in the user data directory
+  (on macOS, in `~/Library/Logs`). Each run starts a new file. If none can
+  be opened, the game runs without one, after a warning.
+- The folders are named after `Config::studio` and `Config::game`, which
+  must be valid folder names on every OS.
 - Crash reports: the `crashes/` directory in user data (see
   `docs/05-release.md`).

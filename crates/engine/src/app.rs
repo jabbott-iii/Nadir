@@ -3,12 +3,13 @@
 use std::time::{Duration, Instant};
 
 use nadir_core::UVec2;
-use nadir_core::log::debug;
+use nadir_core::log::{debug, error};
 use nadir_core::time::{FixedClock, Frame, Stopwatch, Tick};
-use nadir_platform::{Event, Platform, WindowConfig, precise_sleep};
+use nadir_platform::{Event, Platform, WindowConfig, precise_sleep, show_error_dialog};
 
 use crate::Error;
 use crate::limiter::FrameLimiter;
+use crate::log_file;
 
 /// How many times a second the simulation steps.
 pub const TICK_HZ: u32 = 60;
@@ -23,6 +24,18 @@ const MAX_FRAME: Duration = Duration::from_millis(250);
 pub struct Config {
     /// The text in the window's title bar.
     pub title: String,
+    /// Who makes the game. On Windows the game's folders for settings, saves
+    /// and logs are inside a folder of this name.
+    pub studio: String,
+    /// The name of the game's folders for settings, saves and logs. Keep it
+    /// the same from one release to the next, or players lose their
+    /// settings and saves. Two games with the same name and studio share
+    /// their folders.
+    ///
+    /// This and [`studio`](Self::studio) must each be a valid folder name
+    /// on every system (the rules are at [`nadir_platform::user_dirs`]). If
+    /// one is not, the game runs without a log file, and a warning says why.
+    pub game: String,
     /// The size of the inside of the window, in logical pixels.
     pub window_size: UVec2,
     /// The smallest size the user can give the window, in logical pixels.
@@ -43,6 +56,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             title: "Nadir".to_string(),
+            studio: "Nadir".to_string(),
+            game: "Nadir".to_string(),
             window_size: UVec2::new(1280, 720),
             min_window_size: UVec2::new(320, 180),
             resizable: true,
@@ -84,8 +99,8 @@ impl EventSource for Platform {
     }
 }
 
-/// A game: its configuration and its systems. [`App::run`] opens the window
-/// and runs the main loop.
+/// A game: its configuration and its systems. [`App::run`] opens the log
+/// file and the window, and runs the main loop.
 ///
 /// ```no_run
 /// use nadir::prelude::*;
@@ -156,14 +171,22 @@ impl App {
         self
     }
 
-    /// Opens the window and runs the main loop until the user closes the
-    /// window.
+    /// Opens the log file and the window, and runs the main loop until the
+    /// user closes the window.
+    ///
+    /// The log file is `nadir.log`, in the game's logs folder: on Linux
+    /// `~/.local/share/<game>`. Each run starts a new file and keeps the
+    /// last three runs' files beside it, as `nadir.log.1` to `nadir.log.3`.
+    /// If the file cannot be opened, the game goes on without it.
     ///
     /// # Errors
     ///
-    /// Fails if the window cannot be opened.
+    /// Fails if the window cannot be opened. Before it returns the error,
+    /// it logs it and shows it to the player with [`show_error_dialog`].
     pub fn run(mut self) -> Result<(), Error> {
-        let mut platform = Platform::new(&self.config.window())?;
+        log_file::start(&self.config.studio, &self.config.game);
+        let mut platform = Platform::new(&self.config.window())
+            .map_err(|error| fatal(&self.config.title, error.into()))?;
         self.run_loop(&mut platform);
         Ok(())
     }
@@ -207,6 +230,14 @@ impl App {
             (system.run)(&frame);
         }
     }
+}
+
+/// Logs an error that ends the game and shows it to the player. Returns it,
+/// for [`App::run`] to return.
+fn fatal(title: &str, error: Error) -> Error {
+    error!("{error}");
+    show_error_dialog(title, &error.to_string());
+    error
 }
 
 /// The names of some systems, in the order they run.
@@ -257,6 +288,8 @@ mod tests {
     fn the_default_configuration_is_a_resizable_window_at_60_frames() {
         let config = Config::default();
         assert_eq!(config.title, "Nadir");
+        assert_eq!(config.studio, "Nadir");
+        assert_eq!(config.game, "Nadir");
         assert_eq!(config.window_size, UVec2::new(1280, 720));
         assert_eq!(config.min_window_size, UVec2::new(320, 180));
         assert!(config.resizable);
@@ -268,6 +301,8 @@ mod tests {
     fn the_window_is_the_one_the_configuration_asks_for() {
         let config = Config {
             title: "Sandbox".to_string(),
+            studio: "Studio".to_string(),
+            game: "Game".to_string(),
             window_size: UVec2::new(960, 540),
             min_window_size: UVec2::new(480, 270),
             resizable: false,

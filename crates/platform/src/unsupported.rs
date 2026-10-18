@@ -5,7 +5,12 @@
 
 use nadir_core::UVec2;
 
-use crate::{Event, PlatformError, WindowConfig};
+use crate::{Event, PlatformError, UserDirs, WindowConfig};
+
+/// The user's folders are unknown without a backend.
+pub(crate) fn user_dirs(_studio: &str, _game: &str) -> Result<UserDirs, PlatformError> {
+    Err(PlatformError::Unsupported)
+}
 
 pub(crate) enum Backend {}
 

@@ -37,12 +37,21 @@ pub enum PlatformError {
         /// The function that failed.
         call: &'static str,
     },
+    /// A studio or game name cannot be a folder name on every system. See
+    /// [`user_dirs`](crate::user_dirs).
+    InvalidName {
+        /// The name as given.
+        name: String,
+    },
+    /// The user's home directory is unknown, and the folders for settings
+    /// and data are inside it.
+    NoHomeDirectory,
 }
 
 impl fmt::Display for PlatformError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unsupported => f.write_str("this operating system has no window backend yet"),
+            Self::Unsupported => f.write_str("this operating system has no backend yet"),
             Self::NoDisplay { wayland: false } => {
                 f.write_str("no X server to connect to: `DISPLAY` is not set")
             }
@@ -63,6 +72,13 @@ impl fmt::Display for PlatformError {
                 write!(f, "could not connect to the X server `{display}`")
             }
             Self::CallFailed { call } => write!(f, "{call} failed"),
+            Self::InvalidName { name } => write!(
+                f,
+                "`{name}` cannot be a folder name on Windows, macOS and Linux"
+            ),
+            Self::NoHomeDirectory => {
+                f.write_str("could not find the home directory: set `HOME` to an absolute path")
+            }
         }
     }
 }
@@ -78,7 +94,7 @@ mod tests {
         let cases = [
             (
                 PlatformError::Unsupported,
-                "this operating system has no window backend yet",
+                "this operating system has no backend yet",
             ),
             (
                 PlatformError::NoDisplay { wayland: false },
@@ -109,6 +125,16 @@ mod tests {
                     call: "XSetWMProtocols",
                 },
                 "XSetWMProtocols failed",
+            ),
+            (
+                PlatformError::InvalidName {
+                    name: "a/b".to_string(),
+                },
+                "`a/b` cannot be a folder name on Windows, macOS and Linux",
+            ),
+            (
+                PlatformError::NoHomeDirectory,
+                "could not find the home directory: set `HOME` to an absolute path",
             ),
         ];
         for (error, message) in cases {

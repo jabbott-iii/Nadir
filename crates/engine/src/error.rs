@@ -44,12 +44,12 @@ mod tests {
         let error = Error::from(PlatformError::Unsupported);
         assert_eq!(
             error.to_string(),
-            "could not open the window: this operating system has no window backend yet"
+            "could not open the window: this operating system has no backend yet"
         );
         let source = error.source().map(ToString::to_string);
         assert_eq!(
             source.as_deref(),
-            Some("this operating system has no window backend yet")
+            Some("this operating system has no backend yet")
         );
     }
 }

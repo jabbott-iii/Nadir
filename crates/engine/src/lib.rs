@@ -1,9 +1,9 @@
 //! Nadir, a 2D top-down game engine for desktop. This facade crate provides
 //! `App`, plugins, the main loop and re-exports of the engine's subsystems.
 //!
-//! So far there is [`App`] with the main loop: it opens the window, steps
-//! the simulation [`TICK_HZ`] times a second, and ends when the window is
-//! closed. A game needs only this crate:
+//! So far there is [`App`] with the main loop: it opens the log file and
+//! the window, steps the simulation [`TICK_HZ`] times a second, and ends
+//! when the window is closed. A game needs only this crate:
 //!
 //! ```no_run
 //! use nadir::prelude::*;
@@ -22,6 +22,7 @@
 mod app;
 mod error;
 mod limiter;
+mod log_file;
 
 pub use nadir_core::log;
 

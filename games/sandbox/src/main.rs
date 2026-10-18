@@ -18,6 +18,7 @@ fn main() -> Result<(), nadir::Error> {
 
     App::new(Config {
         title: "Sandbox".into(),
+        game: "Sandbox".into(),
         ..Config::default()
     })
     .add_fixed_system("count_ticks", move |_tick| counter.set(counter.get() + 1))

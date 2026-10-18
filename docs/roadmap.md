@@ -349,7 +349,26 @@ loop on Linux, Windows and macOS. No GPU yet.
     - A hitch (sleep 1 s, injected in a test) clamps instead of spiraling.
   - Verify: `cargo test -p nadir`; `cargo run -p sandbox` (observe the log)
 
-- [ ] **M1.4 — paths, error dialog, file logging**
+- [x] **M1.4 — paths, error dialog, file logging**
+  - Note: checked with the sandbox on 2026-10-17 (Linux, XWayland, debug
+    build), with `XDG_DATA_HOME` in a scratch folder. Two runs left
+    `nadir.log` and the first run's `nadir.log.1`. Without `DISPLAY`, the
+    error reached the log file and stderr, then the dialog line, with exit
+    code 1. An unwritable data folder and a relative `HOME` each gave a
+    warning and no file, and the game went on.
+  - Note: the folder names come from two new fields, `Config::studio` and
+    `Config::game`, both `"Nadir"` by default; the sandbox sets `game`.
+    `user_dirs` rejects a name that some target OS would refuse, on every
+    OS.
+  - Note: `user_dirs` creates no folder; `App::run` creates the logs folder.
+    Each run starts a new `nadir.log` and keeps the three before it. If no
+    log file can be opened, the game warns and goes on.
+  - Note: `App::run` logs a window that fails to open and passes the error
+    to `show_error_dialog`. On Linux that writes `<title>: <message>` to
+    stderr.
+  - Note: on Windows and macOS, `user_dirs` returns
+    `PlatformError::Unsupported` until M1.5 and M1.6, so the game runs
+    without a log file there.
   - Depends: M1.3
   - Do:
     - `platform::user_dirs` (Linux first, with XDG env var handling)
