@@ -6,7 +6,9 @@ use crate::PlatformError;
 
 #[cfg(target_os = "linux")]
 use crate::linux::user_dirs as system_dirs;
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(target_os = "macos")]
+use crate::macos::user_dirs as system_dirs;
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 use crate::unsupported::user_dirs as system_dirs;
 #[cfg(target_os = "windows")]
 use crate::windows::user_dirs as system_dirs;
@@ -60,10 +62,10 @@ pub struct UserDirs {
 ///   - be a name that Windows keeps for a device, such as `CON`, `NUL` or
 ///     `COM1`, with or without an extension
 /// - [`PlatformError::NoHomeDirectory`] if the home directory is unknown
-///   and a path needs it.
+///   and a path needs it (Linux and macOS).
 /// - [`PlatformError::CallFailed`] on Windows, if the shell does not know
 ///   the folders.
-/// - [`PlatformError::Unsupported`] on macOS, until it has a backend.
+/// - [`PlatformError::Unsupported`] on any other system.
 pub fn user_dirs(studio: &str, game: &str) -> Result<UserDirs, PlatformError> {
     check_name(studio)?;
     check_name(game)?;
@@ -194,7 +196,7 @@ mod tests {
         assert_eq!(user_dirs("Studio", ".."), invalid(".."));
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     #[test]
     fn other_systems_have_no_paths_yet() {
         assert_eq!(user_dirs("Studio", "Game"), Err(PlatformError::Unsupported));

@@ -8,12 +8,13 @@ use std::io::{self, Write};
 ///
 /// The message goes to stderr, as one line: `<title>: <message>`. On Linux
 /// that is all: the game never starts another program, such as `zenity`, to
-/// show it. On Windows a message box shows it as well, and this returns
-/// when the player closes the box. On macOS it goes only to stderr, until
-/// that system has a backend.
+/// show it. On Windows a message box shows it as well, and on macOS an alert
+/// (from the main thread only); this returns when the player closes it.
 pub fn show_error_dialog(title: &str, message: &str) {
     // There is nowhere left to report a failure to write to stderr.
     let _ = write_error(&mut io::stderr().lock(), title, message);
+    #[cfg(target_os = "macos")]
+    crate::macos::alert(title, message);
     #[cfg(target_os = "windows")]
     crate::windows::message_box(title, message);
 }

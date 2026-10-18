@@ -433,6 +433,54 @@ loop on Linux, Windows and macOS. No GPU yet.
     through CI.
 
 - [ ] **M1.6 — sys + platform (macOS)**
+  - ⏳ needs macOS: `cargo test -p nadir-sys -p nadir-platform` (the
+    `macos-latest` CI job runs it within `cargo xtask ci`). It is the first
+    real compile, and the `nadir-sys` tests send real messages: objects,
+    `double`s, and an `NSRect` both ways.
+  - ⏳ needs macOS: the events example checklist (`cargo run -p
+    nadir-platform --example events`):
+    - keys by position on a non-QWERTY layout, ⌘ held while another key
+      goes up, left and right modifiers, Caps Lock
+    - on an ISO keyboard, how the keys left of `1` and right of the left
+      Shift come out (expected: swapped, see the notes)
+    - the wheel, a trackpad, and the scroll direction with natural
+      scrolling on and off
+    - pointer positions in physical pixels from the top left; a click on
+      the title bar not reported
+    - resizes, and the size limit of `--fixed`
+    - the scale factor when the window moves between a Retina and a
+      standard display
+    - focus loss releasing held keys
+    - F (native fullscreen), C and T
+    - ⌘Q, Quit from the Dock, and the close button giving `CloseRequested`
+      without quitting
+    - "modal frames ran" after resizing the window
+  - ⏳ needs macOS: `cargo run -p sandbox` ticks at 60 Hz ± 1% over 10 s,
+    on Apple Silicon at least; Intel through the CI build.
+  - Note: written on Linux on 2026-10-17, without a macOS target or SDK
+    headers. A copy of the workspace with the OS `cfg`s swapped compiled the
+    macOS code on Linux, on its x86_64 path only (the arm64 `BOOL` and the
+    plain struct return are not compiled there):
+    - `cargo check`, `clippy -D warnings` and `rustdoc -D warnings` passed
+      on it
+    - the 25 tests that need no macOS (key table, flags, buttons, scrolling,
+      the translator, paths) passed there; 18 bugs planted in them were all
+      caught
+    - the `nadir-sys` tests could not run there
+  - Note: the layouts, constants and selectors come from Apple's documented
+    declarations, not from SDK headers. `msg_send!` spells out every
+    signature, and one generic cast picks `objc_msgSend_stret` for results
+    over 16 bytes on x86_64.
+  - Note: the pump reads key and mouse events itself, before `sendEvent:`,
+    because AppKit does not pass key releases to the view while ⌘ is held.
+    Live resize runs modal frames from `windowDidResize:`, not `drawRect:`.
+  - Note: no key code on macOS, listed as exceptions: Print Screen, Scroll
+    Lock, Pause, Menu, F21–F24. Not done: text, `Minimized`, and putting
+    back the two keys that ISO keyboards swap (needs HIToolbox's keyboard
+    type).
+  - Note: new `PlatformError::NotMainThread`: AppKit windows only open on
+    the main thread. Paths come from `HOME`, which in a sandbox is the
+    container. Two crates, plus a doc line in `nadir`.
   - Depends: M1.3
   - Do:
     - the objc runtime declarations and the `msg_send!` macro with

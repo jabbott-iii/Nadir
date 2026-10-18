@@ -220,9 +220,10 @@ impl App {
     /// The main loop: events, then the ticks that are due, then the frame.
     ///
     /// While the system runs an event loop of its own, as Windows does while
-    /// the window is dragged, the pump does not return. Frames then run from
-    /// the modal frame callback, unpaced: the system calls it every 10 to
-    /// 16 ms.
+    /// the window is dragged and macOS while it is resized, the pump does not
+    /// return. Frames then run from the modal frame callback, unpaced: the
+    /// system calls it every 10 to 16 ms on Windows, and once for each step
+    /// of the resize on macOS.
     fn run_loop(self, window: &mut dyn EventSource) {
         debug!(
             "main loop: fixed systems {:?}, frame systems {:?}",

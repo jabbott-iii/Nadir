@@ -46,6 +46,9 @@ pub enum PlatformError {
     /// The user's home directory is unknown, and the folders for settings
     /// and data are inside it.
     NoHomeDirectory,
+    /// The window was to be opened on a thread other than the main one,
+    /// which macOS does not allow.
+    NotMainThread,
 }
 
 impl fmt::Display for PlatformError {
@@ -79,6 +82,7 @@ impl fmt::Display for PlatformError {
             Self::NoHomeDirectory => {
                 f.write_str("could not find the home directory: set `HOME` to an absolute path")
             }
+            Self::NotMainThread => f.write_str("the window can only be opened on the main thread"),
         }
     }
 }
@@ -135,6 +139,10 @@ mod tests {
             (
                 PlatformError::NoHomeDirectory,
                 "could not find the home directory: set `HOME` to an absolute path",
+            ),
+            (
+                PlatformError::NotMainThread,
+                "the window can only be opened on the main thread",
             ),
         ];
         for (error, message) in cases {

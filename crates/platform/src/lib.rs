@@ -2,9 +2,9 @@
 //! GL/Metal surfaces, audio device output, paths and dynamic loading.
 //!
 //! So far there is a window with its events and the user's folders
-//! ([`user_dirs`]) on Linux (X11, and Wayland sessions through XWayland) and
-//! Windows, and [`precise_sleep`] and [`show_error_dialog`] on every system.
-//! On macOS [`Platform::new`] and [`user_dirs`] return
+//! ([`user_dirs`]) on Linux (X11, and Wayland sessions through XWayland),
+//! Windows and macOS, and [`precise_sleep`] and [`show_error_dialog`]. On
+//! any other system [`Platform::new`] and [`user_dirs`] return
 //! [`PlatformError::Unsupported`].
 
 // One of the three crates allowed to contain `unsafe` (AGENTS.md, rule 3). The
@@ -19,7 +19,9 @@ mod sleep;
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 mod unsupported;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -34,7 +36,9 @@ pub use sleep::precise_sleep;
 
 #[cfg(target_os = "linux")]
 use linux::Backend;
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(target_os = "macos")]
+use macos::Backend;
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 use unsupported::Backend;
 #[cfg(target_os = "windows")]
 use windows::Backend;
@@ -80,7 +84,8 @@ impl Platform {
     /// # Errors
     ///
     /// Fails if this system has no backend, if there is no display server
-    /// to connect to, or if a system library is missing or too old.
+    /// to connect to, or if a system library is missing or too old. On
+    /// macOS it fails on any thread but the main one.
     pub fn new(config: &WindowConfig) -> Result<Self, PlatformError> {
         Ok(Self {
             backend: Backend::new(config)?,
@@ -121,9 +126,10 @@ impl Platform {
 
     /// Sets what to call while the operating system runs an event loop of
     /// its own, and [`Platform::pump_events`] therefore does not return:
-    /// while the user drags or resizes the window on Windows. It is called
-    /// every 10 to 16 ms then, so that the game can run frames. It replaces
-    /// any callback set before.
+    /// while the user drags or resizes the window on Windows, or resizes it
+    /// on macOS. It is called every 10 to 16 ms on Windows, and on macOS
+    /// once for each step of the resize, so that the game can run frames.
+    /// It replaces any callback set before.
     ///
     /// The events of that time come from the next pump, after the loop.
     /// On Linux there is no such loop, and the callback is never called.

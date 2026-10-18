@@ -179,9 +179,12 @@ we call, with the full slot ordering preserved.
   followed by `sendEvent:`.
 - `windowShouldClose:` emits `Event::CloseRequested` and returns `NO`; the
   engine decides when to close.
-- **Live resize** blocks our poll loop while the user drags. Render from the
-  view's `drawRect:`/`viewWillStartLiveResize` path via the same engine
-  callback used on Windows. Accept a reduced frame rate during live resize.
+- **Live resize** blocks our poll loop while the user drags. The window
+  delegate's `windowDidResize:` runs the same engine callback used on
+  Windows while `inLiveResize`, once per resize step. Accept a reduced frame
+  rate during live resize. Moving a window does not block the loop.
+- The window can only be made on the main thread; elsewhere `Platform::new`
+  returns `PlatformError::NotMainThread`.
 - HiDPI:
   - set `wantsBestResolutionOpenGLSurface = YES` (GL)
   - for Metal, set `contentsScale` on the layer
@@ -196,12 +199,25 @@ we call, with the full slot ordering preserved.
   - `keyDown:`/`keyUp:` provide `keyCode`, a hardware virtual key code
     (`kVK_*` from HIToolbox `Events.h`), which maps to `Key`.
   - Modifiers arrive only through `flagsChanged:`; diff the flags to produce
-    press and release events.
+    press and release events. The device bits of `IOLLEvent.h` tell the left
+    key from the right. Caps Lock reports only a change of its state, so
+    each change is a press and a release.
+  - The pump reads key and mouse events itself, before `sendEvent:`: AppKit
+    does not pass a key's release to the view while ⌘ is held. The view
+    swallows key events, so that AppKit does not beep.
+  - Print Screen, Scroll Lock, Pause, Menu and F21–F24 have no key code. On
+    ISO keyboards `kVK_ISO_Section` and `kVK_ANSI_Grave` come out swapped
+    compared with ANSI; putting them back needs the keyboard type from
+    HIToolbox (as SDL does), which is not done yet.
   - Text comes from `characters`. Full IME through `NSTextInputClient` is
     backlog.
 - **Mouse:** `mouseMoved:`/`mouseDragged:`/`scrollWheel:`. Enable
   `acceptsMouseMovedEvents`. Flip Y: Cocoa's origin is bottom-left; ours is
-  top-left.
+  top-left. The content view returns `YES` from `isFlipped`, and points are
+  multiplied by `backingScaleFactor`.
+  - A trackpad scrolls in points: 10 of them count as one wheel line. The
+    direction is reported as the device moved, whatever the user's natural
+    scrolling setting.
 - **Gamepads:** `GameController.framework`.
   - Observe `GCControllerDidConnectNotification` and
     `GCControllerDidDisconnectNotification`.
@@ -245,6 +261,8 @@ directly: no locks that can block, and no allocation.
 
 - Config and data: `~/Library/Application Support/<Game>/`.
 - Logs: `~/Library/Logs/<Game>/`.
+- `~` is `HOME`, or the user database's entry if it is unset. In a sandboxed
+  app `HOME` is the app's container.
 
 ### Release specifics
 

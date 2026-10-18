@@ -48,6 +48,11 @@ crates/sys/src/
   argument value (rare; default to `unsafe fn`).
 - `msg_send!` must transmute `objc_msgSend` to the exact signature. Calling it
   through a varargs prototype is forbidden because of the arm64 ABI.
+  - Every call spells the signature out:
+    `msg_send![receiver, selector, (argument => Type, ...) -> Result]`.
+  - The cast lives in one place: `MessageArguments`, implemented for tuples
+    of up to four arguments. On x86_64 it sends a result of more than 16
+    bytes through `objc_msgSend_stret`.
 - Prefer `dlopen`/`LoadLibraryW` for anything not guaranteed present
   (XInput, X11, EGL, ALSA, avrt, dbghelp), so the game can report a clear
   error.
