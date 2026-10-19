@@ -12,7 +12,7 @@ below is our own code (dependency policy items 26–28).
 | Layout tests | `nadir-sys` tests | `cargo test` on each OS | FFI struct size/alignment/offset mismatches |
 | Property tests | `nadir-core::testing::check` | `cargo test` | Edge cases: collision never leaves overlap, codecs round-trip, sort keys monotonic |
 | Integration tests | `crates/*/tests/` | `cargo test` | Cross-module behavior (asset load → GPU upload with the headless device) |
-| Golden-image tests | `xtask golden`, scenes in `tests/golden/` | Linux CI (llvmpipe); Windows and macOS locally before release | Rendering regressions, backend divergence |
+| Golden-image tests | `xtask golden`; scenes in the GL test binaries, references in `tests/golden/` | Linux CI (llvmpipe); Windows and macOS locally before release | Rendering regressions, backend divergence |
 | Determinism tests | `nadir/tests/determinism.rs` | `cargo test` | Replays producing different world state |
 | Fuzz smoke | `xtask fuzz-smoke` | CI (time-boxed) | Panics, hangs, huge allocations in parsers |
 | Soak tests | `xtask soak` (manual or nightly) | Real hardware | Audio underruns, memory growth, handle leaks |
@@ -60,23 +60,71 @@ pub fn check_sized<T: std::fmt::Debug>(
 
 ### Golden-image tests
 
-- A scene is a small Rust function that draws through the public `render`
-  API into an offscreen render target of fixed size, e.g. 320×180.
+- A scene is a test in the OpenGL test binary of the crate that draws it
+  (ADR-0017). It draws into an offscreen render target of fixed size, e.g.
+  320×180, and checks a few of its pixels.
+  - The `gfx` scenes, from M2.4, draw through the `gfx` API, in
+    `crates/gfx/tests/headless/golden.rs`: clear, textured quad (nearest,
+    linear, and repeat through an indexed draw), alpha blend (all four blend
+    modes), 1000 instanced quads, scissor and viewport, and the render
+    target round trip.
+  - The `render` scenes, from M3, draw through the `render` API.
+  - A scene is defined with the `scene!` macro, which names it after its
+    test, and saves its pixels before its own checks can fail it.
 - Readback uses `glReadPixels` or Metal `getBytes`, flipped to a top-left
   origin.
-- The result is compared to `tests/golden/<scene>.qoi`, which is encoded
-  with our own QOI encoder.
-  - References are generated with the GL backend.
-  - `--backend metal` renders with Metal and compares against the same
-    references. Cross-backend parity is the point.
+- `cargo xtask golden` empties `target/golden/`, then runs the scene tests
+  with `NADIR_GOLDEN_DIR` set to `target/golden/rendered/`. Each scene
+  writes its pixels there as `<scene>.pam` (Netpbm PAM, RGBA8), with the
+  renderer in a `# renderer` comment. Without the variable, as under
+  `cargo xtask ci`, the scenes draw and check but write nothing.
+- xtask compares each scene with `tests/golden/<scene>.qoi`, which is
+  encoded with our own QOI encoder.
+  - References are generated with the GL backend, on llvmpipe, as CI draws
+    them. `--bless` refuses any other renderer.
+  - `--backend metal` is to render with Metal and compare against the same
+    references, from M10.4. Cross-backend parity is the point. Until then
+    the command takes only `--bless`.
   - A scene may carry a per-backend override (`<scene>.metal.qoi`) only with
-    a recorded reason.
-- Tolerance: per-channel difference ≤ 2, and at most 0.1% of pixels may
-  exceed it.
-- On failure, write `target/golden/<scene>.actual.qoi` and a `diff.qoi`
-  (differences in magenta).
-- `cargo xtask golden --bless` rewrites the references. Run it only after a
-  human has looked at the diff.
+    a recorded reason. Until M10.4 such a file is listed and skipped. Any
+    other name with a dot, such as a copied `<scene>.actual.qoi`, fails the
+    run.
+  - Every scene of a run must come from one renderer, and from the one
+    `NADIR_EXPECT_GL_RENDERER` names, if it is set.
+- Tolerance: per-channel difference ≤ 2 (alpha included), and at most 0.1%
+  of pixels may exceed it: 57 of the 57 600 in a 320×180 scene.
+- A scene fails when it has no reference, its reference has another size
+  or cannot be decoded, or it is over the tolerance. A reference that no
+  scene drew fails too: its scene is gone, its test failed before it saved
+  (on a GL error, say), or the tests skipped for want of an offscreen
+  context.
+- On failure, write `target/golden/<scene>.actual.qoi`, and for a scene
+  over the tolerance `<scene>.diff.qoi`: magenta where a pixel is over,
+  and elsewhere the reference in dim gray, opaque throughout.
+- If the scene tests fail, xtask still compares what they drew and writes
+  the images, then fails. A scene whose own pixel checks fail, or whose
+  renderer is not the one asked for, has saved its pixels first. One that
+  stops earlier, on a GL error, has saved nothing, and its reference is
+  reported as not drawn.
+- `cargo xtask golden --bless` writes the reference of every scene that
+  fails, and keeps those within tolerance byte for byte, so blessing
+  on another machine does not churn them. It blesses nothing when the scene
+  tests fail, and it cannot mend a reference without a scene: remove that
+  file by hand. Run it only after a human has looked at the images.
+- The exit status is 0 when every scene matches (or, with `--bless`, now
+  does), 1 otherwise, and 2 for a command line not understood.
+- Commands, where libglvnd also has NVIDIA's EGL:
+
+  ```text
+  __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
+  LIBGL_ALWAYS_SOFTWARE=1 NADIR_EXPECT_GL_RENDERER=llvmpipe cargo xtask golden [--bless]
+
+  __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json \
+  NADIR_EXPECT_GL_RENDERER=NVIDIA cargo xtask golden
+  ```
+
+  Without the first variable, `LIBGL_ALWAYS_SOFTWARE=1` does not choose
+  llvmpipe there: NVIDIA takes the surfaceless platform.
 
 ### Determinism
 

@@ -17,15 +17,24 @@ pub struct Limits {
     pub max_string_bytes: usize,
     /// The most elements one array, or members one object, may have.
     pub max_entries: usize,
+    /// The widest, or tallest, image a decoder accepts, in pixels.
+    pub max_texture_dimension: u32,
+    /// The most bytes a decoder may produce for one file. An image takes 4
+    /// bytes a pixel.
+    pub max_decoded_bytes: usize,
 }
 
 impl Default for Limits {
-    /// Depth 64, strings of 1 MiB, 1,000,000 entries per array or object.
+    /// Depth 64, strings of 1 MiB, 1,000,000 entries per array or object,
+    /// images up to 8192 pixels wide and tall, and 256 MiB decoded from one
+    /// file.
     fn default() -> Self {
         Self {
             max_depth: 64,
             max_string_bytes: 1024 * 1024,
             max_entries: 1_000_000,
+            max_texture_dimension: 8192,
+            max_decoded_bytes: 256 * 1024 * 1024,
         }
     }
 }
@@ -40,5 +49,9 @@ mod tests {
         assert_eq!(limits.max_depth, 64);
         assert_eq!(limits.max_string_bytes, 1_048_576);
         assert_eq!(limits.max_entries, 1_000_000);
+        assert_eq!(limits.max_texture_dimension, 8192);
+        assert_eq!(limits.max_decoded_bytes, 268_435_456);
+        // The largest image fits exactly.
+        assert_eq!(8192 * 8192 * 4, limits.max_decoded_bytes);
     }
 }

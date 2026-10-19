@@ -260,18 +260,23 @@ pub struct ShaderSource<'a> {
 
 ## Tests
 
-- **Golden scenes per backend:**
+- **Golden scenes per backend** (M2.4, ADR-0017): tests in
+  `tests/headless/golden.rs` that `cargo xtask golden` compares with
+  `tests/golden/` (`docs/04-quality.md`):
   - clear color
-  - textured quad
-  - alpha blending of overlapping quads
-  - 1000 instanced sprites
-  - scissor
+  - textured quad: nearest, linear, and repeat through an indexed draw of
+    a texture `update_texture` changed
+  - alpha blending of overlapping quads, in each blend mode
+  - 1000 instanced quads, in two draws
+  - scissor and viewport
   - render-target round trip
-  - integer upscale with letterbox
+
+  Integer upscale with letterbox is a `render` scene (M3.3), drawn with its
+  `blit` program.
 - **Parity test** for shader interfaces (pure Rust; runs everywhere).
 - **Stale-handle test:** destroy, then use → error, not crash.
 - **GL tests (M2.3):** behind the `headless-test` feature, on an offscreen
   context: the draw checks, readback, orientation, samplers, sRGB,
   blending, instancing, uniforms, the state cache and shader errors. The
-  golden harness and scenes come with M2.4, the parity test with M3.3.
+  golden scenes run in the same binary; the parity test comes with M3.3.
 - **Benchmark:** 10k instanced sprites, upload plus draw time.

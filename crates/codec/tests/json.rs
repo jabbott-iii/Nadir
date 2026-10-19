@@ -17,6 +17,7 @@ fn parse_ok(text: &str) -> Value {
 fn position_and_kind(text: &str) -> (u32, u32, ErrorKind) {
     match parse(text) {
         Err(CodecError::Json { line, column, kind }) => (line, column, kind),
+        Err(other) => panic!("not a JSON error: {other}"),
         Ok(value) => panic!("should not parse, but gave {value:?}"),
     }
 }
@@ -450,6 +451,7 @@ fn parser_behaves(text: &str) -> Result<(), String> {
             }
             Ok(())
         }
+        Err(other) => Err(format!("not a JSON error: {other}")),
     }
 }
 

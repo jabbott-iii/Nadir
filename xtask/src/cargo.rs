@@ -1,7 +1,7 @@
 //! Running `cargo` from the workspace root.
 
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -10,7 +10,18 @@ use crate::error::Error;
 /// Runs `cargo <args>` in `root`. The command prints straight to the
 /// terminal.
 pub(crate) fn run(root: &Path, args: &[&str]) -> Result<(), Error> {
+    run_with_env(root, args, &[])
+}
+
+/// Runs `cargo <args>` in `root`, with `env` added to the environment it
+/// inherits. The command prints straight to the terminal.
+pub(crate) fn run_with_env(
+    root: &Path,
+    args: &[&str],
+    env: &[(&str, &OsStr)],
+) -> Result<(), Error> {
     let status = command(root, args)
+        .envs(env.iter().copied())
         .status()
         .map_err(|source| Error::Spawn {
             command: display(args),

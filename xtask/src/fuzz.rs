@@ -15,7 +15,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use nadir_codec::{Limits, json};
+use nadir_codec::{Limits, json, qoi};
 use nadir_core::cli::Args;
 use nadir_core::hash::fnv1a64;
 use nadir_core::testing::{DEFAULT_SEED, SEED_VAR};
@@ -34,10 +34,16 @@ struct Target {
 
 /// Every fuzz target. A new parser adds itself here, with seeds in
 /// `fuzz/corpus/<name>/` (`.claude/rules/parsers.md`).
-const TARGETS: &[Target] = &[Target {
-    name: "json",
-    run: parse_json,
-}];
+const TARGETS: &[Target] = &[
+    Target {
+        name: "json",
+        run: parse_json,
+    },
+    Target {
+        name: "qoi",
+        run: decode_qoi,
+    },
+];
 
 /// How long each target is fuzzed when `--secs` is not given.
 const DEFAULT_SECS: u64 = 60;
@@ -63,6 +69,12 @@ fn parse_json(input: &[u8]) {
     // that every input reaches it.
     let text = String::from_utf8_lossy(input);
     let _ = json::parse(&text, Limits::default());
+}
+
+/// The `qoi` target: `nadir_codec::qoi::decode`, with the limits the game
+/// uses.
+fn decode_qoi(input: &[u8]) {
+    let _ = qoi::decode(input, Limits::default());
 }
 
 /// Runs `fuzz-smoke` with the arguments that follow the command name.
@@ -470,6 +482,15 @@ mod tests {
     }
 
     #[test]
+    fn the_qoi_target_takes_any_bytes() {
+        let mut huge = b"qoif\xff\xff\xff\xff\xff\xff\xff\xff\x04\x00".to_vec();
+        huge.extend_from_slice(&[0xfd; 100]);
+        for input in [&b""[..], b"qoif", &huge, &[0xc0; 5000]] {
+            decode_qoi(input);
+        }
+    }
+
+    #[test]
     fn every_real_target_has_seeds_and_accepts_them() {
         let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         for target in TARGETS {
@@ -497,6 +518,20 @@ mod tests {
             })
             .count();
         assert_eq!(accepted, seeds.len());
+    }
+
+    #[test]
+    fn the_qoi_seeds_are_images_the_codec_writes_back_byte_for_byte() {
+        // The seeds were made by a separate port of the reference encoder,
+        // so this also checks `qoi::encode` against it.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(CORPUS)
+            .join("qoi");
+        for seed in load_corpus(&dir).unwrap() {
+            let image = qoi::decode(&seed, Limits::default()).unwrap();
+            assert_eq!(qoi::encode(&image.header, &image.pixels).unwrap(), seed);
+        }
     }
 
     #[test]

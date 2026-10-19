@@ -460,3 +460,61 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     call.
 - **Revisit when:** a second context per thread is needed (see
   ADR-0015), or the per-call liveness check shows up in a profile.
+
+## ADR-0017 — Golden scenes draw in GL test binaries; xtask compares their pixels with QOI references
+
+- **Status:** Accepted
+- **Date:** 2026-10-18
+- **Context:**
+  - The golden harness (`docs/04-quality.md`) needs three things: scenes
+    drawn on an offscreen context, references stored as QOI, and a
+    per-channel comparison that writes diff images.
+  - The dependency matrix allows no crate to do all three. `nadir-gfx` and
+    its tests may use `core`, `sys` and `platform`, so they can draw but
+    cannot use `nadir-codec`. `xtask` may use only `core` and `codec`, so it
+    can read and write QOI but cannot draw. `cargo xtask layers` checks
+    dev-dependencies too.
+  - `core.md` placed "golden comparison helpers (pure pixel diff)" in
+    `nadir_core::testing`. With the comparison there, M2.4 would touch four
+    crates.
+- **Decision:**
+  - Each golden scene is a test in the GL test binary of the crate that
+    draws it: `crates/gfx/tests/headless/golden.rs` from M2.4, `render`'s
+    from M3. A scene draws into a render target and reads it back. When
+    `NADIR_GOLDEN_DIR` names a directory, it writes the raw RGBA8 pixels
+    there as `<scene>.pam` (Netpbm PAM), with the renderer's name in a
+    comment.
+  - `cargo xtask golden` runs those tests with `cargo test`, setting the
+    variable, then compares each PAM with `tests/golden/<scene>.qoi`. The
+    comparison, the diff images and the QOI files belong to xtask; the
+    comparison does not go into `nadir_core::testing`.
+  - The user chose the comparison's place on 2026-10-18.
+- **Consequences:**
+  - No new edge in the dependency matrix. M2.4 touches codec, gfx (tests
+    only) and xtask.
+  - The scenes also run, writing nothing, in `cargo xtask ci`, so a scene
+    that hits a GL error or fails its own pixel checks fails CI on every
+    system that has a context.
+  - The PAM writer (in the test binary) and reader (in xtask) are two
+    copies of one small format. A unit test in xtask pins what the reader
+    takes.
+  - A scene that skips for want of a context writes nothing, and xtask
+    reports its reference as not drawn: the run fails, it does not pass
+    empty.
+  - `render`'s scenes join by adding their test binary to xtask's list of
+    scene commands. Their tests need a device without `platform`
+    (`Device::new_headless`, noted for M3.2).
+- **Alternatives considered:**
+  - The comparison in `nadir_core::testing`, as `core.md` had it. It is
+    usable by every crate, but only xtask compares, and it makes a
+    four-crate task.
+  - A QOI encoder copied into the gfx tests, so they could compare
+    in-process. It is a second encoder to keep byte-identical.
+  - A new crate for the scenes, depending on gfx, platform and codec. It
+    needs a new row in the matrix.
+  - Raw pixels with the size in the file name. That is about 10 lines
+    shorter than PAM, but has no self-check, and image viewers cannot open
+    it.
+- **Revisit when:** a crate other than xtask needs to compare images
+  in-process, for example a test that checks its own pixels against a
+  reference.

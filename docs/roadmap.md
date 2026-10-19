@@ -110,6 +110,7 @@ enforced by tooling from day one.
   - Note: `assert_approx!` and the golden comparison helpers from
     `core.md`'s `testing` row are not part of this task. The golden
     helpers fit M2.4 (golden harness); no task lists either explicitly.
+    (M2.4 put the golden comparison in `xtask` instead, ADR-0017.)
   - Depends: M0.2, M0.3
   - Do: the `log` macros and sinks (stderr, file rotation, ring buffer),
     `civil`, `cli`, `testing::check`, and `profile_scope!` (feature-gated).
@@ -682,7 +683,8 @@ testing in CI.
     `MissingFunction("glGetError")`. The copies with the OS `cfg`s swapped
     passed clippy, rustdoc and the tests that can run there. The window's
     default framebuffer (`Surface` passes, swaps) is not drawn by any test
-    yet.
+    yet. CI, on all three systems, was green on 2026-10-18, as the user
+    reported; the session could not see it itself.
   - Note (from M2.2): under libglvnd, `get_proc_address` gives a stub for
     every name that starts with `gl`. A null check therefore never finds a
     missing function on Linux, so the version check is the guard, and
@@ -705,7 +707,89 @@ testing in CI.
     (headless). Where libglvnd also has NVIDIA's EGL, add
     `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
 
-- [ ] **M2.4 — codec QOI + golden harness**
+- [x] **M2.4 — codec QOI + golden harness**
+  - Note: verified on 2026-10-18:
+    - `cargo test -p nadir-codec`: 69 unit, 16 JSON, 3 QOI property and 2
+      doc tests.
+    - `cargo xtask golden` passed on llvmpipe (`llvmpipe (LLVM 20.1.2, 256
+      bits)`, Mesa forced, no display) and on NVIDIA (RTX 3070, exactly
+      3.3 core), which the literal Verify line picks on this machine.
+      Against the llvmpipe references, NVIDIA is off by at most 1 in any
+      channel (alpha_blend 17 600 pixels, textured_quad 6 444, the rest
+      exact).
+    - A deliberately altered shader (`.bgra` in `TEXTURED_FS`, reverted)
+      failed textured_quad (24 072 pixels over the tolerance) and
+      render_target_round_trip (980), with diff images that are magenta
+      exactly where red and blue differ.
+    - `cargo xtask fuzz-smoke --secs 60 --target qoi`: 10.3 million inputs,
+      clean. `cargo xtask ci` passed.
+
+    The references were drawn on llvmpipe and blessed by the agent, after
+    it looked at each one, converted to PNG. A human should look at them
+    before they are committed.
+  - Note: the user chose two things on 2026-10-18:
+    - The golden comparison lives in `xtask`, not in
+      `nadir_core::testing` as `core.md` had it. The scenes are tests in
+      `crates/gfx/tests/headless/golden.rs`, and write their pixels as PAM
+      files when `NADIR_GOLDEN_DIR` is set; xtask compares those with the
+      QOI references. Three crates: codec, gfx (tests only), xtask.
+      ADR-0017 records this.
+    - The QOI decoder is strict. It rejects a run past the last pixel,
+      chunks that run out before it, an end marker that is missing or
+      wrong, and bytes after it, all of which `qoi.h` accepts. The QOI
+      subset in `assets-and-codecs.md` records this.
+  - Note: the codec:
+    - `qoi::decode(&[u8], Limits)` gives an `Image` (its `Header`, and
+      RGBA8 pixels from the top row, whatever the channel count)
+    - `qoi::encode(&Header, &[u8])` writes what `qoi.h` writes
+    - new errors `CodecError::Qoi { offset, kind }` and
+      `CodecError::QoiEncode { kind }`
+    - new limits `max_texture_dimension` (8192) and `max_decoded_bytes`
+      (256 MiB)
+    - the decoder refuses a file too short for its size,
+      `ceil(pixels / 62) > len − 14`, before it allocates
+
+    The byte-exact vectors were worked out by hand. A design review
+    compared the encoder with its own port of `qoi.h`, written from the
+    specification, on 3000 random images: byte-identical. The fuzz seeds
+    were made by another port, and `qoi::encode` writes each back byte for
+    byte. Neither port is the real `qoi.h`.
+  - Note: `cargo xtask golden`:
+    - `--bless` writes only the references of scenes that fail, and only
+      on llvmpipe; the others keep their bytes.
+    - Every scene of a run must come from one renderer, the one
+      `NADIR_EXPECT_GL_RENDERER` names if it is set.
+    - A scene saves its pixels before its own pixel checks can fail it, and
+      xtask still compares and writes the images when the scene tests fail.
+    - A reference that no scene drew fails the run, so a skipped GL test
+      cannot pass as empty.
+    - `--backend` waits for M10.4; a `<scene>.metal.qoi` is listed and
+      skipped until then.
+  - Note: the six scenes (320×180), each with pixel checks of its own:
+    - clear, with an alpha of 200
+    - textured quad: nearest at 6× with an `update_texture` marker, a
+      linear gradient at 24×, and repeat sampling through an indexed draw
+      from a base vertex
+    - alpha blend: all four modes, over a translucent background and a
+      band, checked against a model of the blend table
+    - 1000 instanced quads in two draws
+    - scissor (inside, clipped, empty) and viewport
+    - render-target round trip
+
+    Colors are sRGB bytes, alphas are whole bytes, and filtered channels
+    stay at 64 or above. A design review measured these choices on both
+    vendors: below 64, a filtered gradient differed by up to 7, and
+    stacked blends hit ±2 on 880 pixels.
+  - Note: an adversarial review (five angles, two refuters a finding)
+    confirmed 17 findings and left 5 contested; all 22 were acted on. The
+    one that mattered most: a scene that panicked before saving, or ran on
+    the wrong renderer, was reported as "its scene is gone, remove its
+    reference". The renderer is now checked after the scene saves, so xtask
+    can say how to choose Mesa, and a scene whose test failed before saving
+    is reported as such. The rest: tests (translucent chunks, the end
+    marker's every byte, other sizes, the run's wiring), stricter PAM
+    parsing, dotted reference names other than `.metal` now fail, and docs.
+    The allocation order of the size check waits for M3.5's counter.
   - Note (from M2.3):
     - Render targets are stored from the bottom row: sampled, `v = 0` is
       clip space `y = -1`.
@@ -735,12 +819,21 @@ testing in CI.
     - A deliberately altered shader makes the goldens fail with a diff
       image.
   - Verify: `cargo test -p nadir-codec`;
-    `LIBGL_ALWAYS_SOFTWARE=1 cargo xtask golden`
+    `LIBGL_ALWAYS_SOFTWARE=1 cargo xtask golden`. Where libglvnd also has
+    NVIDIA's EGL, add
+    `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+    NADIR_EXPECT_GL_RENDERER=llvmpipe`; without them the goldens run on
+    NVIDIA.
 
 - [ ] **M2.5 — CI golden job (Linux)**
   - Note (from M2.2): CI already installs EGL and Mesa (`libegl1`,
     `libgl1-mesa-dri`), with `LIBGL_ALWAYS_SOFTWARE=1` on `cargo xtask
     ci`. What is left here is the golden step.
+  - Note (from M2.4): the step needs its own `LIBGL_ALWAYS_SOFTWARE: "1"`
+    and `NADIR_EXPECT_GL_RENDERER: llvmpipe`, because `ci.yml` sets them
+    on the checks step only. On failure, upload `target/golden/*.qoi` (the
+    `actual` and `diff` images) with `actions/upload-artifact`, pinned by
+    SHA.
   - Depends: M2.4, M0.8
   - Do: install Mesa and run `cargo xtask golden` in the Linux CI job.
     Investigate whether the hosted Windows and macOS runners expose usable
@@ -767,6 +860,10 @@ testing in CI.
 - [ ] **M2.7 — platform (macOS): NSOpenGL context**
   - Note (from M2.3): as for M2.6: take `gpu::Claim`, override
     `context_id`, and give `ModalFrame` a surface.
+  - Note (from M2.4), for M2.6 too: `cargo xtask golden` compares with the
+    llvmpipe references, and `--bless` refuses any other renderer. Until
+    the context exists, the scenes skip and the run fails with every
+    reference "not drawn".
   - Depends: M2.3, M1.6
   - Do: the pixel format, a 3.2-core-profile (4.1) context, Retina backing,
     swap interval, `dlopen` of the OpenGL framework.
@@ -817,6 +914,10 @@ by the batched sprite renderer.
       pass.
     - Shaders read instances through attributes, never `gl_InstanceID`.
     - The blit samples a render target bottom-up on GL.
+  - Note (from M2.4): render's golden scenes are tests too (ADR-0017). Add
+    their `cargo test` command to `SCENES` in `xtask/src/golden.rs`, write
+    PAM as `crates/gfx/tests/headless/golden.rs` does, and define them the
+    same way, so that each saves before its checks.
   - Depends: M3.2
   - Do: following `docs/subsystems/render.md`:
     - the `sprite` and `blit` shaders, with an interface parity test
@@ -841,6 +942,11 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir`; `cargo dev` (manual)
 
 - [ ] **M3.5 — allocation counter + sprite stress benchmark**
+  - Note (from M2.4): with the counter in place, a test can show that
+    `qoi::decode` of a file too short for its size (a 23-byte file that
+    claims 8192×8192) allocates nothing. Today
+    `a_file_too_short_for_its_size_is_rejected_before_decoding` checks the
+    error only, and moving the allocation before the check would pass it.
   - Depends: M3.4, M0.7
   - Do:
     - the dev `#[global_allocator]` counter
@@ -1284,6 +1390,9 @@ by the batched sprite renderer.
     and runs on any OS)
 
 - [ ] **M10.4 — goldens on Metal; Metal is the macOS default**
+  - Note (from M2.4): `cargo xtask golden` takes only `--bless` so far. Add
+    `--backend`, and check the `<scene>.metal.qoi` overrides, which it
+    lists and skips until then.
   - Depends: M10.3
   - Do: `GpuPreference::Auto` picks Metal on macOS; keep the GL fallback via
     `--gpu gl`.

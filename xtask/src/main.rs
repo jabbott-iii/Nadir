@@ -13,6 +13,7 @@ mod check;
 mod deps;
 mod error;
 mod fuzz;
+mod golden;
 mod layers;
 mod metadata;
 mod release_no_dev;
@@ -63,6 +64,7 @@ fn run(mut args: Args, root: &Path, out: &mut dyn Write) -> Result<bool, Error> 
     };
     match command.as_str() {
         "fuzz-smoke" => return fuzz::command(args, root, out),
+        "golden" => return golden::command(args, root, out),
         "bench" => {
             let filter = args.finish().map_err(usage)?;
             cargo::run(root, &bench_command(&filter))?;
@@ -114,6 +116,10 @@ fn usage() -> String {
             "Fuzz the parsers: [--secs N] for each target, [--target NAME] for one",
         ),
         (
+            "golden",
+            "Draw the golden scenes and compare them with tests/golden: [--bless] rewrites those that differ",
+        ),
+        (
             "bench",
             "Run the benchmarks in release mode: [FILTER] for those whose name contains it",
         ),
@@ -158,6 +164,7 @@ mod tests {
             "release-no-dev",
             "ci",
             "fuzz-smoke",
+            "golden",
             "bench",
         ] {
             assert!(
@@ -239,7 +246,7 @@ mod tests {
     fn fuzz_smoke_takes_its_own_options() {
         assert_eq!(
             usage_error(&["fuzz-smoke", "--target", "nope"]),
-            "unknown fuzz target `nope`; the targets are: json"
+            "unknown fuzz target `nope`; the targets are: json, qoi"
         );
         assert_eq!(
             usage_error(&["fuzz-smoke", "--secs"]),

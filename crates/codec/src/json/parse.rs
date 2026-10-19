@@ -487,6 +487,7 @@ mod tests {
     fn err_with(text: &str, limits: Limits) -> (u32, u32, ErrorKind) {
         match parse(text, limits) {
             Err(CodecError::Json { line, column, kind }) => (line, column, kind),
+            Err(other) => panic!("{text:?} gave an error that is not JSON's: {other}"),
             Ok(value) => panic!("{text:?} should not parse, but gave {value:?}"),
         }
     }

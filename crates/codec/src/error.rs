@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::json;
+use crate::{json, qoi};
 
 /// Errors produced by `nadir-codec`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,6 +17,18 @@ pub enum CodecError {
         /// What is wrong.
         kind: json::ErrorKind,
     },
+    /// A QOI file is malformed or exceeds a limit.
+    Qoi {
+        /// The byte offset of the problem in the file.
+        offset: usize,
+        /// What is wrong.
+        kind: qoi::ErrorKind,
+    },
+    /// An image cannot be encoded as QOI.
+    QoiEncode {
+        /// Why not.
+        kind: qoi::EncodeErrorKind,
+    },
 }
 
 impl fmt::Display for CodecError {
@@ -25,6 +37,8 @@ impl fmt::Display for CodecError {
             Self::Json { line, column, kind } => {
                 write!(f, "JSON error at line {line}, column {column}: {kind}")
             }
+            Self::Qoi { offset, kind } => write!(f, "QOI error at byte {offset}: {kind}"),
+            Self::QoiEncode { kind } => write!(f, "cannot encode as QOI: {kind}"),
         }
     }
 }
@@ -45,6 +59,21 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "JSON error at line 3, column 14: numbers cannot have leading zeros"
+        );
+        let error = CodecError::Qoi {
+            offset: 12,
+            kind: qoi::ErrorKind::BadChannels { found: 5 },
+        };
+        assert_eq!(
+            error.to_string(),
+            "QOI error at byte 12: the channel count is 5, not 3 or 4"
+        );
+        let error = CodecError::QoiEncode {
+            kind: qoi::EncodeErrorKind::AlphaInRgb { pixel: 3 },
+        };
+        assert_eq!(
+            error.to_string(),
+            "cannot encode as QOI: pixel 3 of an RGB image has an alpha other than 255"
         );
     }
 }

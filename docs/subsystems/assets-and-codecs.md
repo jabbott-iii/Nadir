@@ -122,6 +122,45 @@ pub enum Value {
 - **Vectors:** `crates/codec/tests/json/`.
 - **Fuzz target:** `json`, with seeds in `fuzz/corpus/json/`.
 
+### QOI subset (documented, tested)
+
+`qoi::decode(&[u8], Limits)` reads a QOI file (specification 1.0) into an
+`Image`: its `Header` and its pixels. `qoi::encode(&Header, &[u8])` writes
+one, byte for byte as the reference encoder (`qoi.h`) does.
+
+- **Pixels:** always RGBA8, 4 bytes each, rows from the top. The header's
+  channel count (3 or 4) and color space (0 sRGB, 1 linear) describe the
+  image; they do not change how chunks are read, so an RGB file decodes
+  to RGBA with whatever alpha its chunks give (255 unless they change it).
+  The encoder refuses an RGB image with an alpha other than 255.
+- **Accepted:** every chunk of the specification. The decoder stores each
+  pixel in its table after every chunk, runs and lookups included, as the
+  reference decoder does.
+- **Rejected, although the reference decoder accepts it:**
+  - a run that goes past the last pixel
+  - chunks that run out before the last pixel, where the reference repeats
+    the last pixel decoded: here the end marker is read as chunks, and the
+    file is cut short or its end marker is wrong
+  - an end marker that is missing or wrong, and any byte after it
+- **Rejected, as by the reference:** a magic other than `qoif`, a width or
+  height of 0, a channel count other than 3 or 4, a color space other than
+  0 or 1.
+- **Limits** (see the table below): width and height each at most
+  `max_texture_dimension`, and `width × height × 4` at most
+  `max_decoded_bytes`. Before it allocates, the decoder also checks the
+  claimed size against the input: a chunk byte gives at most 62 pixels, so
+  `ceil(pixels / 62) > len − 14` is cut short (`UnexpectedEnd` at the end of
+  the input).
+- **Errors:** `CodecError::Qoi { offset, kind }`, with the byte offset of
+  the problem in the file. `UnexpectedEnd` says what should have come next.
+  The encoder's errors are `CodecError::QoiEncode { kind }`.
+- **Vectors:** hand-computed in the unit tests of `crates/codec/src/qoi.rs`,
+  one or more for each chunk and each edge of its range; property tests in
+  `crates/codec/tests/qoi.rs`.
+- **Fuzz target:** `qoi`, with seeds in `fuzz/corpus/qoi/`, made by a
+  separate port of the reference encoder. A test in `xtask` checks that
+  `qoi::encode` writes each one back byte for byte.
+
 ### KBJ (binary JSON value tree)
 
 ```
@@ -248,8 +287,8 @@ string table (optional, dev builds and debugging): path strings in TOC order
 
 | Limit | Default |
 | :- | :- |
-| Max texture dimension | 8192 |
-| Max decoded bytes per asset | 256 MiB |
+| Max texture dimension (`max_texture_dimension`) | 8192 |
+| Max decoded bytes per asset (`max_decoded_bytes`) | 256 MiB |
 | Max JSON/KBJ nesting depth | 64 |
 | Max string length | 1 MiB |
 | Max array or object entries | 1,000,000 |

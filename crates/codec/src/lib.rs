@@ -8,6 +8,7 @@
 mod error;
 pub mod json;
 mod limits;
+pub mod qoi;
 
 pub use error::CodecError;
 pub use limits::Limits;
