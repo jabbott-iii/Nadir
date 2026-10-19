@@ -726,7 +726,9 @@ testing in CI.
 
     The references were drawn on llvmpipe and blessed by the agent, after
     it looked at each one, converted to PNG. A human should look at them
-    before they are committed.
+    before they are committed. CI run 8, for the M2.4 commit `8ca3d15`,
+    passed on all three systems, as the user reported. The session saw
+    that on the public Actions page; the logs need a sign-in.
   - Note: the user chose two things on 2026-10-18:
     - The golden comparison lives in `xtask`, not in
       `nadir_core::testing` as `core.md` had it. The scenes are tests in
@@ -825,7 +827,58 @@ testing in CI.
     NADIR_EXPECT_GL_RENDERER=llvmpipe`; without them the goldens run on
     NVIDIA.
 
-- [ ] **M2.5 — CI golden job (Linux)**
+- [x] **M2.5 — CI golden job (Linux)**
+  - Note: the Linux leg runs `cargo xtask golden` after the checks, even
+    when they fail, with `LIBGL_ALWAYS_SOFTWARE=1` and
+    `NADIR_EXPECT_GL_RENDERER=llvmpipe` set on its own step.
+    - If that step fails, the job uploads `target/golden/*.qoi` as the
+      artifact `golden-failures`, with `actions/upload-artifact`.
+    - The pin is v7.0.2, `cf430e030ddbb5b0abf93d22962f4752f3646cd9`. It
+      was looked up on 2026-10-18, when it was the latest release; the
+      tag points at the commit directly.
+    - The checkout and cache pins were still the latest releases.
+  - Note: verified on 2026-10-18:
+    - The YAML was parsed with PyYAML 6.0.1. A script checked the order,
+      conditions and inputs of the steps, and compared each pin with its
+      upstream tag.
+    - The Linux leg's commands ran in order in a clean clone (Mesa forced,
+      no display): `cargo xtask ci`, `cargo xtask golden` (6 scenes) and
+      120 s of fuzz smoke per target. All passed.
+    - A planted `.bgra` in `TEXTURED_FS`, in that clone: the golden step
+      exits 1, and the upload's pattern matches exactly the four `actual`
+      and `diff` images.
+    - With a reference removed, its `actual` image has the bytes of the
+      committed reference.
+
+    The `if:` conditions cannot run off GitHub. **CI has not run the new
+    steps yet**, because they are not pushed. The run status shows on the
+    public Actions page.
+  - Note: an adversarial review (three angles, two refuters a finding)
+    confirmed four findings and contested one; all five are fixed. The one
+    that mattered: `cargo xtask ci` draws the same scenes, so a scene whose
+    own pixel checks failed (the planted `.bgra` above, say) stopped the
+    job at the checks, and the golden step never ran to upload its images.
+    It now runs after failed checks too. The rest corrected the docs:
+    - the GL tests do not skip on every context failure (below)
+    - a runner log was cited for what came from a developer's machine
+    - which DLLs each Mesa build needs
+    - the macOS GL points are scoped to the arm64 images
+  - Note: the runner findings are in `docs/04-quality.md`, under "GPU
+    availability on hosted runners".
+    - Windows runners have only GDI Generic 1.1.
+    - macOS runners have Apple's software renderer for GL, and Metal on a
+      paravirtual GPU.
+    - So goldens run in CI on Linux only.
+
+    The findings come from docs and other projects' reports, not from a
+    job of ours. A research pass made 51 claims, and two skeptics checked
+    each one. Five were refuted as overstated or out of date; their
+    corrections are what the doc says.
+  - Note: CI draws on Ubuntu's Mesa, not the 26.1.6 the references were
+    drawn on: 25.2.8 on Ubuntu 24.04, and 26.0.8 on 26.04.
+    `ubuntu-latest` moves to 26.04 between 2026-10-19 and 2026-11-19. If a
+    run fails on the tolerance, the artifact holds what CI drew. Blessing
+    from it needs the user's agreement, as any re-bless does.
   - Note (from M2.2): CI already installs EGL and Mesa (`libegl1`,
     `libgl1-mesa-dri`), with `LIBGL_ALWAYS_SOFTWARE=1` on `cargo xtask
     ci`. What is left here is the golden step.
@@ -850,6 +903,19 @@ testing in CI.
       `begin_frame` and `end_frame`.
     - Until then, `Device::new` on the stand-in fails with
       `MissingFunction`, and the gfx GL tests skip.
+  - Note (from M2.5): the hosted Windows runners have only GDI Generic 1.1,
+    with no `WGL_ARB_create_context` (`docs/04-quality.md`).
+    - The context must fail there, not fall back to a legacy one: check
+      that `wglCreateContextAttribsARB` exists and that `GL_VERSION` is at
+      least 3.3.
+    - The gfx GL tests skip only on `Unsupported` with
+      `NADIR_EXPECT_GL_RENDERER` empty (`tests/headless/common.rs`,
+      `src/tests.rs`). Any other failure fails them, and so the Windows
+      leg of CI. Widen the skip, or bring llvmpipe.
+    - Mesa's llvmpipe could run them there, as third-party DLLs beside the
+      test binary. That is the user's decision.
+    - Mesa's WGL reports every pixel format as fully accelerated, llvmpipe
+      included, so only `GL_RENDERER` tells it from a GPU.
   - Depends: M2.3, M1.5
   - Do: the dummy-window dance, `wglChoosePixelFormatARB`, a 3.3 core
     context, `wglSwapIntervalEXT`, GL 1.1 symbols from `opengl32.dll`.
@@ -864,6 +930,16 @@ testing in CI.
     llvmpipe references, and `--bless` refuses any other renderer. Until
     the context exists, the scenes skip and the run fails with every
     reference "not drawn".
+  - Note (from M2.5): on the hosted arm64 macOS runners, GL is only
+    Apple's software renderer, which refuses a pixel format that requires
+    `NSOpenGLPFAAccelerated` (`docs/04-quality.md`).
+    `docs/03-platforms.md` asks for that attribute.
+    - With it, the context fails there. The gfx GL tests skip only on
+      `Unsupported` (see M2.6), so unless the skip is widened, the macOS
+      leg of CI fails.
+    - Without it, they run on a renderer whose pixels are not llvmpipe's,
+      and whose rendering has known defects.
+    - Choose one, and record it.
   - Depends: M2.3, M1.6
   - Do: the pixel format, a 3.2-core-profile (4.1) context, Retina backing,
     swap interval, `dlopen` of the OpenGL framework.
@@ -1393,6 +1469,16 @@ by the batched sprite renderer.
   - Note (from M2.4): `cargo xtask golden` takes only `--bless` so far. Add
     `--backend`, and check the `<scene>.metal.qoi` overrides, which it
     lists and skips until then.
+  - Note (from M2.5): the arm64 macOS runners have Metal on `Apple
+    Paravirtual device` (`docs/04-quality.md`), so Metal goldens could run
+    in CI there.
+    - Its highest family is Apple5, and it has no Metal 4.
+    - The Intel runners hang on multisampled Metal work.
+    - Apple's docs say the process must link CoreGraphics for
+      `MTLCreateSystemDefaultDevice` to return a device, which a
+      command-line tool such as a test binary usually has to do
+      explicitly. `nadir-sys` links AppKit, which loads CoreGraphics, but
+      no test shows yet that this is enough.
   - Depends: M10.3
   - Do: `GpuPreference::Auto` picks Metal on macOS; keep the GL fallback via
     `--gpu gl`.

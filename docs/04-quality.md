@@ -229,10 +229,21 @@ understood.
   3. `cargo xtask ci`, with `LIBGL_ALWAYS_SOFTWARE=1` and, on Linux,
      `NADIR_EXPECT_GL_RENDERER=llvmpipe`: the OpenGL tests fail on any other
      renderer.
-  4. Linux only:
-     - install the rest (`libasound2`, `libx11-6`)
-     - `cargo xtask golden`
-     - `cargo xtask fuzz-smoke --secs 120`
+  4. Linux only, from M2.5: `cargo xtask golden`, with the same two
+     variables, set on that step too.
+     - It runs even when the checks fail: they draw the same scenes, and
+       fail first when a scene's own pixel checks do.
+     - If it fails, the job uploads `target/golden/*.qoi` as the artifact
+       `golden-failures`: each failed scene's `actual` image, and its
+       `diff` image if it was compared.
+     - An `actual` image holds the bytes `--bless` would write on the
+       runner's llvmpipe. Once a human has looked at it, it can become the
+       reference.
+  5. Linux only: `cargo xtask fuzz-smoke --secs 120`.
+
+  The images already have `libx11-6`, through `xvfb`, which their
+  software lists include. ALSA (`libasound2t64` on Ubuntu 24.04) waits
+  for a test that needs it, from M6.3.
 
   Before the checkout, the workflow turns Git's `core.autocrlf` off. A
   Windows runner would otherwise check the files out with CRLF line
@@ -254,13 +265,74 @@ understood.
   `Cargo.lock` + `rust-toolchain.toml` hash using `actions/cache`
   (SHA-pinned).
 
-**GPU availability on hosted runners:**
+**GPU availability on hosted runners.** This was looked into at M2.5, on
+2026-10-18, from GitHub's docs, the `actions/runner-images` repository
+and other projects' CI logs and issues. No Nadir job has drawn on a Windows
+or macOS runner yet, so the "reported" points are other projects'.
 
-- Linux golden tests use software rendering (llvmpipe), which is reliable.
-- Hosted Windows and macOS runners may not expose a usable GPU. Verify this
-  at M2, and record what you find here. Until verified, Windows and macOS
-  goldens are run locally before each release, and the release checklist
-  requires it.
+- **Linux** (`ubuntu-latest`): no GPU. llvmpipe, from Ubuntu's Mesa, draws
+  the goldens.
+  - The references were drawn on Mesa 26.1.6. Ubuntu 24.04 has 25.2.8 and
+    26.04 has 26.0.8, so the tolerance has to cover the version
+    difference.
+  - `ubuntu-latest` moves to Ubuntu 26.04 between 2026-10-19 and
+    2026-11-19 (runner-images #14748). A failure that starts with the
+    move is the new Mesa: compare the uploaded images before blessing.
+- **Windows** (`windows-latest` is Windows Server 2025, and `windows-2022`
+  is the other x64 image):
+  - No GPU. The display is Hyper-V Video. DXGI lists only Microsoft Basic
+    Render Driver (WARP), so Direct3D 11 and 12 work in software.
+  - OpenGL is Microsoft's GDI Generic 1.1. A job on `windows-2025` failed
+    with "the graphics driver provides only OpenGL 1.1.0 (GDI Generic)"
+    (tasksmack#2256). The same project found, on its own machine, that GDI
+    Generic has no `WGL_ARB_create_context` (tasksmack#2113), so it has no
+    3.3 core context.
+  - The gfx GL tests skip only when `create_headless_gl` returns
+    `Unsupported` and `NADIR_EXPECT_GL_RENDERER` is empty. Any other error
+    fails them. So once M2.6 has a WGL context, the Windows leg fails on
+    this runner, unless M2.6 widens the skip or brings llvmpipe.
+  - The image installs no Mesa and no other OpenGL driver.
+  - Jobs run in an interactive desktop session, where windows can be
+    created (reported, not documented).
+  - Other projects get llvmpipe there, at GL 4.x, by putting Mesa's
+    `opengl32.dll` next to the test binary (`target/<profile>/deps`). The
+    builds:
+    - `pal1000/mesa-dist-win`: built on a private server, with no build
+      log. It needs `libgallium_wgl.dll` beside it, and before 25.0
+      `libglapi.dll` too.
+    - `mmozeiko/build-mesa`: built in public CI. It is one static
+      `opengl32.dll`.
+    - MSYS2: signed packages, but a rolling release, and the DLL needs
+      MSYS2's other DLLs.
+  - With `LIBGL_ALWAYS_SOFTWARE=1`, Mesa's WGL chooses llvmpipe over its
+    D3D12 driver on WARP.
+  - Each of these is a third-party binary in CI, which
+    `docs/02-dependency-policy.md` does not cover: using one is the user's
+    decision. Each is also another build of Mesa, with another LLVM, than
+    the one that drew the references.
+- **macOS** (`macos-latest` is macOS 26 on a 3-core M1 virtual machine).
+  The other images are `macos-15`, `macos-15-intel` and `macos-26-intel`.
+  `macos-14` is retired on 2026-11-02.
+  - The virtual GPU, `Apple Paravirtual device`, accelerates Metal only.
+    - Plain Metal works on the arm64 images: wgpu and Bevy run Metal tests
+      there.
+    - It reports Apple5 as its highest family, and no Metal 4.
+    - On the Intel images, multisampled Metal work hangs or gives wrong
+      results (runner-images #14836, open).
+  - On the arm64 images, OpenGL runs on Apple's CPU `Apple Software
+    Renderer`. No recent report gives the Intel images' GL renderer.
+    - A 3.2 core request gave 4.1 core on `macos-14`.
+    - A pixel format that asks for `NSOpenGLPFAAccelerated` is refused.
+    - Its output has known defects (wrong lines and textures, closed as
+      an Apple bug in runner-images #9712), and it is not llvmpipe, so
+      it cannot be compared with the references.
+  - The image logs the runner user in to a GUI session.
+- **So:** goldens run in CI only on Linux. Windows and macOS goldens run
+  locally before each release, and the release checklist requires it.
+  Look again:
+  - at M2.6: Mesa on the Windows runner, if the user approves the binary
+  - at M2.7: the software renderer, which needs references of its own
+  - at M10.4: Metal goldens on the arm64 runners, within Apple5
 
 ## Unsafe and FFI review checklist
 

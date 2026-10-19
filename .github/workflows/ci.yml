@@ -73,11 +73,35 @@ jobs:
           sudo apt-get install --no-install-recommends -y libegl1 libgl1-mesa-dri
 
       - name: Run the checks
+        id: checks
         run: cargo xtask ci
         env:
           # Mesa renders on the CPU, and the tests fail on any other renderer.
           LIBGL_ALWAYS_SOFTWARE: "1"
           NADIR_EXPECT_GL_RENDERER: ${{ runner.os == 'Linux' && 'llvmpipe' || '' }}
+
+      # The references in tests/golden were drawn on llvmpipe, and every
+      # scene must be drawn there too. docs/04-quality.md says why the
+      # Windows and macOS runners do not draw them.
+      #
+      # The checks draw the same scenes, and fail when a scene's own pixel
+      # checks do. This step still runs then, to show how the scenes differ.
+      - name: Golden images
+        id: golden
+        if: runner.os == 'Linux' && (success() || steps.checks.outcome == 'failure')
+        run: cargo xtask golden
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          NADIR_EXPECT_GL_RENDERER: llvmpipe
+
+      # What a failed scene drew (<scene>.actual.qoi) and, for a scene over
+      # the tolerance, where (<scene>.diff.qoi).
+      - name: Upload the golden failures
+        if: failure() && steps.golden.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: golden-failures
+          path: target/golden/*.qoi
 
       # `--secs` is the time for each fuzz target.
       - name: Fuzz smoke
