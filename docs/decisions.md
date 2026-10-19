@@ -391,3 +391,72 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** something needs two OpenGL contexts on one thread,
   such as a second window or contexts that share objects for a loader
   thread.
+
+## ADR-0016 — A gfx Device holds no borrow of its context
+
+- **Status:** Accepted
+- **Date:** 2026-10-18
+- **Context:**
+  - The main loop keeps `gfx::Device::new(platform.gpu_surface())` alive
+    while it calls `platform.pump_events(&mut events)`. A `Device<'a>` that
+    borrowed the surface would not compile there. The `'static` modal-frame
+    callback (Windows, macOS) could not hold it either.
+  - A device that borrows nothing must still prove, before every GL call,
+    that its context exists and is current. Under libglvnd a call with no
+    context does nothing, silently; on macOS it crashes.
+  - The sketch in `gfx.md` had `Pass` methods return `()`. The acceptance
+    of M2.3 needs a destroyed id to give `StaleHandle`, and a draw that
+    would read outside a buffer must be refused, because GL does not
+    always catch it.
+  - `gfx.md` asked for `glGetError` after every call "in dev". The feature
+    table gives `dev` to no such crate as `gfx`.
+- **Decision:**
+  - `nadir-platform` gives each of its contexts a `GlContextId` that is
+    never reused. `GlContextId::is_current()` reads a thread-local, and is
+    `true` while that context exists on this thread.
+    `GlContext::context_id()` is a provided method, `None` by default. It
+    extends ADR-0015's promise: with `Some(id)`, the function pointers stay
+    callable while `id.is_current()`.
+  - The per-thread claim of ADR-0015 holds the id, and moves to the shared
+    `gpu.rs`, so that WGL (M2.6) and NSOpenGL (M2.7) take it too.
+  - `Device` keeps the id and no borrow. Each call that would reach GL
+    checks the id first, and fails with `GfxError::ContextLost` once the
+    context is gone. A thread has at most one device
+    (`GfxError::DeviceExists`).
+  - `begin_frame` and `end_frame` take the surface: one for its drawable
+    size, the other to swap.
+  - `begin_pass`, the five `Pass` setters that take an id or data, and both
+    draws return `Result`. `set_viewport` and `set_scissor` stay `()`.
+  - `glGetError` is read after every call under `cfg(debug_assertions)`. In
+    every build it is also read once a frame, before every draw, and after
+    every call that allocates.
+- **Consequences:**
+  - The facade can keep the device beside the platform, and in the
+    modal-frame callback's shared state.
+  - Each call that reaches GL pays a thread-local read: about 1.5 ns,
+    measured.
+  - The device fails closed on a context that has no id: the stand-in of
+    Windows and macOS until M2.6/M2.7, and any mock.
+  - Render code adds a `?` to each pass call.
+  - A future context that forgets to take the claim, or to override
+    `context_id`, gets `NoContext` from gfx, not undefined behavior.
+  - A context has one device. A device whose context is gone does not
+    count, so a thread can make one for its next context.
+  - The draw checks cover what the device binds. Shader code is trusted:
+    an array index out of bounds in GLSL is undefined behavior that no check
+    covers. GLSL sources may not use `#extension`.
+- **Alternatives considered:**
+  - `Device<'a>` borrowing the context. It is sound by the borrow checker,
+    but the main loop does not compile, and `Platform` would need `&self`
+    pumping on three systems.
+  - A required liveness token on `GlContext`, built on an `Rc`/`Weak`
+    pair. It is as sound, but it breaks the ADR-0015 trait, and every
+    implementation changes.
+  - Setters that return `()`, with errors at the draw or kept for a
+    `finish` call. Errors would show up later than the call that caused
+    them.
+  - A `dev` feature on gfx, or a runtime switch, for per-call checks. The
+    first changes the feature table, and the second costs a branch per
+    call.
+- **Revisit when:** a second context per thread is needed (see
+  ADR-0015), or the per-call liveness check shows up in a profile.

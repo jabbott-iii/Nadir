@@ -23,6 +23,7 @@
       <sourceFolder url="file://$MODULE_DIR$/tools/cook/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/xtask/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/platform/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/gfx/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

@@ -40,7 +40,7 @@ use nadir_core::UVec2;
 pub use dialog::show_error_dialog;
 pub use error::PlatformError;
 pub use event::Event;
-pub use gpu::{GlContext, GpuSurface, HeadlessGl, create_headless_gl};
+pub use gpu::{GlContext, GlContextId, GpuSurface, HeadlessGl, create_headless_gl};
 pub use paths::{UserDirs, user_dirs};
 pub use sleep::precise_sleep;
 

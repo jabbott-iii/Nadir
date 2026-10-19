@@ -608,8 +608,9 @@ testing in CI.
   - Note: CI installs `libegl1` and `libgl1-mesa-dri` on Linux from here,
     and not from M2.5, because `cargo xtask ci` turns on `headless-test`.
     It runs with `LIBGL_ALWAYS_SOFTWARE=1`, and on Linux with
-    `NADIR_EXPECT_GL_RENDERER=llvmpipe`. Only a YAML review was possible
-    here: the session cannot see a CI run. The Windows and macOS code
+    `NADIR_EXPECT_GL_RENDERER=llvmpipe`. CI, on all three systems, was
+    green on 2026-10-18, as the user reported; the session could not see it
+    itself. The Windows and macOS code
     compiled in copies with the OS `cfg`s swapped. Clippy, rustdoc and the
     stand-in tests passed there, and so did the `compile_fail` doctests,
     which fail once the marker that keeps `HeadlessGl` on its thread is
@@ -630,7 +631,58 @@ testing in CI.
     (or the equivalent test name). Where libglvnd also has NVIDIA's EGL,
     add `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
 
-- [ ] **M2.3 — gfx: GL backend core**
+- [x] **M2.3 — gfx: GL backend core**
+  - Note: verified on 2026-10-18 on headless contexts, each on llvmpipe
+    (`llvmpipe (LLVM 20.1.2, 256 bits)`, OpenGL 4.6 core, uniform offset
+    alignment 16) and NVIDIA (`3.3.0 NVIDIA 595.104.02`, alignment 256):
+    - in debug and `--release`: 35 unit, 36 GL and 5 doc tests
+    - on llvmpipe, 10 runs of 10
+    - `cargo test -p nadir-gfx` without the feature: the unit and doc tests,
+      with the GL tests not built
+
+    The Mesa run used no display and the vendor override, as M2.2's did.
+  - Note: the API follows ADR-0016, which the user chose:
+    - the device holds no borrow, and checks its context's
+      `GlContextId` before each call that reaches GL
+    - one device per context
+    - `begin_frame` and `end_frame` take the surface
+    - `begin_pass`, the setters that take ids or data, and the draws return
+      `Result`
+    - per-call `glGetError` under `cfg(debug_assertions)`
+  - Note: the backend:
+    - a `gl_fns!` loader of the 60 functions, with a compile-time check of
+      each name against its type
+    - one safe wrapper per function, on a token made after the liveness
+      check; only the two draws are `unsafe`
+    - a state cache, and a VAO per pipeline whose bindings are recorded by
+      buffer id
+    - base-instance emulation, and a 64 KiB uniform ring
+    - four sampler objects, `GL_UNPACK_ALIGNMENT` 1, and
+      `GL_FRAMEBUFFER_SRGB` always on
+
+    Draws check every read the device sets up (`check_draw`), and refuse
+    if any GL call failed unseen. Shader code is trusted, and `#extension`
+    is refused.
+  - Note: three crates:
+    - `nadir-gfx`
+    - `nadir-platform`: `GlContextId`, and the claim moved to `gpu.rs`
+    - `nadir-sys`: `GL_ACTIVE_UNIFORM_BLOCKS`
+  - Note: an adversarial review (five angles, two refuters a finding)
+    confirmed 30 findings, all fixed, each with a test. Two were soundness
+    holes, reachable from safe code:
+    - In release builds, refilling the uniform ring inside a draw drained
+      the error of a failed attribute-pointer call, and the draw ran on a
+      vertex array that was never set: a segfault on NVIDIA. Calls that
+      allocate now fail on an error an earlier call left. A test plants an
+      error before a refill, and fails on the old code.
+    - `B` and `B[0]` named one uniform block, which left another block
+      without a binding. Two names for one block are now refused.
+  - Note: not run here: Windows and macOS. There the GL tests skip on
+    `Unsupported`, and `Device::new` on the stand-in gives
+    `MissingFunction("glGetError")`. The copies with the OS `cfg`s swapped
+    passed clippy, rustdoc and the tests that can run there. The window's
+    default framebuffer (`Surface` passes, swaps) is not drawn by any test
+    yet.
   - Note (from M2.2): under libglvnd, `get_proc_address` gives a stub for
     every name that starts with `gl`. A null check therefore never finds a
     missing function on Linux, so the version check is the guard, and
@@ -649,9 +701,20 @@ testing in CI.
   - Accept:
     - Using a destroyed resource returns `StaleHandle`.
     - Shader errors include the driver log.
-  - Verify: `cargo test -p nadir-gfx` (headless)
+  - Verify: `LIBGL_ALWAYS_SOFTWARE=1 NADIR_EXPECT_GL_RENDERER=llvmpipe cargo test -p nadir-gfx --features headless-test`
+    (headless). Where libglvnd also has NVIDIA's EGL, add
+    `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
 
 - [ ] **M2.4 — codec QOI + golden harness**
+  - Note (from M2.3):
+    - Render targets are stored from the bottom row: sampled, `v = 0` is
+      clip space `y = -1`.
+    - Compare sRGB within ±1 and blends within ±2, and no value half way
+      between two.
+    - A `Surface` pass on a headless context draws nothing, so goldens
+      render into render targets.
+    - `xtask` may depend only on core and codec, so the scenes render in
+      gfx tests that `xtask golden` runs.
   - Note (from M2.2): where libglvnd also has NVIDIA's EGL,
     `LIBGL_ALWAYS_SOFTWARE=1` does not choose llvmpipe: NVIDIA takes the
     surfaceless platform. Choose Mesa with
@@ -686,6 +749,14 @@ testing in CI.
   - Verify: workflow YAML review; CI results, if visible to the session
 
 - [ ] **M2.6 — platform (Windows): WGL context**
+  - Note (from M2.3):
+    - The context takes `gpu::Claim` and overrides
+      `GlContext::context_id`, or gfx refuses it with `NoContext`
+      (ADR-0016).
+    - `ModalFrame` gets a `GpuSurface`, so that the callback can call
+      `begin_frame` and `end_frame`.
+    - Until then, `Device::new` on the stand-in fails with
+      `MissingFunction`, and the gfx GL tests skip.
   - Depends: M2.3, M1.5
   - Do: the dummy-window dance, `wglChoosePixelFormatARB`, a 3.3 core
     context, `wglSwapIntervalEXT`, GL 1.1 symbols from `opengl32.dll`.
@@ -694,6 +765,8 @@ testing in CI.
   - Verify: on Windows: `cargo xtask golden`
 
 - [ ] **M2.7 — platform (macOS): NSOpenGL context**
+  - Note (from M2.3): as for M2.6: take `gpu::Claim`, override
+    `context_id`, and give `ModalFrame` a surface.
   - Depends: M2.3, M1.6
   - Do: the pixel format, a 3.2-core-profile (4.1) context, Retina backing,
     swap interval, `dlopen` of the OpenGL framework.
@@ -724,6 +797,9 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-input`
 
 - [ ] **M3.2 — minimal assets: handles + synchronous loose loading**
+  - Note (from M2.3): render and assets may not depend on platform, even
+    for tests, so their GPU tests need a `Device::new_headless` that owns
+    its context.
   - Depends: M0.3, M2.4
   - Do:
     - `Handle<T>` and `Assets<T>`
@@ -735,6 +811,12 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-assets -p nadir-render`
 
 - [ ] **M3.3 — render: sprite batcher, sort keys, camera, upscale**
+  - Note (from M2.3):
+    - Each pass call returns a `Result`.
+    - Uniforms are std140 blocks of `[f32; 4 * n]`, set again in each
+      pass.
+    - Shaders read instances through attributes, never `gl_InstanceID`.
+    - The blit samples a render target bottom-up on GL.
   - Depends: M3.2
   - Do: following `docs/subsystems/render.md`:
     - the `sprite` and `blit` shaders, with an interface parity test
@@ -1021,6 +1103,8 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-debug`
 
 - [ ] **M7.3 — stats overlay and profiler**
+  - Note (from M2.3): `Caps` has no timer-query field yet. It is
+    `#[non_exhaustive]`, so adding one breaks nothing.
   - Depends: M7.2, M0.4
   - Do: the overlay; profiler ring, graph and scope tree; Chrome trace
     export; GL timer queries.
@@ -1181,6 +1265,9 @@ by the batched sprite renderer.
   - Verify: on macOS: `cargo test -p nadir-sys -p nadir-platform`
 
 - [ ] **M10.2 — gfx: Metal device**
+  - Note (from M2.3): passes start with nothing bound, as encoders do. The
+    blend table in `gfx.md` gives the factors to bake. The device keeps no
+    borrow of its layer (ADR-0016).
   - Depends: M10.1, M2.3
   - Do: resources, pipelines (blend baked in), passes,
     `setVertexBytes`/`setFragmentBytes` uniforms, triple-buffered dynamic

@@ -4,5 +4,23 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[dependencies]
+nadir-core = { path = "../core" }
+nadir-platform = { path = "../platform" }
+nadir-sys = { path = "../sys" }
+
+[features]
+# Builds the tests that draw on an offscreen OpenGL 3.3 (core profile)
+# context, which then fail, not skip, without a working driver. Where
+# `nadir-platform` has no offscreen context yet (Windows and macOS, until
+# M2.6 and M2.7), they skip. `cargo xtask ci` turns it on, as it does every
+# feature.
+headless-test = []
+
+[[test]]
+name = "headless"
+path = "tests/headless/main.rs"
+required-features = ["headless-test"]
+
 [lints]
 workspace = true

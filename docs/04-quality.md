@@ -46,8 +46,11 @@ pub fn check_sized<T: std::fmt::Debug>(
 - The default seed comes from `NADIR_SEED`, or from a fixed value in CI so
   runs are reproducible.
 - `NADIR_EXPECT_GL_RENDERER`, when set and not empty, makes the headless
-  OpenGL tests of `nadir-platform` fail unless the renderer's name contains
-  it (`llvmpipe` in CI). Otherwise they log the renderer and take any.
+  OpenGL tests of `nadir-platform` and `nadir-gfx` fail unless the
+  renderer's name contains it (`llvmpipe` in CI). Otherwise they log the
+  renderer and take any. Where `nadir-platform` has no offscreen context
+  yet (Windows and macOS, until M2.6 and M2.7), the gfx tests skip, but
+  only while the variable is unset.
 - A nightly job runs with random seeds and prints the seeds it used.
 - Shrinking is deliberately minimal, and only `check_sized` does it: the
   harness retries a failing case at every smaller size and reports the

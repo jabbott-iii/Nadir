@@ -120,7 +120,7 @@ layer), the ECS world and rendering.
 ```rust
 pub fn run(mut app: App) -> Result<(), Error> {
     let mut platform = Platform::new(&app.config.window)?;
-    let mut gfx = gfx::Device::new(platform.gpu_surface())?;
+    let mut gfx = gfx::Device::new(platform.gpu_surface())?;  // keeps no borrow (ADR-0016)
     let mut renderer = Renderer::new(&mut gfx, &app.config.render)?;
     let mut clock = FixedClock::new(TICK_HZ /* 60 */, MAX_FRAME /* 0.25 s */);
     let mut stopwatch = Stopwatch::start();
@@ -143,8 +143,9 @@ pub fn run(mut app: App) -> Result<(), Error> {
         app.world.apply_commands();
 
         let draw = app.extract(frame.alpha);                 // ECS -> RenderFrame
+        gfx.begin_frame(platform.gpu_surface())?;
         renderer.render(&mut gfx, &draw)?;
-        gfx.end_frame()?;                                    // present: GL swap or Metal drawable, vsync-paced
+        gfx.end_frame(platform.gpu_surface())?;              // present: GL swap or Metal drawable
 
         app.assets.finish_completed_loads(&mut gfx);         // GPU uploads on main thread
         app.dev_hooks();                                     // hot reload, profiler (dev)

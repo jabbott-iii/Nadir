@@ -411,6 +411,10 @@ pub const GL_LINK_STATUS: GLenum = 0x8B82;
 /// `GL/glcorearb.h` (GL 2.0): `#define GL_INFO_LOG_LENGTH 0x8B84`
 pub const GL_INFO_LOG_LENGTH: GLenum = 0x8B84;
 
+/// A program parameter: how many uniform blocks the linked program uses.
+/// `GL/glcorearb.h` (GL 3.1): `#define GL_ACTIVE_UNIFORM_BLOCKS 0x8A36`
+pub const GL_ACTIVE_UNIFORM_BLOCKS: GLenum = 0x8A36;
+
 /// A uniform block parameter: the size of the block's data, in bytes.
 /// `GL/glcorearb.h` (GL 3.1): `#define GL_UNIFORM_BLOCK_DATA_SIZE 0x8A40`
 pub const GL_UNIFORM_BLOCK_DATA_SIZE: GLenum = 0x8A40;

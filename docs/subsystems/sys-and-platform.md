@@ -140,6 +140,13 @@ pub unsafe trait GlContext {
     fn swap_buffers(&self) -> Result<(), PlatformError>;
     fn set_swap_interval(&self, interval: i32) -> bool;   // true only if the driver took exactly this interval
     fn drawable_size(&self) -> UVec2;                     // physical px; zero if there is no default framebuffer
+    fn context_id(&self) -> Option<GlContextId> { None }  // ADR-0016: Some for nadir-platform's contexts
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlContextId(/* never reused */);
+impl GlContextId {
+    pub fn is_current(self) -> bool;   // the context exists, and is current on this thread
 }
 
 pub trait AudioRender: Send + 'static {
@@ -160,6 +167,14 @@ pub fn create_headless_gl() -> Result<HeadlessGl, PlatformError>;               
   that opened it, or a `HeadlessGl`. It is current there from creation
   until it is dropped. A second one fails with
   `PlatformError::GlContextExists`.
+- **Context ids** (ADR-0016): every context takes the thread's claim
+  (`gpu::Claim`, shared by every backend), which gives it a `GlContextId`
+  that no other context of the process gets, and overrides
+  `GlContext::context_id`. `is_current` is `true` while that context
+  exists on the thread. `nadir-gfx` keeps the id instead of a borrow, so a
+  device can live beside `Platform`'s `&mut` calls. WGL (M2.6) and
+  NSOpenGL (M2.7) must take the claim too; a context without an id gets
+  `NoContext` from gfx.
 - **`HeadlessGl`** draws only into render targets. It has no default
   framebuffer: `drawable_size` is zero, `swap_buffers` does nothing, and
   `set_swap_interval` returns `false`.

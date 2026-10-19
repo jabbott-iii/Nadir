@@ -10,6 +10,7 @@ use nadir_core::UVec2;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use crate::GlContext;
 use crate::PlatformError;
+use crate::gpu::GlContextId;
 
 /// The OpenGL context of a window that has none yet. It has no functions,
 /// and cannot show anything.
@@ -51,6 +52,10 @@ impl NoHeadless {
     }
 
     pub(crate) fn get_proc_address(&self, _name: &CStr) -> *const c_void {
+        match *self {}
+    }
+
+    pub(crate) fn id(&self) -> GlContextId {
         match *self {}
     }
 }

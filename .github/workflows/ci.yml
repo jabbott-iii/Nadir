@@ -63,8 +63,9 @@ jobs:
             target
           key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
 
-      # The OpenGL tests of nadir-platform (feature headless-test, which the
-      # checks turn on) need EGL and Mesa's software renderer, llvmpipe.
+      # The OpenGL tests of nadir-platform and nadir-gfx (feature
+      # headless-test, which the checks turn on) need EGL and Mesa's
+      # software renderer, llvmpipe.
       - name: Install EGL and Mesa
         if: runner.os == 'Linux'
         run: |

@@ -56,6 +56,11 @@ version = "0.1.0"
 [[package]]
 name = "nadir-gfx"
 version = "0.1.0"
+dependencies = [
+ "nadir-core",
+ "nadir-platform",
+ "nadir-sys",
+]
 
 [[package]]
 name = "nadir-input"

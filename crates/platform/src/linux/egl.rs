@@ -20,9 +20,8 @@
 //! - **Teardown.** A context is released before it is destroyed, also on
 //!   the way out: a thread that ends with its context current leaks it.
 
-use core::cell::{Cell, OnceCell};
+use core::cell::OnceCell;
 use core::ffi::{CStr, c_char, c_void};
-use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
 use nadir_core::log::{debug, info, warn};
@@ -47,6 +46,7 @@ use nadir_sys::linux::x11::{Display, VisualID, Window};
 
 use super::library::Library;
 use crate::PlatformError;
+use crate::gpu::{Claim, GlContextId};
 
 /// The file name of EGL, for the loader.
 const LIBEGL: &CStr = c"libEGL.so.1";
@@ -60,40 +60,6 @@ const LIBOPENGL: &CStr = c"libOpenGL.so.0";
 
 /// The OpenGL version we ask for, with the core profile.
 const GL_REQUIRED: (GLint, GLint) = (3, 3);
-
-// ---------------------------------------------------------------------------
-// The claim
-// ---------------------------------------------------------------------------
-
-thread_local! {
-    /// Whether this thread has an OpenGL context of ours.
-    static HAS_CONTEXT: Cell<bool> = const { Cell::new(false) };
-}
-
-/// This thread's one claim to an OpenGL context. Dropping it gives the
-/// claim up.
-struct Claim {
-    /// The claim is this thread's, so it stays on it.
-    _thread: PhantomData<*const ()>,
-}
-
-impl Claim {
-    /// Takes this thread's claim, if no context of ours has it.
-    fn take() -> Result<Self, PlatformError> {
-        if HAS_CONTEXT.with(|has| has.replace(true)) {
-            return Err(PlatformError::GlContextExists);
-        }
-        Ok(Self {
-            _thread: PhantomData,
-        })
-    }
-}
-
-impl Drop for Claim {
-    fn drop(&mut self) {
-        HAS_CONTEXT.with(|has| has.set(false));
-    }
-}
 
 // ---------------------------------------------------------------------------
 // The library
@@ -633,7 +599,7 @@ pub(crate) struct Headless {
     lookup: GlLookup,
     // Declared last, so that the claim is given up after the context is
     // gone.
-    _claim: Claim,
+    claim: Claim,
 }
 
 impl Headless {
@@ -655,7 +621,7 @@ impl Headless {
             pbuffer: EGL_NO_SURFACE,
             context,
             lookup,
-            _claim: claim,
+            claim,
         };
         if !has_extension(&display.extensions, "EGL_KHR_surfaceless_context") {
             let attributes = [EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE];
@@ -695,6 +661,11 @@ impl Headless {
     pub(crate) fn get_proc_address(&self, name: &CStr) -> *const c_void {
         self.lookup.get(&self.client.egl, name)
     }
+
+    /// The id of the context, current while it exists.
+    pub(crate) fn id(&self) -> GlContextId {
+        self.claim.id()
+    }
 }
 
 impl Drop for Headless {
@@ -732,7 +703,7 @@ pub(super) struct WindowGl {
     lookup: GlLookup,
     // Declared last, so that the claim is given up after the context is
     // gone.
-    _claim: Claim,
+    claim: Claim,
 }
 
 impl WindowGl {
@@ -764,7 +735,7 @@ impl WindowGl {
             swap_range: (0, 0),
             surface: EGL_NO_SURFACE,
             context: EGL_NO_CONTEXT,
-            _claim: claim,
+            claim,
         };
         let (config, record) = gl.client.choose_config(handle, EGL_WINDOW_BIT, |record| {
             VisualID::try_from(record.visual)
@@ -884,6 +855,12 @@ impl WindowGl {
     /// Returns the GL function called `name`, or null.
     pub(super) fn get_proc_address(&self, name: &CStr) -> *const c_void {
         self.lookup.get(&self.client.egl, name)
+    }
+
+    /// The id of the context. It is current from `make_current` until this
+    /// value is dropped; before `make_current`, nothing reads it.
+    pub(super) fn id(&self) -> GlContextId {
+        self.claim.id()
     }
 
     /// Shows the back buffer.
@@ -1184,6 +1161,20 @@ mod headless_tests {
     }
 
     #[test]
+    fn a_headless_context_has_an_id_that_is_current_while_it_exists() {
+        let gl = create_headless_gl().unwrap();
+        let id = gl.context_id().unwrap();
+        assert!(id.is_current());
+        drop(gl);
+        assert!(!id.is_current());
+        let next = create_headless_gl().unwrap();
+        assert!(
+            next.context_id()
+                .is_some_and(|next| next != id && next.is_current())
+        );
+    }
+
+    #[test]
     fn a_thread_has_one_headless_context_at_a_time() {
         let first = create_headless_gl().unwrap();
         assert_eq!(
@@ -1366,17 +1357,5 @@ mod tests {
         // EGL_BAD_CURRENT_SURFACE, which is not declared.
         assert_eq!(error_text(0x3007), "EGL error 0x3007");
         assert_eq!(error_text(0x3000), "no error code");
-    }
-
-    #[test]
-    fn a_thread_claims_one_context_at_a_time() {
-        let claim = Claim::take().unwrap();
-        assert_eq!(Claim::take().err(), Some(PlatformError::GlContextExists));
-        // Another thread has a claim of its own.
-        std::thread::spawn(|| assert!(Claim::take().is_ok()))
-            .join()
-            .unwrap();
-        drop(claim);
-        assert!(Claim::take().is_ok());
     }
 }

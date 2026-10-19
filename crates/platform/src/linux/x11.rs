@@ -37,7 +37,7 @@ use self::connection::{Connection, VisualFormat};
 use self::input::{CloseMessage, Incoming, Translator};
 use super::egl::WindowGl;
 use super::xresources;
-use crate::{Event, GlContext, GpuSurface, ModalFrame, PlatformError, WindowConfig};
+use crate::{Event, GlContext, GlContextId, GpuSurface, ModalFrame, PlatformError, WindowConfig};
 
 /// The events we ask the server for.
 const EVENT_MASK: c_long = KeyPressMask
@@ -331,6 +331,12 @@ unsafe impl GlContext for Backend {
         // On X11 the drawable is the inside of the window.
         self.translator.size()
     }
+
+    fn context_id(&self) -> Option<GlContextId> {
+        // The claim lives until the backend's fields are dropped, after the
+        // context is gone.
+        Some(self.gl.id())
+    }
 }
 
 /// Whether a window of this visual is opaque, in plain 24-bit color. A
@@ -588,6 +594,7 @@ mod tests {
             let backend = Backend::new(&config).unwrap();
             let GpuSurface::Gl(gl) = backend.gpu_surface();
             super::super::egl::gl_test::check_context_and_draw(gl);
+            assert!(gl.context_id().is_some_and(GlContextId::is_current));
             assert_eq!(gl.drawable_size(), backend.window_size());
             assert!(!gl.set_swap_interval(-1));
             for _ in 0..3 {
