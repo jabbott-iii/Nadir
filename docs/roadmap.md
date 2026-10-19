@@ -850,9 +850,12 @@ testing in CI.
     - With a reference removed, its `actual` image has the bytes of the
       committed reference.
 
-    The `if:` conditions cannot run off GitHub. **CI has not run the new
-    steps yet**, because they are not pushed. The run status shows on the
-    public Actions page.
+    The `if:` conditions cannot run off GitHub. CI run 9, for the M2.5
+    commit `7119361`, passed on all three systems, as the user reported.
+    The session saw that on the public Actions page; the logs need a
+    sign-in. On Linux the golden step runs whenever the steps before it
+    pass, so CI's llvmpipe matched the references within the tolerance.
+    Which Ubuntu image the job ran on is in the logs.
   - Note: an adversarial review (three angles, two refuters a finding)
     confirmed four findings and contested one; all five are fixed. The one
     that mattered: `cargo xtask ci` draws the same scenes, so a scene whose
@@ -961,7 +964,60 @@ testing in CI.
 **Goal:** the first playable pixel: a character moved by actions, rendered
 by the batched sprite renderer.
 
-- [ ] **M3.1 — input crate**
+- [x] **M3.1 — input crate**
+  - Note: the user chose three things on 2026-10-19:
+    - Text mode is on the input side only. The platform has no
+      `Event::Text` yet; it comes with the first text field (M7.2).
+    - Keyboard and mouse bindings, with rebind conflict detection. The
+      `begin_capture` flow waits for M9.2, and pad bindings and deadzones
+      for M8.4, whose Accept already lists the deadzone property test.
+    - Replays are fixed records, and live axes are rounded when latched,
+      so that a replay is bit-identical to the live run.
+  - Note: the crate, in `docs/subsystems/input.md`:
+    - `ActionSet` carries each action's name, kind and `ui_allowed`, which
+      the spec had in an `ActionDef`. The map holds only bindings: four
+      slots an action.
+    - `Input` takes events and `set_text_mode`, and `latch(&map, &mut
+      state)` makes the tick's `ActionState`.
+    - `InputRecorder` and `InputPlayer` write and read format version 1.
+    - One error enum, `InputError`. One crate: `nadir-input`, which now
+      depends on core and platform.
+  - Note: the latch keeps the changes between two ticks in order, not the
+    spec's counts per button. With one binding the result is the spec's
+    `ButtonTrack`, and a property test checks that against the model. With
+    several, an action goes down with the first input and up with the last.
+  - Note: the replay reader has no fuzz target: `xtask` may depend only on
+    core and codec. Property tests stand in: a replay cut inside its header
+    or a tick fails where it ends, one cut at the end of a tick plays the
+    ticks before the cut, and damaged ones never panic.
+  - Note: verified on 2026-10-19: `cargo test -p nadir-input` gave 42 unit,
+    5 property and 2 doc tests, all passing. Four planted bugs each failed
+    the property tests:
+    - a tap not held for its tick
+    - the recorder dropping the just-released bit
+    - edges counted per input, not per action
+    - a button's value taken from any binding pressed during the tick
+
+    `cargo xtask ci` passed, and rustdoc with `-D warnings` was clean.
+  - Note: a design critique (three lenses, two refuters a point) confirmed
+    two defects before any code was written:
+    - With two bindings, a button's live value could be 1 while it was not
+      held. The replay derives the value from held, so a replay would have
+      differed from the live run. A button's value now follows held.
+    - With no tick count in the format, "every prefix fails" could not
+      hold. It now reads: a cut inside a tick fails, and a cut at the end
+      of one plays the ticks before it.
+
+    From the contested points, directions are shortened to length 1 after
+    rounding, and the recorder is typed by the set. The adversarial review
+    (three angles, two refuters a finding) then confirmed three findings,
+    all about docs: the map's "strongest binding" wording, the player's
+    "anything latching cannot make" claim, and a mouse binding hidden by
+    text mode. All are fixed. The refuters of the third angle did not run
+    (a session limit), so its six findings were checked by hand: all held,
+    and all are fixed, with two new unit tests. A direction from a key
+    tapped while the action is released was refuted twice as the
+    documented rule, and is now spelled out.
   - Depends: M1.3, M0.2
   - Do: device state, edge latching, `ActionMap`/`ActionState`, composite
     WASD, text mode, recorder/player (format only), per
@@ -1007,6 +1063,11 @@ by the batched sprite renderer.
 
 - [ ] **M3.4 — facade + sandbox: moving character**
   - Depends: M3.1, M3.3
+  - Note (from M3.1): feed every event to `Input::handle`, and call
+    `Input::latch` once for each tick, before the fixed systems. The first
+    tick of a frame sees that frame's events, and the frame's other ticks
+    see none: a held key stays held, and a tap counts once. `latch` starts
+    the next tick, so a reader per frame needs an `Input` of its own.
   - Do:
     - the `App` integrates input latching, interpolation (prev/current
       positions) and render submission
@@ -1102,6 +1163,9 @@ by the batched sprite renderer.
 
 - [ ] **M4.7 — determinism test infrastructure**
   - Depends: M4.4, M3.1
+  - Note (from M3.1): `InputRecorder` and `InputPlayer` hold only the
+    actions' states, tick after tick: no seed, no pointer, no wheel. Keep
+    the seed beside the recording. The player replaces `Input::latch`.
   - Do: a headless run mode; input recording in the sandbox; a world hash
     via reflection; `nadir/tests/determinism.rs` with a stored recording
     and hash sequence.
@@ -1279,6 +1343,18 @@ by the batched sprite renderer.
 
 - [ ] **M7.2 — debug: immediate-mode UI core**
   - Depends: M7.1, M3.1
+  - Note (from M3.1): typed text does not exist yet. The platform needs
+    `Event::Text`:
+    - on Linux, an X input method: `XOpenIM`, `XCreateIC` and
+      `Xutf8LookupString`, not yet declared in `nadir-sys`
+    - on Windows, `WM_CHAR`
+    - on macOS, `characters`
+
+    `nadir-debug` may not depend on `nadir-platform`, so text, and the
+    key repeats that editing needs (`Input` ignores repeats), must reach
+    it through `nadir-input` or the facade. `Input::set_text_mode` hides
+    every key and mouse button from gameplay actions. A capture of the
+    keyboard only, or of the mouse only (`wants_mouse`), needs new API.
   - Do: IDs, hot/active state, layout, windows (drag, collapse, scroll),
     the widget set, input capture, position persistence.
   - Accept: the UI logic tests in the debug spec pass.
@@ -1351,6 +1427,16 @@ by the batched sprite renderer.
 
 - [ ] **M8.4 — input: pad bindings, deadzones, active device, prompt data**
   - Depends: M8.1
+  - Note (from M3.1):
+    - `Binding` is not `#[non_exhaustive]`: adding the pad variants breaks
+      the workspace's matches, which is the point.
+    - A replay of version 1 derives a button's value from held. An analog
+      button value needs format version 2 and a reader for version 1, or
+      the analog half-axis goes through an `Axis1` instead.
+    - Directions are already shortened to length 1 after rounding.
+      `Axis1` values need rounding and clamping to 0..1: M3.1 had no
+      analog input, so it has no function for that.
+    - The spec's deadzone property test is this task's.
   - Do: `PadButton`/`PadAxis`/`PadStick` bindings; radial and trigger
     deadzones; active-device tracking; prompt-glyph data table (per device
     family) in `assets/data/`.
@@ -1378,6 +1464,9 @@ by the batched sprite renderer.
 
 - [ ] **M9.2 — menu kit and game UI**
   - Depends: M7.1, M8.4
+  - Note (from M3.1): `ActionMap::conflict` returns the first other slot
+    whose binding shares a key or button. A swap is an `unbind` and a
+    `bind`. `begin_capture` is this task's.
   - Do: in the facade, focusable buttons, sliders and toggles with
     keyboard, mouse and gamepad navigation; the main menu, pause menu and
     settings (display, audio, controls with rebinding).
@@ -1387,6 +1476,9 @@ by the batched sprite renderer.
 
 - [ ] **M9.3 — settings file**
   - Depends: M9.2
+  - Note (from M3.1): bindings are saved by action name
+    (`ActionSet::from_name`). `Key` and `MouseButton` have no names to
+    read back yet, beyond their `Debug` text.
   - Do: `settings.jsonc` load, validate and save; unknown keys preserved;
     invalid values fall back to defaults with a warning; fuzz target.
   - Accept: a test for each fallback rule; the fuzz target is registered.

@@ -4,5 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[dependencies]
+nadir-core = { path = "../core" }
+nadir-platform = { path = "../platform" }
+
 [lints]
 workspace = true

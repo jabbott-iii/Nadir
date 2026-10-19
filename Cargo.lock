@@ -65,6 +65,10 @@ dependencies = [
 [[package]]
 name = "nadir-input"
 version = "0.1.0"
+dependencies = [
+ "nadir-core",
+ "nadir-platform",
+]
 
 [[package]]
 name = "nadir-platform"

@@ -129,13 +129,13 @@ pub fn run(mut app: App) -> Result<(), Error> {
     loop {
         platform.pump_events(&mut events);                   // non-blocking
         if app.handle_window_events(&events) == Flow::Quit { break; }
-        app.input.ingest(&events);                           // edges accumulate here
+        for event in &events { app.input.handle(event); }    // edges accumulate here
         events.clear();
 
         let frame = clock.begin_frame(stopwatch.lap());      // clamps hitches
         while let Some(tick) = clock.consume_tick() {
             app.world.snapshot_prev_transforms();            // for interpolation
-            app.input.latch_tick();                          // edges -> this tick
+            app.input.latch(&app.action_map, &mut app.actions); // edges -> this tick
             app.schedule.run_fixed(&app.world, &tick);
             app.world.apply_commands();                      // structural changes
         }
@@ -219,7 +219,7 @@ fn main() -> Result<(), nadir::Error> {
 }
 
 fn player_move(world: &World, tick: &Tick) {
-    let input = world.resource::<ActionState>();
+    let input = world.resource::<ActionState<Action>>();
     let players = world.read::<Player>();
     let mut vel = world.write::<Velocity>();
     for (e, _) in players.iter() {
