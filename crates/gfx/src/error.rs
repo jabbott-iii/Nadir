@@ -116,6 +116,14 @@ pub enum GfxError {
     },
     /// The frame could not be shown.
     Present(PlatformError),
+    /// This system has no offscreen OpenGL context yet, so
+    /// [`Device::new_headless`](crate::Device::new_headless) cannot make a
+    /// device: Windows and macOS, until roadmap M2.6 and M2.7.
+    NoOffscreenContext,
+    /// The offscreen OpenGL context for
+    /// [`Device::new_headless`](crate::Device::new_headless) could not be
+    /// made.
+    OffscreenContext(PlatformError),
 }
 
 impl fmt::Display for GfxError {
@@ -177,6 +185,12 @@ impl fmt::Display for GfxError {
             Self::OutOfMemory(what) => write!(f, "the graphics driver ran out of memory: {what}"),
             Self::Gl { call, code } => write!(f, "{call} failed: {}", gl_error_name(*code)),
             Self::Present(error) => write!(f, "could not show the frame: {error}"),
+            Self::NoOffscreenContext => {
+                f.write_str("this system has no offscreen OpenGL context yet")
+            }
+            Self::OffscreenContext(error) => {
+                write!(f, "could not make an offscreen OpenGL context: {error}")
+            }
         }
     }
 }
@@ -184,7 +198,7 @@ impl fmt::Display for GfxError {
 impl std::error::Error for GfxError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Present(error) => Some(error),
+            Self::Present(error) | Self::OffscreenContext(error) => Some(error),
             _ => None,
         }
     }
@@ -306,5 +320,23 @@ mod tests {
             Some("this operating system has no backend yet")
         );
         assert!(std::error::Error::source(&GfxError::NoPipeline).is_none());
+    }
+
+    #[test]
+    fn an_offscreen_context_error_says_why() {
+        assert_eq!(
+            GfxError::NoOffscreenContext.to_string(),
+            "this system has no offscreen OpenGL context yet"
+        );
+        let error = GfxError::OffscreenContext(PlatformError::GlContextExists);
+        let source = std::error::Error::source(&error).map(ToString::to_string);
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "could not make an offscreen OpenGL context: {}",
+                PlatformError::GlContextExists
+            )
+        );
+        assert_eq!(source, Some(PlatformError::GlContextExists.to_string()));
     }
 }

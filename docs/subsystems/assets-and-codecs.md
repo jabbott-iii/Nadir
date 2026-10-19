@@ -177,39 +177,78 @@ file  := "KBJ1" value
 
 ### Handles and storage
 
+As built in M3.2: loading is synchronous, from loose files under a root
+directory. Workers, scopes and `Source` come in M5.3, and `reload` in M5.8.
+
 ```rust
-pub struct Handle<T> { id: GenIndex, _t: PhantomData<fn() -> T> }   // Copy, Eq, Hash
-pub struct Assets<T> { arena: GenArena<Slot<T>>, by_path: FastHashMap<AssetPath, Handle<T>> }
-enum Slot<T> { Loading, Loaded(T), Failed(AssetError) }
+pub use nadir_core::Handle;                 // { id: GenIndex, _t: PhantomData<fn() -> T> }: Copy, Eq, Hash
+pub struct Assets<T> { arena: GenArena<Entry<T>>, by_path: FastHashMap<String, Handle<T>>, pending: Vec<Handle<T>> }
+enum Slot<T> { Pending(Result<T::Decoded, AssetError>), Loaded(T), Failed { error: AssetError, placeholder: Option<T> } }
+pub enum LoadState { Loading, Loaded, Failed }
+pub enum OnFailure { Placeholder, Nothing }
 
 impl AssetServer {
-    pub fn load<T: Asset>(&self, path: &str) -> Handle<T>;         // dedups by path; async on workers
-    pub fn get<T: Asset>(&self, h: &Handle<T>) -> Option<&T>;       // None while loading/failed
-    pub fn state<T: Asset>(&self, h: &Handle<T>) -> LoadState;
-    pub fn finish_completed_loads(&mut self, ctx: &mut FinalizeCtx); // main thread, once per frame
-    pub fn reload(&self, path: &str);                               // dev hot reload
+    pub fn new(root: impl Into<PathBuf>, on_failure: OnFailure) -> Self;
+    pub fn load<T: Asset>(&mut self, path: &str) -> Handle<T>;     // dedups by path; reads and decodes now
+    pub fn get<T: Asset>(&self, h: Handle<T>) -> Option<&T>;        // loaded, or a failed one's placeholder
+    pub fn state<T: Asset>(&self, h: Handle<T>) -> Option<LoadState>;  // None: nothing under that handle
+    pub fn error<T: Asset>(&self, h: Handle<T>) -> Option<&AssetError>;
+    pub fn path<T: Asset>(&self, h: Handle<T>) -> Option<&str>;
+    pub fn assets<T: Asset>(&self) -> Option<&Assets<T>>;
+    pub fn has_pending(&self) -> bool;
+    pub fn finish_completed_loads(&mut self, ctx: &mut FinalizeCtx<'_>); // main thread, once per frame
+    // M5.8: pub fn reload(&self, path: &str);                    // dev hot reload
 }
 
 pub trait Asset: Sized + Send + 'static {
-    type Decoded: Send + 'static;                                  // produced on a worker
+    type Decoded: Send + 'static;                                  // produced on a worker from M5.3
     const EXTENSIONS: &'static [&'static str];
-    fn decode(bytes: &[u8], ctx: &DecodeCtx) -> Result<Self::Decoded, AssetError>;  // worker thread
-    fn finalize(decoded: Self::Decoded, ctx: &mut FinalizeCtx) -> Result<Self, AssetError>; // main thread (GPU upload)
+    fn decode(bytes: &[u8], ctx: &DecodeCtx<'_>) -> Result<Self::Decoded, AssetError>;
+    fn finalize(decoded: Self::Decoded, ctx: &mut FinalizeCtx<'_>) -> Result<Self, AssetError>; // main thread (GPU upload)
+    fn placeholder(ctx: &mut FinalizeCtx<'_>) -> Result<Self, AssetError>;   // default: NoPlaceholder
 }
+
+pub struct DecodeCtx<'a> { /* path, limits */ }
+pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no allocation */ }
 ```
 
+- **Loading:**
+  - `load` gives the same handle for the same path, whatever happened to
+    its load. Otherwise it reads and decodes the file at once.
+  - The asset is made by the next `finish_completed_loads`, and stays
+    `Loading` until then.
+  - A failure shows only then, and is logged with the path: a missing file
+    is `NotFound`.
+- **Paths:**
+  - ASCII letters are lowercased.
+  - The rest is checked as one byte grammar on every system: `/` between
+    parts, no empty, `.` or `..` part, and no part ending in a dot or a
+    space or named like a Windows device.
+  - No control character, `\`, `:` or `*?"<>|` is allowed.
+  - The last part must end in one of `T::EXTENSIONS`.
+- **`FinalizeCtx`** holds the resources `finalize` needs, by type, such as
+  render's `gfx::Device`. A missing one is `AssetError::MissingContext`.
+- **`AssetError`** holds no path: the server logs each failure with its
+  path. Its variants are `BadPath`, `Extension`, `NotFound`, `Read`,
+  `Decode(CodecError)`, `Invalid(String)` (an asset type's own reason),
+  `MissingContext` and `NoPlaceholder`.
 - **Reference handling:** handles are plain IDs; there is no reference
   counting.
   - Assets live until their owning *scope* (global, level, transient) is
-    unloaded.
+    unloaded (M5.3).
   - Levels declare their asset list. Unloading a level frees every asset
     scoped to it.
   - This is explicit, predictable, and has no hidden `Drop` cost.
 - **Placeholders in dev:**
-  - a failed texture becomes a magenta/black 8×8 checker
-  - a failed sound becomes silence
-  - failures log with the path and the error
-- **Release:** a missing asset is a hard error at level load, with a dialog.
+  - The server's `OnFailure::Placeholder` shows them. It is a runtime
+    setting, which the facade picks under its `dev` feature. The user chose
+    this on 2026-10-19.
+  - A failed texture becomes a magenta/black 8×8 checker. Its state stays
+    `Failed`, and `get` gives the placeholder.
+  - A failed sound becomes silence.
+  - Failures log with the path and the error.
+- **Release:** a missing asset is a hard error at level load, with a dialog
+  (M5.6). Until then, with `OnFailure::Nothing`, it is `Failed` and logged.
 
 ### Virtual file system
 

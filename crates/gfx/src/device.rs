@@ -5,7 +5,7 @@ use core::marker::PhantomData;
 use core::ops::Range;
 
 use nadir_core::{IRect, LinearColor};
-use nadir_platform::{GlContextId, GpuSurface};
+use nadir_platform::{GlContextId, GpuSurface, HeadlessGl, PlatformError, create_headless_gl};
 
 use crate::GfxError;
 use crate::gl::{DrawVertices, GlDevice, GlFns, PassState};
@@ -75,6 +75,9 @@ pub struct Device {
     // still has it.
     gl: GlDevice,
     _claim: DeviceClaim,
+    /// The offscreen context of a device from [`Device::new_headless`].
+    /// Dropped last, after the objects and the claim.
+    context: Option<HeadlessGl>,
     /// Keeps the device on its thread.
     _thread: PhantomData<*const ()>,
 }
@@ -106,8 +109,38 @@ impl Device {
         Ok(Self {
             gl: GlDevice::new(fns, id)?,
             _claim: claim,
+            context: None,
             _thread: PhantomData,
         })
+    }
+
+    /// Makes a device on an offscreen context of its own, for tests and
+    /// tools that show nothing in a window. Crates that may not depend on
+    /// `nadir-platform`, such as `nadir-render`, reach the GPU this way.
+    ///
+    /// It draws into render targets only, and runs its frames with
+    /// [`Device::begin_offscreen_frame`] and [`Device::end_offscreen_frame`].
+    /// Like the context, it stays on the thread that made it.
+    ///
+    /// # Errors
+    ///
+    /// - [`GfxError::NoOffscreenContext`] where `nadir-platform` cannot make
+    ///   an offscreen context yet: Windows and macOS, until roadmap M2.6
+    ///   and M2.7.
+    /// - [`GfxError::OffscreenContext`] if the context cannot be made: for
+    ///   instance with no EGL driver, with a driver that has no OpenGL 3.3
+    ///   core (`PlatformError::GlTooOld`), or when this thread already has a
+    ///   context.
+    /// - As [`Device::new`] for the rest, such as
+    ///   [`GfxError::MissingFunction`].
+    pub fn new_headless() -> Result<Self, GfxError> {
+        let context = create_headless_gl().map_err(|error| match error {
+            PlatformError::Unsupported => GfxError::NoOffscreenContext,
+            error => GfxError::OffscreenContext(error),
+        })?;
+        let mut device = Self::new(GpuSurface::Gl(&context))?;
+        device.context = Some(context);
+        Ok(device)
     }
 
     /// What the device runs on, and its limits.
@@ -260,6 +293,29 @@ impl Device {
     /// and [`GfxError::Present`] if the frame cannot be shown.
     pub fn end_frame(&mut self, surface: GpuSurface<'_>) -> Result<(), GfxError> {
         self.gl.end_frame(surface)
+    }
+
+    /// Starts a frame on the offscreen context of a device from
+    /// [`Device::new_headless`]. Its passes draw into render targets.
+    ///
+    /// # Errors
+    ///
+    /// [`GfxError::WrongSurface`] on a device that has no offscreen context
+    /// of its own, and as [`Device::begin_frame`].
+    pub fn begin_offscreen_frame(&mut self) -> Result<(), GfxError> {
+        let context = self.context.as_ref().ok_or(GfxError::WrongSurface)?;
+        self.gl.begin_frame(GpuSurface::Gl(context))
+    }
+
+    /// Ends a frame that [`Device::begin_offscreen_frame`] started.
+    ///
+    /// # Errors
+    ///
+    /// [`GfxError::WrongSurface`] on a device that has no offscreen context
+    /// of its own, and as [`Device::end_frame`].
+    pub fn end_offscreen_frame(&mut self) -> Result<(), GfxError> {
+        let context = self.context.as_ref().ok_or(GfxError::WrongSurface)?;
+        self.gl.end_frame(GpuSurface::Gl(context))
     }
 
     /// Reads a render target back: RGBA8, from the top row, 4 bytes a pixel.

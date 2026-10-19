@@ -13,6 +13,13 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
 - A fixed pass list: world → (lights, later) → post → upscale → UI → debug.
 - The texture, atlas and font asset types, and their loaders, registered with
   `nadir-assets`.
+  - `Texture` (M3.2) is a QOI file uploaded by `finalize`, which needs the
+    `gfx::Device` in the `FinalizeCtx`. An sRGB QOI becomes `Rgba8Srgb`,
+    and a linear one `Rgba8`.
+  - Its placeholder is an 8×8 checker of single texels, magenta and black,
+    with magenta in the top-left corner.
+  - Its GPU tests use `Device::new_headless`, behind render's
+    `headless-test` feature.
 
 ## Input: `RenderFrame`
 

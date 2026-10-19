@@ -20,5 +20,6 @@ mod common;
 mod drawing;
 mod frames;
 mod golden;
+mod offscreen;
 mod pipelines;
 mod resources;

@@ -147,7 +147,9 @@ pub fn run(mut app: App) -> Result<(), Error> {
         renderer.render(&mut gfx, &draw)?;
         gfx.end_frame(platform.gpu_surface())?;              // present: GL swap or Metal drawable
 
-        app.assets.finish_completed_loads(&mut gfx);         // GPU uploads on main thread
+        if app.assets.has_pending() {                        // GPU uploads on main thread
+            app.assets.finish_completed_loads(&mut FinalizeCtx::new().with(&mut gfx));
+        }
         app.dev_hooks();                                     // hot reload, profiler (dev)
         if platform.is_minimized() { std::thread::sleep(MINIMIZED_SLEEP); }
     }

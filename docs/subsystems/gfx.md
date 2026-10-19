@@ -44,6 +44,7 @@ pub struct Device { backend: Backend /* GL now; an enum Gl | Metal from M10 */ }
 
 impl Device {
     pub fn new(surface: GpuSurface<'_>) -> Result<Self, GfxError>;   // keeps the context's id, not a borrow
+    pub fn new_headless() -> Result<Self, GfxError>;     // owns an offscreen context: tests and tools (M3.2)
     pub fn caps(&self) -> &Caps;                          // backend, vendor, renderer, version, max texture size (timer queries: M7.3)
 
     pub fn create_texture(&mut self, desc: &TextureDesc, data: Option<&[u8]>) -> Result<TextureId, GfxError>;
@@ -57,6 +58,8 @@ impl Device {
     pub fn begin_frame(&mut self, surface: GpuSurface<'_>) -> Result<(), GfxError>;   // the drawable size; Metal: acquire drawable
     pub fn begin_pass(&mut self, target: PassTarget, clear: Option<LinearColor>) -> Result<Pass<'_>, GfxError>;
     pub fn end_frame(&mut self, surface: GpuSurface<'_>) -> Result<(), GfxError>;     // present (GL swap / Metal present+commit)
+    pub fn begin_offscreen_frame(&mut self) -> Result<(), GfxError>;   // a frame on new_headless's own context
+    pub fn end_offscreen_frame(&mut self) -> Result<(), GfxError>;
 
     pub fn read_pixels(&mut self, target: RenderTargetId) -> Result<Vec<u8>, GfxError>; // RGBA8, top-left origin (tests)
 }
@@ -279,4 +282,13 @@ pub struct ShaderSource<'a> {
   context: the draw checks, readback, orientation, samplers, sRGB,
   blending, instancing, uniforms, the state cache and shader errors. The
   golden scenes run in the same binary; the parity test comes with M3.3.
+- **Headless devices (M3.2):** `Device::new_headless` makes a device that
+  owns its offscreen context, so that crates which may not depend on
+  `nadir-platform`, such as render, can test on a GPU. Asset types that
+  need the GPU are tested in the crate that defines them.
+  - Its frames are `begin_offscreen_frame` and `end_offscreen_frame`, and it
+    draws into render targets.
+  - Where this system has no offscreen context yet, it fails with
+    `GfxError::NoOffscreenContext`, which tests skip on. Other failures
+    carry the platform's error in `GfxError::OffscreenContext`.
 - **Benchmark:** 10k instanced sprites, upload plus draw time.

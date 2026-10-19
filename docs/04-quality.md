@@ -46,11 +46,11 @@ pub fn check_sized<T: std::fmt::Debug>(
 - The default seed comes from `NADIR_SEED`, or from a fixed value in CI so
   runs are reproducible.
 - `NADIR_EXPECT_GL_RENDERER`, when set and not empty, makes the headless
-  OpenGL tests of `nadir-platform` and `nadir-gfx` fail unless the
-  renderer's name contains it (`llvmpipe` in CI). Otherwise they log the
-  renderer and take any. Where `nadir-platform` has no offscreen context
-  yet (Windows and macOS, until M2.6 and M2.7), the gfx tests skip, but
-  only while the variable is unset.
+  OpenGL tests of `nadir-platform`, `nadir-gfx` and `nadir-render` fail
+  unless the renderer's name contains it (`llvmpipe` in CI). Otherwise they
+  log the renderer and take any. Where `nadir-platform` has no offscreen
+  context yet (Windows and macOS, until M2.6 and M2.7), the gfx and render
+  tests skip, but only while the variable is unset.
 - A nightly job runs with random seeds and prints the seeds it used.
 - Shrinking is deliberately minimal, and only `check_sized` does it: the
   harness retries a failing case at every smaller size and reports the
@@ -287,10 +287,12 @@ or macOS runner yet, so the "reported" points are other projects'.
     (tasksmack#2256). The same project found, on its own machine, that GDI
     Generic has no `WGL_ARB_create_context` (tasksmack#2113), so it has no
     3.3 core context.
-  - The gfx GL tests skip only when `create_headless_gl` returns
-    `Unsupported` and `NADIR_EXPECT_GL_RENDERER` is empty. Any other error
-    fails them. So once M2.6 has a WGL context, the Windows leg fails on
-    this runner, unless M2.6 widens the skip or brings llvmpipe.
+  - The gfx and render GL tests skip only when there is no offscreen
+    context at all (`PlatformError::Unsupported`, which
+    `Device::new_headless` gives as `GfxError::NoOffscreenContext`) and
+    `NADIR_EXPECT_GL_RENDERER` is empty. Any other error fails them. So
+    once M2.6 has a WGL context, the Windows leg fails on this runner,
+    unless M2.6 widens the skip or brings llvmpipe.
   - The image installs no Mesa and no other OpenGL driver.
   - Jobs run in an interactive desktop session, where windows can be
     created (reported, not documented).

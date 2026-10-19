@@ -13,6 +13,10 @@ dependencies = [
 [[package]]
 name = "nadir-assets"
 version = "0.1.0"
+dependencies = [
+ "nadir-codec",
+ "nadir-core",
+]
 
 [[package]]
 name = "nadir-audio"
@@ -81,6 +85,12 @@ dependencies = [
 [[package]]
 name = "nadir-render"
 version = "0.1.0"
+dependencies = [
+ "nadir-assets",
+ "nadir-codec",
+ "nadir-core",
+ "nadir-gfx",
+]
 
 [[package]]
 name = "nadir-scene"

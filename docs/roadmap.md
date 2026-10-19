@@ -919,6 +919,12 @@ testing in CI.
       test binary. That is the user's decision.
     - Mesa's WGL reports every pixel format as fully accelerated, llvmpipe
       included, so only `GL_RENDERER` tells it from a GPU.
+  - Note (from M3.2): two more tests decide whether to skip:
+    `headless_device` in `crates/gfx/tests/headless/offscreen.rs` and
+    `device` in `crates/render/tests/headless.rs`. They skip only on
+    `GfxError::NoOffscreenContext`, and render cannot name `PlatformError`,
+    so widening them means matching a `GfxError`, such as
+    `OffscreenContext(_)`. The same holds for M2.7.
   - Depends: M2.3, M1.5
   - Do: the dummy-window dance, `wglChoosePixelFormatARB`, a 3.3 core
     context, `wglSwapIntervalEXT`, GL 1.1 symbols from `opengl32.dll`.
@@ -998,7 +1004,9 @@ by the batched sprite renderer.
     - edges counted per input, not per action
     - a button's value taken from any binding pressed during the tick
 
-    `cargo xtask ci` passed, and rustdoc with `-D warnings` was clean.
+    `cargo xtask ci` passed, and rustdoc with `-D warnings` was clean. CI
+    run 10, for the M3.1 commit `3e3e885`, passed on all three systems, as
+    the user reported; the session saw it on the public Actions page.
   - Note: a design critique (three lenses, two refuters a point) confirmed
     two defects before any code was written:
     - With two bindings, a button's live value could be 1 while it was not
@@ -1025,7 +1033,70 @@ by the batched sprite renderer.
   - Accept: every test listed in the input spec passes.
   - Verify: `cargo test -p nadir-input`
 
-- [ ] **M3.2 — minimal assets: handles + synchronous loose loading**
+- [x] **M3.2 — minimal assets: handles + synchronous loose loading**
+  - Note: the user chose on 2026-10-19 that placeholders are a runtime
+    setting of the server (`OnFailure::Placeholder` or `Nothing`), not a
+    cargo feature. The facade picks it under its own `dev` feature, and
+    assets gets a `dev` feature when something must be compiled out
+    (M5.7/M5.8).
+  - Note: three crates:
+    - `nadir-assets`:
+      - `Handle` (core's), `Assets<T>`, `LoadState`, and the `Asset`
+        trait with `decode`, `finalize` and `placeholder`
+      - `DecodeCtx`, and `FinalizeCtx`: up to four resources by type,
+        with no allocation
+      - `AssetError`, and `AssetServer`
+    - `nadir-render`: the `Texture` asset, a QOI on the GPU, with a
+      magenta and black 8×8 checker as its placeholder
+    - `nadir-gfx`: `Device::new_headless`, `begin_offscreen_frame`,
+      `end_offscreen_frame`, and `GfxError::NoOffscreenContext` and
+      `OffscreenContext`
+  - Note: `load` reads and decodes at once, and the asset is made by the
+    next `finish_completed_loads`, as it will be once workers decode
+    (M5.3). The same path gives the same handle in every state.
+  - Note: paths are ASCII-lowercased, as `.claude/rules/parsers.md` asks,
+    ahead of M5.3's normalization. They are then checked as one byte
+    grammar on every system: no drive prefix (`:`), no `\`, no empty, `.`
+    or `..` part, no Windows device name, no control character.
+  - Note: verified on 2026-10-19:
+    - `cargo test -p nadir-assets -p nadir-render` (the Verify line, plain)
+      passed: assets 8 unit, 8 integration and 1 doc test; render 3 unit
+      and 1 integration test.
+    - The GPU half of the line also passed: gfx 36 unit and 45 GL tests,
+      and render's 3 GL tests. The run used llvmpipe with Mesa forced and no
+      display. Render's GL tests and the gfx offscreen tests also passed on
+      NVIDIA.
+    - Render's GL tests draw two textures and read them back: a loaded 2×2
+      texture with a color in each corner, the right way up, and a missing
+      file's placeholder, magenta and black texel for texel.
+    - Three planted bugs each failed the tests: no dedup by path, the
+      placeholder policy ignored, and the checker inverted.
+    - `cargo xtask ci` passed, and rustdoc with `-D warnings` was clean.
+  - Note: a design critique (three lenses, two refuters a point) confirmed
+    five defects before any code was written:
+    - A headless device could not run a frame, since `begin_frame` needs a
+      surface that render cannot name. Hence the offscreen frames.
+    - `FinalizeCtx` allocated every frame. It is now a fixed array, and
+      there is `has_pending()`.
+    - A decode failure that is not a codec's had no variant. Hence
+      `AssetError::Invalid`.
+    - The Verify line did not build render's GL tests.
+    - The path check let `C:x.qoi` replace the root on Windows.
+
+    From the contested points, a failed offscreen context carries the
+    platform's error.
+  - Note: the adversarial review (three angles, two refuters a finding)
+    confirmed seven findings and contested two; all nine are fixed:
+    - the device-name check missed `con .qoi`, `CONIN$` and the
+      superscript ports
+    - "`None` for a handle from another server" was false, and its test
+      empty; handles are plain ids
+    - `Assets::handle` did not lowercase
+    - `new_headless`'s doc gave the wrong error for an old driver
+    - the M2.6/M2.7 notes missed the new skip sites
+    - gfx.md said assets could use `new_headless`
+    - a loaded texture's pixels were not read back
+    - stale wording in the M5.3 note
   - Note (from M2.3): render and assets may not depend on platform, even
     for tests, so their GPU tests need a `Device::new_headless` that owns
     its context.
@@ -1037,7 +1108,12 @@ by the batched sprite renderer.
     - a `Texture` asset in `render` (QOI → GPU)
   - Accept: loading the same path twice returns the same handle; a missing
     file shows the placeholder in dev.
-  - Verify: `cargo test -p nadir-assets -p nadir-render`
+  - Verify: `cargo test -p nadir-assets -p nadir-render`; for the GPU
+    tests, `LIBGL_ALWAYS_SOFTWARE=1 NADIR_EXPECT_GL_RENDERER=llvmpipe cargo
+    test -p nadir-gfx -p nadir-assets -p nadir-render --features
+    nadir-gfx/headless-test,nadir-render/headless-test`. Where libglvnd also
+    has NVIDIA's EGL, add
+    `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
 
 - [ ] **M3.3 — render: sprite batcher, sort keys, camera, upscale**
   - Note (from M2.3):
@@ -1046,6 +1122,14 @@ by the batched sprite renderer.
       pass.
     - Shaders read instances through attributes, never `gl_InstanceID`.
     - The blit samples a render target bottom-up on GL.
+  - Note (from M3.2):
+    - Render's GPU tests make their device with `Device::new_headless`, and
+      run frames with `begin_offscreen_frame` and `end_offscreen_frame`.
+      `crates/render/tests/headless.rs` draws a texture that way.
+    - A sprite whose texture failed gets its placeholder from
+      `AssetServer::get`, an 8×8 checker. A sprite's `uv` names a small
+      region of an atlas page, which would show one texel of it: draw a
+      sprite whose texture is `LoadState::Failed` with `uv` 0 to 1.
   - Note (from M2.4): render's golden scenes are tests too (ADR-0017). Add
     their `cargo test` command to `SCENES` in `xtask/src/golden.rs`, write
     PAM as `crates/gfx/tests/headless/golden.rs` does, and define them the
@@ -1063,6 +1147,10 @@ by the batched sprite renderer.
 
 - [ ] **M3.4 — facade + sandbox: moving character**
   - Depends: M3.1, M3.3
+  - Note (from M3.2): make the `AssetServer` with
+    `OnFailure::Placeholder` under the facade's `dev` feature and
+    `OnFailure::Nothing` without it. Once a frame, when `has_pending()`,
+    call `finish_completed_loads(&mut FinalizeCtx::new().with(&mut gfx))`.
   - Note (from M3.1): feed every event to `Input::handle`, and call
     `Input::latch` once for each tick, before the fixed systems. The first
     tick of a frame sees that frame's events, and the frame's other ticks
@@ -1203,6 +1291,17 @@ by the batched sprite renderer.
 
 - [ ] **M5.3 — assets: async server, worker pool, scopes, LooseSource**
   - Depends: M3.2
+  - Note (from M3.2):
+    - `load` reads and decodes at once, and `finish_completed_loads`
+      finalizes, so moving decoding to workers keeps the API.
+    - `load` takes `&mut self`. The spec before M3.2 had `&self`, which
+      needs interior mutability: keep `&mut self` unless workers need
+      otherwise.
+    - Paths are already ASCII-lowercased and checked (`crates/assets/src/path.rs`).
+    - Unloading a scope must destroy GPU textures, which `Asset` has no hook
+      for yet.
+    - The root directory is the only source so far: `AssetServer::new(root,
+      ..)`.
   - Do: worker threads; decode on workers and finalize on main; load
     states; scopes (global/level/transient); `Source`, `LooseSource`; path
     normalization.
@@ -1243,6 +1342,9 @@ by the batched sprite renderer.
 
 - [ ] **M5.7 — pack files**
   - Depends: M5.4
+  - Note (from M3.2): `AssetServer::new(root, ..)` reads loose files. If
+    the `dev` feature compiles loose reading out of release builds, the
+    facade's release path changes with it, as this task's Do says.
   - Do: the `.kpak` writer (cook) with dedup and alignment; `PackSource`
     with TOC binary search and CRC verification; release builds use the
     pack.
