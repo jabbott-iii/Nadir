@@ -54,18 +54,32 @@ const TOLERANCE: u8 = 2;
 /// One pixel in this many may differ by more than [`TOLERANCE`]: 0.1%.
 const OUTLIER_SHARE: usize = 1000;
 
-/// The commands that draw the scenes.
-const SCENES: &[&[&str]] = &[&[
-    "test",
-    "--package",
-    "nadir-gfx",
-    "--features",
-    "headless-test",
-    "--test",
-    "headless",
-    "--",
-    "golden::",
-]];
+/// The commands that draw the scenes: each crate's GL test binary, whose
+/// `golden` module holds its scenes (ADR-0017).
+const SCENES: &[&[&str]] = &[
+    &[
+        "test",
+        "--package",
+        "nadir-gfx",
+        "--features",
+        "headless-test",
+        "--test",
+        "headless",
+        "--",
+        "golden::",
+    ],
+    &[
+        "test",
+        "--package",
+        "nadir-render",
+        "--features",
+        "headless-test",
+        "--test",
+        "headless",
+        "--",
+        "golden::",
+    ],
+];
 
 /// Runs `golden` with the arguments that follow the command name. Returns
 /// whether every scene matched its reference, or, with `--bless`, whether

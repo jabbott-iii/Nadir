@@ -921,7 +921,8 @@ testing in CI.
       included, so only `GL_RENDERER` tells it from a GPU.
   - Note (from M3.2): two more tests decide whether to skip:
     `headless_device` in `crates/gfx/tests/headless/offscreen.rs` and
-    `device` in `crates/render/tests/headless.rs`. They skip only on
+    `device` in `crates/render/tests/headless/common.rs`, which `Stage::new`
+    and so every render golden scene use. They skip only on
     `GfxError::NoOffscreenContext`, and render cannot name `PlatformError`,
     so widening them means matching a `GfxError`, such as
     `OffscreenContext(_)`. The same holds for M2.7.
@@ -1072,6 +1073,9 @@ by the batched sprite renderer.
     - Three planted bugs each failed the tests: no dedup by path, the
       placeholder policy ignored, and the checker inverted.
     - `cargo xtask ci` passed, and rustdoc with `-D warnings` was clean.
+      CI run 11, for the M3.2 commit `89de9cd`, passed on all three
+      systems, as the user reported; the session saw it on the public
+      Actions page.
   - Note: a design critique (three lenses, two refuters a point) confirmed
     five defects before any code was written:
     - A headless device could not run a frame, since `begin_frame` needs a
@@ -1115,7 +1119,76 @@ by the batched sprite renderer.
     has NVIDIA's EGL, add
     `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
 
-- [ ] **M3.3 — render: sprite batcher, sort keys, camera, upscale**
+- [x] **M3.3 — render: sprite batcher, sort keys, camera, upscale**
+  - Note: the user chose two things on 2026-10-19, recorded as ADR-0018:
+    - Pixel-perfect mode snaps each unrotated sprite's corner to a whole
+      virtual pixel, not only the camera.
+    - It rounds the zoom to a whole number, at least 1.
+  - Note: two crates, render and xtask (the golden scene list), plus four
+    new references in `tests/golden/`:
+    - `Renderer` with `render(device, assets, frame, output)`, `upscale`,
+      `screen_to_world` and `world_to_screen`
+    - `RenderFrame` (camera, clear, sprites), `SpriteDraw`, `Camera2D`,
+      `SortMode`, `Flip`, `Output`, `FrameStats` and `RenderError`
+    - the `sprite` and `blit` GLSL, in `crates/render/shaders`, with a
+      parity test
+    - render's GL tests moved to `tests/headless/`, as gfx's are
+  - Note: departures from `render.md`, which now records them:
+    - Ties sort by the full submission index, not `seq`. The design
+      critique showed that `seq` swaps two tied sprites submitted at 255
+      and 256, so tied decals would flicker.
+    - The view's top-left corner snaps, with halves rounding up, not the
+      centre: a camera step across zero would otherwise move the view by
+      two pixels.
+    - The unit quad's corner is location 6, after the spec's six instance
+      attributes.
+    - The blit's clip-space corners and uv come from Rust (`BLIT_QUAD`),
+      as `.claude/rules/shaders.md` asks.
+    - That rule also asks for both sources of a program in one task. Only
+      the GLSL is written; the `.metal` sources are M10.3's, as the
+      roadmap schedules them.
+  - Note: verified on 2026-10-20:
+    - `cargo test -p nadir-render`: 29 unit tests, including the sort-key
+      property test and the batching tests.
+    - With `headless-test` on llvmpipe (Mesa forced, no display): 17 GL
+      tests, among them order by feet, batches, snapping, placeholders,
+      zoom, shake, rotation, tint and buffer growth.
+    - `cargo xtask golden`: 10 scenes ok on llvmpipe and on NVIDIA, the 4
+      new ones among them.
+
+    The new references were drawn on llvmpipe and blessed by the agent,
+    after it looked at each one as a PNG. A human should look at them
+    before they are committed.
+  - Note: nine planted bugs each failed the tests:
+    - sorting by the top
+    - an ignored flip
+    - a factor taken from the width alone
+    - an upside-down blit
+    - the zoom left out of the uniform
+    - an unrounded zoom
+    - no buffer growth
+    - an unconverted tint
+    - counter-clockwise rotation
+
+    `cargo xtask ci` passed, and rustdoc with `-D warnings` was clean.
+  - Note: a design critique (three lenses, two refuters a point) confirmed
+    nine findings, all taken:
+    - unsnapped sprite corners, ADR-0018 after the user's choice
+    - the `seq` tie flicker
+    - halves rounding away from zero at the camera
+    - a planner that needed a GPU to test
+    - golden sprites at non-whole texel scales
+    - upscale sizes that could not catch a width-only factor, and edges
+      the scenes could not show
+
+    The adversarial review (three angles, two refuters a finding) confirmed
+    four findings and contested four; all eight are fixed:
+    - `skipped` and the placeholder rule under `OnFailure::Nothing`
+    - the architecture doc's `render` call
+    - stale test paths
+    - the fragment shaders' alpha comments
+    - tests for zoom, buffer growth, tint and rotation, which four of the
+      planted bugs had survived before
   - Note (from M2.3):
     - Each pass call returns a `Result`.
     - Uniforms are std140 blocks of `[f32; 4 * n]`, set again in each
@@ -1125,7 +1198,7 @@ by the batched sprite renderer.
   - Note (from M3.2):
     - Render's GPU tests make their device with `Device::new_headless`, and
       run frames with `begin_offscreen_frame` and `end_offscreen_frame`.
-      `crates/render/tests/headless.rs` draws a texture that way.
+      `crates/render/tests/headless/textures.rs` draws a texture that way.
     - A sprite whose texture failed gets its placeholder from
       `AssetServer::get`, an 8×8 checker. A sprite's `uv` names a small
       region of an atlas page, which would show one texel of it: draw a
@@ -1143,10 +1216,22 @@ by the batched sprite renderer.
   - Accept:
     - Sort-key property test; batching tests.
     - Goldens: y-sort scene, upscale at 3 window sizes.
-  - Verify: `cargo test -p nadir-render`; `cargo xtask golden`
+  - Verify: `cargo test -p nadir-render`; `cargo xtask golden`. For the GPU
+    tests and the goldens on llvmpipe, as for M3.2: `LIBGL_ALWAYS_SOFTWARE=1
+    NADIR_EXPECT_GL_RENDERER=llvmpipe`, plus the Mesa vendor file where
+    libglvnd also has NVIDIA's EGL, and `--features headless-test` for
+    `cargo test`.
 
 - [ ] **M3.4 — facade + sandbox: moving character**
   - Depends: M3.1, M3.3
+  - Note (from M3.3):
+    - Make the `Renderer` once with the game's virtual resolution.
+    - Inside each device frame, call `render(&mut gfx, &assets, &frame,
+      Output { target: PassTarget::Surface, size })`, with `size` from
+      `Platform::window_size()`: gfx does not expose the drawable size.
+    - Keep one `RenderFrame`, and `clear()` it each frame.
+    - Sprites snap to whole virtual pixels (ADR-0018), so motion is in
+      whole pixels. Interpolation still matters, for when each step lands.
   - Note (from M3.2): make the `AssetServer` with
     `OnFailure::Placeholder` under the facade's `dev` feature and
     `OnFailure::Nothing` without it. Once a frame, when `has_pending()`,
@@ -1167,6 +1252,16 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir`; `cargo dev` (manual)
 
 - [ ] **M3.5 — allocation counter + sprite stress benchmark**
+  - Note (from M3.3):
+    - `Renderer::render` reuses its plan and instance buffers. The buffer
+      grows by doubling, so a steady frame should allocate nothing; this
+      task's counter will tell.
+    - The planner (`crates/render/src/plan.rs`) is generic over the
+      texture, so the sort + batch bench can run without a GPU. It is
+      crate-private: expose it for `nadir-bench`.
+    - Each sprite's tint goes through `Color::to_linear`, which is three
+      `powf` calls. A table or a white fast path may be needed for the 2 ms
+      budget.
   - Note (from M2.4): with the counter in place, a test can show that
     `qoi::decode` of a file too short for its size (a 23-byte file that
     claims 8192×8192) allocates nothing. Today
@@ -1232,6 +1327,10 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir`; `cargo dev` (manual)
 
 - [ ] **M4.5 — tilemap rendering and collision grid**
+  - Note (from M3.3): tile chunks draw in the renderer's world pass, into
+    the virtual image, before or among the sprites by layer. Tall tiles are
+    sprites (`render.md`). Draw each tile at whole pixels per texel, as the
+    golden rules in `crates/render/tests/headless/golden.rs` require.
   - Depends: M4.4
   - Do:
     - the `tile_chunk` shader + chunk cache, culling, animated tiles
@@ -1652,6 +1751,18 @@ by the batched sprite renderer.
   - Verify: on macOS: `cargo test -p nadir-gfx`
 
 - [ ] **M10.3 — MSL for every shader + parity test**
+  - Note (from M3.3):
+    - The interface constants are in `crates/render/src/shader.rs`, and
+      the GLSL in `crates/render/shaders/`.
+    - The blit's uv, in `BLIT_QUAD` in `crates/render/src/renderer.rs`,
+      samples the virtual image bottom-up, as a GL render target is stored.
+      Metal's is top-down.
+    - `.claude/rules/shaders.md` asks for both sources of a program in the
+      same task. M3.3 wrote GLSL only, since this task is where the `.metal`
+      sources are scheduled.
+    - An output smaller than the virtual image sets a viewport outside the
+      target. Metal's validation refuses that, so clamp the viewport and
+      the uv then.
   - Depends: M10.2
   - Do: write a `.metal` source for every program; extend the parity test
     to parse MSL attributes.

@@ -19,7 +19,7 @@ headless-test = []
 
 [[test]]
 name = "headless"
-path = "tests/headless.rs"
+path = "tests/headless/main.rs"
 required-features = ["headless-test"]
 
 [lints]

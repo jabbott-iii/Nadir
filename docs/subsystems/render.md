@@ -21,6 +21,44 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
   - Its GPU tests use `Device::new_headless`, behind render's
     `headless-test` feature.
 
+## Built so far
+
+- M3.2: the `Texture` asset.
+- M3.3: the `Renderer` for sprites, in pixel-perfect mode:
+  - the `sprite` and `blit` programs, with a GLSL parity test
+  - instance packing, sort keys and batching
+  - `Camera2D`, the integer upscale with its letterbox, and
+    `screen_to_world` and `world_to_screen`
+  - golden scenes: `y_sort`, and `upscale_320x180`, `upscale_300x200` and
+    `upscale_333x147`
+- Not built yet:
+  - tilemaps, text, UI sprites, debug draw and post
+  - the smooth-camera and native-resolution modes
+  - shader hot reload (M5.8), and the Metal sources (M10.3)
+
+```rust
+impl Renderer {
+    pub fn new(device: &mut Device, config: &RenderConfig) -> Result<Self, RenderError>;
+    /// Inside a device frame: the world pass into the virtual image, then the
+    /// blit into `output` (the window, or a render target; Rgba8Srgb).
+    pub fn render(&mut self, device: &mut Device, assets: &AssetServer,
+                  frame: &RenderFrame, output: Output) -> Result<FrameStats, RenderError>;
+    pub fn upscale(&self, output_size: UVec2) -> Upscale;          // factor + where the image lands
+    pub fn screen_to_world(&self, camera: &Camera2D, output_size: UVec2, screen: Vec2) -> Vec2;
+    pub fn world_to_screen(&self, camera: &Camera2D, output_size: UVec2, world: Vec2) -> Vec2;
+}
+pub struct Output { pub target: PassTarget, pub size: UVec2 }      // the caller knows the window's size
+pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32 }
+```
+
+- Textures are looked up in the `AssetServer`.
+  - A sprite whose texture is still loading is not drawn (`skipped`).
+  - One whose texture failed draws all of its placeholder, uv 0 to 1,
+    whatever its `uv`, when the server shows placeholders. Without them
+    (`OnFailure::Nothing`) it is skipped too.
+- `RenderFrame` so far has `camera`, `clear` and `sprites`. The other
+  fields below come with their tasks. `Camera2D` has no rotation yet.
+
 ## Input: `RenderFrame`
 
 The facade's extract stage fills a `RenderFrame` every frame. All of its
@@ -75,6 +113,15 @@ Every world sprite gets a `u64` key, and the keys are sorted with
   with equal depth, which avoids flicker between frames. Only the low 8 bits
   are used; that's acceptable because exact ties are rare and order within a
   tie is cosmetic.
+  - As built, the renderer sorts `(key >> 8, submission index)` pairs, so
+    the full index breaks ties instead of `seq`.
+  - Ties then keep their submission order exactly, even when sprites are
+    added before them: sprites submitted at 255 and 256 have `seq` 255 and
+    0.
+  - Exact ties are common, since every `Fixed(n)` sprite of a layer
+    shares a depth.
+- `Fixed(0)` is behind, and `Fixed(u32::MAX)` in front of, every y-sorted
+  sprite of its layer. In-world UI goes in a higher layer.
 - **Batching:**
   - Consecutive sprites with the same texture and pipeline go into one
     instanced draw.
@@ -107,6 +154,13 @@ fn push_instance(out: &mut Vec<f32>, s: &SpriteDraw, uv: [f32; 4], color: [f32; 
 
 - The vertex layout in the `sprite` pipeline and the shader interface
   constant must match this order. The parity test checks it.
+- The unit quad's corner, 0 to 1 from the sprite's top left, is location 6,
+  in a second vertex slot.
+- The blit draws a quad whose clip-space corners and uv come from Rust
+  (`BLIT_QUAD`), as the shaders rule asks: GL's bottom-up render targets
+  are accounted for there.
+- In pixel-perfect mode, an unrotated sprite's position is packed with its
+  top-left corner moved to the nearest whole virtual pixel (ADR-0018).
 - One dynamic instance buffer, sized to the frame's peak. It grows by
   doubling and never shrinks during a session.
 - The unit quad is a static 4-vertex triangle strip.
@@ -135,7 +189,18 @@ fn push_instance(out: &mut Vec<f32>, s: &SpriteDraw, uv: [f32; 4], color: [f32; 
   1. Render the world into an RT of exactly `virtual_resolution`.
   2. Upscale to the window by the largest integer factor that fits, with
      letterbox bars in the clear color.
-  3. Snap the camera position to whole virtual pixels.
+  3. Snap the camera position to whole virtual pixels. As built
+     (ADR-0018):
+     - The view's top-left corner snaps, not its centre, so that an odd
+       virtual size stays on the pixel grid.
+     - Halves round up, `floor(x + 0.5)`, so each pixel the camera moves
+       moves the view by one.
+     - Unrotated sprites snap their corners too.
+     - The zoom is rounded to a whole number, at least 1.
+     - The factor is the largest whole number that fits both sides, at
+       least 1. The image is centred, with the odd pixel of a bar on the
+       right or at the bottom, and cropped when the output is smaller than
+       the virtual resolution.
   4. Optional smooth-camera mode: render with a one-pixel border and offset
      the upscale blit by the sub-pixel remainder, so slow pans don't stair-step.
 - **Smooth mode:** render at native resolution, with zoom as a float.

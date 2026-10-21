@@ -251,6 +251,10 @@ pub struct ShaderSource<'a> {
   uniform blocks with sizes, texture slots. Both sources must agree with it.
   A parity test parses the GLSL `layout(location = N) in` lines and the MSL
   `[[attribute(N)]]` annotations and checks both against the constant.
+- As built (M3.3), `sprite` and `blit` exist, in `crates/render`. Render's
+  parity test checks each `layout(location = N) in` line of their GLSL
+  against the interface constant, and that each uniform block and sampler
+  is declared. MSL comes with M10.3.
 - Expected programs:
   - `sprite` (instanced quads)
   - `tile_chunk`
@@ -281,7 +285,8 @@ pub struct ShaderSource<'a> {
 - **GL tests (M2.3):** behind the `headless-test` feature, on an offscreen
   context: the draw checks, readback, orientation, samplers, sRGB,
   blending, instancing, uniforms, the state cache and shader errors. The
-  golden scenes run in the same binary; the parity test comes with M3.3.
+  golden scenes run in the same binary. The shader parity test is render's
+  (M3.3).
 - **Headless devices (M3.2):** `Device::new_headless` makes a device that
   owns its offscreen context, so that crates which may not depend on
   `nadir-platform`, such as render, can test on a GPU. Asset types that

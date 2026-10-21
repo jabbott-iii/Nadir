@@ -518,3 +518,48 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** a crate other than xtask needs to compare images
   in-process, for example a test that checks its own pixels against a
   reference.
+
+## ADR-0018 — Pixel-perfect mode snaps sprite corners and rounds the zoom
+
+- **Status:** Accepted
+- **Date:** 2026-10-20
+- **Context:**
+  - `render.md` defined pixel-perfect mode as rendering the world into a
+    render target of the virtual resolution, scaled up by a whole factor,
+    with the camera snapped to whole virtual pixels. It said nothing of
+    the sprites or the zoom.
+  - A sprite's corner is its position less pivot × size. With the default
+    pivot (0.5, 1), an odd-width sprite at a whole position has its corner
+    on a half pixel. So does any sprite at a `.5` position. Its edges and
+    its texel boundaries then fall on pixel centres. GL leaves both the
+    edge coverage and the nearest-texel choice to the vendor there, so a
+    13-pixel-wide sprite can draw a texel column twice and drop another,
+    differently on each GPU, and moving sprites shimmer.
+  - A non-integer zoom puts texel boundaries on pixel centres whatever is
+    snapped: at zoom 1.5, a third of the pixel columns.
+  - The design critique of M3.3 found this. The user chose both rules on
+    2026-10-19.
+- **Decision:**
+  - In pixel-perfect mode, an unrotated sprite's top-left corner is moved
+    to the nearest whole virtual pixel (halves up) when its instance is
+    packed. Sorting still uses its exact y. Rotated sprites are not moved.
+  - The zoom is rounded to a whole number, at least 1 (halves up; NaN is
+    1).
+  - The camera's origin, the view's top-left corner in virtual pixels,
+    snaps the same way: `floor(x + 0.5)`, so each one-pixel move of the
+    camera moves the view by one pixel, across zero too.
+- **Consequences:**
+  - Every texel of an unrotated sprite at whole-number zoom lands on whole
+    pixels, the same on every GPU, which also makes goldens portable.
+  - Motion is in whole virtual pixels. Sub-pixel smoothness belongs to the
+    smooth-camera and native-resolution modes, which no task has built yet.
+  - A fractional zoom is not available in pixel-perfect mode.
+- **Alternatives considered:**
+  - Snapping the camera only, as `render.md` had it. Pixels at texel
+    boundaries then depend on the vendor, and odd sprites shimmer.
+  - Allowing a fractional zoom and documenting that it is not exact. That
+    leaves the shimmer in, in the mode named for having none.
+  - Snapping in the vertex shader. It costs the same, but does it on the
+    GPU, where the CPU-side tests cannot check it.
+- **Revisit when:** the smooth-camera or native-resolution mode is built,
+  or a game needs rotated sprites to stay on the pixel grid.

@@ -144,7 +144,8 @@ pub fn run(mut app: App) -> Result<(), Error> {
 
         let draw = app.extract(frame.alpha);                 // ECS -> RenderFrame
         gfx.begin_frame(platform.gpu_surface())?;
-        renderer.render(&mut gfx, &draw)?;
+        renderer.render(&mut gfx, &app.assets, &draw,
+                        Output { target: PassTarget::Surface, size: platform.window_size() })?;
         gfx.end_frame(platform.gpu_surface())?;              // present: GL swap or Metal drawable
 
         if app.assets.has_pending() {                        // GPU uploads on main thread

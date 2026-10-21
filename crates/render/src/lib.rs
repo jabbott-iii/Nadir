@@ -1,9 +1,23 @@
 //! 2D renderer for the Nadir engine: sprite batching, y-sort, tilemap chunks,
 //! camera, bitmap text, debug draw and passes.
 //!
-//! So far (roadmap M3.2): the [`Texture`] asset. `docs/subsystems/render.md`
-//! has the design.
+//! So far: the [`Texture`] asset (roadmap M3.2), and the [`Renderer`]
+//! (M3.3), which draws a [`RenderFrame`]'s sprites in pixel-perfect mode.
+//! `docs/subsystems/render.md` has the design.
 
+mod error;
+mod frame;
+mod instance;
+mod plan;
+mod renderer;
+mod shader;
+mod sort;
 mod texture;
+mod view;
 
+pub use error::RenderError;
+pub use frame::{Camera2D, Flip, RenderFrame, SortMode, SpriteDraw};
+pub use instance::SPRITE_INSTANCE_FLOATS;
+pub use renderer::{FrameStats, Output, RenderConfig, Renderer};
 pub use texture::{DecodedTexture, Texture};
+pub use view::Upscale;

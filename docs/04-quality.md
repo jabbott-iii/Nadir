@@ -68,7 +68,17 @@ pub fn check_sized<T: std::fmt::Debug>(
     linear, and repeat through an indexed draw), alpha blend (all four blend
     modes), 1000 instanced quads, scissor and viewport, and the render
     target round trip.
-  - The `render` scenes, from M3, draw through the `render` API.
+  - The `render` scenes, from M3.3, draw through the `render` API, in
+    `crates/render/tests/headless/golden.rs`:
+    - `y_sort`: a person behind a tree and one in front, a flipped sprite, a
+      ground decal, and a missing texture's placeholder
+    - the upscale of a 64×36 image, with a dot in each corner, at three
+      output sizes: `upscale_320x180` (an exact fit),
+      `upscale_300x200` (bars all round) and `upscale_333x147` (bars of
+      uneven widths)
+
+    Each sprite is drawn at a whole number of pixels per texel, with its
+    corner on a whole pixel, so that every GPU draws it alike.
   - A scene is defined with the `scene!` macro, which names it after its
     test, and saves its pixels before its own checks can fail it.
 - Readback uses `glReadPixels` or Metal `getBytes`, flipped to a top-left

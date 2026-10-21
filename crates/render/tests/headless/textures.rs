@@ -1,81 +1,17 @@
-//! Textures loaded through `nadir-assets` onto a GPU, on an offscreen OpenGL
-//! context from `Device::new_headless`.
-//!
-//! They need the `headless-test` feature and a working driver:
-//!
-//! ```text
-//! LIBGL_ALWAYS_SOFTWARE=1 NADIR_EXPECT_GL_RENDERER=llvmpipe \
-//!     cargo test -p nadir-render --features headless-test
-//! ```
-//!
-//! Where libglvnd also has NVIDIA's EGL, add
-//! `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
+//! Textures loaded through `nadir-assets` onto the GPU.
 
-use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
 
-use nadir_assets::{AssetError, AssetServer, FinalizeCtx, LoadState, OnFailure};
+use nadir_assets::{AssetError, AssetServer, LoadState, OnFailure};
 use nadir_codec::qoi::{self, Channels, ColorSpace, Header};
 use nadir_core::UVec2;
 use nadir_gfx::{
-    BlendMode, BufferDesc, BufferKind, BufferUsage, Device, GfxError, PipelineDesc, Sampler,
-    ShaderSource, TextureFormat, Topology, VertexAttribute, VertexFormat, VertexLayout, VertexStep,
+    BlendMode, BufferDesc, BufferKind, BufferUsage, Device, PipelineDesc, Sampler, ShaderSource,
+    TextureFormat, Topology, VertexAttribute, VertexFormat, VertexLayout, VertexStep,
 };
 use nadir_render::Texture;
 
-/// Names a part of the renderer, such as `llvmpipe`, that the context must
-/// have. Unset or empty, any renderer will do.
-const EXPECT_RENDERER: &str = "NADIR_EXPECT_GL_RENDERER";
-
-/// A device on an offscreen context, or `None` where this system has none
-/// yet and no renderer is asked for. Any other failure fails the test.
-fn device() -> Option<Device> {
-    let expected = env::var(EXPECT_RENDERER).unwrap_or_default();
-    match Device::new_headless() {
-        Ok(device) => {
-            let renderer = &device.caps().renderer;
-            assert!(
-                renderer.contains(&expected),
-                "the renderer is `{renderer}`, not `{expected}`"
-            );
-            Some(device)
-        }
-        Err(GfxError::NoOffscreenContext) if expected.is_empty() => None,
-        Err(error) => panic!(
-            "no headless device: {error}. With libglvnd, Mesa can be chosen with \
-             __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json"
-        ),
-    }
-}
-
-/// A fresh, empty asset root for one test, under `target/tmp`.
-fn root(test: &str) -> PathBuf {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join("nadir-render-headless")
-        .join(test);
-    if dir.exists() {
-        fs::remove_dir_all(&dir).expect("remove the previous run's directory");
-    }
-    fs::create_dir_all(dir.join("sprites")).expect("create the test directory");
-    dir
-}
-
-/// Writes a QOI file of `width`×`height` texels, each `texel`.
-fn write_qoi(path: &Path, width: u32, height: u32, color_space: ColorSpace, texel: [u8; 4]) {
-    let header = Header {
-        width,
-        height,
-        channels: Channels::Rgba,
-        color_space,
-    };
-    let pixels = texel.repeat((width * height) as usize);
-    fs::write(path, qoi::encode(&header, &pixels).expect("an image")).expect("write the file");
-}
-
-fn finish(server: &mut AssetServer, device: &mut Device) {
-    server.finish_completed_loads(&mut FinalizeCtx::new().with(device));
-}
+use crate::common::{device, finish, root, write_qoi};
 
 #[test]
 fn a_texture_goes_to_the_gpu_once() {
