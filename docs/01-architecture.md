@@ -238,6 +238,13 @@ Systems are plain functions `fn(&World, &Tick)` (fixed) or
 borrow checks (see the ECS spec). Borrow conflicts panic with the system name
 and component type, so they are caught on the first run in tests.
 
+Until M4.4 (ADR-0019), the facade has no `World` and no stages. Systems are
+closures `FnMut(&Resources, &Tick)` and `FnMut(&Resources, &Frame)`, added
+by name, which run in the order they were added. `Resources` has the
+`World`'s resource calls. A game's actions come from `App::add_actions`,
+movement is interpolated with `Interpolated<T>`, and
+`Config::virtual_resolution` is a plain `UVec2`.
+
 ## Data flow per frame
 
 ```

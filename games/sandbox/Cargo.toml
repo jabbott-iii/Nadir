@@ -7,5 +7,10 @@ license.workspace = true
 [dependencies]
 nadir = { path = "../../crates/engine" }
 
+[features]
+# `cargo dev`: development builds of the engine, where a missing asset shows
+# its placeholder.
+dev = ["nadir/dev"]
+
 [lints]
 workspace = true

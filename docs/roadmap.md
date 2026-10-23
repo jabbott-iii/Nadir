@@ -926,6 +926,13 @@ testing in CI.
     `GfxError::NoOffscreenContext`, and render cannot name `PlatformError`,
     so widening them means matching a `GfxError`, such as
     `OffscreenContext(_)`. The same holds for M2.7.
+  - Note (from M3.4): the sandbox draws now. Without this context,
+    `App::run` logs "no GPU device" and runs the game without drawing.
+    - Once it works, check `cargo dev` here: M3's exit criterion is a
+      character that moves smoothly on all three OSes.
+    - Modal frames call `EngineCore::frame(&[], None)`
+      (`crates/engine/src/app.rs`). Pass the `ModalFrame`'s surface and the
+      window size there, so that a title-bar drag draws.
   - Depends: M2.3, M1.5
   - Do: the dummy-window dance, `wglChoosePixelFormatARB`, a 3.3 core
     context, `wglSwapIntervalEXT`, GL 1.1 symbols from `opengl32.dll`.
@@ -950,6 +957,13 @@ testing in CI.
     - Without it, they run on a renderer whose pixels are not llvmpipe's,
       and whose rendering has known defects.
     - Choose one, and record it.
+  - Note (from M3.4): the sandbox draws now. Without this context,
+    `App::run` logs "no GPU device" and runs the game without drawing.
+    - Once it works, check `cargo dev` here: M3's exit criterion is a
+      character that moves smoothly on all three OSes.
+    - Modal frames call `EngineCore::frame(&[], None)`
+      (`crates/engine/src/app.rs`). Pass the `ModalFrame`'s surface and the
+      window size there, so that a live resize draws.
   - Depends: M2.3, M1.6
   - Do: the pixel format, a 3.2-core-profile (4.1) context, Retina backing,
     swap interval, `dlopen` of the OpenGL framework.
@@ -1158,7 +1172,10 @@ by the batched sprite renderer.
 
     The new references were drawn on llvmpipe and blessed by the agent,
     after it looked at each one as a PNG. A human should look at them
-    before they are committed.
+    before they are committed. CI run 12, for the M3.3 commit `18d2660`,
+    passed on all three systems, as the user reported; the session saw it
+    on the public Actions page. Its golden step drew the new scenes on
+    Ubuntu's Mesa, within the tolerance of the references.
   - Note: nine planted bugs each failed the tests:
     - sorting by the top
     - an ignored flip
@@ -1222,7 +1239,7 @@ by the batched sprite renderer.
     libglvnd also has NVIDIA's EGL, and `--features headless-test` for
     `cargo test`.
 
-- [ ] **M3.4 — facade + sandbox: moving character**
+- [x] **M3.4 — facade + sandbox: moving character**
   - Depends: M3.1, M3.3
   - Note (from M3.3):
     - Make the `Renderer` once with the game's virtual resolution.
@@ -1250,6 +1267,40 @@ by the batched sprite renderer.
   - Accept: movement is smooth at 60, 144 and uncapped fps (interpolation
     works); a tap between ticks moves the character exactly one tick.
   - Verify: `cargo test -p nadir`; `cargo dev` (manual)
+  - Note: built on a typed resource map, `Resources`, until the ECS
+    (ADR-0019).
+    - Systems are `FnMut(&Resources, &Tick)` and
+      `FnMut(&Resources, &Frame)`.
+    - The engine provides `Input`, `AssetServer`, `RenderFrame`,
+      `FrameStats`, and `ActionMap<A>` with `ActionState<A>` from
+      `App::add_actions` (one set per app).
+    - With no GPU device, the game runs without drawing.
+  - Note: the sandbox takes `--fps <n>` (0 means no limit; 60 by default)
+    and `--no-vsync`, and refuses any other argument. Its sprites are in
+    the root `assets/sprites/`. The person walks 2 px a tick (120 px/s),
+    so in pixel-perfect mode (ADR-0018) each tick's step is whole pixels.
+  - Note: `cargo dev` on Linux (X11, Mesa 26.1.6, Intel UHD Graphics TGL
+    GT1), 7 s at each setting. Every frame drew 203 sprites in 7 batches,
+    with 0 not ready and no warnings or errors in the log.
+    - `--fps 60`: 60.0 frames and 60.00 ticks a second
+    - `--fps 144 --no-vsync`: 144.0 frames and 59.6 to 60.6 ticks a second
+    - `--fps 0 --no-vsync`: 3,600 to 3,900 frames and 60.00 ticks a second
+  - Note: each test that proves the acceptance was checked against a
+    planted bug, then reverted. The tap test fails when only a frame's
+    first tick latches. The interpolation test fails when frames draw
+    `current` instead of the lerp. The render-frame test fails when the
+    frame is not emptied. The wheel test fails when the loop latches only
+    for a game's own action set.
+  - Note: the user checked the movement on 2026-10-23, on the same Linux
+    machine. `cargo dev --fps 60`, `cargo dev --fps 144 --no-vsync` and
+    `cargo dev --fps 0 --no-vsync` were all smooth, and WASD and the arrow
+    keys both moved the person. The runs logged 60.0, 144.0 and 3,400 to
+    3,800 frames a second, 60 ticks a second, and 203 sprites in 7 or 8
+    batches (the person's place in the y-sort splits a batch) with 0 not
+    ready. Pass the sandbox's options after `cargo dev` with no second
+    `--`: the alias ends in one, and the sandbox refuses the extra one.
+    A press and release within one tick moving exactly one tick is shown
+    by `a_tap_between_ticks_moves_exactly_one_tick`, not by eye.
 
 - [ ] **M3.5 — allocation counter + sprite stress benchmark**
   - Note (from M3.3):
@@ -1267,6 +1318,12 @@ by the batched sprite renderer.
     claims 8192×8192) allocates nothing. Today
     `a_file_too_short_for_its_size_is_rejected_before_decoding` checks the
     error only, and moving the allocation before the check would pass it.
+  - Note (from M3.4):
+    - The facade's frame now draws: `Graphics::draw` in
+      `crates/engine/src/app.rs` renders, then calls
+      `finish_completed_loads` while loads are pending.
+    - The sandbox's `report` system logs a line once a second, so 100
+      frames at 60 fps include one report.
   - Depends: M3.4, M0.7
   - Do:
     - the dev `#[global_allocator]` counter
@@ -1314,6 +1371,19 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-collision`; `cargo xtask bench collision`
 
 - [ ] **M4.4 — facade: ECS integration and sandbox migration**
+  - Note (from M3.4):
+    - `Resources` (`crates/engine/src/resources.rs`) has the `World`'s
+      resource calls: replace it with the `World` (ADR-0019). `ecs.md`
+      names the borrows `Res` and `ResMut`, where `Resources` returns
+      `Ref` and `RefMut`.
+    - The sandbox snapshots its `Interpolated<Vec2>` in its own fixed
+      system. `PrevTransform` and the snapshot glue system replace that.
+    - The sandbox's systems are `fn` items with their state in resources,
+      except `count_ticks`, a closure with no captures.
+    - An app has one action set (`App::add_actions`): a second set's latch
+      would see no edges. Until the game adds its set, the loop latches
+      into a private set of one unbound action (`NoActions`), so that
+      every tick ends and `Input::wheel` moves on.
   - Depends: M4.1, M4.2, M4.3, M3.4
   - Do:
     - `App` builder with stages

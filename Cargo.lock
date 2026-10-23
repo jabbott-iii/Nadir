@@ -6,8 +6,12 @@ version = 4
 name = "nadir"
 version = "0.1.0"
 dependencies = [
+ "nadir-assets",
  "nadir-core",
+ "nadir-gfx",
+ "nadir-input",
  "nadir-platform",
+ "nadir-render",
 ]
 
 [[package]]

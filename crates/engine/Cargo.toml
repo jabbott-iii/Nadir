@@ -5,8 +5,17 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+nadir-assets = { path = "../assets" }
 nadir-core = { path = "../core" }
+nadir-gfx = { path = "../gfx" }
+nadir-input = { path = "../input" }
 nadir-platform = { path = "../platform" }
+nadir-render = { path = "../render" }
+
+[features]
+# Development builds: a failed asset shows its placeholder rather than
+# nothing. `cargo dev` turns it on through the sandbox.
+dev = []
 
 [lints]
 workspace = true

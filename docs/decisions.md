@@ -563,3 +563,70 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     GPU, where the CPU-side tests cannot check it.
 - **Revisit when:** the smooth-camera or native-resolution mode is built,
   or a game needs rotated sprites to stay on the pixel grid.
+
+## ADR-0019 — Until the ECS, systems share a typed resource map; with no GPU device the game runs undrawn
+
+- **Status:** Accepted
+- **Date:** 2026-10-21
+- **Context:**
+  - M3.4 makes the sandbox move a character. Its systems need shared state:
+    the latched actions, the player's position, the textures and the
+    frame to draw. Until then systems were closures `FnMut(&Tick)` and
+    `FnMut(&Frame)` with no shared state but what they captured (M1.3).
+  - The ECS `World` and its stages arrive in M4.4. Its resource calls are
+    `resource`, `resource_mut` and `insert_resource` (`ecs.md`).
+  - Windows and macOS have no OpenGL device until M2.6 and M2.7, so
+    `Device::new` fails there.
+  - The user chose both points below on 2026-10-21. The design critique
+    of M3.4 added the rules for action sets and for render errors.
+- **Decision:**
+  - The facade has `Resources`, a map of one value per type behind
+    `RefCell`, with the `World`'s resource calls. Systems become
+    `FnMut(&Resources, &Tick)` and `FnMut(&Resources, &Frame)`: a break
+    of the M1.3 signatures. A missing resource or a conflicting borrow
+    panics, naming the type and the running system (or the engine step,
+    such as `nadir::draw`).
+  - The engine's own resources are `Input`, `AssetServer`, `RenderFrame`
+    and `FrameStats`, plus `ActionMap<A>` and `ActionState<A>` from
+    `App::add_actions`. The loop feeds every event to `Input`, latches
+    once a tick before the fixed systems, empties the `RenderFrame` before
+    the frame systems, then draws it and finalizes completed loads.
+  - An app has one action set. `Input::latch` starts the next tick, so a
+    second set's latch would see no edges. Adding another type panics;
+    adding the same type again replaces its bindings.
+  - When `Device::new` fails, `App::run` logs the error and runs the game
+    without drawing. A failure of `Renderer::new` on a working device, or
+    of a frame's drawing, ends the game with the error and the error
+    dialog, as a failure to open the window does.
+  - `Interpolated<T>` (`previous`, `current`, `snapshot`, `lerp`) is the
+    interim interpolation. The game snapshots in its fixed system and
+    lerps by `frame.alpha` in its frame systems.
+  - `Config` gains `vsync`, `virtual_resolution` (a `UVec2`, as
+    `RenderConfig` has it) and `assets` (the asset root).
+- **Consequences:**
+  - The sandbox moves, draws and is tested now, with M4.4's resource calls.
+    M4.4 swaps `Resources` for `World`, systems from closures to `fn`
+    items with stages, and `Interpolated` for `PrevTransform` and the
+    snapshot system.
+  - `ecs.md` names the borrows `Res` and `ResMut`; code that names
+    `Ref` or `RefMut` changes then.
+  - Every game's system closures changed signature. Only the sandbox and
+    the facade's tests had any.
+  - On Windows and macOS the sandbox shows an empty window until M2.6 and
+    M2.7. Modal frames (a window drag or live resize) simulate but do not
+    draw until `ModalFrame` carries a surface.
+  - A frame system reads `ActionState` as the last tick left it: edges
+    belong in fixed systems, as `App::add_actions` says.
+  - `virtual_resolution` becomes an `Option` when the native-resolution
+    mode is built (the API sketch in `01-architecture.md`).
+- **Alternatives considered:**
+  - Building M4.4's `World` now: the ECS crate (M4.1) does not exist.
+  - Plain structs captured by `Rc<RefCell<_>>` in each closure: the
+    roadmap's "plain structs" with no shared access path, and none of it
+    survives M4.4.
+  - Several action sets, each with its own `Input`: no game needs a second
+    set yet, and the latch would have to be designed again for it.
+  - Running undrawn on any render failure: a lost context or an
+    out-of-memory error would then leave a frozen window with no message.
+- **Revisit when:** M4.4 replaces `Resources` with the ECS `World`, or a
+  game needs a second action set.
