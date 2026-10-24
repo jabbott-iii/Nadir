@@ -249,6 +249,9 @@ struct EngineCore {
     /// An error that ends the loop, from a frame the loop did not run
     /// itself (a modal one).
     error: Option<Error>,
+    /// The main thread's heap use at the end of the last frame.
+    #[cfg(feature = "dev")]
+    allocs_at_frame_end: nadir_platform::AllocCounts,
 }
 
 impl EngineCore {
@@ -261,6 +264,13 @@ impl EngineCore {
             && let Err(error) = graphics.draw(&self.app.resources, surface, size)
         {
             self.error.get_or_insert(error);
+        }
+        #[cfg(feature = "dev")]
+        {
+            let now = nadir_platform::thread_alloc_counts();
+            let allocs = crate::FrameAllocs(now.since(self.allocs_at_frame_end));
+            *self.app.resources.resource_mut::<crate::FrameAllocs>() = allocs;
+            self.allocs_at_frame_end = now;
         }
         self.app.resources.set_system("(none)");
     }
@@ -279,6 +289,7 @@ impl EngineCore {
 /// - [`RenderFrame`], emptied before the frame systems, which fill it; the
 ///   loop then draws it
 /// - [`FrameStats`], what the last frame drew
+/// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
 ///
 /// ```no_run
 /// use nadir::prelude::*;
@@ -330,6 +341,8 @@ impl App {
         resources.insert_resource(AssetServer::new(&config.assets, on_failure));
         resources.insert_resource(RenderFrame::new());
         resources.insert_resource(FrameStats::default());
+        #[cfg(feature = "dev")]
+        resources.insert_resource(crate::FrameAllocs::default());
         Self {
             config,
             resources,
@@ -486,6 +499,8 @@ impl App {
             stopwatch: Stopwatch::start(),
             graphics,
             error: None,
+            #[cfg(feature = "dev")]
+            allocs_at_frame_end: nadir_platform::thread_alloc_counts(),
         }));
         let modal_core = Rc::clone(&core);
         window.set_modal_frame_callback(Box::new(move |_frame| {
@@ -1260,5 +1275,292 @@ mod tests {
         app.run_loop(&mut Tapping { pumps: 0 }, None)
             .expect("no error without a device");
         assert_eq!(*moved.borrow(), SPEED / 60.0, "the tap moved it one tick");
+    }
+
+    /// A steady frame of 10,000 sprites allocates nothing (roadmap M3.5).
+    #[cfg(feature = "dev")]
+    mod steady_frames {
+        use std::env;
+        use std::fs;
+        use std::hint::black_box;
+        use std::path::PathBuf;
+        use std::process;
+
+        use nadir_assets::Handle;
+        use nadir_codec::qoi::{self, Channels, ColorSpace, Header};
+        use nadir_core::{Color, Vec2};
+        use nadir_platform::{
+            AllocCounts, HeadlessGl, PlatformError, create_headless_gl, thread_alloc_counts,
+        };
+        use nadir_render::{SortMode, SpriteDraw, Texture};
+
+        use super::*;
+        use crate::{FrameAllocs, Interpolated};
+
+        /// How many sprites walk about.
+        const CROWD: usize = 10_000;
+        /// Ground tiles under them: 16 × 12 of 32 pixels.
+        const TILES: usize = 192;
+        /// Frames before the counting starts: the textures load after the
+        /// first draw, and the buffers grow in the frames after it.
+        const WARM_UP: usize = 10;
+        /// Frames counted.
+        const COUNTED: usize = 100;
+        /// The view, which the walkers stay inside.
+        const VIEW: Vec2 = Vec2::new(480.0, 270.0);
+
+        struct Walker {
+            position: Interpolated<Vec2>,
+            velocity: Vec2,
+            tint: Color,
+        }
+
+        /// The scene: its textures and the walkers.
+        struct Scene {
+            walker: Handle<Texture>,
+            ground: Handle<Texture>,
+            walkers: Vec<Walker>,
+        }
+
+        /// What each frame saw: the last frame's allocations and drawing,
+        /// and the ticks so far. Room for every frame is made up front, and
+        /// the test keeps it when the loop drops the app.
+        struct Seen {
+            frames: Vec<(AllocCounts, FrameStats, u64)>,
+            ticks: u64,
+        }
+
+        /// The window: an offscreen context, if there is one. It notes the
+        /// thread's heap use as each pump starts, and closes after the
+        /// counted frames.
+        struct Offscreen {
+            gl: Option<HeadlessGl>,
+            at_pumps: Vec<AllocCounts>,
+        }
+
+        impl EventSource for Offscreen {
+            fn pump_events(&mut self, out: &mut Vec<Event>) {
+                self.at_pumps.push(thread_alloc_counts());
+                if self.at_pumps.len() > WARM_UP + COUNTED {
+                    out.push(Event::CloseRequested);
+                }
+            }
+
+            fn set_modal_frame_callback(&mut self, _callback: Box<dyn FnMut(ModalFrame)>) {}
+
+            fn gpu_surface(&self) -> Option<GpuSurface<'_>> {
+                self.gl.as_ref().map(|gl| GpuSurface::Gl(gl))
+            }
+
+            fn window_size(&self) -> UVec2 {
+                UVec2::new(960, 540)
+            }
+        }
+
+        /// An offscreen context, or `None` where `nadir-platform` cannot
+        /// make one yet (Windows and macOS, until M2.6 and M2.7) and no
+        /// renderer is asked for in `NADIR_EXPECT_GL_RENDERER`, as for the
+        /// gfx and render tests. Any other failure fails the test.
+        fn headless(expected: &str) -> Option<HeadlessGl> {
+            match create_headless_gl() {
+                Ok(gl) => Some(gl),
+                Err(PlatformError::Unsupported) if expected.is_empty() => None,
+                Err(error) => panic!(
+                    "no offscreen OpenGL context: {error}. With libglvnd, Mesa can be chosen \
+                     with __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json"
+                ),
+            }
+        }
+
+        /// Writes a texture of one color, opaque.
+        fn write_texture(path: &PathBuf, size: u32, color: [u8; 4]) {
+            let header = Header {
+                width: size,
+                height: size,
+                channels: Channels::Rgba,
+                color_space: ColorSpace::Srgb,
+            };
+            let pixels = color.repeat((size * size) as usize);
+            let bytes = qoi::encode(&header, &pixels).expect("a valid image");
+            fs::write(path, bytes).expect("write a texture");
+        }
+
+        /// The scene's app, loading its textures from `assets`, and noting
+        /// in `seen` what each frame sees.
+        fn scene(assets: PathBuf, seen: &Rc<RefCell<Seen>>) -> App {
+            let mut app = App::new(Config {
+                assets,
+                // Frames then sleep in the limiter, which the count covers.
+                frame_rate_limit: Some(500),
+                ..Config::default()
+            });
+            let (walker, ground) = {
+                let mut server = app.resources_mut().resource_mut::<AssetServer>();
+                (server.load("walker.qoi"), server.load("ground.qoi"))
+            };
+            let mut seed = 1u32;
+            let mut random = move || {
+                // A xorshift: the same walkers every run.
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                (seed % 10_000) as f32 / 10_000.0
+            };
+            let walkers = (0..CROWD)
+                .map(|index| Walker {
+                    position: Interpolated::new(Vec2::new(
+                        8.0 + random() * (VIEW.x - 16.0),
+                        16.0 + random() * (VIEW.y - 16.0),
+                    )),
+                    velocity: Vec2::new(random() * 120.0 - 60.0, random() * 120.0 - 60.0),
+                    tint: if index % 4 == 0 {
+                        Color::rgb(255, 200, 200)
+                    } else {
+                        Color::WHITE
+                    },
+                })
+                .collect();
+            app.insert_resource(Scene {
+                walker,
+                ground,
+                walkers,
+            })
+            .add_fixed_system("walk", {
+                let seen = Rc::clone(seen);
+                move |resources, tick| {
+                    for walker in &mut resources.resource_mut::<Scene>().walkers {
+                        walker.position.snapshot();
+                        let mut next = walker.position.current + walker.velocity * tick.dt;
+                        if !(8.0..=VIEW.x - 8.0).contains(&next.x) {
+                            walker.velocity.x = -walker.velocity.x;
+                            next.x = walker.position.current.x;
+                        }
+                        if !(16.0..=VIEW.y).contains(&next.y) {
+                            walker.velocity.y = -walker.velocity.y;
+                            next.y = walker.position.current.y;
+                        }
+                        walker.position.current = next;
+                    }
+                    seen.borrow_mut().ticks += 1;
+                }
+            })
+            .add_frame_system("draw", |resources, frame| {
+                let scene = resources.resource::<Scene>();
+                let mut out = resources.resource_mut::<RenderFrame>();
+                out.camera.position = VIEW * 0.5;
+                for tile in 0..TILES {
+                    let corner = Vec2::new((tile % 16) as f32, (tile / 16) as f32) * 32.0;
+                    let mut sprite = SpriteDraw::new(scene.ground, corner, Vec2::splat(32.0));
+                    sprite.pivot = Vec2::ZERO;
+                    sprite.sort = SortMode::Fixed(0);
+                    out.sprites.push(sprite);
+                }
+                for walker in &scene.walkers {
+                    let position = walker.position.lerp(frame.alpha);
+                    let mut sprite = SpriteDraw::new(scene.walker, position, Vec2::new(8.0, 16.0));
+                    sprite.layer = 1;
+                    sprite.color = walker.tint;
+                    sprite.flip.x = walker.velocity.x < 0.0;
+                    out.sprites.push(sprite);
+                }
+            })
+            .add_frame_system("probe", {
+                let seen = Rc::clone(seen);
+                move |resources, _| {
+                    let mut seen = seen.borrow_mut();
+                    let entry = (
+                        resources.resource::<FrameAllocs>().0,
+                        *resources.resource::<FrameStats>(),
+                        seen.ticks,
+                    );
+                    seen.frames.push(entry);
+                    // In a warm-up frame, a known allocation, which that
+                    // frame's count must show.
+                    if seen.frames.len() == 5 {
+                        drop(black_box(Box::new(5u64)));
+                    }
+                }
+            })
+        }
+
+        #[test]
+        fn a_steady_frame_of_10k_sprites_allocates_nothing() {
+            // The counter is the global allocator, so a known allocation
+            // shows: a count of zero below means something.
+            let start = thread_alloc_counts();
+            drop(black_box(Box::new(0u64)));
+            assert_eq!(thread_alloc_counts().since(start).allocations, 1);
+
+            let assets = env::temp_dir().join(format!("nadir-engine-steady-{}", process::id()));
+            fs::create_dir_all(&assets).expect("make the asset folder");
+            write_texture(&assets.join("walker.qoi"), 8, [200, 120, 60, 255]);
+            write_texture(&assets.join("ground.qoi"), 32, [90, 140, 70, 255]);
+            let seen = Rc::new(RefCell::new(Seen {
+                frames: Vec::with_capacity(WARM_UP + COUNTED),
+                ticks: 0,
+            }));
+            let app = scene(assets.clone(), &seen);
+
+            let expected = env::var("NADIR_EXPECT_GL_RENDERER").unwrap_or_default();
+            let mut window = Offscreen {
+                gl: headless(&expected),
+                at_pumps: Vec::with_capacity(WARM_UP + COUNTED + 2),
+            };
+            let graphics = window.gl.as_ref().map(|gl| {
+                let mut device = Device::new(GpuSurface::Gl(gl)).expect("a device");
+                let renderer = device.caps().renderer.clone();
+                assert!(renderer.contains(&expected), "{renderer} is not {expected}");
+                let config = RenderConfig {
+                    virtual_resolution: VIEW.as_uvec2(),
+                };
+                let renderer = Renderer::new(&mut device, &config).expect("a renderer");
+                Graphics { renderer, device }
+            });
+            let drawn = graphics.is_some();
+            app.run_loop(&mut window, graphics)
+                .expect("the frames draw");
+            fs::remove_dir_all(&assets).expect("remove the asset folder");
+            let seen = &seen.borrow().frames;
+
+            // Frame f runs after pump f; `seen[f - 1]` is what frame f saw,
+            // so `seen[f].0` is frame f's own count.
+            let pumps = &window.at_pumps;
+            assert_eq!(pumps.len(), WARM_UP + COUNTED + 1);
+            assert_eq!(seen.len(), WARM_UP + COUNTED);
+
+            // The counted frames: the loop between two pumps, from frame
+            // WARM_UP + 1 to the last.
+            let counted = pumps[WARM_UP + COUNTED].since(pumps[WARM_UP]);
+            assert_eq!(
+                counted,
+                AllocCounts::default(),
+                "the steady frames allocated"
+            );
+            let ticks = seen[WARM_UP + COUNTED - 1].2 - seen[WARM_UP].2;
+            assert!(ticks > 0, "no tick ran in the counted frames");
+
+            // `FrameAllocs` counts the same as the pumps, frame by frame,
+            // warm-up included: the probe's allocation in frame 5, and with
+            // a GPU, the first frame that draws the textures.
+            for frame in 2..WARM_UP + COUNTED {
+                let between_pumps = pumps[frame].since(pumps[frame - 1]);
+                assert_eq!(seen[frame].0, between_pumps, "frame {frame}");
+            }
+            assert!(seen[5].0.allocations >= 1, "the probe's allocation");
+
+            if drawn {
+                assert!(
+                    seen[2].0.allocations > 0,
+                    "the first full draw grows its lists"
+                );
+                let all = FrameStats {
+                    sprites: (CROWD + TILES) as u32,
+                    skipped: 0,
+                    batches: 2,
+                };
+                assert_eq!(seen[WARM_UP].1, all, "drawn before the counting starts");
+                assert_eq!(seen[WARM_UP + COUNTED - 1].1, all);
+            }
+        }
     }
 }

@@ -2,12 +2,18 @@
 //!
 //! A person walks a field of grass among trees and rocks, moved with WASD
 //! or the arrow keys, and the camera follows them. Once a second it logs
-//! how fast the simulation ticks and the frames come, and what was drawn.
-//! Close the window to quit.
+//! how fast the simulation ticks and the frames come, and what was drawn;
+//! with the `dev` feature, also how often the frames allocated. Close the
+//! window to quit.
 //!
 //! - `--fps N`: at most `N` frames a second; 0 for no limit (default 60)
 //! - `--no-vsync`: do not wait for the display's refresh
+//! - `--scene NAME`: `field` (the default), or `stress-sprites`, where
+//!   10,000 more people walk about in view (`stress.rs`)
 
+mod stress;
+
+use std::fmt;
 use std::time::Duration;
 
 use nadir::log::info;
@@ -17,6 +23,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = nadir::cli::Args::from_env();
     let fps: Option<u32> = args.parsed("--fps")?;
     let vsync = !args.flag("--no-vsync");
+    let scene = match args.value("--scene")? {
+        None => Scene::Field,
+        Some(name) => Scene::from_name(&name).ok_or_else(|| {
+            format!("there is no scene `{name}`: try `field` or `stress-sprites`")
+        })?,
+    };
     // `cargo dev` ends in `--` already, so `cargo dev -- --fps 144` would
     // pass the options as positionals: refuse them rather than ignore them.
     if let Some(extra) = args.finish()?.first() {
@@ -32,15 +44,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Config::default()
     };
     info!(
-        "sandbox: at most {} frames a second, vsync {}",
+        "sandbox: scene {}, at most {} frames a second, vsync {}",
+        scene.name(),
         config
             .frame_rate_limit
             .filter(|&fps| fps > 0)
             .map_or("unlimited".to_string(), |fps| fps.to_string()),
         if vsync { "on" } else { "off" }
     );
-    game(App::new(config))?.run()?;
+    game(App::new(config), scene)?.run()?;
     Ok(())
+}
+
+/// What the sandbox shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scene {
+    /// The person among trees and rocks.
+    Field,
+    /// The field with 10,000 more people walking about in view.
+    StressSprites,
+}
+
+impl Scene {
+    /// The scene of a `--scene` name.
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "field" => Some(Scene::Field),
+            "stress-sprites" => Some(Scene::StressSprites),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Scene::Field => "field",
+            Scene::StressSprites => "stress-sprites",
+        }
+    }
 }
 
 /// What the player does.
@@ -88,6 +128,27 @@ struct Sprites {
 /// The things that do not move.
 struct Props(Vec<SpriteDraw>);
 
+/// A thing that does not move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Prop {
+    Tree,
+    Rock,
+}
+
+/// Where the trees and rocks stand: where their feet are.
+const PROPS: [(Prop, i32, i32); 10] = [
+    (Prop::Tree, 120, 120),
+    (Prop::Tree, 200, 90),
+    (Prop::Tree, 330, 140),
+    (Prop::Tree, 420, 230),
+    (Prop::Tree, 90, 260),
+    (Prop::Tree, 300, 300),
+    (Prop::Rock, 160, 200),
+    (Prop::Rock, 280, 220),
+    (Prop::Rock, 380, 110),
+    (Prop::Rock, 60, 170),
+];
+
 /// What the once-a-second report counts.
 struct Report {
     stopwatch: Stopwatch,
@@ -98,7 +159,7 @@ struct Report {
 }
 
 /// Sets the game up on `app`: its textures, actions, state and systems.
-fn game(mut app: App) -> Result<App, nadir::input::InputError> {
+fn game(mut app: App, scene: Scene) -> Result<App, nadir::input::InputError> {
     let sprites = {
         let mut assets = app.resources_mut().resource_mut::<AssetServer>();
         Sprites {
@@ -124,10 +185,9 @@ fn game(mut app: App) -> Result<App, nadir::input::InputError> {
         keys(Key::Up, Key::Down, Key::Left, Key::Right),
     )?;
 
-    Ok(app
+    let app = app
         .add_actions(map)
         .insert_resource(sprites)
-        .insert_resource(props)
         .insert_resource(Player {
             position: Interpolated::new(Vec2::new(240.0, 160.0)),
             facing_left: false,
@@ -142,29 +202,28 @@ fn game(mut app: App) -> Result<App, nadir::input::InputError> {
         .add_fixed_system("move_player", move_player)
         .add_fixed_system("count_ticks", |resources, _| {
             resources.resource_mut::<Report>().ticks += 1;
-        })
-        .add_frame_system("follow_camera", follow_camera)
-        .add_frame_system("draw", draw)
-        .add_frame_system("report", report))
+        });
+    #[cfg(feature = "dev")]
+    let app = app.insert_resource(AllocTally::default());
+    let app = match scene {
+        Scene::Field => app
+            .insert_resource(props)
+            .add_frame_system("follow_camera", follow_camera)
+            .add_frame_system("draw", draw),
+        Scene::StressSprites => stress::add(app),
+    };
+    Ok(app.add_frame_system("report", report))
 }
 
 /// Trees and rocks about the field.
 fn props(sprites: &Sprites) -> Vec<SpriteDraw> {
-    let mut props = Vec::new();
-    for (x, y) in [
-        (120, 120),
-        (200, 90),
-        (330, 140),
-        (420, 230),
-        (90, 260),
-        (300, 300),
-    ] {
-        props.push(prop(sprites.tree, x, y, Vec2::new(24.0, 48.0)));
-    }
-    for (x, y) in [(160, 200), (280, 220), (380, 110), (60, 170)] {
-        props.push(prop(sprites.rock, x, y, Vec2::new(16.0, 12.0)));
-    }
-    props
+    PROPS
+        .iter()
+        .map(|&(kind, x, y)| match kind {
+            Prop::Tree => prop(sprites.tree, x, y, Vec2::new(24.0, 48.0)),
+            Prop::Rock => prop(sprites.rock, x, y, Vec2::new(16.0, 12.0)),
+        })
+        .collect()
 }
 
 fn prop(texture: Handle<Texture>, x: i32, y: i32, size: Vec2) -> SpriteDraw {
@@ -195,17 +254,7 @@ fn draw(resources: &Resources, frame: &Frame) {
     let sprites = resources.resource::<Sprites>();
     let player = resources.resource::<Player>();
     let mut out = resources.resource_mut::<RenderFrame>();
-    out.clear = Color::rgb(60, 90, 50);
-    // Grass in 32-pixel tiles over the field, under everything.
-    for row in 0..12 {
-        for column in 0..16 {
-            let corner = Vec2::new(column as f32 * 32.0, row as f32 * 32.0);
-            let mut tile = SpriteDraw::new(sprites.grass, corner, Vec2::splat(32.0));
-            tile.pivot = Vec2::ZERO;
-            tile.sort = SortMode::Fixed(0);
-            out.sprites.push(tile);
-        }
-    }
+    push_grass(&mut out, sprites.grass);
     out.sprites
         .extend_from_slice(&resources.resource::<Props>().0);
     let mut person = SpriteDraw::new(
@@ -218,8 +267,56 @@ fn draw(resources: &Resources, frame: &Frame) {
     out.sprites.push(person);
 }
 
+/// The clear color, and grass in 32-pixel tiles over the field, under
+/// everything.
+fn push_grass(out: &mut RenderFrame, grass: Handle<Texture>) {
+    out.clear = Color::rgb(60, 90, 50);
+    for row in 0..12 {
+        for column in 0..16 {
+            let corner = Vec2::new(column as f32 * 32.0, row as f32 * 32.0);
+            let mut tile = SpriteDraw::new(grass, corner, Vec2::splat(32.0));
+            tile.pivot = Vec2::ZERO;
+            tile.sort = SortMode::Fixed(0);
+            out.sprites.push(tile);
+        }
+    }
+}
+
+/// How often the frames allocated since the last report (feature `dev`).
+#[cfg(feature = "dev")]
+#[derive(Default)]
+struct AllocTally {
+    /// Allocations in the frames since the last report.
+    since_report: u64,
+    /// What the last report's own log line allocated: the log allocates
+    /// until its ring of records is full. It is not the frames' doing, so
+    /// it is taken back out.
+    report_line: u64,
+}
+
+/// The allocation part of a report: nothing without the `dev` feature.
+struct Allocations(Option<u64>);
+
+impl fmt::Display for Allocations {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(count) => write!(f, "; allocated {count} times since the last report"),
+            None => Ok(()),
+        }
+    }
+}
+
 /// Logs the tick and frame rates, and what was drawn, once a second.
 fn report(resources: &Resources, _frame: &Frame) {
+    // The last frame's allocations, read in this one.
+    #[cfg(feature = "dev")]
+    let mut tally = {
+        let mut tally = resources.resource_mut::<AllocTally>();
+        let last = resources.resource::<nadir::FrameAllocs>().0.allocations;
+        let report_line = std::mem::take(&mut tally.report_line);
+        tally.since_report += last.saturating_sub(report_line);
+        tally
+    };
     let mut report = resources.resource_mut::<Report>();
     report.frames += 1;
     let elapsed = report.stopwatch.elapsed();
@@ -230,10 +327,17 @@ fn report(resources: &Resources, _frame: &Frame) {
         report.frames_reported = report.frames;
         let fps = frames as f64 / (elapsed - since).as_secs_f64();
         let stats = *resources.resource::<FrameStats>();
+        #[cfg(feature = "dev")]
+        let (allocations, before) = (
+            Allocations(Some(std::mem::take(&mut tally.since_report))),
+            nadir::thread_alloc_counts(),
+        );
+        #[cfg(not(feature = "dev"))]
+        let allocations = Allocations(None);
         info!(
             "tick rate: {:.2} Hz over the last second, {:.2} Hz since the start \
              ({} ticks in {:.1} s); {fps:.1} frames a second; drawn: {} sprites in {} \
-             batches, {} not ready",
+             batches, {} not ready{allocations}",
             rate.recent_hz,
             rate.average_hz,
             rate.ticks,
@@ -242,6 +346,10 @@ fn report(resources: &Resources, _frame: &Frame) {
             stats.batches,
             stats.skipped
         );
+        #[cfg(feature = "dev")]
+        {
+            tally.report_line = nadir::thread_alloc_counts().since(before).allocations;
+        }
     }
 }
 
@@ -346,14 +454,22 @@ mod tests {
     /// The sandbox's resources, set up as the game sets them, without a
     /// window.
     fn sandbox() -> App {
-        game(App::new(Config {
-            assets: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into(),
-            ..Config::default()
-        }))
+        scene(Scene::Field)
+    }
+
+    /// A scene's resources, set up as the game sets them, without a window.
+    pub(crate) fn scene(scene: Scene) -> App {
+        game(
+            App::new(Config {
+                assets: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into(),
+                ..Config::default()
+            }),
+            scene,
+        )
         .expect("the sandbox sets up")
     }
 
-    fn tick() -> Tick {
+    pub(crate) fn tick() -> Tick {
         Tick {
             index: 0,
             dt: 1.0 / 60.0,
@@ -406,9 +522,22 @@ mod tests {
     }
 
     #[test]
+    fn a_scene_is_chosen_by_name() {
+        for scene in [Scene::Field, Scene::StressSprites] {
+            assert_eq!(Scene::from_name(scene.name()), Some(scene));
+        }
+        assert_eq!(Scene::from_name("Field"), None);
+        assert_eq!(Allocations(None).to_string(), "");
+        assert_eq!(
+            Allocations(Some(0)).to_string(),
+            "; allocated 0 times since the last report"
+        );
+    }
+
+    #[test]
     fn every_sprite_file_is_there() {
         let app = sandbox();
-        for name in ["person", "tree", "rock", "grass"] {
+        for name in ["person", "tree", "rock", "grass", "atlas"] {
             let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sprites/");
             let bytes = std::fs::read(format!("{path}{name}.qoi")).expect("the sprite file");
             assert!(bytes.starts_with(b"qoif"), "{name}");

@@ -3,8 +3,11 @@
 //!
 //! So far: the [`Texture`] asset (roadmap M3.2), and the [`Renderer`]
 //! (M3.3), which draws a [`RenderFrame`]'s sprites in pixel-perfect mode.
+//! Its work on the CPU is the [`SpriteBatcher`], public so that it can be
+//! measured without a GPU (M3.5).
 //! `docs/subsystems/render.md` has the design.
 
+mod batcher;
 mod error;
 mod frame;
 mod instance;
@@ -15,6 +18,7 @@ mod sort;
 mod texture;
 mod view;
 
+pub use batcher::SpriteBatcher;
 pub use error::RenderError;
 pub use frame::{Camera2D, Flip, RenderFrame, SortMode, SpriteDraw};
 pub use instance::SPRITE_INSTANCE_FLOATS;

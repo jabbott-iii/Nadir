@@ -208,6 +208,14 @@ per-thread counters (allocations, deallocations, bytes) in `thread_local!`
 `Cell`s, plus process totals in atomics. `nadir-platform` owns this because
 it requires `unsafe impl GlobalAlloc`.
 
+- A reallocation counts as an allocation of its new size, and not as a
+  deallocation. The bytes are the bytes asked for.
+- `thread_alloc_counts()` and `process_alloc_counts()` read them, as an
+  `AllocCounts`; `AllocCounts::since` takes the difference of two readings.
+- Inside the allocator nothing allocates, locks, logs or panics: the
+  thread-local has a constant start and no destructor, and is read with
+  `try_with`.
+
 ## Invariants
 
 - Each window has its own event sequence. Events are delivered in OS order.

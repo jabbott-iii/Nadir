@@ -9,11 +9,9 @@ use nadir_gfx::{
     VertexStep,
 };
 
-use crate::instance::push_instance;
-use crate::plan::{Plan, Resolved};
 use crate::shader::{BLIT, SPRITE, packed};
 use crate::view::{self, Upscale, View};
-use crate::{Camera2D, RenderError, RenderFrame, SPRITE_INSTANCE_FLOATS, Texture};
+use crate::{Camera2D, RenderError, RenderFrame, SPRITE_INSTANCE_FLOATS, SpriteBatcher, Texture};
 
 /// How the renderer draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,8 +79,7 @@ pub struct Renderer {
     /// Instances the buffer holds.
     capacity: usize,
     world: RenderTargetId,
-    plan: Plan<TextureId>,
-    packed: Vec<f32>,
+    batcher: SpriteBatcher<TextureId>,
 }
 
 impl Renderer {
@@ -163,8 +160,7 @@ impl Renderer {
             instances,
             capacity: FIRST_CAPACITY,
             world,
-            plan: Plan::new(),
-            packed: Vec::with_capacity(FIRST_CAPACITY * SPRITE_INSTANCE_FLOATS),
+            batcher: SpriteBatcher::new(),
         })
     }
 
@@ -188,31 +184,16 @@ impl Renderer {
         output: Output,
     ) -> Result<FrameStats, RenderError> {
         let textures = assets.assets::<Texture>();
-        self.plan.build(&frame.sprites, |sprite| {
-            let Some(textures) = textures else {
-                return Resolved::Skip;
-            };
-            match textures.get(sprite.texture) {
-                None => Resolved::Skip,
-                Some(texture) if textures.state(sprite.texture) == Some(LoadState::Failed) => {
-                    Resolved::Placeholder(texture.id())
-                }
-                Some(texture) => Resolved::Draw(texture.id()),
-            }
+        self.batcher.build(&frame.sprites, &frame.camera, |sprite| {
+            let textures = textures?;
+            let texture = textures.get(sprite.texture)?;
+            let failed = textures.state(sprite.texture) == Some(LoadState::Failed);
+            Some((texture.id(), failed))
         });
 
         let view = View::new(&frame.camera, self.virtual_size);
-        self.packed.clear();
-        for drawn in &self.plan.order {
-            let sprite = &frame.sprites[drawn.sprite as usize];
-            push_instance(
-                &mut self.packed,
-                sprite,
-                drawn.placeholder,
-                Some(view.zoom()),
-            );
-        }
-        let count = self.plan.order.len();
+        let stats = self.batcher.stats();
+        let count = stats.sprites as usize;
         if count > self.capacity {
             let capacity = count.next_power_of_two().max(self.capacity * 2);
             let instances = instance_buffer(device, capacity)?;
@@ -221,7 +202,7 @@ impl Renderer {
             self.capacity = capacity;
         }
         if count > 0 {
-            device.write_buffer(self.instances, 0, &self.packed)?;
+            device.write_buffer(self.instances, 0, self.batcher.instances())?;
         }
 
         let clear = frame.clear.to_linear();
@@ -232,7 +213,7 @@ impl Renderer {
                 pass.set_vertex_buffer(0, self.instances, 0)?;
                 pass.set_vertex_buffer(1, self.quad, 0)?;
                 pass.set_uniforms(0, &view.uniform())?;
-                for batch in &self.plan.batches {
+                for batch in self.batcher.batches() {
                     pass.set_texture(0, batch.texture, Sampler::NearestClamp)?;
                     pass.draw(0..4, batch.start..batch.start + batch.count)?;
                 }
@@ -247,11 +228,7 @@ impl Renderer {
             pass.set_texture(0, self.world, Sampler::NearestClamp)?;
             pass.draw(0..4, 0..1)?;
         }
-        Ok(FrameStats {
-            sprites: count as u32,
-            skipped: self.plan.skipped,
-            batches: self.plan.batches.len() as u32,
-        })
+        Ok(stats)
     }
 
     /// Where the virtual image lands in an output of `size`.

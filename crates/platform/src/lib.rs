@@ -12,11 +12,17 @@
 //! draws offscreen. Windows and macOS have no OpenGL context yet: their
 //! surface has no functions, and [`create_headless_gl`] returns
 //! [`PlatformError::Unsupported`].
+//!
+//! With the `dev` feature, the global allocator of every binary that links
+//! this crate counts allocations (`thread_alloc_counts`,
+//! `process_alloc_counts`), and no other crate may declare one.
 
 // One of the three crates allowed to contain `unsafe` (AGENTS.md, rule 3). The
 // workspace denies `unsafe_code` everywhere else.
 #![allow(unsafe_code)]
 
+#[cfg(feature = "dev")]
+mod alloc_counter;
 mod dialog;
 mod error;
 mod event;
@@ -37,6 +43,8 @@ mod windows;
 
 use nadir_core::UVec2;
 
+#[cfg(feature = "dev")]
+pub use alloc_counter::{AllocCounts, process_alloc_counts, thread_alloc_counts};
 pub use dialog::show_error_dialog;
 pub use error::PlatformError;
 pub use event::Event;

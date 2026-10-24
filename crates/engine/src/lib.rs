@@ -4,7 +4,9 @@
 //! So far there is [`App`] with the main loop: it opens the log file and
 //! the window, latches the game's actions and steps the simulation
 //! [`TICK_HZ`] times a second, and draws each frame's sprites. Systems share
-//! state through [`Resources`]. A game needs only this crate:
+//! state through [`Resources`]. With the `dev` feature, the global
+//! allocator counts allocations, and the resource `FrameAllocs` holds the
+//! last frame's. A game needs only this crate:
 //!
 //! ```no_run
 //! use nadir::prelude::*;
@@ -22,6 +24,8 @@
 
 mod app;
 mod error;
+#[cfg(feature = "dev")]
+mod frame_allocs;
 mod interpolated;
 mod limiter;
 mod log_file;
@@ -29,10 +33,14 @@ mod resources;
 
 pub use nadir_core::{cli, log};
 pub use nadir_platform::Event;
+#[cfg(feature = "dev")]
+pub use nadir_platform::{AllocCounts, process_alloc_counts, thread_alloc_counts};
 pub use {nadir_assets as assets, nadir_input as input, nadir_render as render};
 
 pub use app::{App, Config, TICK_HZ};
 pub use error::Error;
+#[cfg(feature = "dev")]
+pub use frame_allocs::FrameAllocs;
 pub use interpolated::{Interpolated, Lerp};
 pub use resources::Resources;
 

@@ -70,10 +70,6 @@ impl View {
         Self { origin, zoom, size }
     }
 
-    pub(crate) fn zoom(&self) -> f32 {
-        self.zoom
-    }
-
     /// The `Camera` uniform of the `sprite` shader: clip = world * xy + zw.
     pub(crate) fn uniform(&self) -> [f32; 4] {
         let scale = Vec2::new(

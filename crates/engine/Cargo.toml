@@ -12,10 +12,16 @@ nadir-input = { path = "../input" }
 nadir-platform = { path = "../platform" }
 nadir-render = { path = "../render" }
 
+[dev-dependencies]
+# The tests write QOI textures, and check that a QOI file too short for
+# its size is refused before anything is allocated.
+nadir-codec = { path = "../codec" }
+
 [features]
 # Development builds: a failed asset shows its placeholder rather than
-# nothing. `cargo dev` turns it on through the sandbox.
-dev = []
+# nothing, and the allocation counter counts each frame's allocations
+# (`FrameAllocs`). `cargo dev` turns it on through the sandbox.
+dev = ["nadir-platform/dev"]
 
 [lints]
 workspace = true

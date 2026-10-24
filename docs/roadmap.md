@@ -933,6 +933,10 @@ testing in CI.
     - Modal frames call `EngineCore::frame(&[], None)`
       (`crates/engine/src/app.rs`). Pass the `ModalFrame`'s surface and the
       window size there, so that a title-bar drag draws.
+  - Note (from M3.5): the facade's `steady_frames` test runs without
+    drawing where there is no offscreen context. Once this one exists, it
+    draws, and it fails rather than skips on a context that fails another
+    way, as the gfx and render tests do.
   - Depends: M2.3, M1.5
   - Do: the dummy-window dance, `wglChoosePixelFormatARB`, a 3.3 core
     context, `wglSwapIntervalEXT`, GL 1.1 symbols from `opengl32.dll`.
@@ -964,6 +968,10 @@ testing in CI.
     - Modal frames call `EngineCore::frame(&[], None)`
       (`crates/engine/src/app.rs`). Pass the `ModalFrame`'s surface and the
       window size there, so that a live resize draws.
+  - Note (from M3.5): the facade's `steady_frames` test runs without
+    drawing where there is no offscreen context. Once this one exists, it
+    draws, and it fails rather than skips on a context that fails another
+    way, as the gfx and render tests do.
   - Depends: M2.3, M1.6
   - Do: the pixel format, a 3.2-core-profile (4.1) context, Retina backing,
     swap interval, `dlopen` of the OpenGL framework.
@@ -1301,8 +1309,11 @@ by the batched sprite renderer.
     `--`: the alias ends in one, and the sandbox refuses the extra one.
     A press and release within one tick moving exactly one tick is shown
     by `a_tap_between_ticks_moves_exactly_one_tick`, not by eye.
+  - Note: CI run 13, for the M3.4 commit `3a43a01`, passed on all three
+    systems, as the user reported; the session saw it on the public
+    Actions page.
 
-- [ ] **M3.5 — allocation counter + sprite stress benchmark**
+- [x] **M3.5 — allocation counter + sprite stress benchmark**
   - Note (from M3.3):
     - `Renderer::render` reuses its plan and instance buffers. The buffer
       grows by doubling, so a steady frame should allocate nothing; this
@@ -1333,6 +1344,51 @@ by the batched sprite renderer.
   - Accept: 0 allocations/frame; bench results recorded in
     `bench/baseline.json`.
   - Verify: `cargo test -p nadir --features dev`; `cargo xtask bench sprite`
+  - Note: the user decided on 2026-10-23 to keep this one task across five
+    crates (platform, nadir, render, bench, sandbox). They also chose one
+    new public render type for the bench, and a facade test with a scene
+    of its own.
+  - Note: built:
+    - `nadir-platform`'s `dev` feature installs the counting global
+      allocator (`alloc_counter.rs`): allocations, reallocations included,
+      deallocations and bytes, per thread and per process.
+    - The facade's `dev` turns it on and keeps `FrameAllocs`, the main
+      thread's count from the end of one frame to the end of the next.
+    - render's `SpriteBatcher<K>` does the sort, the batches and the
+      instance packing for the `Renderer`, and for the bench without a GPU.
+      Its `build` takes a closure that returns `Option<(K, bool)>`, so
+      that it is the one new public type.
+    - The bench `sprite_sort_batch` times one frame shaped like the stress
+      scene.
+    - The sandbox's `--scene stress-sprites` adds 10,000 people walking
+      about in view, all drawn from `assets/sprites/atlas.qoi`, as are the
+      props and the player. The camera stays on the view's centre.
+  - Note: measured on 2026-10-23 on an i7-11800H.
+    - `steady_frames`: over 100 counted frames of 10,192 sprites in 2
+      batches through the real loop, 0 allocations and 0 deallocations.
+      This held on llvmpipe, on the NVIDIA RTX 3070, and with no context.
+    - `bench/baseline.json`, from a full run: `sprite_sort_batch` median
+      738 µs (p95 825 µs), `json_parse` 1.6 ms. render.md's 2 ms budget
+      also covers the upload, and is for min-spec, not this machine.
+    - The stress scene on X11 (Mesa 26.1.6, Intel UHD Graphics TGL GT1)
+      drew 10,203 sprites in 2 batches, with 0 allocations in every second
+      after the first. The first second's 73 are loading and growth.
+      - debug, uncapped: about 119 frames a second
+      - debug, `--fps 60` with vsync: 60.0
+      - release, uncapped: 680 to 726
+  - Note: each of these planted bugs failed its test, and was reverted:
+    - the batcher making a new instance list each frame
+    - `FrameAllocs` never written, or ended before the draw
+    - an allocation in `App::frame`
+    - an allocation in the crowd's draw
+    - `qoi::decode` allocating before its size check (the M2.4 note's
+      test, in `crates/engine/tests/allocations.rs`)
+  - Note: the counter sees only Rust's global allocator: not what Mesa or
+    Xlib allocate themselves. The fuzzer does not use it, because `xtask`
+    may not link `nadir-platform` (`docs/04-quality.md`). Release builds
+    stay free of it by a rule, `dev` only from `[features]` or
+    dev-dependencies (`docs/01-architecture.md`); `release-no-dev` does
+    not check this.
 
 **Exit criteria (M3):**
 
@@ -1384,6 +1440,13 @@ by the batched sprite renderer.
       would see no edges. Until the game adds its set, the loop latches
       into a private set of one unbound action (`NoActions`), so that
       every tick ends and `Input::wheel` moves on.
+  - Note (from M3.5):
+    - `FrameAllocs` counts per frame. The M4 exit asks for 0 allocations a
+      tick: a count around the fixed systems in `App::frame` would give it.
+    - The 5k-entity steady test can follow `steady_frames` in
+      `crates/engine/src/app.rs`, which drives the real loop offscreen.
+    - The stress scene (`games/sandbox/src/stress.rs`) moves its crowd
+      with `Interpolated` too, and has a test of its own systems.
   - Depends: M4.1, M4.2, M4.3, M3.4
   - Do:
     - `App` builder with stages
@@ -1479,6 +1542,9 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-assets`
 
 - [ ] **M5.4 — cook: CLI, cache, textures, atlas packer**
+  - Note (from M3.5): the sandbox has a hand-made atlas,
+    `assets/sprites/atlas.qoi`, with its regions as constants in
+    `games/sandbox/src/stress.rs`. Cooked atlases replace both.
   - Depends: M5.1, M5.2, M2.4
   - Do: the `nadir-cook` library and CLI; the incremental cache; the
     PNG → trim → MaxRects atlas (padding + extrusion) → QOI pipeline;
@@ -1550,6 +1616,10 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-codec`
 
 - [ ] **M6.2 — audio: mixer (offline)**
+  - Note (from M3.5): for the test that `render` allocates nothing, a
+    dev-dependency on `nadir-platform` with `features = ["dev"]` installs the
+    counter. Read `thread_alloc_counts()` around the calls. Declare no other
+    `#[global_allocator]`: two in one binary do not build.
   - Depends: M6.1, M3.2
   - Do: voices, buses, constant-power pan, positional attenuation, fades,
     the resampler, stealing, the limiter, music streaming from in-memory
@@ -1634,6 +1704,10 @@ by the batched sprite renderer.
 - [ ] **M7.3 — stats overlay and profiler**
   - Note (from M2.3): `Caps` has no timer-query field yet. It is
     `#[non_exhaustive]`, so adding one breaks nothing.
+  - Note (from M3.5): `FrameAllocs`, the last frame's allocations, is a
+    facade resource holding `nadir-platform`'s `AllocCounts`, and
+    `nadir-debug` may depend on neither. So the overlay takes plain numbers,
+    which the facade copies in each frame. Only Rust's allocator is counted.
   - Depends: M7.2, M0.4
   - Do: the overlay; profiler ring, graph and scope tree; Chrome trace
     export; GL timer queries.
@@ -1913,6 +1987,9 @@ by the batched sprite renderer.
   - Verify: measurement notes with numbers, per OS
 
 - [ ] **M11.6 — security pass**
+  - Note (from M3.5): the fuzzer does not count allocations. The counter
+    is in `nadir-platform`, which `xtask` may not link. Decide where the
+    targets run, or the matrix edge, with the user (`docs/04-quality.md`).
   - Depends: M9.4
   - Do: nightly 30-minute fuzz smoke per parser; review the limits in
     every loader; ask the user to decide dependency-policy item 29

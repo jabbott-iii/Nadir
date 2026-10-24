@@ -9,6 +9,11 @@ nadir-core = { path = "../core" }
 nadir-sys = { path = "../sys" }
 
 [features]
+# Development builds: the allocation counter, as the global allocator of
+# every binary that links this crate (`alloc_counter.rs`). Turn it on only
+# from a `[features]` table or a dev-dependency, so that no release build
+# carries it. The facade's `dev` turns it on.
+dev = []
 # Builds the tests that need an EGL driver with OpenGL 3.3 (core profile),
 # which then fail, not skip, if there is none. Linux only: elsewhere it adds
 # nothing. `cargo xtask ci` turns it on, as it does every feature.

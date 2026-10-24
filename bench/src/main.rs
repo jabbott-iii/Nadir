@@ -5,7 +5,8 @@
 //! 95th percentile of the time per iteration are printed and written to
 //! `target/bench/latest.json`. If `bench/baseline.json` exists, each median
 //! is compared with it, and a slowdown of more than 10% is flagged. To
-//! record a baseline, copy `latest.json` there.
+//! record a baseline, copy `latest.json` there after a run of every
+//! benchmark: a filtered run writes only what it ran.
 //!
 //! The method is specified in `docs/04-quality.md`.
 

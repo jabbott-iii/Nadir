@@ -290,6 +290,13 @@ Run dev builds with `cargo dev` (the alias above). Release builds never
 include `dev`. `cargo xtask release-no-dev` checks this: `nadir-debug` must
 not appear in the sandbox's non-dev dependency tree.
 
+A member turns a `dev` feature on only from its `[features]` table or a
+dev-dependency, never from a normal dependency (M3.5). A build of the whole
+workspace unifies features, and `dev` in `nadir-platform` replaces the
+global allocator. A dev-dependency reaches only builds of test, bench or
+example targets, which a release build does not make. Nothing checks this
+rule yet: `release-no-dev` looks only for `nadir-debug`.
+
 ## Configuration and user data
 
 - Settings live in `settings.jsonc` in the user config directory (paths per

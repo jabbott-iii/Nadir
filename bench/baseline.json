@@ -1,0 +1,18 @@
+{
+  "benchmarks": [
+    {
+      "name": "json_parse",
+      "median_ns": 1609402.75,
+      "p95_ns": 1813437.1666666667,
+      "samples": 50,
+      "iterations": 6
+    },
+    {
+      "name": "sprite_sort_batch",
+      "median_ns": 738152.2142857143,
+      "p95_ns": 825038.7857142857,
+      "samples": 50,
+      "iterations": 14
+    }
+  ]
+}

@@ -46,11 +46,15 @@ pub fn check_sized<T: std::fmt::Debug>(
 - The default seed comes from `NADIR_SEED`, or from a fixed value in CI so
   runs are reproducible.
 - `NADIR_EXPECT_GL_RENDERER`, when set and not empty, makes the headless
-  OpenGL tests of `nadir-platform`, `nadir-gfx` and `nadir-render` fail
-  unless the renderer's name contains it (`llvmpipe` in CI). Otherwise they
-  log the renderer and take any. Where `nadir-platform` has no offscreen
-  context yet (Windows and macOS, until M2.6 and M2.7), the gfx and render
-  tests skip, but only while the variable is unset.
+  OpenGL tests of `nadir-platform`, `nadir-gfx`, `nadir-render` and the
+  facade fail unless the renderer's name contains it (`llvmpipe` in CI).
+  Otherwise they log the renderer and take any. Where `nadir-platform` has
+  no offscreen context yet (Windows and macOS, until M2.6 and M2.7), the
+  gfx and render tests skip, and the facade's steady-frame test runs
+  without drawing, but only while the variable is unset.
+  - The facade's test is behind its `dev` feature, not `headless-test`, so
+    `cargo test -p nadir --features dev` on Linux needs EGL and an OpenGL
+    3.3 driver.
 - A nightly job runs with random seeds and prints the seeds it used.
 - Shrinking is deliberately minimal, and only `check_sized` does it: the
   harness retries a failing case at every smaller size and reports the
@@ -161,8 +165,11 @@ pub fn check_sized<T: std::fmt::Debug>(
     location count as one finding.
   - A hang is an input the target does not finish within 10 s. It ends the
     whole run, because the stuck thread cannot be stopped.
-  - The allocation counter is not wired in yet: it arrives with the dev
-    allocator in M3.5.
+  - The allocation counter is not wired in. It lives in `nadir-platform`
+    (M3.5), which `xtask` may not depend on (the dependency matrix).
+    Wiring it needs a decision: run the targets in a test binary that links
+    `nadir-platform`, as the goldens run in GL test binaries (ADR-0017), or
+    a new matrix edge.
   - A stack overflow or an aborted allocation kills the fuzzer, and the
     input is then not saved.
 - Crashes are saved to `fuzz/crashes/`, which Git ignores, as
@@ -182,10 +189,32 @@ pub fn check_sized<T: std::fmt::Debug>(
 ### Allocation counter (dev)
 
 - `nadir-platform` provides a `#[global_allocator]` wrapper around `System`
-  under feature `dev`. It counts allocations per thread and per frame.
+  under feature `dev` (`crates/platform/src/alloc_counter.rs`).
+  - It counts allocations (reallocations included, as that is how a `Vec`
+    grows), deallocations and the bytes asked for, per thread
+    (`thread_alloc_counts`) and for the process (`process_alloc_counts`).
+  - It sees only Rust's global allocator: C libraries that call `malloc`
+    themselves (Mesa, Xlib, EGL) are not counted.
+  - Every binary that links `nadir-platform` with `dev` allocates through
+    it, so no other crate may declare a `#[global_allocator]`. Turn `dev` on
+    only from a `[features]` table or a dev-dependency, never from a normal
+    dependency, so that no release build carries it.
+- The facade re-exports it under its own `dev`, and keeps the main thread's
+  count for the last frame in the resource `FrameAllocs`: from the end of
+  the frame before to the end of this one. The sandbox reports it once a
+  second.
 - The debug overlay shows allocations per frame.
-- Integration tests assert **0 allocations** across 100 steady-state frames
-  of the "10k sprites" and "5k entities" scenes.
+- Tests assert **0 allocations** across 100 steady-state frames:
+  - the facade's unit test `steady_frames` in `crates/engine/src/app.rs`
+    draws a 10k-sprite scene of its own through the real loop, offscreen
+    (`cargo test -p nadir --features dev`), and checks `FrameAllocs`
+    against its own count frame by frame;
+  - the sandbox's stress scene, `--scene stress-sprites`, tests its own
+    systems the same way, without a GPU;
+  - the "5k entities" scene follows in M4.
+- `crates/engine/tests/allocations.rs` holds checks of code outside the
+  loop, such as a QOI file too short for its size being refused before
+  anything is allocated.
 
 ### Benchmarks — `nadir-bench`
 
@@ -200,10 +229,11 @@ pub fn check_sized<T: std::fmt::Debug>(
   `bench/baseline.json`. A slowdown above 10% is flagged; it is not a failure.
   - Medians are compared. A benchmark without a baseline entry is reported
     as such.
-  - To record a baseline, copy `latest.json` to `bench/baseline.json`. The
-    numbers only mean something on the machine that recorded them.
+  - To record a baseline, copy `latest.json` to `bench/baseline.json`
+    after a run of every benchmark: a filtered run writes only what it ran.
+    The numbers only mean something on the machine that recorded them.
 - Required benchmarks:
-  - sprite sort + batch for 10k sprites
+  - sprite sort + batch for 10k sprites (`sprite_sort_batch`, M3.5)
   - tilemap chunk rebuild
   - ECS join over 5k entities
   - spatial hash rebuild and query

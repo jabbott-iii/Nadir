@@ -237,6 +237,10 @@ Measured on min-spec; see `docs/00-overview.md`.
 
 - 10k sprites: sort + batch + upload ≤ 2 ms CPU; ≤ 30 draw calls with the
   sandbox atlases.
+  - The CPU part before the upload is `SpriteBatcher`, public so that
+    `nadir-bench` can time it without a GPU (`sprite_sort_batch`): the sort
+    keys, the sort, the batches and the packed instances. The `Renderer`
+    holds one; it adds the asset lookups and the upload.
 - Tilemap: a 256×256 level visible at zoom 1 adds ≤ 1 ms CPU and ≤ 30 draw
   calls.
 - Zero heap allocations per frame in steady state.

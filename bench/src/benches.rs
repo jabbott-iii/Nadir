@@ -2,6 +2,7 @@
 //! input and hands the work to the [`Bencher`].
 
 mod json;
+mod sprite;
 
 use crate::harness::Bencher;
 
@@ -16,10 +17,16 @@ pub(crate) struct Benchmark {
 
 /// Every benchmark, in the order they run. `docs/04-quality.md` lists the
 /// ones the engine must have by the end.
-pub(crate) const ALL: &[Benchmark] = &[Benchmark {
-    name: "json_parse",
-    run: json::parse,
-}];
+pub(crate) const ALL: &[Benchmark] = &[
+    Benchmark {
+        name: "json_parse",
+        run: json::parse,
+    },
+    Benchmark {
+        name: "sprite_sort_batch",
+        run: sprite::sort_batch,
+    },
+];
 
 #[cfg(test)]
 mod tests {
