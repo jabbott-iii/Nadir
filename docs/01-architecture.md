@@ -136,11 +136,9 @@ pub fn run(mut app: App) -> Result<(), Error> {
         while let Some(tick) = clock.consume_tick() {
             app.world.snapshot_prev_transforms();            // for interpolation
             app.input.latch(&app.action_map, &mut app.actions); // edges -> this tick
-            app.schedule.run_fixed(&app.world, &tick);
-            app.world.apply_commands();                      // structural changes
+            app.schedule.run_fixed(&mut app.world, &tick);   // then its commands (ecs.md)
         }
-        app.schedule.run_frame(&app.world, &frame);          // frame.dt, frame.alpha
-        app.world.apply_commands();
+        app.schedule.run_frame(&mut app.world, &frame);      // frame.dt, frame.alpha; commands
 
         let draw = app.extract(frame.alpha);                 // ECS -> RenderFrame
         gfx.begin_frame(platform.gpu_surface())?;

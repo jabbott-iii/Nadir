@@ -1,6 +1,7 @@
 //! The benchmarks. Each one is a name and a function that sets up its
 //! input and hands the work to the [`Bencher`].
 
+mod ecs;
 mod json;
 mod sprite;
 
@@ -25,6 +26,18 @@ pub(crate) const ALL: &[Benchmark] = &[
     Benchmark {
         name: "sprite_sort_batch",
         run: sprite::sort_batch,
+    },
+    Benchmark {
+        name: "ecs_join2_5k",
+        run: ecs::join2,
+    },
+    Benchmark {
+        name: "ecs_join3_5k",
+        run: ecs::join3,
+    },
+    Benchmark {
+        name: "ecs_spawn_despawn",
+        run: ecs::spawn_despawn,
     },
 ];
 

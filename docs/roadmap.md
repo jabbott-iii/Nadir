@@ -1389,6 +1389,9 @@ by the batched sprite renderer.
     stay free of it by a rule, `dev` only from `[features]` or
     dev-dependencies (`docs/01-architecture.md`); `release-no-dev` does
     not check this.
+  - Note: CI run 14, for the M3.5 commit `34e0ea8`, passed on all three
+    systems, as the user reported; the session saw it on the public
+    Actions page.
 
 **Exit criteria (M3):**
 
@@ -1400,7 +1403,7 @@ by the batched sprite renderer.
 
 ## M4 — Simulation: ECS, reflection, collision, tilemaps
 
-- [ ] **M4.1 — ecs crate**
+- [x] **M4.1 — ecs crate**
   - Depends: M0.3
   - Do: everything in `docs/subsystems/ecs.md`:
     - entities, `SparseSet`, `World`, `Read`/`Write`, resources
@@ -1409,8 +1412,51 @@ by the batched sprite renderer.
   - Accept: the model-based property test, the borrow-conflict test and
     the events test pass; benchmarks are recorded.
   - Verify: `cargo test -p nadir-ecs`; `cargo xtask bench ecs`
+  - Note: built as `docs/subsystems/ecs.md` describes. The spec now
+    records where the code settles what it left open:
+    - `Entity` wraps a `GenIndex` and has no public constructor.
+    - A stale entity's insert never touches its slot's newer occupant.
+    - `Component` is an explicit marker (ADR-0014: the facade defines the
+      components).
+    - `Read`, `Write`, `Res` and `ResMut` are aliases of `Ref` and `RefMut`.
+    - Commands queue small ops, with each insert's value in its own type's
+      queue: nothing is boxed.
+    - `World::add_event` records how the schedule clears each event type.
+    - `Schedule::run_fixed` and `run_frame` take `&mut World`, apply the
+      commands and clear the events.
+    - A guard restores the current system's name, also on a panic.
+    - `docs/01-architecture.md`'s loop is updated to match.
+  - Note: tests: 19 unit tests and 3 doc tests.
+    - The model-based property test runs 300 random histories of up to 300
+      steps against a `BTreeMap` model, stale entities and queued commands
+      included.
+    - The borrow-conflict test checks the start of each message, the
+      system's name and the type's, for components, resources and an
+      unregistered type.
+    - The events test runs frames of 3, then 0, then 1 ticks, and compares
+      exact lists.
+    - Each of these planted bugs failed a test, and was reverted: the
+      swap-remove fix-up left out, despawn leaving components, removes
+      applied before inserts, frame events cleared at the next tick, the
+      command queue or the event buffers freed instead of cleared, and
+      `add_event` skipping an `Events<T>` inserted by hand.
+  - Note: `bench/baseline.json`, from a full run on 2026-10-24 (i7-11800H):
+    `ecs_join2_5k` 8.2 µs, `ecs_join3_5k` 14.3 µs, `ecs_spawn_despawn`
+    (100 entities with 2 components, through commands) 7.4 µs. The run
+    re-recorded `json_parse` (1.58 ms, 2.1% faster than the earlier
+    baseline) and `sprite_sort_batch` (744 µs, 0.9% slower).
+  - Note: `nadir-ecs` cannot count allocations: it may depend only on
+    `nadir-core`. So a test checks only that, under a steady stream of
+    commands and events, the command queue, the storages and the event
+    buffers keep the same non-zero capacities. The facade's count covers
+    the rest in M4.4.
 
 - [ ] **M4.2 — scene: reflection**
+  - Note (from M4.1): the ecs world keeps only names and storage
+    operations per component type. The reflection hooks belong to this
+    crate's `TypeRegistry`. `Component` is an explicit marker, so a
+    `reflect_struct!` type used as a component also needs
+    `impl Component for …`.
   - Depends: M4.1, M0.5
   - Do: `reflect_struct!`, `reflect_enum!`, `reflect_newtype!`, the
     built-in impls, `TypeRegistry`, `Value` round-trip, unknown-field
@@ -1447,6 +1493,19 @@ by the batched sprite renderer.
       `crates/engine/src/app.rs`, which drives the real loop offscreen.
     - The stress scene (`games/sandbox/src/stress.rs`) moves its crowd
       with `Interpolated` too, and has a test of its own systems.
+  - Note (from M4.1):
+    - `Schedule::run_fixed(&mut World, &Tick)` and `run_frame` apply the
+      commands and clear the events themselves: the loop calls nothing
+      else (`docs/01-architecture.md`).
+    - `Res` and `ResMut` are aliases of `Ref` and `RefMut`, so code that
+      names `Ref` or `RefMut` keeps working after the swap.
+    - The current system's name is private to `nadir-ecs` (`SystemScope`
+      in `system.rs`). Engine steps outside the schedule, such as the latch
+      or the draw, show `(none)` in borrow panics unless the guard is made
+      public.
+    - `Component` is explicit: the facade implements it for each component.
+    - Count a steady stream of commands and events with `FrameAllocs`; the
+      ecs crate checks only that its buffers do not grow.
   - Depends: M4.1, M4.2, M4.3, M3.4
   - Do:
     - `App` builder with stages
@@ -1723,6 +1782,9 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-debug`
 
 - [ ] **M7.5 — console**
+  - Note (from M4.1): `Schedule::describe()` lists the systems in run
+    order as `SystemInfo`, which displays as `tick  Gameplay:
+    player_move`, with `(conditional)` for a system with a run condition.
   - Depends: M7.2
   - Do: the command registry, history, completion, the log view, the
     initial command set.

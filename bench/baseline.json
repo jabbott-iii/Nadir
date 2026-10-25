@@ -2,17 +2,38 @@
   "benchmarks": [
     {
       "name": "json_parse",
-      "median_ns": 1609402.75,
-      "p95_ns": 1813437.1666666667,
+      "median_ns": 1575365.75,
+      "p95_ns": 1605277.0,
       "samples": 50,
       "iterations": 6
     },
     {
       "name": "sprite_sort_batch",
-      "median_ns": 738152.2142857143,
-      "p95_ns": 825038.7857142857,
+      "median_ns": 744471.0384615385,
+      "p95_ns": 758780.6153846154,
       "samples": 50,
-      "iterations": 14
+      "iterations": 13
+    },
+    {
+      "name": "ecs_join2_5k",
+      "median_ns": 8150.101333333333,
+      "p95_ns": 8446.385777777778,
+      "samples": 50,
+      "iterations": 1125
+    },
+    {
+      "name": "ecs_join3_5k",
+      "median_ns": 14337.076149425287,
+      "p95_ns": 14891.347701149425,
+      "samples": 50,
+      "iterations": 696
+    },
+    {
+      "name": "ecs_spawn_despawn",
+      "median_ns": 7411.162857142857,
+      "p95_ns": 7496.088571428571,
+      "samples": 50,
+      "iterations": 1400
     }
   ]
 }

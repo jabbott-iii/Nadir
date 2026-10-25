@@ -33,6 +33,7 @@ version = "0.1.0"
 dependencies = [
  "nadir-codec",
  "nadir-core",
+ "nadir-ecs",
  "nadir-render",
 ]
 
@@ -62,6 +63,9 @@ version = "0.1.0"
 [[package]]
 name = "nadir-ecs"
 version = "0.1.0"
+dependencies = [
+ "nadir-core",
+]
 
 [[package]]
 name = "nadir-gfx"

@@ -235,7 +235,8 @@ pub fn check_sized<T: std::fmt::Debug>(
 - Required benchmarks:
   - sprite sort + batch for 10k sprites (`sprite_sort_batch`, M3.5)
   - tilemap chunk rebuild
-  - ECS join over 5k entities
+  - ECS join over 5k entities (`ecs_join2_5k`, `ecs_join3_5k`, with
+    `ecs_spawn_despawn` for churn, M4.1)
   - spatial hash rebuild and query
   - A* on 256×256
   - mixer with 32 voices
