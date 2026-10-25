@@ -105,6 +105,11 @@ dependencies = [
 [[package]]
 name = "nadir-scene"
 version = "0.1.0"
+dependencies = [
+ "nadir-codec",
+ "nadir-core",
+ "nadir-ecs",
+]
 
 [[package]]
 name = "nadir-sys"

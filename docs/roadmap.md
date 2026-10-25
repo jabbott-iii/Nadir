@@ -1450,8 +1450,11 @@ by the batched sprite renderer.
     commands and events, the command queue, the storages and the event
     buffers keep the same non-zero capacities. The facade's count covers
     the rest in M4.4.
+  - Note: CI run 15, for the M4.1 commit `9a282c8`, passed on all three
+    systems, as the user reported; the session saw it on the public
+    Actions page.
 
-- [ ] **M4.2 — scene: reflection**
+- [x] **M4.2 — scene: reflection**
   - Note (from M4.1): the ecs world keeps only names and storage
     operations per component type. The reflection hooks belong to this
     crate's `TypeRegistry`. `Component` is an explicit marker, so a
@@ -1463,6 +1466,32 @@ by the batched sprite renderer.
     warnings.
   - Accept: the reflection tests in the scene spec pass.
   - Verify: `cargo test -p nadir-scene`
+  - Note: the user decided three points on 2026-10-25 (ADR-0020):
+    - `to_value` and `apply_value` take a `ReflectContext`: the source's
+      name, the path, the warnings.
+    - `Handle` and `Entity` impls come with M5.6 and M9.4.
+    - The compact encodings: `[x, y]`, `"#rrggbb(aa)"`,
+      `{"min", "max"}`.
+    `docs/subsystems/scene.md` has the rest. The design critique moved
+    `FromValue` to a per-type impl, because `Color` has no `Default`.
+  - Note: tests: 12 unit tests, 1 integration test and 3 doc tests.
+    - The field lists check names, types as written, and docs: verbatim,
+      across another attribute.
+    - Every built-in type, and three macro types (an enum, a newtype and a
+      struct), go to JSON text and back in property tests. Floats come from random bits, so all magnitudes
+      are covered; strings include quotes, controls and non-BMP
+      characters.
+    - Errors are checked with their paths, and hostile colors are refused.
+    - Unknown fields warn in nested structs, list elements, `Rect` and
+      tags.
+    - The registry is checked from end to end.
+    - `tests/macros.rs` uses the macros among items named `Option`,
+      `Result`, `String`, `usize`, `str` and `stringify!`. It found that
+      the generated code named `usize` and `str` loosely; it now uses
+      absolute paths.
+  - Note: each of these planted bugs failed a test, and was reverted:
+    unknown fields skipped silently, field docs dropped, a large `u64`
+    wrapping, and colors losing their alpha.
 
 - [ ] **M4.3 — collision crate (without pathfinding)**
   - Depends: M0.2
@@ -1506,6 +1535,13 @@ by the batched sprite renderer.
     - `Component` is explicit: the facade implements it for each component.
     - Count a steady stream of commands and events with `FrameAllocs`; the
       ecs crate checks only that its buffers do not grow.
+  - Note (from M4.2): `app.register_component::<T>()` wraps
+    `TypeRegistry::register_component` and `World::register`. A component
+    with a `Color` field, such as a sprite's tint, needs a hand-written
+    `Default`: `Color` has none (ADR-0020). A component holding a
+    `Handle<T>`, such as a sprite's texture, cannot be reflected until
+    M5.6 adds the `Handle` impl: register it then, or write its `Reflect`
+    by hand.
   - Depends: M4.1, M4.2, M4.3, M3.4
   - Do:
     - `App` builder with stages
@@ -1541,6 +1577,11 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir`
 
 - [ ] **M4.7 — determinism test infrastructure**
+  - Note (from M4.2): hashing the world through reflection needs every
+    component of every entity in a fixed order. The registry has per-entity
+    hooks only: add a per-type walk in registration order. Components that
+    hold a `Handle` are not reflected before M5.6 (ADR-0020): hash them
+    another way, or leave them out and say so.
   - Depends: M4.4, M3.1
   - Note (from M3.1): `InputRecorder` and `InputPlayer` hold only the
     actions' states, tick after tick: no seed, no pointer, no wheel. Keep
@@ -1623,6 +1664,13 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-cook`; `cargo dev` (manual)
 
 - [ ] **M5.6 — cook: LDtk importer; scene: prefabs and level loading**
+  - Note (from M4.2): reflect `Handle<T>` as its asset path here
+    (ADR-0020).
+    - Give `ReflectContext` the asset server: `AssetServer::path` writes
+      the path, and `load` reads it.
+    - `Registration::insert` goes through `Commands`. Prefab layers (base,
+      derived, overrides) can each apply onto one value before the insert.
+    - `TypeRegistry` keys types by `T::TYPE_NAME`, the name prefabs use.
   - Depends: M5.5, M4.5, M4.2
   - Do:
     - LDtk → `.klvl` (tile layers, IntGrid → collision, entities, tall
@@ -1775,6 +1823,11 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-debug`; manual check described
 
 - [ ] **M7.4 — inspector**
+  - Note (from M4.2): `Registration::inspect` and `inspect_mut` hold the
+    type's borrow while their callback runs: edit through `inspect_mut`
+    alone. There is no remove hook yet, and `World` cannot list entities:
+    the entity list needs one of those. `FieldInfo::doc` keeps each line's
+    leading space; trim it for display.
   - Depends: M7.2, M4.2
   - Do: the entity list with filter; component editors via `Reflect`;
     add/remove; despawn; save as prefab.
@@ -1882,6 +1935,10 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir`; `cargo dev` (manual)
 
 - [ ] **M9.3 — settings file**
+  - Note (from M4.2): apply settings field by field (`fields()` and
+    `field_mut()`), so that an invalid value can fall back alone. Keep the
+    source `Value` to preserve unknown keys: `apply_value` warns about them
+    and leaves them out.
   - Depends: M9.2
   - Note (from M3.1): bindings are saved by action name
     (`ActionSet::from_name`). `Key` and `MouseButton` have no names to
@@ -1893,6 +1950,12 @@ by the batched sprite renderer.
     `cargo xtask fuzz-smoke --target settings --secs 120`
 
 - [ ] **M9.4 — saves**
+  - Note (from M4.2): reflect `Entity` as its `SaveId` here (ADR-0020).
+    - Give `ReflectContext` the map between them. `Entity` has no
+      `Default`, so implement `FromValue` for it directly.
+    - Registrations need a `saved` flag (scene.md "Saves").
+    - `reflect_newtype!` already makes `SaveId(u64)` transparent. Values
+      too large for an `i64` are written as strings.
   - Depends: M4.2, M9.1
   - Do: the `.ksav` format; atomic write with `.bak`; CRC; migration
     scaffolding with a v1 fixture; fuzz target.

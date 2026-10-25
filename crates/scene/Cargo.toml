@@ -4,5 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[dependencies]
+nadir-codec = { path = "../codec" }
+nadir-core = { path = "../core" }
+nadir-ecs = { path = "../ecs" }
+
 [lints]
 workspace = true

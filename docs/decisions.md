@@ -630,3 +630,68 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     out-of-memory error would then leave a frozen window with no message.
 - **Revisit when:** M4.4 replaces `Resources` with the ECS `World`, or a
   game needs a second action set.
+
+## ADR-0020 — Reflection takes a context argument, writes compact encodings, and leaves Handle and Entity to prefabs and saves
+
+- **Status:** Accepted
+- **Date:** 2026-10-25
+- **Context:**
+  - `docs/subsystems/scene.md` sketched `Reflect::to_value(&self)` and
+    `apply_value(&mut self, v)`. With those signatures:
+    - an unknown-field warning cannot name the file it comes from, which
+      the spec asks for;
+    - a `Handle<T>` cannot be written as its asset path, nor read back,
+      without the asset server;
+    - an `Entity` cannot be written as its `SaveId` without the world's
+      map of them.
+  - The spec named the built-in types, but not how `Vec2`, `IVec2`,
+    `Color` and `Rect` are written. That is the on-disk format of prefabs,
+    levels and saves.
+  - The user decided all three points on 2026-10-25, in M4.2.
+- **Decision:**
+  - `to_value` and `apply_value` take a `&mut ReflectContext`. It holds the
+    source's name, the path to the field at hand, and the warnings so far.
+    Slots for the asset server and the `SaveId` map are added when prefabs
+    and saves need them.
+  - The encodings:
+    - `Vec2` and `IVec2` are `[x, y]`.
+    - `Color` is an sRGB hex string, `"#rrggbb"`, or `"#rrggbbaa"` when it
+      is not opaque. Reading needs the `#`, and takes either case.
+    - `Rect` is `{"min": [x, y], "max": [x, y]}`.
+  - `Handle<T>` is reflected with prefabs and levels (M5.6), and `Entity`
+    with saves (M9.4), where the asset server and the `SaveId` map exist.
+    M4.2 builds every other built-in.
+- **Consequences:**
+  - Every `Reflect` impl takes the context, hand-written ones included. It
+    also owns the path: `cx.field(name, …)` and `cx.index(i, …)` take the
+    step off again whatever happens inside.
+  - A warning names the file, the type, the field and the path. For
+    example: prefabs/slime.jsonc: `Health` has no field `hp`, so it was
+    left out (at `components.Health`). An error names the source and the
+    path the same way.
+  - `FromValue` is implemented per type, not for every `Default` type:
+    `Color` has no `Default`, and `Entity` will have none either. The
+    macros make a struct from its `Default` with the data applied, so a
+    struct with a `Color` field needs a hand-written `Default`.
+  - Two more encoding rules follow from `Value`:
+    - A `u64` or `usize` too large for an `i64` is written as a string of
+      digits.
+    - Non-finite floats become `null` in JSON text, so they do not survive
+      it.
+  - ADR-0007 stands: the macros and `Value` are unchanged as the
+    interchange.
+- **Alternatives considered:**
+  - The spec's signatures, with a thread-local holding the file name and,
+    later, the asset server. Nothing would show when a call runs outside
+    the scope.
+  - `apply_value` returning the unknown fields for its caller to log. That
+    names the file, but does not help handles and entities.
+  - Named fields everywhere (`{"x": 1, "y": 2}`, `{"r", "g", "b", "a"}`):
+    self-describing, but verbose in every prefab. Arrays everywhere
+    (`[r, g, b, a]`, `[x0, y0, x1, y1]`): the most compact, and the least
+    readable.
+  - Building the `Handle` and `Entity` impls now, against test fakes. That
+    designs the context before anything uses it.
+- **Revisit when:** M5.6 or M9.4 adds the asset server or the `SaveId` map
+  to the context. Also when a format needs a value the encodings cannot
+  write, such as a non-finite float that must survive a save.
