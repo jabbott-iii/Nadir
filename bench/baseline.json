@@ -34,6 +34,20 @@
       "p95_ns": 7496.088571428571,
       "samples": 50,
       "iterations": 1400
+    },
+    {
+      "name": "collision_hash_5k",
+      "median_ns": 1493018.5,
+      "p95_ns": 1573535.857142857,
+      "samples": 50,
+      "iterations": 7
+    },
+    {
+      "name": "collision_slide_5k",
+      "median_ns": 2235002.6,
+      "p95_ns": 2291101.8,
+      "samples": 50,
+      "iterations": 5
     }
   ]
 }

@@ -695,3 +695,105 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** M5.6 or M9.4 adds the asset server or the `SaveId` map
   to the context. Also when a format needs a value the encodings cannot
   write, such as a non-finite float that must survive a save.
+
+## ADR-0021 — Movement sweeps each axis and never goes deeper; colliders can move between rebuilds; tiles have a layer
+
+- **Status:** Accepted
+- **Date:** 2026-10-25
+- **Context:**
+  - `docs/subsystems/collision.md` says to move along X, then "resolve
+    against the tile grid and solid colliders. Push out along X only",
+    then the same along Y. It does not say what happens to a collider that
+    starts inside a solid, such as one spawned in a wall or caught by a
+    closing door.
+  - The spec rebuilds the spatial hash once a tick. The facade moves
+    entities one after another, so each later mover would be checked
+    against where the earlier ones were at the start of the tick. Two
+    movers walking into each other would end the tick overlapping by both
+    their speeds.
+  - The spec does not say how tiles relate to collision layers. The
+    prefab example in `docs/subsystems/scene.md` gives masks such as
+    `["World", "Player"]`.
+  - The user decided these three points on 2026-10-25, in M4.3, and asked
+    for a movement benchmark besides the required one.
+- **Decision:**
+  - Each axis of a move is a clamped sweep, not a move followed by a push
+    out. A solid blocks the axis only if the motion goes toward its
+    center. The mover stops where it would start to overlap the solid, or
+    stays put if it already does.
+    - So a mover that starts inside a solid can leave it toward the nearer
+      side along the motion, and never goes deeper. An exact touch counts
+      as ahead.
+    - A solid that the mover overlaps across the axis by `EPSILON`
+      (0.01 px) or less does not block it. This is what keeps seams
+      between tiles from snagging.
+    - A move longer than half the collider's smallest dimension is split
+      into substeps, at most 16. Each axis is swept, so tunnelling does not
+      depend on the substeps.
+  - `CollisionWorld::set_position(index, position)` moves a collider
+    between rebuilds:
+    - The hash keeps the bounds it was built with. Queries widen their
+      region by the largest move since the rebuild, up to a quarter of a
+      hash cell.
+    - A collider moved further than that goes on a list that every query
+      scans until the next rebuild. One fast projectile does not widen
+      every query.
+  - `TileGrid` has a `pub layer: LayerMask`, every layer by default. A
+    mover or a cast collides with tiles when its mask has the grid's
+    layer.
+  - The `collision_slide_5k` benchmark times 5,000 `move_and_slide` calls
+    a tick, beside the required `collision_hash_5k`.
+  - Choices made in M4.3 where the spec was open:
+    - Casts and `nearest` take an `ignore` collider, so that a cast from
+      an entity's feet does not hit its own collider.
+    - A trigger mover is stopped by tiles only: it detects colliders, and
+      moves into them to do so.
+    - Casts share `EPSILON`: a cast along an axis grazes a solid it
+      overlaps across the motion by `EPSILON` or less, and one that passes
+      within `EPSILON` of a circle's surface grazes it. So a cast along the
+      wall a mover rests against passes, as the move would.
+    - A cast along the seam between two solid tiles, or within `EPSILON`
+      of it, is stopped, while one along the outside of a wall passes.
+    - A mover no more than `EPSILON` either side of its center, across its
+      motion, treats a tile and its solid neighbours as one wall, so it
+      cannot slip along a seam.
+    - A query whose region spans more cells than hold colliders walks the
+      cells that do, so a query never costs more than the colliders'
+      cells.
+- **Consequences:**
+  - The spec's invariant holds as "a mover that starts clear ends
+    overlapping no solid by more than `EPSILON`". A mover that starts
+    inside a solid stays inside it until it moves out; it is not pushed.
+  - The bound is `EPSILON` give or take one f32 step at the mover's
+    position: under 0.002 px within ±16,384 px of the origin, under
+    0.008 px within ±65,536 px. A mover may end up to `EPSILON` into a
+    solid it passes, so rounding can only add to that.
+  - The facade calls `set_position` after each move (M4.4). A teleport
+    should rebuild the world instead.
+  - A level loader sets `grid.layer` to the layer its masks call "World"
+    (M4.5, M5.6). A grid built in code collides with everything until then.
+  - The query order is: colliders too big to hash, then colliders moved
+    far, then cell by cell. The spec said "by cell, then by insertion".
+  - On the i7-11800H, `collision_hash_5k` (rebuild and 5,000 queries) takes
+    1.5 ms. `collision_slide_5k` takes 2.2 ms, for a crowd among walls in
+    which one move in four is stopped. The M4 exit budget is 4 ms a tick
+    for 5,000 entities, everything included, on the min-spec machine.
+- **Alternatives considered:**
+  - Push out along the shallower axis before moving. It ends clear, but it
+    can pop several pixels in one tick, or into another solid in tight
+    spaces.
+  - Ignore any solid the mover starts inside. It can then walk straight
+    through the wall it spawned in.
+  - A snapshot for the whole tick, as the spec has it. It is a smaller
+    API, but movers overlap by up to a tick's movement.
+  - One drift for every moved collider. A single fast mover would widen
+    every later query in the tick.
+  - Tiles that always block, or tiles on layer 0 by default. The first
+    leaves no way for a ghost to pass walls, and the second is easy to
+    forget in scenes built in code.
+- **Revisit when:**
+  - A game needs colliders pushed out of solids, for example by moving
+    platforms or crushers.
+  - Profiling in M4.4 shows that the 5,000-entity tick misses its 4 ms
+    budget on min-spec.
+  - A level needs half-cell tiles or diagonal walls (backlog).

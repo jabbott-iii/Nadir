@@ -1,0 +1,231 @@
+//! [`move_and_slide`]: kinematic movement that stops at solids and slides
+//! along them.
+
+use nadir_core::{IVec2, Rect, Vec2};
+
+use crate::geometry::{self, Axis};
+use crate::{Collider, ColliderKind, CollisionWorld, EPSILON, Obstacle, Shape};
+
+/// The most substeps a move takes, however far it goes.
+const MOST_SUBSTEPS: u32 = 16;
+
+/// A solid that stopped a move along an axis.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Contact {
+    /// What stopped it.
+    pub obstacle: Obstacle,
+    /// The unit normal along the stopped axis, against the motion.
+    pub normal: Vec2,
+}
+
+/// Moves collider `self_index`'s entity from `start` by `delta`, stopping
+/// at solids and sliding along them, and returns where it ends. Fills
+/// `out_contacts` with each solid that stopped it, once per solid and
+/// normal.
+///
+/// The solids are the grid's solid tiles if the collider's mask has the
+/// grid's layer, and the other solid colliders on a layer of its mask,
+/// where the world has them now ([`CollisionWorld::set_position`]). A
+/// trigger is stopped by tiles only: it detects colliders, and moves into
+/// them to do so.
+///
+/// - It moves along X, then along Y, so a wall stops only the motion into
+///   it. A solid it overlaps across the motion by [`EPSILON`] or less
+///   does not stop it, so it slides along floors and walls of tiles
+///   without snagging on the seams between them.
+/// - A move longer than half the collider's smallest dimension is split
+///   into up to 16 substeps, so a diagonal move follows its diagonal.
+///   Each axis is swept, so nothing tunnels through a thin wall however
+///   long the move.
+/// - Each axis stops where the collider would start to overlap a solid
+///   ahead of it. A solid it already overlaps lets it leave toward the
+///   nearer side along the motion and stops it going deeper, so the
+///   overlap never grows.
+/// - If it starts overlapping no solid, it ends overlapping none by more
+///   than [`EPSILON`], give or take one f32 step at its position: under
+///   0.002 px within ±16,384 px of the origin, under 0.008 px within
+///   ±65,536 px.
+/// - No motion, or a position or motion that is not finite, returns
+///   `start` and no contacts.
+///
+/// # Panics
+///
+/// If there is no collider `self_index`.
+pub fn move_and_slide(
+    world: &CollisionWorld,
+    self_index: u32,
+    start: Vec2,
+    delta: Vec2,
+    out_contacts: &mut Vec<Contact>,
+) -> Vec2 {
+    out_contacts.clear();
+    let collider = *world.collider(self_index);
+    let finite = |v: Vec2| v.x.is_finite() && v.y.is_finite();
+    if delta == Vec2::ZERO || !finite(start) || !finite(delta) {
+        return start;
+    }
+    let half = collider.shape.half_extents();
+    let step = half.x.min(half.y);
+    let substeps = if step > 0.0 {
+        (delta.length() / step).ceil().min(MOST_SUBSTEPS as f32) as u32
+    } else {
+        MOST_SUBSTEPS
+    }
+    .max(1);
+
+    let mover = Mover {
+        world,
+        index: self_index,
+        collider,
+    };
+    let mut position = start;
+    for substep in 1..=substeps {
+        let target = if substep == substeps {
+            start + delta
+        } else {
+            start + delta * (substep as f32 / substeps as f32)
+        };
+        for axis in [Axis::X, Axis::Y] {
+            let to = axis.of(target);
+            if to != axis.of(position) {
+                let reached = mover.slide(position, axis, to, out_contacts);
+                position = axis.with(position, reached);
+            }
+        }
+    }
+    position
+}
+
+/// The collider being moved.
+struct Mover<'a> {
+    world: &'a CollisionWorld,
+    index: u32,
+    collider: Collider,
+}
+
+impl Mover<'_> {
+    /// Moves the entity at `position` along `axis` to `to`, or as far as
+    /// the solids let it, and returns the coordinate it reaches.
+    fn slide(&self, position: Vec2, axis: Axis, to: f32, contacts: &mut Vec<Contact>) -> f32 {
+        let from = axis.of(position);
+        let end = axis.with(position, to);
+        let center = self.collider.center(position);
+        let (start, finish) = (axis.of(center), axis.of(self.collider.center(end)));
+        let forward = finish > start;
+        let (here, there) = (self.collider.bounds(position), self.collider.bounds(end));
+        let swept = Rect::new(
+            here.min.min(there.min) - Vec2::splat(EPSILON),
+            here.max.max(there.max) + Vec2::splat(EPSILON),
+        );
+
+        // Where each solid ahead would stop the center, if it does.
+        let stop_at = |other: f32, reach: f32| {
+            if forward {
+                (other > start && other - reach < finish).then(|| (other - reach).max(start))
+            } else {
+                (other < start && other + reach > finish).then(|| (other + reach).min(start))
+            }
+        };
+        let mut stop = finish;
+        self.solids(center, axis, swept, |_, other, reach| {
+            if let Some(at) = stop_at(other, reach) {
+                stop = if forward { stop.min(at) } else { stop.max(at) };
+            }
+        });
+        if stop == finish {
+            return to;
+        }
+
+        let normal = axis.unit(if forward { -1.0 } else { 1.0 });
+        self.solids(center, axis, swept, |obstacle, other, reach| {
+            if stop_at(other, reach).is_some_and(|at| (at - stop).abs() <= EPSILON) {
+                let contact = Contact { obstacle, normal };
+                if !contacts.contains(&contact) {
+                    contacts.push(contact);
+                }
+            }
+        });
+        // Back from the center to the entity, and never past either end.
+        let reached = stop - axis.of(self.collider.offset);
+        reached.clamp(from.min(to), from.max(to))
+    }
+
+    /// Calls `visit` with each solid under `swept` that the collider at
+    /// `center` overlaps across `axis` by more than [`EPSILON`]: the solid,
+    /// its center along the axis, and how far the collider's center
+    /// reaches past it along the axis while they overlap.
+    fn solids(
+        &self,
+        center: Vec2,
+        axis: Axis,
+        swept: Rect,
+        mut visit: impl FnMut(Obstacle, f32, f32),
+    ) {
+        let shape = self.collider.shape;
+        let mut offer = |obstacle, other: Vec2, other_shape| {
+            let across = (axis.across(other) - axis.across(center)).abs();
+            if let Some(reach) = geometry::reach(shape, other_shape, axis, across) {
+                visit(obstacle, axis.of(other), reach);
+            }
+        };
+
+        let grid = self.world.grid();
+        if grid.layer.intersects(self.collider.mask)
+            && let Some((min, max)) = grid.cells_touching(swept)
+        {
+            let half = grid.cell_size() * 0.5;
+            // A mover no more than EPSILON either side of its center,
+            // across the axis, overlaps neither of two solid tiles by more
+            // than EPSILON when it is on the seam between them, and would
+            // slip along it: for it, each tile is one with the solid tiles
+            // beside it across the axis, and only the tiles it is across
+            // from count. Neighbouring cells share their edges exactly, so
+            // some tile of a wall is across from every point along it.
+            let thin = axis.across(shape.half_extents()) <= EPSILON;
+            let across_unit = axis.with(Vec2::ONE, 0.0);
+            let step = across_unit.as_ivec2();
+            for y in min.y..=max.y {
+                for x in min.x..=max.x {
+                    let cell = IVec2::new(x, y);
+                    if !grid.is_solid(cell) {
+                        continue;
+                    }
+                    let rect = grid.cell_rect(cell);
+                    let mut tile = Shape::Aabb {
+                        half: rect.size() * 0.5,
+                    };
+                    let mut middle = rect.center();
+                    if thin {
+                        let at = axis.across(center);
+                        let (low, high) = (axis.across(rect.min), axis.across(rect.max));
+                        if !(at >= low && at <= high) {
+                            continue;
+                        }
+                        let before = f32::from(u8::from(grid.is_solid(cell - step)));
+                        let after = f32::from(u8::from(grid.is_solid(cell + step)));
+                        middle += across_unit * ((after - before) * half);
+                        tile = Shape::Aabb {
+                            half: axis.with(Vec2::splat(half * (1.0 + before + after)), half),
+                        };
+                    }
+                    offer(Obstacle::Tile(cell), middle, tile);
+                }
+            }
+        }
+
+        if self.collider.kind == ColliderKind::Trigger {
+            return;
+        }
+        self.world.candidates(swept, |index| {
+            let other = self.world.collider(index);
+            if index == self.index
+                || other.kind != ColliderKind::Solid
+                || !self.collider.mask.intersects(other.layer)
+            {
+                return;
+            }
+            let placed = self.world.placed(index);
+            offer(Obstacle::Collider(index), placed.center, placed.shape);
+        });
+    }
+}

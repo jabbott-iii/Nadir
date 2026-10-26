@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 nadir-core = { path = "../crates/core" }
 nadir-codec = { path = "../crates/codec" }
+nadir-collision = { path = "../crates/collision" }
 nadir-ecs = { path = "../crates/ecs" }
 nadir-render = { path = "../crates/render" }
 

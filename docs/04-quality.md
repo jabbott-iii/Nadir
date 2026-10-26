@@ -237,7 +237,8 @@ pub fn check_sized<T: std::fmt::Debug>(
   - tilemap chunk rebuild
   - ECS join over 5k entities (`ecs_join2_5k`, `ecs_join3_5k`, with
     `ecs_spawn_despawn` for churn, M4.1)
-  - spatial hash rebuild and query
+  - spatial hash rebuild and query (`collision_hash_5k`, M4.3, with
+    `collision_slide_5k` for a tick of movement, ADR-0021)
   - A* on 256×256
   - mixer with 32 voices
   - QOI decode 2048²

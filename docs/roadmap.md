@@ -1492,14 +1492,99 @@ by the batched sprite renderer.
   - Note: each of these planted bugs failed a test, and was reverted:
     unknown fields skipped silently, field docs dropped, a large `u64`
     wrapping, and colors losing their alpha.
+  - Note: CI run 16, for the M4.2 commit `fb4ee22`, passed on all three
+    systems, as the user reported; the session saw it on the public
+    Actions page.
 
-- [ ] **M4.3 — collision crate (without pathfinding)**
+- [x] **M4.3 — collision crate (without pathfinding)**
   - Depends: M0.2
   - Do: shapes, `TileGrid`, spatial hash, `move_and_slide` with substeps,
     sweeps, triggers, queries.
   - Accept: the property tests and scenario tests in the collision spec
     pass; benchmarks are recorded.
   - Verify: `cargo test -p nadir-collision`; `cargo xtask bench collision`
+  - Note: the user decided four points on 2026-10-25 (ADR-0021):
+    - A mover that starts inside a solid can leave toward the nearer side,
+      and never goes deeper.
+    - `CollisionWorld::set_position` moves colliders between rebuilds.
+    - `TileGrid::layer` is every layer by default.
+    - A `collision_slide_5k` benchmark, besides the required one.
+    Half-cell tiles went to the backlog. `docs/subsystems/collision.md`
+    has the rest, including the choices made in the task: `ignore` on the
+    casts and on `nearest`, trigger movers stopped by tiles only, casts
+    sharing `EPSILON` with moves, and tile seams closed for casts and for
+    movers no more than `EPSILON` either side of their center.
+  - Note: the design critique and the property tests found that a line
+    exactly along the seam between two solid tiles slipped through a wall.
+    The code review (24 findings confirmed, 1 contested) found more, all
+    fixed:
+    - Circle casts along a wall they rested against stopped at its inner
+      seams, and long casts missed circles they went through. The circle
+      maths now works from the cast's nearest point to the center.
+    - Casts now share `EPSILON` with moves (ADR-0021).
+    - Tile seams at cell sizes and origins that round slipped. Neighbouring
+      cells now share their edges exactly.
+    - `aabb` on a rect as wide as f32 allows, and casts too long to
+      square, overflowed.
+    - Huge queries in sparse worlds walked every cell. They now walk only
+      the cells that hold colliders.
+    - The movement bench hardly collided. It is now a crowd among walls.
+    - Most of the rest were tests that a planted bug passed.
+  - Note: a verification pass after the fixes found more, also fixed. Its
+    workflow crashed the desktop twice: one of its fuzzers ran the machine
+    out of memory through the first of these bugs.
+    - A collider with finite bounds over the whole f32 range overflowed
+      the hash's cell count. A release build then walked 2^64 cells,
+      growing the table until memory ran out; a debug build panicked. A
+      query over such a world would hang the same way.
+    - `aabb` halved a huge rect into a center and a size, which lost the
+      colliders' precision near its edges. It now tests the rect's edges.
+    - A cast from inside a shape, with a motion too long to square, could
+      overflow its "toward the center" test.
+    - `cell_rect` overflowed for the last cell there is.
+    - A cast with a shape larger than the grid took up to a million
+      steps. It now takes at most twice the grid's width plus height.
+    - The overlap bound held only to within rounding, and the docs
+      claimed it exactly within ±65,536 px. The docs now say what a test
+      measures: `EPSILON` plus under 0.002 px within ±16,384 px, and under
+      0.008 px within ±65,536 px.
+    The fuzzer that found the overflow then ran 60,000 cases of
+    non-finite and extreme values in 3 seconds, with no NaN, panic or
+    runaway memory.
+  - Note: tests: 34 unit tests and 29 integration tests.
+    - Properties against an oracle written apart from the crate's
+      geometry (overlap depths, no rays):
+      - 400 random moves among random tiles and colliders: the moves end
+        clear, stay within their motion, go all the way when nothing is
+        in the way, stop flush, and report only what stopped them;
+      - 300 worlds of queries and casts against brute force, with
+        colliders moved since the rebuild, in a twin world with another
+        hash layout. Casts must go into what they hit, not graze it;
+      - 200 runs of trigger pairs, diffed exactly, as colliders move,
+        leave and arrive in a shuffled order.
+      Positions are on a 1/8 px grid half the time, so shapes touch
+      exactly and motions have exact zeros.
+    - Scenarios for every rule the spec and ADR-0021 state:
+      - movement: seams, the inside corner, a fast projectile through a
+        1 px wall, substeps, leaving what it touches, the `EPSILON`
+        tolerance, contacts, layers and defaults, thin movers, and input
+        that is not a number;
+      - casts: lines along seams and faces at sizes that round, grazes,
+        long casts, and the query order and tie rules.
+    - A steady tick keeps every buffer, and a lighter tick keeps a heavier
+      one's (`src/tests.rs`).
+  - Note: 49 planted bugs, one at a time: 48 failed a test and were
+    reverted. The 45th, widening the thin-mover check by `EPSILON`, showed
+    that check was redundant once cells shared their edges, so it was
+    removed. A first run of the query property passed with the drift
+    widening removed, so it got probes at moved colliders' leading edges.
+  - Note: `bench/baseline.json` has the two new entries, from a run on
+    2026-10-26 (i7-11800H): `collision_hash_5k` (a rebuild and 5,000
+    queries) 1.5 ms, and `collision_slide_5k` 2.2 ms. The other entries
+    were left as they were. On 2026-10-25 the CPU ran at up to 97 °C after
+    the review's agents, and in full runs `ecs_join2_5k` read 8.5 to
+    11 µs, against 8.2 µs recorded. The other four stayed within 2.3% of
+    their baselines.
 
 - [ ] **M4.4 — facade: ECS integration and sandbox migration**
   - Note (from M3.4):
@@ -1542,6 +1627,24 @@ by the batched sprite renderer.
     `Handle<T>`, such as a sprite's texture, cannot be reflected until
     M5.6 adds the `Handle` impl: register it then, or write its `Reflect`
     by hand.
+  - Note (from M4.3):
+    - `Component` is a nadir-ecs trait, so the facade's `Collider`
+      component wraps `nadir_collision::Collider`. It needs its own
+      `Default`, and a hand-written `Reflect` for `Shape` (a data enum:
+      `reflect_enum!` takes unit variants only) and for layer names.
+    - Give each collider the entity's bits as its `u64` id. `Triggers`
+      reports pairs by id, and `Entity` has no public constructor, so map
+      ids back through this tick's and the last tick's entities: an exited
+      pair's entity may be gone.
+    - Each tick: `rebuild`, then for each mover `move_and_slide` and
+      `set_position(index, end)` (ADR-0021), then `Triggers::update`.
+    - The crate checks only that a steady tick keeps its buffers; count it
+      with `FrameAllocs`.
+    - `collision_slide_5k` is 2.2 ms on the i7-11800H, against a budget of
+      4 ms a tick on min-spec for everything, so movement alone may not fit
+      on min-spec. Profile the whole tick first. Two candidates: gather
+      the hash candidates once per move instead of once per axis, and
+      collect contacts in the first pass instead of a second one.
   - Depends: M4.1, M4.2, M4.3, M3.4
   - Do:
     - `App` builder with stages
@@ -1559,6 +1662,9 @@ by the batched sprite renderer.
     the virtual image, before or among the sprites by layer. Tall tiles are
     sprites (`render.md`). Draw each tile at whole pixels per texel, as the
     golden rules in `crates/render/tests/headless/golden.rs` require.
+  - Note (from M4.3): build the `TileGrid` from the map's collision layer,
+    and set `grid.layer` to the layer the masks call "World" (ADR-0021).
+    Cells outside the grid are not solid, so the map needs border walls.
   - Depends: M4.4
   - Do:
     - the `tile_chunk` shader + chunk cache, culling, animated tiles
@@ -1845,6 +1951,9 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-debug`
 
 - [ ] **M7.6 — debug draw toggles and time control**
+  - Note (from M4.3): `CollisionWorld` gives each collider (`len`,
+    `collider`, `position`) and the grid. The spatial hash's cells are
+    private: add a read-only visitor for the F4 overlay.
   - Depends: M7.2, M4.3
   - Do: the F4 overlays and the F5–F7 time controls.
   - Accept: manual check on the sandbox.
@@ -1964,6 +2073,10 @@ by the batched sprite renderer.
     `cargo xtask fuzz-smoke --target ksav --secs 120`
 
 - [ ] **M9.5 — pathfinding and enemy AI**
+  - Note (from M4.3): A* reads `TileGrid::is_solid`, `cell_at` and
+    `cell_rect`. Cells outside the grid are not solid, so keep the search
+    inside it. `segment` with the grid's layer gives a line of sight for
+    string-pulling. Casts take an `ignore` collider for the caster's own.
   - Depends: M4.3
   - Do: A* with budget and smoothing; flow fields; sandbox enemies that
     chase and patrol.
@@ -2159,3 +2272,4 @@ three OSes from a tag, and the release checklist is complete.
 | ECS change detection | A profiled need (e.g. render extract of static sprites) |
 | Lock-free audio command queue | Measured `try_lock` contention |
 | Localization pipeline (string tables, plurals) | Before the first non-English release |
+| Per-cell tile shapes in `TileGrid` (half cells, corner triangles; M4.3 has full cells) | A level needs half-height ledges or diagonal walls |

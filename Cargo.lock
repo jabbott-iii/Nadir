@@ -32,6 +32,7 @@ name = "nadir-bench"
 version = "0.1.0"
 dependencies = [
  "nadir-codec",
+ "nadir-collision",
  "nadir-core",
  "nadir-ecs",
  "nadir-render",
@@ -47,6 +48,9 @@ dependencies = [
 [[package]]
 name = "nadir-collision"
 version = "0.1.0"
+dependencies = [
+ "nadir-core",
+]
 
 [[package]]
 name = "nadir-cook"
