@@ -48,6 +48,13 @@
       "p95_ns": 2291101.8,
       "samples": 50,
       "iterations": 5
+    },
+    {
+      "name": "facade_tick_5k",
+      "median_ns": 6310331.25,
+      "p95_ns": 6434491.5,
+      "samples": 50,
+      "iterations": 2
     }
   ]
 }

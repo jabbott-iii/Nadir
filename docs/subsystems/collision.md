@@ -123,6 +123,28 @@ pub fn move_and_slide(
   again when the rebuild order changes. A collider that leaves the world
   ends its pairs.
 
+## The facade's glue
+
+The facade's systems drive the world each tick (ADR-0022):
+
+- `nadir::movement` (first in `Movement`) rebuilds the world from every
+  entity with a `Collider` and a `Transform`, with the entity's generation
+  and index as the collider's id. It then moves each of them that has a
+  `Velocity` with `move_and_slide`, in the collider storage's order, and
+  calls `set_position` after each move.
+- `nadir::triggers` (in `PostMovement`) first moves every collider to its
+  entity's `Transform`, so that moves made after the engine's, by a game or
+  by `nadir::parent_offsets`, reach the triggers. Then it sends the pairs
+  that began and ended as `TriggerEnter` and `TriggerExit`, naming
+  entities. An exit can name an entity despawned since.
+- The `Collisions` resource gives the world to systems for queries, with
+  `entity(index)` and `index(entity)`. Until the next tick's movement, its
+  colliders are the last tick's: check that an entity it gives is alive.
+- Contacts are not passed on yet.
+- A child's solid collider is in its parent's way when the child's layer is
+  in the parent's mask, since the parent moves while the child is still
+  where the last tick left it.
+
 ## Queries
 
 Methods on `CollisionWorld`:
@@ -233,7 +255,9 @@ picking.
   - far from the origin, the overlap bound holds to within one f32 step.
 - A steady tick keeps every buffer's capacity, and a lighter tick after a
   heavier one keeps the heavier one's (`src/tests.rs`). The facade's
-  allocation counter checks it in M4.4.
+  allocation counter counts 0 allocations in a steady tick of 5,000
+  colliding entities, with triggers and entities spawned and despawned
+  (`steady_ticks` in `crates/engine/src/glue.rs`, feature `dev`).
 - **A\*:**
   - optimal-length tests on small handcrafted grids
   - no corner cutting
@@ -242,4 +266,7 @@ picking.
   - `collision_hash_5k`: rebuild plus 5k overlap queries;
   - `collision_slide_5k`: 5,000 `move_and_slide` calls, a crowd among 16 px
     tiles, one in five solid; about one move in four is stopped (ADR-0021);
+  - `facade_tick_5k` (`cargo xtask bench facade`): the same crowd as
+    entities, a tenth of them triggers, through a whole tick of the facade,
+    after 60 ticks have jammed it: most moves are stopped (ADR-0022);
   - A* on 256×256 with 30% obstacles (M9.5).

@@ -204,14 +204,28 @@ pub fn check_sized<T: std::fmt::Debug>(
   the frame before to the end of this one. The sandbox reports it once a
   second.
 - The debug overlay shows allocations per frame.
-- Tests assert **0 allocations** across 100 steady-state frames:
+- Tests assert **0 allocations** in steady state:
   - the facade's unit test `steady_frames` in `crates/engine/src/app.rs`
-    draws a 10k-sprite scene of its own through the real loop, offscreen
-    (`cargo test -p nadir --features dev`), and checks `FrameAllocs`
-    against its own count frame by frame;
-  - the sandbox's stress scene, `--scene stress-sprites`, tests its own
-    systems the same way, without a GPU;
-  - the "5k entities" scene follows in M4.
+    draws 10,000 sprite entities of its own through the real loop,
+    offscreen, for 100 frames (`cargo test -p nadir --features dev`), and
+    checks `FrameAllocs` against its own count frame by frame;
+  - the facade's unit test `steady_ticks` in `crates/engine/src/glue.rs`
+    runs 5,000 colliding entities, a tenth of them triggers, with 10
+    entities spawned and 10 despawned through commands each tick. It runs
+    three identical passes of 28 ticks, frames of two ticks among them,
+    and counts the third: movement, triggers and their events, commands
+    and drawing (M4.4);
+  - the sandbox's stress scene, `--scene stress-sprites`, runs 100 frames
+    through `App::update`, without a GPU.
+- The sandbox's `--scene stress-entities` (5,000 colliding entities)
+  reports its allocations once a second. As its crowd jams, its buffers
+  grow now and then to a new peak, then stay.
+- `App::update` drains the scope records of nadir-core's `profile`
+  feature each frame, into buffers with room for 1,024 records, so a build
+  with it allocates nothing for them in steady state, even in a frame of
+  many ticks (`a_frame_of_many_ticks_after_frames_of_one_allocates_nothing`
+  in `crates/engine/src/app.rs`, which `cargo xtask ci` runs with the
+  feature on).
 - `crates/engine/tests/allocations.rs` holds checks of code outside the
   loop, such as a QOI file too short for its size being refused before
   anything is allocated.
@@ -239,6 +253,8 @@ pub fn check_sized<T: std::fmt::Debug>(
     `ecs_spawn_despawn` for churn, M4.1)
   - spatial hash rebuild and query (`collision_hash_5k`, M4.3, with
     `collision_slide_5k` for a tick of movement, ADR-0021)
+  - a whole tick of the facade for 5,000 colliding entities
+    (`facade_tick_5k`, M4.4, ADR-0022)
   - A* on 256×256
   - mixer with 32 voices
   - QOI decode 2048²

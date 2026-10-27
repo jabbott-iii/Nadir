@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+nadir = { path = "../crates/engine" }
 nadir-core = { path = "../crates/core" }
 nadir-codec = { path = "../crates/codec" }
 nadir-collision = { path = "../crates/collision" }

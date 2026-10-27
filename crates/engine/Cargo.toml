@@ -6,11 +6,14 @@ license.workspace = true
 
 [dependencies]
 nadir-assets = { path = "../assets" }
+nadir-collision = { path = "../collision" }
 nadir-core = { path = "../core" }
+nadir-ecs = { path = "../ecs" }
 nadir-gfx = { path = "../gfx" }
 nadir-input = { path = "../input" }
 nadir-platform = { path = "../platform" }
 nadir-render = { path = "../render" }
+nadir-scene = { path = "../scene" }
 
 [dev-dependencies]
 # The tests write QOI textures, and check that a QOI file too short for

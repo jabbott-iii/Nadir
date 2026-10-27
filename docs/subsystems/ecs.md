@@ -91,8 +91,8 @@ impl World {
   before use. Reading an unregistered type panics with the type name and a
   hint.
 - `Read`, `Write`, `Res` and `ResMut` are type aliases of `Ref<SparseSet<T>>`,
-  `RefMut<SparseSet<T>>`, `Ref<R>` and `RefMut<R>`. The facade's interim
-  `Resources` (ADR-0019) returns the same types.
+  `RefMut<SparseSet<T>>`, `Ref<R>` and `RefMut<R>`. The facade's `App` holds
+  the game's `World` (ADR-0022).
 - The world also has `is_registered`, `contains_resource` and
   `entity_count`; `spawn()` returns an `EntityMut` with `with(component)`
   and `id()`.
@@ -136,7 +136,7 @@ If two components must both be mutable, iterate one mutably and call
 let mut cmd = world.commands();
 let e = cmd.spawn()
     .with(Transform::at(pos))
-    .with(Sprite::from(handle))
+    .with(Sprite::new(handle, size))
     .id();                  // Entity is reserved immediately (allocator), components applied later
 cmd.despawn(enemy);
 cmd.insert(e, Stunned { ticks: 30 });
@@ -210,11 +210,22 @@ struct SystemEntry<C> {
 
 ## Supporting patterns
 
-- **Hierarchy (minimal):** a `Parent { entity, offset }` component. A
-  `PostMovement` system writes children's `Transform` from their parent's.
-  There is no general transform tree.
+- **Hierarchy (minimal):** a `Parent { entity, offset }` component. The
+  facade's `nadir::parent_offsets`, first in `PostMovement`, writes each
+  child's `Transform`. There is no general transform tree (ADR-0022):
+  - A parent may have a parent. A child goes with the first entity up its
+    chain that has none, its root, plus the offsets on the way, so the
+    result does not depend on storage order. Entities on the way need no
+    `Transform`. The chain is limited to 8 steps; a longer one, a loop, or
+    a root without a `Transform` (a despawned entity ends the chain there)
+    leaves the child where it is.
+  - Frames draw a child at its root's interpolated position plus the
+    offsets, from its first frame.
+  - A child's solid collider is in its parent's way when the child's layer
+    is in the parent's mask: give it another layer, or make it a trigger.
 - **Stable IDs for saves:** a `SaveId(u64)` component, assigned from a
-  world-level counter. Saves never store raw `Entity` values.
+  world-level counter. Saves never store raw `Entity` values. The facade
+  has the component (M4.4); saves add the counter (M9.4).
 - **Tags:** zero-sized components (`struct Enemy;`) use the normal
   `SparseSet<T>`. `Vec<ZST>` never allocates, so tags cost only the
   sparse/dense arrays.

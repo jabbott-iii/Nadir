@@ -1,5 +1,5 @@
-//! [`App`]: the game's configuration, its systems and resources, and the
-//! main loop.
+//! [`App`]: the game's configuration, its world and systems, and the main
+//! loop.
 
 use std::any::type_name;
 use std::cell::RefCell;
@@ -10,16 +10,22 @@ use std::time::{Duration, Instant};
 use nadir_assets::{AssetServer, FinalizeCtx, OnFailure};
 use nadir_core::UVec2;
 use nadir_core::log::{debug, error};
-use nadir_core::time::{FixedClock, Frame, Stopwatch, Tick};
+use nadir_core::profile::{self, ScopeRecord};
+use nadir_core::time::{FixedClock, Stopwatch};
+use nadir_ecs::{Component, FixedStage, FixedSystem, FrameStage, FrameSystem, Schedule, World};
 use nadir_gfx::{Device, PassTarget};
 use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Input};
 use nadir_platform::{
     Event, GpuSurface, ModalFrame, Platform, WindowConfig, precise_sleep, show_error_dialog,
 };
 use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer};
+use nadir_scene::{FromValue, TypeRegistry};
 
 use crate::limiter::FrameLimiter;
-use crate::{Error, Resources, log_file};
+use crate::{
+    Collider, Collisions, Error, Parent, Player, PrevTransform, SaveId, Sprite, TickStats,
+    Transform, TriggerEnter, TriggerExit, Velocity, glue, log_file,
+};
 
 /// How many times a second the simulation steps.
 pub const TICK_HZ: u32 = 60;
@@ -28,6 +34,10 @@ pub const TICK_HZ: u32 = 60;
 /// falls behind real time by the rest, which is better than a long burst of
 /// ticks to catch up. See [`FixedClock`].
 const MAX_FRAME: Duration = Duration::from_millis(250);
+
+/// How many profile scope records each frame's buffer holds before it
+/// must grow: a frame of 15 ticks of 60 systems each.
+const PROFILE_RECORDS: usize = 1_024;
 
 /// What a game asks of the engine.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,17 +114,8 @@ impl Config {
     }
 }
 
-/// What a system is: a function of the resources and a tick or frame.
-type SystemFn<T> = Box<dyn FnMut(&Resources, &T)>;
-
-/// A function that the loop calls, with the name it was added under.
-struct System<T> {
-    name: &'static str,
-    run: SystemFn<T>,
-}
-
 /// Latches the input into the game's action state.
-type LatchFn = Box<dyn FnMut(&mut Input, &Resources)>;
+type LatchFn = Box<dyn FnMut(&mut Input, &World)>;
 
 /// The game's action set: latches the input into its state once a tick.
 struct Actions {
@@ -208,17 +209,11 @@ struct Graphics {
 impl Graphics {
     /// Draws the frame the frame systems made, shows it, and then makes the
     /// assets loaded since the last frame.
-    fn draw(
-        &mut self,
-        resources: &Resources,
-        surface: GpuSurface<'_>,
-        size: UVec2,
-    ) -> Result<(), Error> {
-        resources.set_system("nadir::draw");
+    fn draw(&mut self, world: &World, surface: GpuSurface<'_>, size: UVec2) -> Result<(), Error> {
         self.device.begin_frame(surface)?;
         let stats = {
-            let assets = resources.resource::<AssetServer>();
-            let frame = resources.resource::<RenderFrame>();
+            let assets = world.resource::<AssetServer>();
+            let frame = world.resource::<RenderFrame>();
             let output = Output {
                 target: PassTarget::Surface,
                 size,
@@ -226,12 +221,11 @@ impl Graphics {
             self.renderer
                 .render(&mut self.device, &assets, &frame, output)?
         };
-        *resources.resource_mut::<FrameStats>() = stats;
+        *world.resource_mut::<FrameStats>() = stats;
         self.device.end_frame(surface)?;
-        let pending = resources.resource::<AssetServer>().has_pending();
+        let pending = world.resource::<AssetServer>().has_pending();
         if pending {
-            resources.set_system("nadir::finish_loads");
-            resources
+            world
                 .resource_mut::<AssetServer>()
                 .finish_completed_loads(&mut FinalizeCtx::new().with(&mut self.device));
         }
@@ -243,7 +237,6 @@ impl Graphics {
 /// callback.
 struct EngineCore {
     app: App,
-    clock: FixedClock,
     stopwatch: Stopwatch,
     graphics: Option<Graphics>,
     /// An error that ends the loop, from a frame the loop did not run
@@ -259,9 +252,9 @@ impl EngineCore {
     /// came before it. Draws it on `window`'s surface, if there is one.
     fn frame(&mut self, events: &[Event], window: Option<(GpuSurface<'_>, UVec2)>) {
         let elapsed = self.stopwatch.lap();
-        self.app.frame(&mut self.clock, elapsed, events);
+        self.app.update(elapsed, events);
         if let (Some(graphics), Some((surface, size))) = (&mut self.graphics, window)
-            && let Err(error) = graphics.draw(&self.app.resources, surface, size)
+            && let Err(error) = graphics.draw(&self.app.world, surface, size)
         {
             self.error.get_or_insert(error);
         }
@@ -269,26 +262,51 @@ impl EngineCore {
         {
             let now = nadir_platform::thread_alloc_counts();
             let allocs = crate::FrameAllocs(now.since(self.allocs_at_frame_end));
-            *self.app.resources.resource_mut::<crate::FrameAllocs>() = allocs;
+            *self.app.world.resource_mut::<crate::FrameAllocs>() = allocs;
             self.allocs_at_frame_end = now;
         }
-        self.app.resources.set_system("(none)");
     }
 }
 
-/// A game: its configuration, resources and systems. [`App::run`] opens the
-/// log file and the window, and runs the main loop.
+/// A game: its configuration, its [`World`] of entities and resources, and
+/// its systems in stages. [`App::run`] opens the log file and the window,
+/// and runs the main loop; [`App::update`] runs one frame without them.
 ///
-/// Systems share state through [`Resources`]. The engine provides:
+/// Systems are functions of the world and the tick, or the frame, added to
+/// a stage with a name. They run in stage order, then in the order they
+/// were added (`docs/subsystems/ecs.md`). The engine adds its own first in
+/// their stages:
+///
+/// - `nadir::snapshot` (tick `Input`): copies each [`Transform`] into its
+///   [`PrevTransform`], and gives one to every entity with a [`Sprite`]
+///   and to the root of every drawn child;
+/// - `nadir::movement` (tick `Movement`): rebuilds [`Collisions`] and
+///   moves every entity with a [`Velocity`], sliding the ones with a
+///   [`Collider`];
+/// - `nadir::parent_offsets` (tick `PostMovement`): puts each entity with
+///   a [`Parent`] where its parent is, plus its offset;
+/// - `nadir::triggers` (tick `PostMovement`): sends [`TriggerEnter`] and
+///   [`TriggerExit`];
+/// - `nadir::extract_sprites` (frame `Extract`): draws every [`Sprite`]
+///   into the [`RenderFrame`], between the last two ticks.
+///
+/// So a game sets velocities in `Gameplay`, and reacts to the moves after
+/// the engine's, in `Movement` or `PostMovement`.
+///
+/// The engine's resources:
 ///
 /// - [`Input`], which latches the keys and buttons into the actions, and
 ///   holds the pointer and the wheel
 /// - with [`App::add_actions`], the game's [`ActionMap`] and its
-///   [`ActionState`], latched once a tick before the fixed systems
+///   [`ActionState`], latched once a tick before the tick stages
 /// - [`AssetServer`], loading from [`Config::assets`]
-/// - [`RenderFrame`], emptied before the frame systems, which fill it; the
+/// - [`RenderFrame`], emptied before the frame stages, which fill it; the
 ///   loop then draws it
 /// - [`FrameStats`], what the last frame drew
+/// - [`TickStats`], how long this frame's ticks took
+/// - [`Collisions`], the colliders
+/// - [`TypeRegistry`], the reflected component types
+/// - the events [`TriggerEnter`] and [`TriggerExit`]
 /// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
 ///
 /// ```no_run
@@ -296,72 +314,137 @@ impl EngineCore {
 ///
 /// struct Spin(f32);
 ///
+/// fn simulate(world: &World, tick: &Tick) {
+///     // 60 times a second: move things by `tick.dt`.
+///     world.resource_mut::<Spin>().0 += tick.dt;
+/// }
+///
 /// fn main() -> Result<(), nadir::Error> {
 ///     App::new(Config {
 ///         title: "My game".into(),
 ///         ..Config::default()
 ///     })
 ///     .insert_resource(Spin(0.0))
-///     .add_fixed_system("simulate", |resources, tick| {
-///         // 60 times a second: move things by `tick.dt`.
-///         resources.resource_mut::<Spin>().0 += tick.dt;
-///     })
-///     .add_frame_system("draw", |resources, frame| {
-///         // Once for each frame: blend by `frame.alpha`, and fill the
-///         // RenderFrame.
-///         let _ = (resources.resource::<Spin>().0, frame.alpha);
+///     .add_fixed_system(FixedStage::Gameplay, "simulate", simulate)
+///     .add_frame_system(FrameStage::Ui, "show", |world, frame| {
+///         // Once for each frame, after its ticks.
+///         let _ = (world.resource::<Spin>().0, frame.alpha);
 ///     })
 ///     .run()
 /// }
 /// ```
-///
-/// Systems take [`Resources`] until the entity world replaces it (roadmap
-/// M4.4, ADR-0019).
 pub struct App {
     config: Config,
-    resources: Resources,
-    fixed_systems: Vec<System<Tick>>,
-    frame_systems: Vec<System<Frame>>,
+    world: World,
+    schedule: Schedule,
     actions: Actions,
+    clock: FixedClock,
+    /// The last frame's profile scopes (the `profile` feature of
+    /// `nadir-core`), drained each frame so that the recorder keeps its
+    /// buffer. Nothing reads them until the profiler (roadmap M7.3).
+    profile: Vec<ScopeRecord>,
 }
 
 impl App {
-    /// An app with no systems, and the engine's resources.
+    /// An app with the engine's resources, components and systems, and no
+    /// entities.
     ///
     /// Its [`AssetServer`] loads from [`Config::assets`]. With the `dev`
     /// feature, a failed asset shows its placeholder; without it, nothing.
+    ///
+    /// Of the engine's components, [`Transform`], [`Velocity`], [`Player`]
+    /// and [`SaveId`] are reflected. [`Sprite`], [`Collider`] and
+    /// [`Parent`] are not yet (roadmap M5.6 and M9.4), and
+    /// [`PrevTransform`] is the engine's own.
     pub fn new(config: Config) -> Self {
         let on_failure = if cfg!(feature = "dev") {
             OnFailure::Placeholder
         } else {
             OnFailure::Nothing
         };
-        let mut resources = Resources::new();
-        resources.insert_resource(Input::new());
-        resources.insert_resource(AssetServer::new(&config.assets, on_failure));
-        resources.insert_resource(RenderFrame::new());
-        resources.insert_resource(FrameStats::default());
+        let mut world = World::new();
+        world.insert_resource(Input::new());
+        world.insert_resource(AssetServer::new(&config.assets, on_failure));
+        world.insert_resource(RenderFrame::new());
+        world.insert_resource(FrameStats::default());
+        world.insert_resource(TickStats::default());
+        world.insert_resource(Collisions::new());
         #[cfg(feature = "dev")]
-        resources.insert_resource(crate::FrameAllocs::default());
+        world.insert_resource(crate::FrameAllocs::default());
+        world.add_event::<TriggerEnter>();
+        world.add_event::<TriggerExit>();
+
+        let mut registry = TypeRegistry::new();
+        registry.register_component::<Transform>();
+        registry.register_component::<Velocity>();
+        registry.register_component::<Player>();
+        registry.register_component::<SaveId>();
+        registry.register_components(&mut world);
+        world.insert_resource(registry);
+        world.register::<PrevTransform>();
+        world.register::<Sprite>();
+        world.register::<Collider>();
+        world.register::<Parent>();
+
+        let mut schedule = Schedule::new();
+        schedule
+            .add_fixed(FixedStage::Input, "nadir::snapshot", glue::snapshot)
+            .add_fixed(FixedStage::Movement, "nadir::movement", glue::movement)
+            .add_fixed(
+                FixedStage::PostMovement,
+                "nadir::parent_offsets",
+                glue::parent_offsets,
+            )
+            .add_fixed(FixedStage::PostMovement, "nadir::triggers", glue::triggers)
+            .add_frame(
+                FrameStage::Extract,
+                "nadir::extract_sprites",
+                glue::extract_sprites,
+            );
         Self {
             config,
-            resources,
-            fixed_systems: Vec::new(),
-            frame_systems: Vec::new(),
+            world,
+            schedule,
             actions: Actions::none(),
+            clock: FixedClock::new(TICK_HZ, MAX_FRAME),
+            profile: Vec::new(),
         }
     }
 
     /// Adds `resource`, or replaces the one of its type.
     #[must_use]
     pub fn insert_resource<R: 'static>(mut self, resource: R) -> Self {
-        self.resources.insert_resource(resource);
+        self.world.insert_resource(resource);
+        self
+    }
+
+    /// Adds the event type `T`: the resource `Events<T>`, which the
+    /// schedule clears (`World::add_event`).
+    #[must_use]
+    pub fn add_event<T: Clone + 'static>(mut self) -> Self {
+        self.world.add_event::<T>();
+        self
+    }
+
+    /// Adds the reflected component type `T` to the world and to the
+    /// [`TypeRegistry`], under its reflected name. A component that is not
+    /// reflected is added with `app.world_mut().register::<T>()`.
+    ///
+    /// # Panics
+    ///
+    /// If another type has the same reflected name.
+    #[must_use]
+    pub fn register_component<T: Component + FromValue>(mut self) -> Self {
+        self.world
+            .resource_mut::<TypeRegistry>()
+            .register_component::<T>();
+        self.world.register::<T>();
         self
     }
 
     /// Adds the game's actions, with their bindings: the resources
     /// [`ActionMap<A>`] and [`ActionState<A>`], whose state is latched from
-    /// the input once a tick, before the fixed systems.
+    /// the input once a tick, before the tick stages.
     ///
     /// Read edges (`just_pressed`) in fixed systems. A frame system sees
     /// only the last tick's: it misses those of a frame's earlier ticks, and
@@ -380,58 +463,111 @@ impl App {
                 "an App has one action set: it has `{existing}`, so it cannot add `{set}`",
             );
         }
-        self.resources.insert_resource(map);
-        self.resources.insert_resource(ActionState::<A>::new());
+        self.world.insert_resource(map);
+        self.world.insert_resource(ActionState::<A>::new());
         self.actions = Actions {
             set: Some(set),
-            latch: Box::new(|input, resources| {
-                let map = resources.resource::<ActionMap<A>>();
-                let mut state = resources.resource_mut::<ActionState<A>>();
+            latch: Box::new(|input, world| {
+                let map = world.resource::<ActionMap<A>>();
+                let mut state = world.resource_mut::<ActionState<A>>();
                 input.latch(&map, &mut state);
             }),
         };
         self
     }
 
-    /// Adds a system that runs once for every simulation tick: [`TICK_HZ`]
-    /// times a second, however fast frames come. Systems run in the order
-    /// they were added.
+    /// Adds a system to a stage of each simulation tick, after the stage's
+    /// others. Ticks come [`TICK_HZ`] times a second, however fast frames
+    /// come.
     #[must_use]
     pub fn add_fixed_system(
         mut self,
+        stage: FixedStage,
         name: &'static str,
-        system: impl FnMut(&Resources, &Tick) + 'static,
+        system: FixedSystem,
     ) -> Self {
-        self.fixed_systems.push(System {
-            name,
-            run: Box::new(system),
-        });
+        self.schedule.add_fixed(stage, name, system);
         self
     }
 
-    /// Adds a system that runs once for every frame, after the ticks of
-    /// that frame. Systems run in the order they were added.
+    /// Adds a system to a stage of each frame, after the stage's others.
+    /// A frame's stages run after its ticks.
     #[must_use]
     pub fn add_frame_system(
         mut self,
+        stage: FrameStage,
         name: &'static str,
-        system: impl FnMut(&Resources, &Frame) + 'static,
+        system: FrameSystem,
     ) -> Self {
-        self.frame_systems.push(System {
-            name,
-            run: Box::new(system),
-        });
+        self.schedule.add_frame(stage, name, system);
         self
     }
 
-    /// The resources, for setup: loading assets, say.
-    pub fn resources(&self) -> &Resources {
-        &self.resources
+    /// The world, to read it.
+    pub fn world(&self) -> &World {
+        &self.world
     }
 
-    /// The resources, to change them before the game runs.
-    pub fn resources_mut(&mut self) -> &mut Resources {
-        &mut self.resources
+    /// The world, for setup: spawning entities, loading assets,
+    /// registering components that are not reflected.
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
+    /// The systems, in stages: [`Schedule::describe`] lists them in the
+    /// order they run.
+    pub fn schedule(&self) -> &Schedule {
+        &self.schedule
+    }
+
+    /// Runs one frame that comes `elapsed` after the last, with the events
+    /// that came before it, without drawing it:
+    ///
+    /// 1. feeds the events to [`Input`];
+    /// 2. runs the ticks that are due: for each, latches the actions and
+    ///    runs the tick stages, which apply their commands;
+    /// 3. sets [`TickStats`];
+    /// 4. empties the [`RenderFrame`], and runs the frame stages;
+    /// 5. collects the profile scopes the systems recorded, with the
+    ///    `profile` feature of `nadir-core`, so that they do not pile up.
+    ///
+    /// [`App::run`] calls it once a frame, then draws the `RenderFrame`.
+    /// Tests, benchmarks and headless runs call it themselves. A frame of
+    /// `Duration::from_nanos(16_666_667)` runs one tick: the third of a
+    /// nanosecond it holds past a tick adds up to another only after 50
+    /// million frames.
+    pub fn update(&mut self, elapsed: Duration, events: &[Event]) {
+        {
+            let mut input = self.world.resource_mut::<Input>();
+            for event in events {
+                input.handle(event);
+            }
+        }
+        let frame = self.clock.begin_frame(elapsed);
+        let mut stats = TickStats::default();
+        while let Some(tick) = self.clock.consume_tick() {
+            let start = Instant::now();
+            {
+                let mut input = self.world.resource_mut::<Input>();
+                (self.actions.latch)(&mut input, &self.world);
+            }
+            self.schedule.run_fixed(&mut self.world, &tick);
+            let took = start.elapsed();
+            stats.ticks += 1;
+            stats.time += took;
+            stats.longest = stats.longest.max(took);
+        }
+        *self.world.resource_mut::<TickStats>() = stats;
+        self.world.resource_mut::<RenderFrame>().clear();
+        self.schedule.run_frame(&mut self.world, &frame);
+        profile::take_frame(&mut self.profile);
+        // Records came back, so the feature is on. The recorder gets this
+        // buffer back next frame: make it big enough that a frame of many
+        // ticks does not grow it.
+        if !self.profile.is_empty() {
+            let more = PROFILE_RECORDS.saturating_sub(self.profile.len());
+            self.profile.reserve(more);
+        }
     }
 
     /// Opens the log file and the window, and runs the main loop until the
@@ -474,7 +610,7 @@ impl App {
             .map_err(|error| fatal(&title, error))
     }
 
-    /// The main loop: events, then the ticks that are due, then the frame.
+    /// The main loop: events, then the frame and its ticks, then drawing.
     ///
     /// While the system runs an event loop of its own, as Windows does while
     /// the window is dragged and macOS while it is resized, the pump does not
@@ -487,15 +623,13 @@ impl App {
         window: &mut dyn EventSource,
         graphics: Option<Graphics>,
     ) -> Result<(), Error> {
-        debug!(
-            "main loop: fixed systems {:?}, frame systems {:?}",
-            names(&self.fixed_systems),
-            names(&self.frame_systems)
-        );
+        debug!("the systems, in the order they run:");
+        for system in self.schedule.describe() {
+            debug!("  {system}");
+        }
         let mut limiter = FrameLimiter::new(self.config.frame_rate_limit, Instant::now());
         let core = Rc::new(RefCell::new(EngineCore {
             app: self,
-            clock: FixedClock::new(TICK_HZ, MAX_FRAME),
             stopwatch: Stopwatch::start(),
             graphics,
             error: None,
@@ -534,37 +668,6 @@ impl App {
         }
         Ok(())
     }
-
-    /// Runs the systems for one frame that comes `elapsed` after the last,
-    /// with the events that came before it.
-    fn frame(&mut self, clock: &mut FixedClock, elapsed: Duration, events: &[Event]) {
-        self.resources.set_system("nadir::input");
-        {
-            let mut input = self.resources.resource_mut::<Input>();
-            for event in events {
-                input.handle(event);
-            }
-        }
-        let frame = clock.begin_frame(elapsed);
-        while let Some(tick) = clock.consume_tick() {
-            self.resources.set_system("nadir::latch");
-            {
-                let mut input = self.resources.resource_mut::<Input>();
-                (self.actions.latch)(&mut input, &self.resources);
-            }
-            for system in &mut self.fixed_systems {
-                self.resources.set_system(system.name);
-                (system.run)(&self.resources, &tick);
-            }
-        }
-        self.resources.set_system("nadir::frame");
-        self.resources.resource_mut::<RenderFrame>().clear();
-        for system in &mut self.frame_systems {
-            self.resources.set_system(system.name);
-            (system.run)(&self.resources, &frame);
-        }
-        self.resources.set_system("(none)");
-    }
 }
 
 /// Logs an error that ends the game and shows it to the player. Returns it,
@@ -575,46 +678,68 @@ fn fatal(title: &str, error: Error) -> Error {
     error
 }
 
-/// The names of some systems, in the order they run.
-fn names<T>(systems: &[System<T>]) -> Vec<&'static str> {
-    systems.iter().map(|system| system.name).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::rc::Rc;
     use std::thread;
+
+    use nadir_core::time::{Frame, Tick};
+    use nadir_core::{Key, Vec2};
+    use nadir_ecs::Entity;
+    use nadir_input::Binding;
 
     use super::*;
 
-    /// What the systems of a test saw, in order.
-    type Seen = Rc<RefCell<Vec<String>>>;
+    /// One tick's length, as a frame: it runs one tick.
+    const TICK: Duration = Duration::from_nanos(16_666_667);
+    const MS: Duration = Duration::from_millis(1);
 
     fn app() -> App {
         App::new(Config::default())
     }
 
-    /// An app whose systems count ticks and frames.
-    fn counting_app(ticks: &Rc<Cell<u64>>, frames: &Rc<Cell<u64>>) -> App {
-        let (ticks, frames) = (Rc::clone(ticks), Rc::clone(frames));
+    /// What the systems of a test saw, shared with the test through a
+    /// resource, so that it outlives an app that the loop consumed.
+    #[derive(Default)]
+    struct Log {
+        ticks: Cell<u64>,
+        frames: Cell<u64>,
+        seen: RefCell<Vec<String>>,
+        values: RefCell<Vec<f32>>,
+    }
+
+    type Shared = Rc<Log>;
+
+    fn shared() -> Shared {
+        Rc::default()
+    }
+
+    fn count_ticks(world: &World, _: &Tick) {
+        let log = world.resource::<Shared>();
+        log.ticks.set(log.ticks.get() + 1);
+    }
+
+    fn count_frames(world: &World, _: &Frame) {
+        let log = world.resource::<Shared>();
+        log.frames.set(log.frames.get() + 1);
+    }
+
+    /// An app whose systems count ticks and frames into `log`.
+    fn counting_app(log: &Shared) -> App {
         app()
-            .add_fixed_system("count_ticks", move |_, _| ticks.set(ticks.get() + 1))
-            .add_frame_system("count_frames", move |_, _| frames.set(frames.get() + 1))
+            .insert_resource(Rc::clone(log))
+            .add_fixed_system(FixedStage::Gameplay, "count_ticks", count_ticks)
+            .add_frame_system(FrameStage::Ui, "count_frames", count_frames)
     }
 
     /// Runs frames of one length until `total` has passed.
-    fn simulate(app: &mut App, clock: &mut FixedClock, frame_length: Duration, total: Duration) {
+    fn simulate(app: &mut App, frame_length: Duration, total: Duration) {
         let mut passed = Duration::ZERO;
         while passed < total {
             let step = frame_length.min(total - passed);
-            app.frame(clock, step, &[]);
+            app.update(step, &[]);
             passed += step;
         }
-    }
-
-    fn new_clock() -> FixedClock {
-        FixedClock::new(TICK_HZ, MAX_FRAME)
     }
 
     // -- configuration ------------------------------------------------------
@@ -661,71 +786,164 @@ mod tests {
         assert_eq!(config.window(), expected);
     }
 
-    // -- one frame ----------------------------------------------------------
+    // -- the schedule and the world -----------------------------------------
 
     #[test]
-    fn a_frame_runs_its_ticks_and_then_its_frame_systems_in_the_order_added() {
-        let seen: Seen = Rc::default();
-        let log = |seen: &Seen, name: &'static str| {
-            let seen = Rc::clone(seen);
-            move |text: String| seen.borrow_mut().push(format!("{name} {text}"))
-        };
-        let (a, b, c, d) = (
-            log(&seen, "a"),
-            log(&seen, "b"),
-            log(&seen, "c"),
-            log(&seen, "d"),
-        );
-        let mut app = app()
-            .add_fixed_system("a", move |_: &Resources, tick: &Tick| {
-                a(format!("tick {}", tick.index))
-            })
-            .add_frame_system("c", move |_: &Resources, _: &Frame| c("frame".to_string()))
-            .add_fixed_system("b", move |_: &Resources, tick: &Tick| {
-                b(format!("tick {}", tick.index))
-            })
-            .add_frame_system("d", move |_: &Resources, _: &Frame| d("frame".to_string()));
-        assert_eq!(names(&app.fixed_systems), ["a", "b"]);
-        assert_eq!(names(&app.frame_systems), ["c", "d"]);
-
-        // 40 ms hold two ticks.
-        app.frame(&mut new_clock(), Duration::from_millis(40), &[]);
+    fn the_schedule_prints_the_engines_systems_first_in_their_stages() {
+        let app = app()
+            .add_frame_system(FrameStage::Extract, "draw_ground", |_, _| {})
+            .add_fixed_system(FixedStage::Movement, "bounce", |_, _| {})
+            .add_fixed_system(FixedStage::Gameplay, "walk", |_, _| {})
+            .add_frame_system(FrameStage::Camera, "follow", |_, _| {});
+        let printed: Vec<String> = app
+            .schedule()
+            .describe()
+            .map(|system| system.to_string())
+            .collect();
         assert_eq!(
-            *seen.borrow(),
+            printed,
             [
-                "a tick 0", "b tick 0", "a tick 1", "b tick 1", "c frame", "d frame"
+                "tick  Input: nadir::snapshot",
+                "tick  Gameplay: walk",
+                "tick  Movement: nadir::movement",
+                "tick  Movement: bounce",
+                "tick  PostMovement: nadir::parent_offsets",
+                "tick  PostMovement: nadir::triggers",
+                "frame Camera: follow",
+                "frame Extract: nadir::extract_sprites",
+                "frame Extract: draw_ground",
             ]
         );
     }
 
     #[test]
-    fn a_frame_shorter_than_a_tick_still_runs_the_frame_systems() {
-        let (ticks, frames) = (Rc::default(), Rc::default());
-        let mut app = counting_app(&ticks, &frames);
-        let mut clock = new_clock();
-        app.frame(&mut clock, Duration::from_millis(5), &[]);
-        app.frame(&mut clock, Duration::from_millis(5), &[]);
-        assert_eq!((ticks.get(), frames.get()), (0, 2));
-        app.frame(&mut clock, Duration::from_millis(10), &[]);
-        assert_eq!((ticks.get(), frames.get()), (1, 3));
+    fn the_engines_components_are_registered_and_four_are_reflected() {
+        let app = app();
+        let world = app.world();
+        assert!(world.is_registered::<Transform>());
+        assert!(world.is_registered::<PrevTransform>());
+        assert!(world.is_registered::<Velocity>());
+        assert!(world.is_registered::<Sprite>());
+        assert!(world.is_registered::<Collider>());
+        assert!(world.is_registered::<Player>());
+        assert!(world.is_registered::<Parent>());
+        assert!(world.is_registered::<SaveId>());
+        let registry = world.resource::<TypeRegistry>();
+        let names: Vec<&str> = registry.iter().map(|it| it.name()).collect();
+        assert_eq!(names, ["Transform", "Velocity", "Player", "SaveId"]);
+    }
+
+    nadir_scene::reflect_newtype! {
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        struct Score(u32);
+    }
+
+    impl Component for Score {}
+
+    #[test]
+    fn a_game_registers_its_reflected_components_and_events() {
+        #[derive(Clone)]
+        struct Scored;
+        let mut app = app()
+            .register_component::<Score>()
+            .add_event::<Scored>()
+            .add_fixed_system(FixedStage::Gameplay, "score", |world, _| {
+                world
+                    .resource_mut::<nadir_ecs::Events<Scored>>()
+                    .send(Scored);
+            });
+        assert!(
+            app.world()
+                .resource::<TypeRegistry>()
+                .get("Score")
+                .is_some()
+        );
+        let entity = app.world_mut().spawn().with(Score(3)).id();
+        assert_eq!(app.world().read::<Score>().get(entity), Some(&Score(3)));
+        app.update(TICK, &[]);
+        let events = app.world().resource::<nadir_ecs::Events<Scored>>();
+        assert_eq!(events.frame_events().len(), 0, "cleared after the frame");
+    }
+
+    // -- one frame ----------------------------------------------------------
+
+    fn note(world: &World, text: String) {
+        world.resource::<Shared>().seen.borrow_mut().push(text);
+    }
+
+    #[test]
+    fn a_frame_runs_its_ticks_and_then_its_frame_stages_in_order() {
+        let log = shared();
+        let mut app = app()
+            .insert_resource(Rc::clone(&log))
+            .add_fixed_system(FixedStage::Gameplay, "a", |world, tick| {
+                note(world, format!("a tick {}", tick.index));
+            })
+            .add_frame_system(FrameStage::Ui, "c", |world, _| note(world, "c".into()))
+            .add_fixed_system(FixedStage::Input, "b", |world, tick| {
+                note(world, format!("b tick {}", tick.index));
+            })
+            .add_frame_system(FrameStage::Camera, "d", |world, _| note(world, "d".into()));
+        // 40 ms hold two ticks.
+        app.update(40 * MS, &[]);
+        assert_eq!(
+            *log.seen.borrow(),
+            ["b tick 0", "a tick 0", "b tick 1", "a tick 1", "d", "c"]
+        );
+    }
+
+    #[test]
+    fn a_frame_shorter_than_a_tick_still_runs_the_frame_stages() {
+        let log = shared();
+        let mut app = counting_app(&log);
+        app.update(5 * MS, &[]);
+        app.update(5 * MS, &[]);
+        assert_eq!((log.ticks.get(), log.frames.get()), (0, 2));
+        app.update(10 * MS, &[]);
+        assert_eq!((log.ticks.get(), log.frames.get()), (1, 3));
     }
 
     #[test]
     fn systems_get_the_tick_length_and_the_frame_time() {
-        let dts: Rc<RefCell<Vec<f32>>> = Rc::default();
-        let (tick_dts, frame_dts) = (Rc::clone(&dts), Rc::clone(&dts));
-        let alphas: Rc<RefCell<Vec<f32>>> = Rc::default();
-        let frame_alphas = Rc::clone(&alphas);
+        let log = shared();
         let mut app = app()
-            .add_fixed_system("tick", move |_, tick| tick_dts.borrow_mut().push(tick.dt))
-            .add_frame_system("frame", move |_, frame| {
-                frame_dts.borrow_mut().push(frame.dt);
-                frame_alphas.borrow_mut().push(frame.alpha);
+            .insert_resource(Rc::clone(&log))
+            .add_fixed_system(FixedStage::Gameplay, "tick", |world, tick| {
+                let log = world.resource::<Shared>();
+                log.values.borrow_mut().push(tick.dt);
+            })
+            .add_frame_system(FrameStage::Ui, "frame", |world, frame| {
+                let log = world.resource::<Shared>();
+                log.values.borrow_mut().extend([frame.dt, frame.alpha]);
             });
-        app.frame(&mut new_clock(), Duration::from_millis(20), &[]);
-        assert_eq!(*dts.borrow(), [1.0 / 60.0, 0.02]);
+        app.update(20 * MS, &[]);
+        let values = log.values.borrow();
+        assert_eq!(values[..2], [1.0 / 60.0, 0.02]);
         // 20 ms is one tick of 16.67 ms and a fifth of the next.
-        assert!((alphas.borrow()[0] - 0.2).abs() < 1e-6, "{alphas:?}");
+        assert!((values[2] - 0.2).abs() < 1e-6, "{values:?}");
+    }
+
+    #[test]
+    fn tick_stats_count_this_frames_ticks_for_its_frame_stages() {
+        let log = shared();
+        let mut app = app()
+            .insert_resource(Rc::clone(&log))
+            .add_fixed_system(FixedStage::Gameplay, "slow", |_, tick| {
+                if tick.index == 1 {
+                    thread::sleep(3 * MS);
+                }
+            })
+            .add_frame_system(FrameStage::Ui, "read", |world, _| {
+                let stats = *world.resource::<TickStats>();
+                note(world, format!("{}", stats.ticks));
+            });
+        app.update(40 * MS, &[]);
+        let two = *app.world().resource::<TickStats>();
+        assert_eq!(two.ticks, 2);
+        assert!(two.longest >= 3 * MS && two.time >= two.longest, "{two:?}");
+        app.update(5 * MS, &[]);
+        assert_eq!(*app.world().resource::<TickStats>(), TickStats::default());
+        assert_eq!(*log.seen.borrow(), ["2", "0"]);
     }
 
     // -- the tick rate ------------------------------------------------------
@@ -733,52 +951,36 @@ mod tests {
     #[test]
     fn ten_seconds_run_600_ticks_whatever_the_frame_rate() {
         let frame_lengths = [
-            Duration::from_nanos(16_666_667), // 60 frames a second
-            Duration::from_nanos(6_944_444),  // 144
-            Duration::from_micros(33_333),    // 30
+            TICK,                            // 60 frames a second
+            Duration::from_nanos(6_944_444), // 144
+            Duration::from_micros(33_333),   // 30
             Duration::from_millis(3),
             Duration::from_millis(110),
         ];
         for frame_length in frame_lengths {
-            let (ticks, frames) = (Rc::default(), Rc::default());
-            let mut app = counting_app(&ticks, &frames);
-            simulate(
-                &mut app,
-                &mut new_clock(),
-                frame_length,
-                Duration::from_secs(10),
-            );
+            let log = shared();
+            let mut app = counting_app(&log);
+            simulate(&mut app, frame_length, Duration::from_secs(10));
             // The task asks for 60 Hz within 1%. The clock is exact.
-            assert_eq!(ticks.get(), 600, "frames of {frame_length:?}");
-            assert!(frames.get() >= 90, "frames of {frame_length:?}");
+            assert_eq!(log.ticks.get(), 600, "frames of {frame_length:?}");
+            assert!(log.frames.get() >= 90, "frames of {frame_length:?}");
         }
     }
 
     #[test]
     fn a_simulated_hitch_runs_a_quarter_second_of_ticks_and_no_more() {
-        let (ticks, frames) = (Rc::default(), Rc::default());
-        let mut app = counting_app(&ticks, &frames);
-        let mut clock = new_clock();
-        simulate(
-            &mut app,
-            &mut clock,
-            Duration::from_millis(10),
-            Duration::from_secs(1),
-        );
-        assert_eq!(ticks.get(), 60);
+        let log = shared();
+        let mut app = counting_app(&log);
+        simulate(&mut app, 10 * MS, Duration::from_secs(1));
+        assert_eq!(log.ticks.get(), 60);
 
         // One frame takes a whole second.
-        app.frame(&mut clock, Duration::from_secs(1), &[]);
-        assert_eq!(ticks.get(), 60 + 15);
+        app.update(Duration::from_secs(1), &[]);
+        assert_eq!(log.ticks.get(), 60 + 15);
 
         // Nothing is owed afterwards: the next second is an ordinary one.
-        simulate(
-            &mut app,
-            &mut clock,
-            Duration::from_millis(10),
-            Duration::from_secs(1),
-        );
-        assert_eq!(ticks.get(), 60 + 15 + 60);
+        simulate(&mut app, 10 * MS, Duration::from_secs(1));
+        assert_eq!(log.ticks.get(), 60 + 15 + 60);
     }
 
     // -- the loop -----------------------------------------------------------
@@ -841,8 +1043,8 @@ mod tests {
 
     #[test]
     fn the_loop_runs_until_the_window_asks_to_close() {
-        let (ticks, frames) = (Rc::default(), Rc::default());
-        let mut app = counting_app(&ticks, &frames);
+        let log = shared();
+        let mut app = counting_app(&log);
         app.config.frame_rate_limit = None;
         let mut window = Script::closing_when(|pumps| pumps == 8);
         app.run_loop(&mut window, None)
@@ -850,22 +1052,22 @@ mod tests {
         // Seven frames ran, and the eighth pump ended the loop before its
         // frame.
         assert_eq!(window.pumps, 8);
-        assert_eq!(frames.get(), 7);
+        assert_eq!(log.frames.get(), 7);
     }
 
     #[test]
     fn a_close_request_on_the_first_pump_runs_no_frame() {
-        let (ticks, frames) = (Rc::default(), Rc::default());
-        let app = counting_app(&ticks, &frames);
+        let log = shared();
+        let app = counting_app(&log);
         app.run_loop(&mut Script::closing_when(|_| true), None)
             .expect("no error without a device");
-        assert_eq!((ticks.get(), frames.get()), (0, 0));
+        assert_eq!((log.ticks.get(), log.frames.get()), (0, 0));
     }
 
     #[test]
     fn while_the_system_holds_the_loop_frames_run_from_the_callback() {
-        let (ticks, frames) = (Rc::default(), Rc::default());
-        let mut app = counting_app(&ticks, &frames);
+        let log = shared();
+        let mut app = counting_app(&log);
         app.config.frame_rate_limit = None;
         // The second pump holds the loop for five modal frames, as a drag
         // of the window does on Windows.
@@ -875,43 +1077,43 @@ mod tests {
             .expect("no error without a device");
         // One frame after the first pump, five during the second and one
         // after it, and none after the third.
-        assert_eq!(frames.get(), 7);
+        assert_eq!(log.frames.get(), 7);
     }
 
     #[test]
     fn modal_frames_keep_the_simulation_on_time() {
-        let (ticks, frames) = (Rc::default(), Rc::default());
-        let mut app = counting_app(&ticks, &frames);
+        let log = shared();
+        let mut app = counting_app(&log)
+            .add_frame_system(FrameStage::Ui, "wait", |_, _| thread::sleep(10 * MS));
         app.config.frame_rate_limit = None;
         // The first pump holds the loop for 300 ms or more, in modal frames
         // of at least 10 ms.
         let start = Instant::now();
         let mut window = Script::closing_when(|pumps| pumps == 2)
             .with_modal_frames(|pumps| if pumps == 1 { 30 } else { 0 });
-        let wait = move |_: &Resources, _: &Frame| thread::sleep(Duration::from_millis(10));
-        app = app.add_frame_system("wait", wait);
         app.run_loop(&mut window, None)
             .expect("no error without a device");
         let elapsed = start.elapsed();
-        assert_eq!(frames.get(), 30 + 1);
+        assert_eq!(log.frames.get(), 30 + 1);
         // The ticks kept up with real time while the loop was held: 60 a
         // second for 300 ms is 18, less one for rounding. Without modal
         // frames, the frame after the hold would have counted only a
         // quarter of a second: 15.
-        assert!(ticks.get() >= 17, "{} ticks in {elapsed:?}", ticks.get());
+        let ticks = log.ticks.get();
+        assert!(ticks >= 17, "{ticks} ticks in {elapsed:?}");
     }
 
     #[test]
     fn the_limiter_paces_the_loop() {
-        let (ticks, frames) = (Rc::default(), Rc::default());
-        let mut app = counting_app(&ticks, &frames);
+        let log = shared();
+        let mut app = counting_app(&log);
         app.config.frame_rate_limit = Some(200);
         let start = Instant::now();
         app.run_loop(&mut Script::closing_when(|pumps| pumps == 21), None)
             .expect("no error without a device");
         // Twenty frames of 5 ms each. A busy machine can make them longer,
         // but nothing makes them shorter.
-        assert_eq!(frames.get(), 20);
+        assert_eq!(log.frames.get(), 20);
         assert!(
             start.elapsed() >= Duration::from_millis(100),
             "{:?}",
@@ -919,37 +1121,38 @@ mod tests {
         );
     }
 
+    /// What the hitch test's systems saw.
+    #[derive(Default)]
+    struct Hitch {
+        /// Each frame's ticks and `dt`.
+        frames: RefCell<Vec<(u32, f32)>>,
+        ticks_this_frame: Cell<u32>,
+        stalled: Cell<bool>,
+        frames_since_stall: Cell<u32>,
+    }
+
     #[test]
     fn a_real_hitch_of_one_second_is_clamped_and_does_not_spiral() {
-        // What each frame saw: how many ticks it ran, and its `dt`.
-        let frames: Rc<RefCell<Vec<(u32, f32)>>> = Rc::default();
-        let ticks_this_frame = Rc::new(Cell::new(0u32));
-        let stalled = Rc::new(Cell::new(false));
-        let frames_since_stall = Rc::new(Cell::new(0u32));
-
-        let tick_counter = Rc::clone(&ticks_this_frame);
-        let tick_stalled = Rc::clone(&stalled);
-        let frame_log = Rc::clone(&frames);
-        let frame_counter = Rc::clone(&ticks_this_frame);
-        let frame_stalled = Rc::clone(&stalled);
-        let frame_since = Rc::clone(&frames_since_stall);
-        let script_since = Rc::clone(&frames_since_stall);
-
+        let hitch: Rc<Hitch> = Rc::default();
         let app = app()
-            .add_fixed_system("stall_once", move |_, tick| {
-                tick_counter.set(tick_counter.get() + 1);
+            .insert_resource(Rc::clone(&hitch))
+            .add_fixed_system(FixedStage::Gameplay, "stall_once", |world, tick| {
+                let hitch = world.resource::<Rc<Hitch>>();
+                hitch.ticks_this_frame.set(hitch.ticks_this_frame.get() + 1);
                 // The hitch: the third tick takes a second.
                 if tick.index == 2 {
                     thread::sleep(Duration::from_secs(1));
-                    tick_stalled.set(true);
+                    hitch.stalled.set(true);
                 }
             })
-            .add_frame_system("record", move |_, frame| {
-                frame_log
-                    .borrow_mut()
-                    .push((frame_counter.take(), frame.dt));
-                if frame_stalled.get() {
-                    frame_since.set(frame_since.get() + 1);
+            .add_frame_system(FrameStage::Ui, "record", |world, frame| {
+                let hitch = world.resource::<Rc<Hitch>>();
+                let ticks = hitch.ticks_this_frame.take();
+                hitch.frames.borrow_mut().push((ticks, frame.dt));
+                if hitch.stalled.get() {
+                    hitch
+                        .frames_since_stall
+                        .set(hitch.frames_since_stall.get() + 1);
                 }
             });
 
@@ -957,15 +1160,18 @@ mod tests {
         // never comes, give up after ten seconds of frames, so that a bug
         // fails this test and does not hang it.
         let start = Instant::now();
+        let script = Rc::clone(&hitch);
         app.run_loop(
-            &mut Script::closing_when(move |pumps| script_since.get() > 6 || pumps > 600),
+            &mut Script::closing_when(move |pumps| {
+                script.frames_since_stall.get() > 6 || pumps > 600
+            }),
             None,
         )
         .expect("no error without a device");
         let elapsed = start.elapsed();
-        assert!(stalled.get(), "the stall never happened");
+        assert!(hitch.stalled.get(), "the stall never happened");
 
-        let frames = frames.borrow();
+        let frames = hitch.frames.borrow();
         let most_ticks = frames.iter().map(|&(ticks, _)| ticks).max();
         let longest_dt = frames.iter().map(|&(_, dt)| dt).fold(0.0, f32::max);
         let total_ticks: u32 = frames.iter().map(|&(ticks, _)| ticks).sum();
@@ -985,12 +1191,7 @@ mod tests {
         );
     }
 
-    // -- actions and resources ------------------------------------------------
-
-    use nadir_core::{Key, Vec2};
-    use nadir_input::{ActionKind, Binding};
-
-    use crate::Interpolated;
+    // -- actions, movement and drawing ----------------------------------------
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Act {
@@ -1016,15 +1217,17 @@ mod tests {
     /// Pixels a second: two a tick.
     const SPEED: f32 = 120.0;
 
-    /// Where the mover is, between ticks.
-    struct Mover(Interpolated<Vec2>);
+    /// The entity that moves.
+    struct Mover(Entity);
 
-    /// Where each frame drew the mover.
-    struct Drawn(Vec<f32>);
+    /// A texture handle, which nothing loads.
+    fn texture() -> nadir_assets::Handle<nadir_render::Texture> {
+        nadir_assets::Handle::new(nadir_core::GenIndex::new(0, std::num::NonZeroU32::MIN))
+    }
 
-    /// An app that moves a `Mover` with `Act::Move`, bound to WASD, and
-    /// records where each frame draws it.
-    fn moving_app() -> App {
+    /// An app that moves an entity with `Act::Move`, bound to WASD, and
+    /// notes in `log` where each frame draws it.
+    fn moving_app(log: &Shared) -> App {
         let mut map = ActionMap::<Act>::new().expect("a valid set");
         let wasd = Binding::KeyComposite2 {
             up: Key::W,
@@ -1033,20 +1236,28 @@ mod tests {
             right: Key::D,
         };
         map.bind(Act::Move, 0, wasd).expect("fits");
-        app()
+        let mut app = app()
             .add_actions(map)
-            .insert_resource(Mover(Interpolated::new(Vec2::ZERO)))
-            .insert_resource(Drawn(Vec::new()))
-            .add_fixed_system("move", |resources, tick| {
-                let direction = resources.resource::<ActionState<Act>>().axis2(Act::Move);
-                let mut mover = resources.resource_mut::<Mover>();
-                mover.0.snapshot();
-                mover.0.current += direction * SPEED * tick.dt;
+            .insert_resource(Rc::clone(log))
+            .add_fixed_system(FixedStage::Gameplay, "steer", |world, _| {
+                let direction = world.resource::<ActionState<Act>>().axis2(Act::Move);
+                let mover = world.resource::<Mover>().0;
+                if let Some(velocity) = world.write::<Velocity>().get_mut(mover) {
+                    velocity.0 = direction * SPEED;
+                }
             })
-            .add_frame_system("draw", |resources, frame| {
-                let x = resources.resource::<Mover>().0.lerp(frame.alpha).x;
-                resources.resource_mut::<Drawn>().0.push(x);
-            })
+            .add_frame_system(FrameStage::Extract, "record", |world, _| {
+                let x = world.resource::<RenderFrame>().sprites[0].position.x;
+                world.resource::<Shared>().values.borrow_mut().push(x);
+            });
+        let mover = app
+            .world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::ZERO))
+            .with(Velocity::default())
+            .with(Sprite::new(texture(), Vec2::splat(8.0)))
+            .id();
+        app.insert_resource(Mover(mover))
     }
 
     fn key(key: Key, pressed: bool) -> Event {
@@ -1058,64 +1269,62 @@ mod tests {
     }
 
     fn x(app: &App) -> f32 {
-        app.resources().resource::<Mover>().0.current.x
+        let mover = app.world().resource::<Mover>().0;
+        app.world()
+            .read::<Transform>()
+            .get(mover)
+            .expect("it is")
+            .position
+            .x
     }
-
-    const MS: Duration = Duration::from_millis(1);
 
     #[test]
     fn a_tap_between_ticks_moves_exactly_one_tick() {
-        let mut app = moving_app();
-        let mut clock = new_clock();
+        let mut app = moving_app(&shared());
         // D goes down and up within a frame too short for a tick.
-        app.frame(&mut clock, 5 * MS, &[key(Key::D, true), key(Key::D, false)]);
+        app.update(5 * MS, &[key(Key::D, true), key(Key::D, false)]);
         assert_eq!(x(&app), 0.0, "no tick yet");
         // The next frame's tick moves it once.
-        app.frame(&mut clock, 12 * MS, &[]);
+        app.update(12 * MS, &[]);
         assert_eq!(x(&app), SPEED / 60.0);
         for _ in 0..10 {
-            app.frame(&mut clock, 16 * MS, &[]);
+            app.update(16 * MS, &[]);
         }
         assert_eq!(x(&app), SPEED / 60.0, "and never again");
         // In a frame of two ticks, the second sees no edge either.
-        app.frame(
-            &mut clock,
-            34 * MS,
-            &[key(Key::D, true), key(Key::D, false)],
-        );
+        app.update(34 * MS, &[key(Key::D, true), key(Key::D, false)]);
         assert_eq!(x(&app), 2.0 * SPEED / 60.0);
     }
 
     #[test]
     fn a_held_key_moves_every_tick() {
-        let mut app = moving_app();
-        let mut clock = new_clock();
-        app.frame(&mut clock, Duration::ZERO, &[key(Key::D, true)]);
+        let mut app = moving_app(&shared());
+        app.update(Duration::ZERO, &[key(Key::D, true)]);
         // Exactly a second of 60 Hz frames: sixty ticks.
         for _ in 0..60 {
-            app.frame(&mut clock, Duration::from_nanos(16_666_667), &[]);
+            app.update(TICK, &[]);
         }
         assert!((x(&app) - SPEED).abs() < 1e-3, "{}", x(&app));
-        app.frame(&mut clock, Duration::ZERO, &[key(Key::D, false)]);
-        app.frame(&mut clock, 20 * MS, &[]);
+        app.update(Duration::ZERO, &[key(Key::D, false)]);
+        app.update(20 * MS, &[]);
         assert!((x(&app) - SPEED).abs() < 1e-3, "it stops: {}", x(&app));
     }
 
     #[test]
     fn the_wheel_moves_on_each_tick_without_an_action_set() {
-        let seen: Rc<RefCell<Vec<Vec2>>> = Rc::default();
-        let record = Rc::clone(&seen);
-        let mut app = app().add_fixed_system("zoom", move |resources, _| {
-            record
-                .borrow_mut()
-                .push(resources.resource::<Input>().wheel());
-        });
-        let mut clock = new_clock();
-        let up = Vec2::new(0.0, 3.0);
+        let log = shared();
+        let mut app = app().insert_resource(Rc::clone(&log)).add_fixed_system(
+            FixedStage::Input,
+            "zoom",
+            |world, _| {
+                let wheel = world.resource::<Input>().wheel();
+                world.resource::<Shared>().values.borrow_mut().push(wheel.y);
+            },
+        );
         // A tick each.
-        app.frame(&mut clock, 20 * MS, &[Event::MouseWheel(up)]);
-        app.frame(&mut clock, 20 * MS, &[]);
-        assert_eq!(*seen.borrow(), [up, Vec2::ZERO]);
+        app.update(20 * MS, &[Event::MouseWheel(Vec2::new(0.0, 3.0))]);
+        app.update(20 * MS, &[]);
+        assert_eq!(*log.values.borrow(), [3.0, 0.0]);
     }
 
     #[test]
@@ -1125,7 +1334,7 @@ mod tests {
         // whatever that is.
         let mut irregular = nadir_core::Pcg32::new(7, 1);
         let rates: [(&str, Vec<Duration>); 5] = [
-            ("60", vec![Duration::from_nanos(16_666_667); 120]),
+            ("60", vec![TICK; 120]),
             ("59.94", vec![Duration::from_nanos(16_683_350); 120]),
             ("144", vec![Duration::from_nanos(6_944_444); 288]),
             ("1 ms", vec![MS; 2000]),
@@ -1137,18 +1346,19 @@ mod tests {
             ),
         ];
         for (name, frames) in rates {
-            let mut app = moving_app();
-            let mut clock = new_clock();
-            app.frame(&mut clock, Duration::ZERO, &[key(Key::D, true)]);
+            let log = shared();
+            let mut app = moving_app(&log);
+            app.update(Duration::ZERO, &[key(Key::D, true)]);
             let mut t = Duration::ZERO;
             let mut expected = vec![0.0];
             for frame in frames {
-                app.frame(&mut clock, frame, &[]);
+                app.update(frame, &[]);
                 t += frame;
                 let x = SPEED as f64 * (t.as_secs_f64() - 1.0 / 60.0).max(0.0);
                 expected.push(x);
             }
-            let drawn = &app.resources().resource::<Drawn>().0;
+            let drawn = log.values.borrow();
+            assert_eq!(drawn.len(), expected.len(), "{name}");
             for (i, (&drawn, &expected)) in drawn.iter().zip(&expected).enumerate() {
                 assert!(
                     (f64::from(drawn) - expected).abs() < 2e-3,
@@ -1183,7 +1393,7 @@ mod tests {
         }
 
         let map = ActionMap::<Menu>::new().expect("a valid set");
-        let _ = moving_app().add_actions(map);
+        let _ = moving_app(&shared()).add_actions(map);
     }
 
     #[test]
@@ -1196,43 +1406,43 @@ mod tests {
             right: Key::Right,
         };
         map.bind(Act::Move, 0, arrows).expect("fits");
-        let mut app = moving_app().add_actions(map);
-        let mut clock = new_clock();
-        app.frame(&mut clock, 20 * MS, &[key(Key::D, true)]);
+        let mut app = moving_app(&shared()).add_actions(map);
+        app.update(20 * MS, &[key(Key::D, true)]);
         assert_eq!(x(&app), 0.0, "D is no longer bound");
-        app.frame(&mut clock, 20 * MS, &[key(Key::Right, true)]);
+        app.update(20 * MS, &[key(Key::Right, true)]);
         assert_eq!(x(&app), SPEED / 60.0, "one latch a tick, with the new map");
     }
 
     #[test]
     fn the_render_frame_is_emptied_before_each_frame() {
-        let sizes: Rc<RefCell<Vec<usize>>> = Rc::default();
-        let seen = Rc::clone(&sizes);
-        let mut app = app().add_frame_system("draw", move |resources, _| {
-            let mut frame = resources.resource_mut::<RenderFrame>();
-            seen.borrow_mut().push(frame.sprites.len());
-            let texture =
-                nadir_assets::Handle::new(nadir_core::GenIndex::new(0, std::num::NonZeroU32::MIN));
-            frame.sprites.push(nadir_render::SpriteDraw::new(
-                texture,
-                Vec2::ZERO,
-                Vec2::ONE,
-            ));
-        });
-        let mut clock = new_clock();
+        let log = shared();
+        let mut app = app().insert_resource(Rc::clone(&log)).add_frame_system(
+            FrameStage::Camera,
+            "draw",
+            |world, _| {
+                let mut frame = world.resource_mut::<RenderFrame>();
+                let size = frame.sprites.len() as f32;
+                world.resource::<Shared>().values.borrow_mut().push(size);
+                frame.sprites.push(nadir_render::SpriteDraw::new(
+                    texture(),
+                    Vec2::ZERO,
+                    Vec2::ONE,
+                ));
+            },
+        );
         for _ in 0..3 {
-            app.frame(&mut clock, 16 * MS, &[]);
+            app.update(16 * MS, &[]);
         }
-        assert_eq!(*sizes.borrow(), [0, 0, 0]);
+        assert_eq!(*log.values.borrow(), [0.0, 0.0, 0.0]);
     }
 
     #[test]
     fn a_missing_resource_names_the_system_that_asked() {
-        let mut app = app().add_fixed_system("needs_a_score", |resources, _| {
-            let _ = resources.resource::<u64>();
+        let mut app = app().add_fixed_system(FixedStage::Gameplay, "needs_a_score", |world, _| {
+            let _ = world.resource::<u64>();
         });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            app.frame(&mut new_clock(), 20 * MS, &[]);
+            app.update(20 * MS, &[]);
         }));
         let payload = result.expect_err("a panic");
         let message = payload
@@ -1266,18 +1476,52 @@ mod tests {
 
     #[test]
     fn the_loop_feeds_pumped_keys_to_the_actions() {
-        let moved: Rc<RefCell<f32>> = Rc::default();
-        let report = Rc::clone(&moved);
-        let mut app = moving_app().add_frame_system("report", move |resources, _| {
-            *report.borrow_mut() = resources.resource::<Mover>().0.current.x;
+        let log = shared();
+        let mut app = moving_app(&log).add_frame_system(FrameStage::Ui, "report", |world, _| {
+            let mover = world.resource::<Mover>().0;
+            let x = world
+                .read::<Transform>()
+                .get(mover)
+                .expect("it is")
+                .position
+                .x;
+            world
+                .resource::<Shared>()
+                .seen
+                .borrow_mut()
+                .push(x.to_string());
         });
         app.config.frame_rate_limit = None;
         app.run_loop(&mut Tapping { pumps: 0 }, None)
             .expect("no error without a device");
-        assert_eq!(*moved.borrow(), SPEED / 60.0, "the tap moved it one tick");
+        let seen = log.seen.borrow();
+        let last: f32 = seen.last().expect("frames ran").parse().expect("a number");
+        assert_eq!(last, SPEED / 60.0, "the tap moved it one tick");
     }
 
-    /// A steady frame of 10,000 sprites allocates nothing (roadmap M3.5).
+    /// A hitch's frame of 15 ticks, after frames of one, allocates nothing:
+    /// with nadir-core's `profile` feature too, whose records it holds.
+    #[cfg(feature = "dev")]
+    #[test]
+    fn a_frame_of_many_ticks_after_frames_of_one_allocates_nothing() {
+        let mut app = app();
+        app.world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::ZERO))
+            .with(Velocity(Vec2::ONE))
+            .with(Sprite::new(texture(), Vec2::ONE));
+        for _ in 0..5 {
+            app.update(TICK, &[]);
+        }
+        let start = nadir_platform::thread_alloc_counts();
+        app.update(Duration::from_secs(1), &[]);
+        let allocated = nadir_platform::thread_alloc_counts().since(start);
+        assert_eq!(app.world().resource::<TickStats>().ticks, 15);
+        assert_eq!(allocated, nadir_platform::AllocCounts::default());
+    }
+
+    /// A steady frame of 10,000 sprites allocates nothing (roadmap M3.5),
+    /// now drawn from entities.
     #[cfg(feature = "dev")]
     mod steady_frames {
         use std::env;
@@ -1295,7 +1539,7 @@ mod tests {
         use nadir_render::{SortMode, SpriteDraw, Texture};
 
         use super::*;
-        use crate::{FrameAllocs, Interpolated};
+        use crate::FrameAllocs;
 
         /// How many sprites walk about.
         const CROWD: usize = 10_000;
@@ -1309,18 +1553,8 @@ mod tests {
         /// The view, which the walkers stay inside.
         const VIEW: Vec2 = Vec2::new(480.0, 270.0);
 
-        struct Walker {
-            position: Interpolated<Vec2>,
-            velocity: Vec2,
-            tint: Color,
-        }
-
-        /// The scene: its textures and the walkers.
-        struct Scene {
-            walker: Handle<Texture>,
-            ground: Handle<Texture>,
-            walkers: Vec<Walker>,
-        }
+        /// The ground's texture.
+        struct Ground(Handle<Texture>);
 
         /// What each frame saw: the last frame's allocations and drawing,
         /// and the ticks so far. Room for every frame is made up front, and
@@ -1329,6 +1563,8 @@ mod tests {
             frames: Vec<(AllocCounts, FrameStats, u64)>,
             ticks: u64,
         }
+
+        type SharedSeen = Rc<RefCell<Seen>>;
 
         /// The window: an offscreen context, if there is one. It notes the
         /// thread's heap use as each pump starts, and closes after the
@@ -1385,17 +1621,74 @@ mod tests {
             fs::write(path, bytes).expect("write a texture");
         }
 
+        /// Turns each walker back at the edges of the view, and faces it
+        /// the way it goes.
+        fn walk(world: &World, tick: &Tick) {
+            let transforms = world.read::<Transform>();
+            let mut velocities = world.write::<Velocity>();
+            let mut sprites = world.write::<Sprite>();
+            for (entity, velocity) in velocities.iter_mut() {
+                let Some(transform) = transforms.get(entity) else {
+                    continue;
+                };
+                let next = transform.position + velocity.0 * tick.dt;
+                if !(8.0..=VIEW.x - 8.0).contains(&next.x) {
+                    velocity.0.x = -velocity.0.x;
+                }
+                if !(16.0..=VIEW.y).contains(&next.y) {
+                    velocity.0.y = -velocity.0.y;
+                }
+                if let Some(sprite) = sprites.get_mut(entity) {
+                    sprite.flip.x = velocity.0.x < 0.0;
+                }
+            }
+            world.resource::<SharedSeen>().borrow_mut().ticks += 1;
+        }
+
+        fn draw_ground(world: &World, _: &Frame) {
+            let ground = world.resource::<Ground>().0;
+            let mut out = world.resource_mut::<RenderFrame>();
+            out.camera.position = VIEW * 0.5;
+            for tile in 0..TILES {
+                let corner = Vec2::new((tile % 16) as f32, (tile / 16) as f32) * 32.0;
+                let mut sprite = SpriteDraw::new(ground, corner, Vec2::splat(32.0));
+                sprite.pivot = Vec2::ZERO;
+                sprite.sort = SortMode::Fixed(0);
+                out.sprites.push(sprite);
+            }
+        }
+
+        fn probe(world: &World, _: &Frame) {
+            let seen = world.resource::<SharedSeen>();
+            let mut seen = seen.borrow_mut();
+            let entry = (
+                world.resource::<FrameAllocs>().0,
+                *world.resource::<FrameStats>(),
+                seen.ticks,
+            );
+            seen.frames.push(entry);
+            // In a warm-up frame, a known allocation, which that frame's
+            // count must show.
+            if seen.frames.len() == 5 {
+                drop(black_box(Box::new(5u64)));
+            }
+        }
+
         /// The scene's app, loading its textures from `assets`, and noting
         /// in `seen` what each frame sees.
-        fn scene(assets: PathBuf, seen: &Rc<RefCell<Seen>>) -> App {
+        fn scene(assets: PathBuf, seen: &SharedSeen) -> App {
             let mut app = App::new(Config {
                 assets,
                 // Frames then sleep in the limiter, which the count covers.
                 frame_rate_limit: Some(500),
                 ..Config::default()
-            });
+            })
+            .insert_resource(Rc::clone(seen))
+            .add_fixed_system(FixedStage::Gameplay, "walk", walk)
+            .add_frame_system(FrameStage::Extract, "draw_ground", draw_ground)
+            .add_frame_system(FrameStage::Ui, "probe", probe);
             let (walker, ground) = {
-                let mut server = app.resources_mut().resource_mut::<AssetServer>();
+                let mut server = app.world().resource_mut::<AssetServer>();
                 (server.load("walker.qoi"), server.load("ground.qoi"))
             };
             let mut seed = 1u32;
@@ -1406,81 +1699,24 @@ mod tests {
                 seed ^= seed << 5;
                 (seed % 10_000) as f32 / 10_000.0
             };
-            let walkers = (0..CROWD)
-                .map(|index| Walker {
-                    position: Interpolated::new(Vec2::new(
-                        8.0 + random() * (VIEW.x - 16.0),
-                        16.0 + random() * (VIEW.y - 16.0),
-                    )),
-                    velocity: Vec2::new(random() * 120.0 - 60.0, random() * 120.0 - 60.0),
-                    tint: if index % 4 == 0 {
-                        Color::rgb(255, 200, 200)
-                    } else {
-                        Color::WHITE
-                    },
-                })
-                .collect();
-            app.insert_resource(Scene {
-                walker,
-                ground,
-                walkers,
-            })
-            .add_fixed_system("walk", {
-                let seen = Rc::clone(seen);
-                move |resources, tick| {
-                    for walker in &mut resources.resource_mut::<Scene>().walkers {
-                        walker.position.snapshot();
-                        let mut next = walker.position.current + walker.velocity * tick.dt;
-                        if !(8.0..=VIEW.x - 8.0).contains(&next.x) {
-                            walker.velocity.x = -walker.velocity.x;
-                            next.x = walker.position.current.x;
-                        }
-                        if !(16.0..=VIEW.y).contains(&next.y) {
-                            walker.velocity.y = -walker.velocity.y;
-                            next.y = walker.position.current.y;
-                        }
-                        walker.position.current = next;
-                    }
-                    seen.borrow_mut().ticks += 1;
+            for index in 0..CROWD {
+                let position = Vec2::new(
+                    8.0 + random() * (VIEW.x - 16.0),
+                    16.0 + random() * (VIEW.y - 16.0),
+                );
+                let velocity = Vec2::new(random() * 120.0 - 60.0, random() * 120.0 - 60.0);
+                let mut sprite = Sprite::new(walker, Vec2::new(8.0, 16.0));
+                sprite.layer = 1;
+                if index % 4 == 0 {
+                    sprite.color = Color::rgb(255, 200, 200);
                 }
-            })
-            .add_frame_system("draw", |resources, frame| {
-                let scene = resources.resource::<Scene>();
-                let mut out = resources.resource_mut::<RenderFrame>();
-                out.camera.position = VIEW * 0.5;
-                for tile in 0..TILES {
-                    let corner = Vec2::new((tile % 16) as f32, (tile / 16) as f32) * 32.0;
-                    let mut sprite = SpriteDraw::new(scene.ground, corner, Vec2::splat(32.0));
-                    sprite.pivot = Vec2::ZERO;
-                    sprite.sort = SortMode::Fixed(0);
-                    out.sprites.push(sprite);
-                }
-                for walker in &scene.walkers {
-                    let position = walker.position.lerp(frame.alpha);
-                    let mut sprite = SpriteDraw::new(scene.walker, position, Vec2::new(8.0, 16.0));
-                    sprite.layer = 1;
-                    sprite.color = walker.tint;
-                    sprite.flip.x = walker.velocity.x < 0.0;
-                    out.sprites.push(sprite);
-                }
-            })
-            .add_frame_system("probe", {
-                let seen = Rc::clone(seen);
-                move |resources, _| {
-                    let mut seen = seen.borrow_mut();
-                    let entry = (
-                        resources.resource::<FrameAllocs>().0,
-                        *resources.resource::<FrameStats>(),
-                        seen.ticks,
-                    );
-                    seen.frames.push(entry);
-                    // In a warm-up frame, a known allocation, which that
-                    // frame's count must show.
-                    if seen.frames.len() == 5 {
-                        drop(black_box(Box::new(5u64)));
-                    }
-                }
-            })
+                app.world_mut()
+                    .spawn()
+                    .with(Transform::at(position))
+                    .with(Velocity(velocity))
+                    .with(sprite);
+            }
+            app.insert_resource(Ground(ground))
         }
 
         #[test]

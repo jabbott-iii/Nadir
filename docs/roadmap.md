@@ -1585,8 +1585,11 @@ by the batched sprite renderer.
     the review's agents, and in full runs `ecs_join2_5k` read 8.5 to
     11 µs, against 8.2 µs recorded. The other four stayed within 2.3% of
     their baselines.
+  - Note: CI run 17, for the M4.3 commit `31002d6`, passed on all three
+    systems, as the user reported; the session saw it on the public
+    Actions page.
 
-- [ ] **M4.4 — facade: ECS integration and sandbox migration**
+- [x] **M4.4 — facade: ECS integration and sandbox migration**
   - Note (from M3.4):
     - `Resources` (`crates/engine/src/resources.rs`) has the `World`'s
       resource calls: replace it with the `World` (ADR-0019). `ecs.md`
@@ -1656,6 +1659,88 @@ by the batched sprite renderer.
   - Accept: the sandbox behaves as in M3, now through the ECS; the
     schedule prints from a test.
   - Verify: `cargo test -p nadir`; `cargo dev` (manual)
+  - Note: the user decided three points on 2026-10-26 (ADR-0022): the
+    facade's `Collider` stays unreflected until prefabs give layers names
+    (M5.6); the task adds the `facade_tick_5k` benchmark and the sandbox's
+    `--scene stress-entities`, with tick times in the report; and since
+    that tick misses its budget, M4.8 makes collision faster.
+  - Note: built as ADR-0022 says. The design critique (22 findings
+    survived its refuters) changed the draft:
+    - `App::update` became public, the headless step for tests, the
+      benchmark and M4.7.
+    - `PrevTransform` is given by the engine to every drawn entity.
+    - Colliders are copied from `Transform` before the triggers.
+    - Parent chains are walked to their root, in the tick and in the
+      draw.
+    - Trigger ids resolve through two rebuilds' arrays, not hash maps.
+    - The walkers face the way they go, and the player is spawned last.
+    - The steady test churns entities and repeats identical passes.
+    - ADR-0022 restates what stays of ADR-0019.
+  - Note: `cargo xtask ci` turns on every feature, and with nadir-core's
+    `profile` the schedule's scope records piled up and allocated in the
+    steady tests. `App::update` now drains them each frame.
+  - Note: measured on the i7-11800H (Linux, 2026-10-26):
+    - `facade_tick_5k` 6.3 ms, in `bench/baseline.json`.
+    - A probe of the same crowd: 3.5 ms for the first tick and 6.6 ms
+      once it has jammed. `nadir::movement` takes 6.5 ms of it: 0.3 ms of
+      rebuild, 5.5 ms of `move_and_slide` with 4,200 of the 5,000 moves
+      stopped, and about 0.6 ms from `set_position`. `nadir::triggers`
+      takes 0.15 ms, and snapshot, parents and the ECS around them almost
+      nothing.
+  - Note: the sandbox, run for 8 to 15 s a scene on Linux (X11, Mesa,
+    Intel UHD Graphics TGL GT1), as `cargo dev` builds it, logged:
+    - `field`: 203 sprites in 7 batches, 60 ticks and 60 frames a second,
+      a tick 0.02 to 0.06 ms, and no allocations, as in M3.
+    - `stress-sprites`: 10,203 sprites in 2 batches, a tick 2.1 to 2.7 ms
+      in a debug build (the later number after the review's fixes), and no
+      allocations.
+    - `stress-entities`: about 30 ms a tick in a debug build, so the clock
+      runs 30 ticks a second. Built in release
+      (`cargo run --release -p sandbox --features dev -- --scene
+      stress-entities`): 5.5 ms a tick at 60 frames a second, 8,673 sprites
+      in 2 batches, and one allocation in each of the reports at 4 and 5 s,
+      as the jam reached new peaks, then none to 14 s.
+  - Note: the code review (15 findings survived their refuters, 6 once
+    merged) and a check of its fixes found, all fixed:
+    - A drawn child of a root with no `Sprite` was drawn at the root's
+      latest tick, not between ticks: the root now gets a `PrevTransform`.
+    - The teleport rule failed in an entity's first tick, because its
+      `PrevTransform` came by command at the tick's end. The snapshot now
+      adds it at once, the one structural change outside commands
+      (`01-architecture.md`, "Stages").
+    - Movers went in the order of whichever of the `Collider` and
+      `Transform` storages was smaller, not the colliders' as documented.
+    - The sandbox's stress allocation test also counted the wall-clock
+      report's log line on a slow or loaded machine: it failed 3 runs of 3
+      pinned to one core, and passed 3 of 3 after the fix.
+    - A frame of many ticks could grow the profile buffers: they keep room
+      for 1,024 records.
+    - `resolve` keeps its generation check, so a `Collisions` put in
+      mid-tick drops a pair rather than naming the wrong entity.
+    - Docs: the parent chain's rule for entities without a `Transform`, and
+      `ecs.md`'s `Sprite::from`.
+  - Note: 27 planted bugs, one at a time, in a copy of the tree, each
+    failed a test, except removing `resolve`'s generation check: only a
+    `Collisions` put in mid-tick reaches it. Removing the stale-slot check
+    in `Collisions::index` failed no test at first; a test with a stale
+    slot now catches it
+    (`a_despawned_entity_has_no_collider_index_though_its_slot_is_stale`).
+  - Note: tests: the facade has 50 unit tests and 2 doc tests, 53 with
+    every feature (`dev` adds the steady tests: 10,000 sprites through
+    the real loop, 5,000 colliding entities with churn through three
+    identical passes, and a hitch's frame of 15 ticks). The sandbox has
+    16, 17 with `dev`, including the schedule's printout. nadir-bench
+    has 2 more.
+  - Note: the user checked all three scenes on 2026-10-27, on the same
+    machine. The field and `stress-entities` looked right at once. In
+    `stress-sprites` the person could not be found: the crowd covers each
+    spot about 20 deep, and M3 drew the person the same way, y-sorted
+    among it. Nothing kept them in the view either, which the camera does
+    not leave. So in the stress scenes the person is now tinted yellow; in
+    `stress-sprites` they are drawn a layer above the crowd (still 2
+    batches) and stop at the view's edges.
+    `the_person_walks_among_the_crowd_too` tests that WASD moves them there
+    and that they stop. The user then saw them walk and stop.
 
 - [ ] **M4.5 — tilemap rendering and collision grid**
   - Note (from M3.3): tile chunks draw in the renderer's world pass, into
@@ -1665,6 +1750,14 @@ by the batched sprite renderer.
   - Note (from M4.3): build the `TileGrid` from the map's collision layer,
     and set `grid.layer` to the layer the masks call "World" (ADR-0021).
     Cells outside the grid are not solid, so the map needs border walls.
+  - Note (from M4.4):
+    - Set the grid with `world.resource_mut::<Collisions>().set_grid(grid)`.
+      The field has no colliders yet: give the player a `Collider` at its
+      feet, with an offset, as `stress-entities` gives its people.
+    - `stress-entities` draws its walls as sprites from the grid, in a game
+      system in `Extract`: a stand-in for tile chunks.
+    - Entities' sprites are drawn by `nadir::extract_sprites`, first in
+      `Extract`.
   - Depends: M4.4
   - Do:
     - the `tile_chunk` shader + chunk cache, culling, animated tiles
@@ -1675,6 +1768,9 @@ by the batched sprite renderer.
   - Verify: `cargo xtask golden`; `cargo test -p nadir-render -p nadir`
 
 - [ ] **M4.6 — animation**
+  - Note (from M4.4): `Sprite` holds `uv` and `flip`. An `Animate` system
+    writes them before `nadir::extract_sprites` (`Extract`) draws them. The
+    sandbox faces the player in `move_player`, and its crowds by velocity.
   - Depends: M4.4
   - Do: the `Animator` component and clips (hand-defined until M5), a
     frame-stage system, a flip by `Facing`.
@@ -1683,6 +1779,17 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir`
 
 - [ ] **M4.7 — determinism test infrastructure**
+  - Note (from M4.4):
+    - The headless run is `App::update(elapsed, events)` without
+      `App::run`. A frame of `Duration::from_nanos(16_666_667)` runs one
+      tick.
+    - The `TypeRegistry` is a world resource. Of the engine's components,
+      `Transform`, `Velocity`, `Player` and `SaveId` are reflected;
+      `PrevTransform` follows from `Transform`; `Sprite`, `Collider` and
+      `Parent` are not (ADR-0022).
+    - Movers move in the `Collider` storage's order, which its insert and
+      remove history fixes. `TickStats` and the profile drain read the
+      clock; nothing in the simulation reads them.
   - Note (from M4.2): hashing the world through reflection needs every
     component of every entity in a fixed order. The registry has per-entity
     hooks only: add a per-type walk in registration order. Components that
@@ -1699,11 +1806,40 @@ by the batched sprite renderer.
     nondeterministic (demonstrate, then revert).
   - Verify: `cargo test -p nadir --test determinism`
 
+- [ ] **M4.8 — collision: the 5,000-entity tick within budget**
+  - Note (from M4.4): `facade_tick_5k` measured 6.3 ms on the i7-11800H,
+    and `--scene stress-entities` 5.5 ms a tick in release, against 4 ms
+    on min-spec: ADR-0021's revisit (ADR-0022). Of a jammed tick of
+    6.6 ms, `nadir::movement` is 6.5 ms: 0.3 ms of rebuild, 5.5 ms of
+    `move_and_slide` with 4,200 of 5,000 moves stopped, and about 0.6 ms
+    from the queries that `set_position` widens. The triggers are
+    0.15 ms.
+  - Depends: M4.4
+  - Do: make `move_and_slide` and its queries cheaper in nadir-collision,
+    keeping ADR-0021's rules. Candidates:
+    - gather the hash's candidates once per move rather than once per
+      axis;
+    - find the contacts in the first pass, or skip the second pass when
+      the caller wants none (the facade drops them);
+    - re-bucket a moved collider rather than widen every query by the
+      largest move (an ADR: it changes ADR-0021's `set_position`).
+  - Accept: the collision crate's property and scenario tests pass
+    unchanged; `facade_tick_5k` and `collision_slide_5k` are recorded. No
+    min-spec machine is named yet (M11.5 measures on one), so the user
+    judges whether the new number leaves room for 4 ms there.
+  - Verify: `cargo test -p nadir-collision -p nadir`;
+    `cargo xtask bench collision`; `cargo xtask bench facade`
+
 **Exit criteria (M4):**
 
 - The player explores a hand-built tilemap, collides cleanly, and y-sorts
   correctly around tall tiles.
 - The 5k-entity stress scene runs at ≤ 4 ms per tick on min-spec.
+  - Note (from M4.4): the scene is
+    `cargo run --release -p sandbox --features dev -- --scene
+    stress-entities`, whose report gives the time per tick and the
+    allocations. `facade_tick_5k` times the same tick. Both miss 4 ms on
+    the i7-11800H: see M4.8.
 - The determinism test passes.
 - 0 allocations per tick in steady state.
 
@@ -1777,6 +1913,12 @@ by the batched sprite renderer.
     - `Registration::insert` goes through `Commands`. Prefab layers (base,
       derived, overrides) can each apply onto one value before the insert.
     - `TypeRegistry` keys types by `T::TYPE_NAME`, the name prefabs use.
+  - Note (from M4.4): reflect the facade's `Sprite` (a `Handle`) and
+    `Collider` here. `Collider` needs names for the collision layers, as
+    scene.md's prefab example writes them, and its `Shape` is a data enum,
+    so its `Reflect` is hand-written. Prefabs never list `PrevTransform`:
+    the engine gives one to every entity with a `Sprite`.
+    `app.register_component::<T>()` adds a game's reflected component.
   - Depends: M5.5, M4.5, M4.2
   - Do:
     - LDtk → `.klvl` (tile layers, IntGrid → collision, entities, tall
@@ -1921,6 +2063,10 @@ by the batched sprite renderer.
     facade resource holding `nadir-platform`'s `AllocCounts`, and
     `nadir-debug` may depend on neither. So the overlay takes plain numbers,
     which the facade copies in each frame. Only Rust's allocator is counted.
+  - Note (from M4.4): `TickStats` holds each frame's ticks and how long
+    they took. `App::update` drains the `profile` feature's scope records
+    each frame into a buffer the `App` keeps (`profile`, in
+    `crates/engine/src/app.rs`): hand them to the profiler's ring there.
   - Depends: M7.2, M0.4
   - Do: the overlay; profiler ring, graph and scope tree; Chrome trace
     export; GL timer queries.
@@ -1934,6 +2080,7 @@ by the batched sprite renderer.
     alone. There is no remove hook yet, and `World` cannot list entities:
     the entity list needs one of those. `FieldInfo::doc` keeps each line's
     leading space; trim it for display.
+  - Note (from M4.4): the `TypeRegistry` is a world resource.
   - Depends: M7.2, M4.2
   - Do: the entity list with filter; component editors via `Reflect`;
     add/remove; despawn; save as prefab.
@@ -1944,6 +2091,8 @@ by the batched sprite renderer.
   - Note (from M4.1): `Schedule::describe()` lists the systems in run
     order as `SystemInfo`, which displays as `tick  Gameplay:
     player_move`, with `(conditional)` for a system with a run condition.
+  - Note (from M4.4): `App::schedule()` gives the schedule. The engine's
+    own systems are named `nadir::snapshot`, `nadir::movement`, and so on.
   - Depends: M7.2
   - Do: the command registry, history, completion, the log view, the
     initial command set.
@@ -2065,6 +2214,8 @@ by the batched sprite renderer.
     - Registrations need a `saved` flag (scene.md "Saves").
     - `reflect_newtype!` already makes `SaveId(u64)` transparent. Values
       too large for an `i64` are written as strings.
+  - Note (from M4.4): `SaveId` is a facade component, reflected as an
+    integer. The world-level counter that assigns them is not built.
   - Depends: M4.2, M9.1
   - Do: the `.ksav` format; atomic write with `.bak`; CRC; migration
     scaffolding with a v1 fixture; fuzz target.
@@ -2077,6 +2228,11 @@ by the batched sprite renderer.
     `cell_rect`. Cells outside the grid are not solid, so keep the search
     inside it. `segment` with the grid's layer gives a line of sight for
     string-pulling. Casts take an `ignore` collider for the caster's own.
+  - Note (from M4.4): AI queries go through the `Collisions` resource:
+    `index(entity)` gives a caster's own collider to `ignore`, and
+    `entity(index)` turns a hit into an entity. Until `nadir::movement`,
+    it holds the last tick's colliders, so AI in `Gameplay` checks that an
+    entity it finds is alive.
   - Depends: M4.3
   - Do: A* with budget and smoothing; flow fields; sandbox enemies that
     chase and patrol.

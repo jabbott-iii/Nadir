@@ -2,16 +2,18 @@
 //!
 //! A person walks a field of grass among trees and rocks, moved with WASD
 //! or the arrow keys, and the camera follows them. Once a second it logs
-//! how fast the simulation ticks and the frames come, and what was drawn;
-//! with the `dev` feature, also how often the frames allocated. Close the
-//! window to quit.
+//! how fast the simulation ticks and the frames come, how long the ticks
+//! take, and what was drawn; with the `dev` feature, also how often the
+//! frames allocated. Close the window to quit.
 //!
 //! - `--fps N`: at most `N` frames a second; 0 for no limit (default 60)
 //! - `--no-vsync`: do not wait for the display's refresh
-//! - `--scene NAME`: `field` (the default), or `stress-sprites`, where
-//!   10,000 more people walk about in view (`stress.rs`)
+//! - `--scene NAME`: `field` (the default); `stress-sprites`, where 10,000
+//!   more people walk about in view (`stress.rs`); or `stress-entities`,
+//!   where 5,000 people jostle in a maze of walls (`stress_entities.rs`)
 
 mod stress;
+mod stress_entities;
 
 use std::fmt;
 use std::time::Duration;
@@ -26,7 +28,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scene = match args.value("--scene")? {
         None => Scene::Field,
         Some(name) => Scene::from_name(&name).ok_or_else(|| {
-            format!("there is no scene `{name}`: try `field` or `stress-sprites`")
+            format!(
+                "there is no scene `{name}`: try `field`, `stress-sprites` or `stress-entities`"
+            )
         })?,
     };
     // `cargo dev` ends in `--` already, so `cargo dev -- --fps 144` would
@@ -63,6 +67,8 @@ enum Scene {
     Field,
     /// The field with 10,000 more people walking about in view.
     StressSprites,
+    /// 5,000 people jostling in a maze of walls.
+    StressEntities,
 }
 
 impl Scene {
@@ -71,6 +77,7 @@ impl Scene {
         match name {
             "field" => Some(Scene::Field),
             "stress-sprites" => Some(Scene::StressSprites),
+            "stress-entities" => Some(Scene::StressEntities),
             _ => None,
         }
     }
@@ -79,6 +86,7 @@ impl Scene {
         match self {
             Scene::Field => "field",
             Scene::StressSprites => "stress-sprites",
+            Scene::StressEntities => "stress-entities",
         }
     }
 }
@@ -109,13 +117,8 @@ impl ActionSet for Act {
 /// How fast the person walks, in pixels a second: two a tick.
 const SPEED: f32 = 120.0;
 
-/// The person.
-struct Player {
-    /// Where their feet are.
-    position: Interpolated<Vec2>,
-    /// Whether they face left.
-    facing_left: bool,
-}
+/// Where the person starts: where their feet are.
+const PLAYER_START: Vec2 = Vec2::new(240.0, 160.0);
 
 /// The textures.
 struct Sprites {
@@ -124,9 +127,6 @@ struct Sprites {
     rock: Handle<Texture>,
     grass: Handle<Texture>,
 }
-
-/// The things that do not move.
-struct Props(Vec<SpriteDraw>);
 
 /// A thing that does not move.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,12 +156,17 @@ struct Report {
     ticks: u64,
     frames: u64,
     frames_reported: u64,
+    /// The ticks timed since the last report, how long they took, and the
+    /// longest of them ([`TickStats`]).
+    timed_ticks: u32,
+    tick_time: Duration,
+    longest_tick: Duration,
 }
 
-/// Sets the game up on `app`: its textures, actions, state and systems.
-fn game(mut app: App, scene: Scene) -> Result<App, nadir::input::InputError> {
+/// Sets the game up on `app`: its textures, actions, entities and systems.
+fn game(app: App, scene: Scene) -> Result<App, nadir::input::InputError> {
     let sprites = {
-        let mut assets = app.resources_mut().resource_mut::<AssetServer>();
+        let mut assets = app.world().resource_mut::<AssetServer>();
         Sprites {
             person: assets.load("sprites/person.qoi"),
             tree: assets.load("sprites/tree.qoi"),
@@ -169,7 +174,6 @@ fn game(mut app: App, scene: Scene) -> Result<App, nadir::input::InputError> {
             grass: assets.load("sprites/grass.qoi"),
         }
     };
-    let props = Props(props(&sprites));
 
     let mut map = ActionMap::<Act>::new()?;
     let keys = |up, down, left, right| Binding::KeyComposite2 {
@@ -187,84 +191,103 @@ fn game(mut app: App, scene: Scene) -> Result<App, nadir::input::InputError> {
 
     let app = app
         .add_actions(map)
-        .insert_resource(sprites)
-        .insert_resource(Player {
-            position: Interpolated::new(Vec2::new(240.0, 160.0)),
-            facing_left: false,
-        })
         .insert_resource(Report {
             stopwatch: Stopwatch::start(),
             rate: TickRate::default(),
             ticks: 0,
             frames: 0,
             frames_reported: 0,
+            timed_ticks: 0,
+            tick_time: Duration::ZERO,
+            longest_tick: Duration::ZERO,
         })
-        .add_fixed_system("move_player", move_player)
-        .add_fixed_system("count_ticks", |resources, _| {
-            resources.resource_mut::<Report>().ticks += 1;
-        });
+        .add_fixed_system(FixedStage::Gameplay, "move_player", move_player)
+        .add_fixed_system(FixedStage::Cleanup, "count_ticks", count_ticks)
+        .add_frame_system(FrameStage::Ui, "report", report);
     #[cfg(feature = "dev")]
     let app = app.insert_resource(AllocTally::default());
     let app = match scene {
-        Scene::Field => app
-            .insert_resource(props)
-            .add_frame_system("follow_camera", follow_camera)
-            .add_frame_system("draw", draw),
+        Scene::Field => field(app, &sprites),
         Scene::StressSprites => stress::add(app),
+        Scene::StressEntities => stress_entities::add(app),
     };
-    Ok(app.add_frame_system("report", report))
+    Ok(app.insert_resource(sprites))
 }
 
-/// Trees and rocks about the field.
-fn props(sprites: &Sprites) -> Vec<SpriteDraw> {
-    PROPS
-        .iter()
-        .map(|&(kind, x, y)| match kind {
-            Prop::Tree => prop(sprites.tree, x, y, Vec2::new(24.0, 48.0)),
-            Prop::Rock => prop(sprites.rock, x, y, Vec2::new(16.0, 12.0)),
-        })
-        .collect()
+/// The field: trees and rocks, then the person, and the camera on them.
+fn field(mut app: App, sprites: &Sprites) -> App {
+    let world = app.world_mut();
+    for &(kind, x, y) in &PROPS {
+        let mut sprite = match kind {
+            Prop::Tree => Sprite::new(sprites.tree, Vec2::new(24.0, 48.0)),
+            Prop::Rock => Sprite::new(sprites.rock, Vec2::new(16.0, 12.0)),
+        };
+        sprite.layer = 1;
+        world
+            .spawn()
+            .with(Transform::at(Vec2::new(x as f32, y as f32)))
+            .with(sprite);
+    }
+    let mut person = Sprite::new(sprites.person, Vec2::new(12.0, 20.0));
+    person.layer = 1;
+    spawn_player(world, person);
+    app.add_frame_system(FrameStage::Camera, "follow_camera", follow_camera)
+        .add_frame_system(FrameStage::Extract, "draw_grass", draw_grass)
 }
 
-fn prop(texture: Handle<Texture>, x: i32, y: i32, size: Vec2) -> SpriteDraw {
-    let mut sprite = SpriteDraw::new(texture, Vec2::new(x as f32, y as f32), size);
-    sprite.layer = 1;
-    sprite
+/// The person, at [`PLAYER_START`], drawn as `sprite`.
+fn spawn_player(world: &mut World, sprite: Sprite) -> Entity {
+    world
+        .spawn()
+        .with(Player)
+        .with(Transform::at(PLAYER_START))
+        .with(Velocity::default())
+        .with(sprite)
+        .id()
 }
 
-/// Walks the person by the `Move` action.
-fn move_player(resources: &Resources, tick: &Tick) {
-    let direction = resources.resource::<ActionState<Act>>().axis2(Act::Move);
-    let mut player = resources.resource_mut::<Player>();
-    player.position.snapshot();
-    player.position.current += direction * SPEED * tick.dt;
-    if direction.x != 0.0 {
-        player.facing_left = direction.x < 0.0;
+/// Walks the person by the `Move` action, and faces them the way they go.
+fn move_player(world: &World, _tick: &Tick) {
+    let direction = world.resource::<ActionState<Act>>().axis2(Act::Move);
+    let players = world.read::<Player>();
+    let mut velocities = world.write::<Velocity>();
+    let mut sprites = world.write::<Sprite>();
+    for (player, _) in players.iter() {
+        if let Some(velocity) = velocities.get_mut(player) {
+            velocity.0 = direction * SPEED;
+        }
+        if direction.x != 0.0
+            && let Some(sprite) = sprites.get_mut(player)
+        {
+            sprite.flip.x = direction.x < 0.0;
+        }
     }
 }
 
-/// Centres the view on the person, where this frame draws them.
-fn follow_camera(resources: &Resources, frame: &Frame) {
-    let position = resources.resource::<Player>().position.lerp(frame.alpha);
-    resources.resource_mut::<RenderFrame>().camera.position = position;
+fn count_ticks(world: &World, _tick: &Tick) {
+    world.resource_mut::<Report>().ticks += 1;
 }
 
-/// The grass, the props and the person.
-fn draw(resources: &Resources, frame: &Frame) {
-    let sprites = resources.resource::<Sprites>();
-    let player = resources.resource::<Player>();
-    let mut out = resources.resource_mut::<RenderFrame>();
-    push_grass(&mut out, sprites.grass);
-    out.sprites
-        .extend_from_slice(&resources.resource::<Props>().0);
-    let mut person = SpriteDraw::new(
-        sprites.person,
-        player.position.lerp(frame.alpha),
-        Vec2::new(12.0, 20.0),
-    );
-    person.layer = 1;
-    person.flip.x = player.facing_left;
-    out.sprites.push(person);
+/// Where this frame draws `entity`: `alpha` of the way from where it was
+/// at the start of the last tick to where that tick left it.
+fn drawn_position(world: &World, entity: Entity, alpha: f32) -> Option<Vec2> {
+    let current = world.read::<Transform>().get(entity)?.position;
+    let previous = world.read::<PrevTransform>().get(entity).copied();
+    Some(previous.map_or(current, |previous| previous.0.position.lerp(current, alpha)))
+}
+
+/// Centres the view on the person, where this frame draws them.
+fn follow_camera(world: &World, frame: &Frame) {
+    let player = world.read::<Player>().entities().first().copied();
+    if let Some(position) = player.and_then(|player| drawn_position(world, player, frame.alpha)) {
+        world.resource_mut::<RenderFrame>().camera.position = position;
+    }
+}
+
+/// The grass, under everything.
+fn draw_grass(world: &World, _frame: &Frame) {
+    let grass = world.resource::<Sprites>().grass;
+    push_grass(&mut world.resource_mut::<RenderFrame>(), grass);
 }
 
 /// The clear color, and grass in 32-pixel tiles over the field, under
@@ -306,19 +329,43 @@ impl fmt::Display for Allocations {
     }
 }
 
-/// Logs the tick and frame rates, and what was drawn, once a second.
-fn report(resources: &Resources, _frame: &Frame) {
+/// How long the ticks took, for a report: the mean and the longest, in
+/// milliseconds.
+struct TickTimes {
+    ticks: u32,
+    time: Duration,
+    longest: Duration,
+}
+
+impl fmt::Display for TickTimes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.ticks == 0 {
+            return write!(f, "no tick ran");
+        }
+        let mean = self.time.as_secs_f64() * 1000.0 / f64::from(self.ticks);
+        let longest = self.longest.as_secs_f64() * 1000.0;
+        write!(f, "a tick took {mean:.2} ms, {longest:.2} ms at most")
+    }
+}
+
+/// Logs the tick and frame rates, how long the ticks took, and what was
+/// drawn, once a second.
+fn report(world: &World, _frame: &Frame) {
     // The last frame's allocations, read in this one.
     #[cfg(feature = "dev")]
     let mut tally = {
-        let mut tally = resources.resource_mut::<AllocTally>();
-        let last = resources.resource::<nadir::FrameAllocs>().0.allocations;
+        let mut tally = world.resource_mut::<AllocTally>();
+        let last = world.resource::<nadir::FrameAllocs>().0.allocations;
         let report_line = std::mem::take(&mut tally.report_line);
         tally.since_report += last.saturating_sub(report_line);
         tally
     };
-    let mut report = resources.resource_mut::<Report>();
+    let mut report = world.resource_mut::<Report>();
     report.frames += 1;
+    let ticked = *world.resource::<TickStats>();
+    report.timed_ticks += ticked.ticks;
+    report.tick_time += ticked.time;
+    report.longest_tick = report.longest_tick.max(ticked.longest);
     let elapsed = report.stopwatch.elapsed();
     let ticks = report.ticks;
     let since = report.rate.reported_at;
@@ -326,7 +373,12 @@ fn report(resources: &Resources, _frame: &Frame) {
         let frames = report.frames - report.frames_reported;
         report.frames_reported = report.frames;
         let fps = frames as f64 / (elapsed - since).as_secs_f64();
-        let stats = *resources.resource::<FrameStats>();
+        let times = TickTimes {
+            ticks: std::mem::take(&mut report.timed_ticks),
+            time: std::mem::take(&mut report.tick_time),
+            longest: std::mem::take(&mut report.longest_tick),
+        };
+        let stats = *world.resource::<FrameStats>();
         #[cfg(feature = "dev")]
         let (allocations, before) = (
             Allocations(Some(std::mem::take(&mut tally.since_report))),
@@ -336,8 +388,8 @@ fn report(resources: &Resources, _frame: &Frame) {
         let allocations = Allocations(None);
         info!(
             "tick rate: {:.2} Hz over the last second, {:.2} Hz since the start \
-             ({} ticks in {:.1} s); {fps:.1} frames a second; drawn: {} sprites in {} \
-             batches, {} not ready{allocations}",
+             ({} ticks in {:.1} s); {times}; {fps:.1} frames a second; drawn: {} sprites \
+             in {} batches, {} not ready{allocations}",
             rate.recent_hz,
             rate.average_hz,
             rate.ticks,
@@ -405,6 +457,9 @@ mod tests {
 
     const MS: Duration = Duration::from_millis(1);
 
+    /// One tick's length, as a frame: it runs one tick.
+    pub(crate) const TICK: Duration = Duration::from_nanos(16_666_667);
+
     #[test]
     fn nothing_is_reported_within_the_first_second() {
         let mut rate = TickRate::default();
@@ -451,13 +506,28 @@ mod tests {
         assert_eq!(report.map(|report| report.recent_hz), Some(60.0));
     }
 
-    /// The sandbox's resources, set up as the game sets them, without a
-    /// window.
+    #[test]
+    fn a_report_gives_the_mean_and_the_longest_tick() {
+        let times = TickTimes {
+            ticks: 4,
+            time: 10 * MS,
+            longest: 4 * MS,
+        };
+        assert_eq!(times.to_string(), "a tick took 2.50 ms, 4.00 ms at most");
+        let none = TickTimes {
+            ticks: 0,
+            time: Duration::ZERO,
+            longest: Duration::ZERO,
+        };
+        assert_eq!(none.to_string(), "no tick ran");
+    }
+
+    /// The field, set up as the game sets it, without a window.
     fn sandbox() -> App {
         scene(Scene::Field)
     }
 
-    /// A scene's resources, set up as the game sets them, without a window.
+    /// A scene, set up as the game sets it, without a window.
     pub(crate) fn scene(scene: Scene) -> App {
         game(
             App::new(Config {
@@ -469,61 +539,113 @@ mod tests {
         .expect("the sandbox sets up")
     }
 
-    pub(crate) fn tick() -> Tick {
-        Tick {
-            index: 0,
-            dt: 1.0 / 60.0,
-        }
+    /// Keeps the once-a-second report quiet: it goes by the wall clock, and
+    /// its log line allocates, which a count of a scene's frames leaves out
+    /// as the game does (`AllocTally::report_line`).
+    #[cfg(feature = "dev")]
+    pub(crate) fn without_reports(app: &App) {
+        app.world().resource_mut::<Report>().rate.reported_at = Duration::MAX;
+    }
+
+    /// The player.
+    pub(crate) fn player(app: &App) -> Entity {
+        let players = app.world().read::<Player>();
+        assert_eq!(players.len(), 1, "one player");
+        players.entities()[0]
+    }
+
+    pub(crate) fn position(app: &App, entity: Entity) -> Vec2 {
+        let transforms = app.world().read::<Transform>();
+        transforms.get(entity).expect("it has a Transform").position
+    }
+
+    #[test]
+    fn the_schedule_runs_the_games_systems_among_the_engines() {
+        let printed: Vec<String> = sandbox()
+            .schedule()
+            .describe()
+            .map(|system| system.to_string())
+            .collect();
+        assert_eq!(
+            printed,
+            [
+                "tick  Input: nadir::snapshot",
+                "tick  Gameplay: move_player",
+                "tick  Movement: nadir::movement",
+                "tick  PostMovement: nadir::parent_offsets",
+                "tick  PostMovement: nadir::triggers",
+                "tick  Cleanup: count_ticks",
+                "frame Camera: follow_camera",
+                "frame Ui: report",
+                "frame Extract: nadir::extract_sprites",
+                "frame Extract: draw_grass",
+            ]
+        );
     }
 
     #[test]
     fn the_person_walks_two_pixels_a_tick_and_faces_the_way_they_go() {
-        let app = sandbox();
-        let resources = app.resources();
-        let start = resources.resource::<Player>().position.current;
-        resources
-            .resource_mut::<Input>()
-            .handle(&nadir::Event::Key {
-                key: Key::A,
-                pressed: true,
-                repeat: false,
-            });
-        {
-            let map = resources.resource::<ActionMap<Act>>();
-            let mut state = resources.resource_mut::<ActionState<Act>>();
-            resources.resource_mut::<Input>().latch(&map, &mut state);
-        }
-        move_player(resources, &tick());
-        let player = resources.resource::<Player>();
-        assert_eq!(player.position.current - start, Vec2::new(-2.0, 0.0));
-        assert_eq!(player.position.previous, start);
-        assert!(player.facing_left);
+        let mut app = sandbox();
+        let player = player(&app);
+        let press = nadir::Event::Key {
+            key: Key::A,
+            pressed: true,
+            repeat: false,
+        };
+        app.update(TICK, &[press]);
+        assert_eq!(position(&app, player) - PLAYER_START, Vec2::new(-2.0, 0.0));
+        let world = app.world();
+        let previous = world.read::<PrevTransform>().get(player).copied();
+        assert_eq!(previous, Some(PrevTransform(Transform::at(PLAYER_START))));
+        assert!(world.read::<Sprite>().get(player).expect("drawn").flip.x);
+        // Held for another tick: two more pixels.
+        app.update(TICK, &[]);
+        assert_eq!(position(&app, player) - PLAYER_START, Vec2::new(-4.0, 0.0));
     }
 
     #[test]
     fn a_frame_draws_the_grass_the_props_and_the_person() {
-        let app = sandbox();
-        let resources = app.resources();
-        let frame = Frame {
-            dt: 0.016,
-            alpha: 0.5,
+        let mut app = sandbox();
+        // Half a tick: drawn where everything is, with no tick yet.
+        app.update(8 * MS, &[]);
+        let world = app.world();
+        let out = world.resource::<RenderFrame>();
+        assert_eq!(out.sprites.len(), 16 * 12 + PROPS.len() + 1);
+        let person = world.resource::<Sprites>().person;
+        let drawn: Vec<&SpriteDraw> = out
+            .sprites
+            .iter()
+            .filter(|sprite| sprite.texture == person)
+            .collect();
+        assert_eq!(drawn.len(), 1);
+        assert_eq!(drawn[0].position, PLAYER_START);
+        assert_eq!((drawn[0].layer, drawn[0].size), (1, Vec2::new(12.0, 20.0)));
+        assert_eq!(out.camera.position, PLAYER_START);
+        let grass = out.sprites.iter().filter(|sprite| sprite.layer == 0);
+        assert_eq!(grass.count(), 16 * 12);
+    }
+
+    #[test]
+    fn the_camera_follows_the_person_between_ticks() {
+        let mut app = sandbox();
+        let press = nadir::Event::Key {
+            key: Key::D,
+            pressed: true,
+            repeat: false,
         };
-        follow_camera(resources, &frame);
-        draw(resources, &frame);
-        let out = resources.resource::<RenderFrame>();
-        let props = resources.resource::<Props>().0.len();
-        assert_eq!(out.sprites.len(), 16 * 12 + props + 1);
-        let person = out.sprites.last().expect("the person");
-        assert_eq!(
-            person.position,
-            resources.resource::<Player>().position.current
+        app.update(TICK, &[press]);
+        // A quarter of the way to the next tick: drawn half a pixel on.
+        app.update(TICK / 4, &[]);
+        let camera = app.world().resource::<RenderFrame>().camera.position;
+        assert!(
+            (camera.x - (PLAYER_START.x + 0.5)).abs() < 1e-3,
+            "{camera:?}"
         );
-        assert_eq!(out.camera.position, person.position);
     }
 
     #[test]
     fn a_scene_is_chosen_by_name() {
-        for scene in [Scene::Field, Scene::StressSprites] {
+        for scene in [Scene::Field, Scene::StressSprites, Scene::StressEntities] {
             assert_eq!(Scene::from_name(scene.name()), Some(scene));
         }
         assert_eq!(Scene::from_name("Field"), None);
@@ -542,6 +664,6 @@ mod tests {
             let bytes = std::fs::read(format!("{path}{name}.qoi")).expect("the sprite file");
             assert!(bytes.starts_with(b"qoif"), "{name}");
         }
-        assert!(app.resources().resource::<AssetServer>().has_pending());
+        assert!(app.world().resource::<AssetServer>().has_pending());
     }
 }

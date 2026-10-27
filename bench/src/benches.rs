@@ -3,6 +3,7 @@
 
 mod collision;
 mod ecs;
+mod facade;
 mod json;
 mod sprite;
 
@@ -47,6 +48,10 @@ pub(crate) const ALL: &[Benchmark] = &[
     Benchmark {
         name: "collision_slide_5k",
         run: collision::slide,
+    },
+    Benchmark {
+        name: "facade_tick_5k",
+        run: facade::tick,
     },
 ];
 

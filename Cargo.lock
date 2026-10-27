@@ -8,11 +8,14 @@ version = "0.1.0"
 dependencies = [
  "nadir-assets",
  "nadir-codec",
+ "nadir-collision",
  "nadir-core",
+ "nadir-ecs",
  "nadir-gfx",
  "nadir-input",
  "nadir-platform",
  "nadir-render",
+ "nadir-scene",
 ]
 
 [[package]]
@@ -31,6 +34,7 @@ version = "0.1.0"
 name = "nadir-bench"
 version = "0.1.0"
 dependencies = [
+ "nadir",
  "nadir-codec",
  "nadir-collision",
  "nadir-core",

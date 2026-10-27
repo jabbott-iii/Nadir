@@ -566,7 +566,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0019 — Until the ECS, systems share a typed resource map; with no GPU device the game runs undrawn
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0022
 - **Date:** 2026-10-21
 - **Context:**
   - M3.4 makes the sandbox move a character. Its systems need shared state:
@@ -797,3 +797,148 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - Profiling in M4.4 shows that the 5,000-entity tick misses its 4 ms
     budget on min-spec.
   - A level needs half-cell tiles or diagonal walls (backlog).
+
+## ADR-0022 — The facade runs the game in a World of staged systems; the engine owns interpolation, movement, triggers, parents and sprite drawing
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:**
+  - ADR-0019 gave the facade an interim `Resources` map, closure systems
+    with no stages, and `Interpolated<T>`. It said M4.4 swaps them for the
+    ECS `World`, `fn` systems in stages, and `PrevTransform` with a
+    snapshot system. Its revisit trigger was M4.4.
+  - M4.4 asks for the components `Transform`, `PrevTransform`,
+    `Velocity`, `Sprite`, `Collider`, `Player`, `Parent` and `SaveId`,
+    and for glue systems: snapshot, movement and collision, triggers to
+    events, parent offsets, and extract (ADR-0014).
+  - The ECS schedule takes `fn(&World, &Tick)` and `fn(&World, &Frame)`
+    pointers, and names only the systems it runs in its borrow panics.
+  - `Component` is a nadir-ecs trait, so the facade cannot implement it
+    for `nadir_collision::Collider`. Reflection has no encoding yet for
+    `Handle` or `Entity` (ADR-0020), nor names for collision layers.
+  - The M4 exit asks for 5,000 entities with collision at 4 ms a tick or
+    less on min-spec. The M4.3 note and ADR-0021 give the profiling of
+    that tick to M4.4.
+  - The user decided three points on 2026-10-26: `Collider` stays
+    unreflected until prefabs (M5.6); M4.4 adds a benchmark of the whole
+    tick and a 5,000-entity stress scene; and if that tick misses its
+    budget, a roadmap task follows to make collision faster. The design
+    critique of M4.4 led to the rest.
+- **Decision:**
+  - Replaced from ADR-0019:
+    - The `App` holds a `World`, a `Schedule` and the clock. Systems are
+      `fn` pointers added to a stage with a name:
+      `add_fixed_system(stage, name, system)` and
+      `add_frame_system(stage, name, system)`. Closures that capture
+      nothing coerce. `Resources`, `Interpolated` and `Lerp` are gone.
+    - `App::update(elapsed, events)` is public. It runs one frame without
+      drawing it: input, then each tick (latch, tick stages), then
+      `TickStats`, then the frame stages. `App::run` calls it each frame.
+      Tests, benchmarks and headless runs call it directly. The
+      `profile` feature's scope records are drained at the end of each
+      update, into a buffer the app keeps.
+    - `App::new` adds the engine's systems, each first in its stage:
+      - `nadir::snapshot` (tick `Input`): copies `Transform` into
+        `PrevTransform`. It gives one at once to every entity with a
+        `Sprite` that has none, and to the root of every drawn child, so
+        a system can write it from an entity's first tick.
+      - `nadir::movement` (tick `Movement`): rebuilds the `Collisions`
+        world from the entities with a `Collider` and a `Transform`. It
+        then moves each one that has a `Velocity` with `move_and_slide`
+        and `set_position` (ADR-0021), in the collider storage's order,
+        then the rest freely by `velocity × dt`.
+      - `nadir::parent_offsets` (tick `PostMovement`): puts each child at
+        the first entity up its chain of `Parent`s that has none, its
+        root, plus the offsets on the way. The chain is limited to 8
+        steps; a longer one, or a loop, leaves the child where it is,
+        after one warning, and so does a root without a `Transform`.
+      - `nadir::triggers` (tick `PostMovement`): copies every collider's
+        position from its `Transform`, then sends `TriggerEnter` and
+        `TriggerExit` events, which name entities.
+      - `nadir::extract_sprites` (frame `Extract`): draws each `Sprite`
+        at its interpolated `Transform`, and a child at its root's
+        interpolated position plus its offsets.
+    - Engine steps outside the schedule (input, latch, emptying the
+      `RenderFrame`, drawing) show `(none)` as the system in a borrow
+      panic. The schedule's system name is private to nadir-ecs, and the
+      game cannot make those steps conflict.
+  - The components:
+    - `Transform { position }`, `Velocity(Vec2)` in pixels a second,
+      `Player` and `SaveId(u64)` are reflected and in the `TypeRegistry`,
+      which is a world resource.
+    - `PrevTransform(Transform)` is the engine's own, and `Sprite` (a
+      `Handle`), `Collider` (a newtype of the collision crate's) and
+      `Parent { entity, offset }` (an `Entity`) are registered with the
+      world only. `app.register_component::<T>()` adds a game's reflected
+      component to both.
+  - `Collisions` is the collision resource:
+    - It holds the `CollisionWorld` (read-only outside the engine, plus
+      the tile grid) and maps collider indices to entities and back.
+    - A collider's id is its entity's generation and index. The last two
+      rebuilds' maps are kept, so an exit can name an entity despawned
+      since.
+    - Its trigger pairs are not public: the events are the interface.
+  - `TickStats` holds the frame's ticks and how long they took.
+  - Kept from ADR-0019, unchanged:
+    - An app has one action set: a second type panics, and the same type
+      replaces its bindings. Until the game adds one, the loop latches
+      into a private set, so that each tick ends and the wheel moves on.
+    - When `Device::new` fails, the game runs undrawn after logging why.
+      A failure of `Renderer::new` on a working device, or of a frame's
+      drawing, ends the game with the error and the error dialog.
+    - `Config` keeps `vsync`, `virtual_resolution` (a `UVec2`) and
+      `assets`.
+- **Consequences:**
+  - A game's systems set velocities in `Gameplay`, react to moves after
+    the engine's in `Movement` or `PostMovement`, and read trigger events
+    after `nadir::triggers`.
+    - A `Transform` written up to `nadir::triggers` reaches the triggers
+      that tick.
+    - One written after reaches the collision world at the next tick's
+      rebuild.
+    - Queries before `nadir::movement`, and in frames, see the last
+      tick's colliders. An entity despawned since still answers: check
+      `World::is_alive`.
+  - To teleport an entity, a fixed system writes both its `Transform`
+    and its `PrevTransform`.
+  - A child's solid collider is in its parent's way when the child's
+    layer is in the parent's mask. Give it another layer, or make it a
+    trigger.
+  - `move_and_slide`'s contacts are dropped. No contact event exists yet.
+  - The whole 5,000-entity tick is measured:
+    - `facade_tick_5k` in nadir-bench takes 6.3 ms on the i7-11800H.
+    - The sandbox's `--scene stress-entities`, in release, reports 5.5 ms
+      a tick.
+    - The movement system is 6.5 of the 6.6 ms of a settled tick:
+      0.3 ms of rebuild, 5.5 ms of `move_and_slide`, with 4,200 of the
+      5,000 moves stopped in a jammed crowd, and about 0.6 ms from
+      `set_position`.
+    - This meets ADR-0021's revisit trigger. Roadmap task M4.8 makes
+      collision faster before the M4 exit.
+  - The facade gains nadir-ecs, nadir-scene and nadir-collision as
+    dependencies, and nadir-bench gains the facade (both allowed by the
+    matrix).
+- **Alternatives considered:**
+  - Engine steps outside the schedule for the snapshot and the extract,
+    as the loop sketch in `01-architecture.md` had them: the schedule's
+    printout would not show them, and game systems could not be placed
+    around them.
+  - `PrevTransform` added by the game: entities spawned from prefabs,
+    levels and saves would not be interpolated, and a forgotten one
+    jumps.
+  - A public `Collisions::set_position(entity, ...)` for games that move
+    colliders after the engine: every game would have to remember it,
+    where copying from `Transform` before the triggers costs one pass
+    over the colliders.
+  - Hash maps from collider ids to entities, refilled each tick: every
+    collider hashed each tick, where only the few pairs that begin or end
+    need looking up.
+  - Making nadir-ecs's system-name guard public, so that engine steps are
+    named in panics: a change to a fourth crate, for steps the game cannot
+    make conflict.
+  - Changing nadir-collision in this task to meet the budget: the change
+    would spread over four crates. The user chose a separate task.
+- **Revisit when:** a game needs systems that capture state, a second
+  action set, contact events, or plugins (the API sketch's
+  `add_plugin`); or M4.8 changes what `nadir::movement` asks of the
+  collision crate.

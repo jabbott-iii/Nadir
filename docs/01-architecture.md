@@ -134,13 +134,12 @@ pub fn run(mut app: App) -> Result<(), Error> {
 
         let frame = clock.begin_frame(stopwatch.lap());      // clamps hitches
         while let Some(tick) = clock.consume_tick() {
-            app.world.snapshot_prev_transforms();            // for interpolation
             app.input.latch(&app.action_map, &mut app.actions); // edges -> this tick
-            app.schedule.run_fixed(&mut app.world, &tick);   // then its commands (ecs.md)
+            app.schedule.run_fixed(&mut app.world, &tick);   // snapshot first; then its commands (ecs.md)
         }
-        app.schedule.run_frame(&mut app.world, &frame);      // frame.dt, frame.alpha; commands
+        draw.clear();                                        // the RenderFrame resource
+        app.schedule.run_frame(&mut app.world, &frame);      // frame.dt, frame.alpha; Extract fills `draw`
 
-        let draw = app.extract(frame.alpha);                 // ECS -> RenderFrame
         gfx.begin_frame(platform.gpu_surface())?;
         renderer.render(&mut gfx, &app.assets, &draw,
                         Output { target: PassTarget::Surface, size: platform.window_size() })?;
@@ -156,6 +155,11 @@ pub fn run(mut app: App) -> Result<(), Error> {
 }
 ```
 
+As built (ADR-0022), `App::update(elapsed, events)` is everything from
+feeding the events to the frame stages, and `App::run` calls it once a
+frame before drawing. The snapshot and the extract are the engine's own
+systems, `nadir::snapshot` and `nadir::extract_sprites` (see "Stages").
+
 Rules:
 
 - **Fixed tick: 60 Hz.**
@@ -170,7 +174,9 @@ Rules:
   every machine. It accumulates in nanoseconds times the tick rate, which
   makes a tick a whole number of units: the rate does not drift.
 - **Interpolation:** `PrevTransform` is copied before each tick. Extract lerps
-  `prev → current` by `alpha`.
+  `prev → current` by `alpha`. The engine gives a `PrevTransform` to every
+  entity with a `Sprite` and to the root of every drawn child; to teleport,
+  write both (ADR-0022).
 - **Pacing:**
   - Use vsync (swap interval 1) when available.
   - Keep a limiter as well, which sleeps to about 1 ms before the deadline
@@ -196,9 +202,21 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
 
 - Systems run in stage order, then insertion order within a stage. The order
   is printed by the debug console (`schedule`).
+- `App::new` adds the engine's systems first in their stages (ADR-0022), so a
+  game's systems in the same stage run after them:
+
+  | Stage | Engine system | Does |
+  | :- | :- | :- |
+  | tick `Input` | `nadir::snapshot` | copies `Transform` into `PrevTransform` |
+  | tick `Movement` | `nadir::movement` | rebuilds `Collisions`, moves each `Velocity`, sliding `Collider`s |
+  | tick `PostMovement` | `nadir::parent_offsets` | puts each `Parent`'s child at its root plus the offsets |
+  | tick `PostMovement` | `nadir::triggers` | sends `TriggerEnter` and `TriggerExit` |
+  | frame `Extract` | `nadir::extract_sprites` | draws each `Sprite` between the last two ticks |
 - Structural changes (spawn, despawn, add or remove component) are deferred
   through `Commands`. They are applied after each fixed tick and after the
-  frame stages, never mid-iteration.
+  frame stages, never mid-iteration. The one exception is the engine's
+  `nadir::snapshot`, first in the tick: it adds a missing `PrevTransform` at
+  once, so that a system can write it in an entity's first tick (ADR-0022).
 - Events are double-buffered per tick (see `docs/subsystems/ecs.md`).
 
 ## Public API sketch (game-facing)
@@ -236,12 +254,13 @@ Systems are plain functions `fn(&World, &Tick)` (fixed) or
 borrow checks (see the ECS spec). Borrow conflicts panic with the system name
 and component type, so they are caught on the first run in tests.
 
-Until M4.4 (ADR-0019), the facade has no `World` and no stages. Systems are
-closures `FnMut(&Resources, &Tick)` and `FnMut(&Resources, &Frame)`, added
-by name, which run in the order they were added. `Resources` has the
-`World`'s resource calls. A game's actions come from `App::add_actions`,
-movement is interpolated with `Interpolated<T>`, and
-`Config::virtual_resolution` is a plain `UVec2`.
+As built in M4.4 (ADR-0022), there are no plugins yet: `App::new` adds the
+engine's systems and resources itself. A game's actions come from
+`App::add_actions`, its reflected components from
+`app.register_component::<T>()`, and its entities from `app.world_mut()`
+during setup. `Config::virtual_resolution` is a plain `UVec2`. Closures that
+capture nothing coerce to the system type; systems keep their state in
+resources.
 
 ## Data flow per frame
 

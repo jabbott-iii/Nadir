@@ -11,7 +11,7 @@ use nadir_core::{IVec2, Pcg32, Rect, Vec2};
 use crate::harness::Bencher;
 
 /// How many colliders each benchmark has.
-const COLLIDERS: usize = 5_000;
+pub(super) const COLLIDERS: usize = 5_000;
 
 /// The side of the square they stand in, in pixels.
 const MAP: f32 = 2_048.0;
@@ -21,13 +21,13 @@ const TILE: f32 = 16.0;
 
 /// One collider of the benchmarks: its id, position, collider and
 /// velocity.
-type Body = (u64, Vec2, Collider, Vec2);
+pub(super) type Body = (u64, Vec2, Collider, Vec2);
 
 /// A map of [`TILE`] px tiles, one in five solid, and [`COLLIDERS`] boxes
 /// and circles from 10 to 14 px across, each near the middle of a tile
 /// that is not, with a velocity of 2 to 4 px a tick: a crowd among walls,
 /// where a move often meets a neighbour or a wall. The same every time.
-fn scene() -> (TileGrid, Vec<Body>) {
+pub(super) fn scene() -> (TileGrid, Vec<Body>) {
     let mut rng = Pcg32::new(0x636f_6c6c, 0);
     let tiles = (MAP / TILE) as i32;
     let mut grid = TileGrid::new(tiles as u32, tiles as u32, TILE, Vec2::ZERO);

@@ -6,11 +6,15 @@
 //! Everything that stands on the grass, the player included, is drawn from
 //! one atlas texture, so that the 10,203 sprites are 2 batches: the grass,
 //! and the rest. The camera stays on the view's centre, and the crowd
-//! inside the view.
+//! inside the view. Each walker is an entity, which the engine moves by
+//! its velocity. The player is tinted yellow and drawn over the crowd, one
+//! layer up, to be found in it: the crowd covers each spot about 20 deep.
+//! They walk with WASD inside the view, which stays put, and stop at its
+//! edges.
 
 use nadir::prelude::*;
 
-use crate::{PROPS, Player, Prop, Sprites, push_grass};
+use crate::{PROPS, Prop, spawn_player};
 
 /// How many people walk about.
 pub(crate) const CROWD: usize = 10_000;
@@ -19,7 +23,7 @@ pub(crate) const CROWD: usize = 10_000;
 const VIEW: Vec2 = Vec2::new(480.0, 270.0);
 
 /// The atlas: `assets/sprites/atlas.qoi`, 64 pixels square.
-const ATLAS: &str = "sprites/atlas.qoi";
+pub(crate) const ATLAS: &str = "sprites/atlas.qoi";
 const ATLAS_SIZE: f32 = 64.0;
 
 /// A region of the atlas, from pixels to its normalized `uv`.
@@ -32,77 +36,113 @@ const fn region(x: f32, y: f32, width: f32, height: f32) -> Rect {
 
 /// Where the person, the tree and the rock are in the atlas. Each has a
 /// transparent pixel around it.
-const PERSON: Rect = region(1.0, 1.0, 12.0, 20.0);
+pub(crate) const PERSON: Rect = region(1.0, 1.0, 12.0, 20.0);
 const TREE: Rect = region(18.0, 1.0, 24.0, 48.0);
 const ROCK: Rect = region(1.0, 22.0, 16.0, 12.0);
 
 /// A person's size, in pixels.
-const PERSON_SIZE: Vec2 = Vec2::new(12.0, 20.0);
+pub(crate) const PERSON_SIZE: Vec2 = Vec2::new(12.0, 20.0);
+
+/// The player's tint in a crowd, so that they can be told from it.
+pub(crate) const PLAYER_TINT: Color = Color::rgb(255, 225, 60);
 
 /// How often a walker turns: once in this many ticks, each at its own time.
 const TURN_TICKS: u64 = 120;
 
-/// One of the crowd.
-struct Walker {
-    /// Where their feet are.
-    position: Interpolated<Vec2>,
-    /// Pixels a second.
-    velocity: Vec2,
-    tint: Color,
+nadir::scene::reflect_newtype! {
+    /// One of a crowd: its number, which picks its headings.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub(crate) struct Walker(pub(crate) u32);
 }
 
-/// The crowd, and the atlas they are drawn from.
-struct Crowd {
-    atlas: Handle<Texture>,
-    walkers: Vec<Walker>,
+impl Component for Walker {}
+
+/// How fast a crowd walks: its walkers' headings are multiplied by it.
+pub(crate) struct Pace(pub(crate) f32);
+
+/// Adds the stress scene's props, crowd, player and systems to `app`.
+pub(crate) fn add(app: App) -> App {
+    let atlas = app.world().resource_mut::<AssetServer>().load(ATLAS);
+    let mut app = app.register_component::<Walker>();
+    let world = app.world_mut();
+    let sprite = |size: Vec2, uv: Rect| {
+        let mut sprite = Sprite::new(atlas, size);
+        sprite.uv = uv;
+        sprite.layer = 1;
+        sprite
+    };
+    for &(kind, x, y) in &PROPS {
+        let prop = match kind {
+            Prop::Tree => sprite(Vec2::new(24.0, 48.0), TREE),
+            Prop::Rock => sprite(Vec2::new(16.0, 12.0), ROCK),
+        };
+        world
+            .spawn()
+            .with(Transform::at(Vec2::new(x as f32, y as f32)))
+            .with(prop);
+    }
+    for index in 0..CROWD as u32 {
+        let velocity = heading(index, 0);
+        let mut walker = sprite(PERSON_SIZE, PERSON);
+        walker.color = tint(index);
+        walker.flip.x = velocity.x < 0.0;
+        world
+            .spawn()
+            .with(Walker(index))
+            .with(Transform::at(start(index)))
+            .with(Velocity(velocity))
+            .with(walker);
+    }
+    // Last, and a layer up: the same atlas right after the crowd, so still
+    // one batch with it.
+    let mut person = sprite(PERSON_SIZE, PERSON);
+    person.color = PLAYER_TINT;
+    person.layer = 2;
+    spawn_player(world, person);
+    app.insert_resource(Pace(1.0))
+        .add_fixed_system(FixedStage::Gameplay, "turn_crowd", turn_crowd)
+        .add_fixed_system(FixedStage::Movement, "bounce_crowd", bounce_crowd)
+        .add_fixed_system(
+            FixedStage::Movement,
+            "keep_player_in_view",
+            keep_player_in_view,
+        )
+        .add_frame_system(FrameStage::Camera, "fix_camera", fix_camera)
+        .add_frame_system(FrameStage::Extract, "draw_grass", crate::draw_grass)
 }
 
-/// Adds the stress scene's crowd and systems to the field's `app`.
-pub(crate) fn add(mut app: App) -> App {
-    let atlas = app
-        .resources_mut()
-        .resource_mut::<AssetServer>()
-        .load(ATLAS);
-    let walkers = (0..CROWD as u32).map(walker).collect();
-    app.insert_resource(Crowd { atlas, walkers })
-        .add_fixed_system("walk_crowd", walk_crowd)
-        .add_frame_system("fix_camera", fix_camera)
-        .add_frame_system("draw_crowd", draw_crowd)
+/// Where walker `index` starts: somewhere in view.
+fn start(index: u32) -> Vec2 {
+    Vec2::new(
+        PERSON_SIZE.x * 0.5 + unit(index, 0) * (VIEW.x - PERSON_SIZE.x),
+        PERSON_SIZE.y + unit(index, 1) * (VIEW.y - PERSON_SIZE.y),
+    )
 }
 
-/// Walker `index`, where it starts: somewhere in view, walking at 20 to 60
-/// pixels a second. A quarter of the crowd is tinted.
-fn walker(index: u32) -> Walker {
+/// A quarter of the crowd is tinted.
+fn tint(index: u32) -> Color {
     let tints = [
         Color::rgb(255, 190, 190),
         Color::rgb(190, 210, 255),
         Color::rgb(210, 255, 190),
     ];
-    let position = Vec2::new(
-        PERSON_SIZE.x * 0.5 + unit(index, 0) * (VIEW.x - PERSON_SIZE.x),
-        PERSON_SIZE.y + unit(index, 1) * (VIEW.y - PERSON_SIZE.y),
-    );
-    Walker {
-        position: Interpolated::new(position),
-        velocity: heading(index, 0),
-        tint: if index.is_multiple_of(4) {
-            tints[(index / 4) as usize % tints.len()]
-        } else {
-            Color::WHITE
-        },
+    if index.is_multiple_of(4) {
+        tints[(index / 4) as usize % tints.len()]
+    } else {
+        Color::WHITE
     }
 }
 
 /// A velocity of 20 to 60 pixels a second in a direction chosen by
 /// `index` and `turn`.
-fn heading(index: u32, turn: u32) -> Vec2 {
+pub(crate) fn heading(index: u32, turn: u32) -> Vec2 {
     let angle = unit(index, 2 + 2 * turn) * std::f32::consts::TAU;
     let speed = 20.0 + 40.0 * unit(index, 3 + 2 * turn);
     Vec2::new(angle.cos(), angle.sin()) * speed
 }
 
 /// A number in 0..1 for `index` and `salt`: the same every run.
-fn unit(index: u32, salt: u32) -> f32 {
+pub(crate) fn unit(index: u32, salt: u32) -> f32 {
     // A 32-bit integer hash (lowbias32, by Chris Wellons).
     let mut x = index.wrapping_mul(0x9e37_79b9) ^ salt.wrapping_mul(0x85eb_ca6b);
     x ^= x >> 16;
@@ -113,130 +153,156 @@ fn unit(index: u32, salt: u32) -> f32 {
     (x >> 8) as f32 / (1u32 << 24) as f32
 }
 
-/// Moves the crowd one tick: each walker steps, bounces off the edges of
-/// the view, and now and then turns.
-fn walk_crowd(resources: &Resources, tick: &Tick) {
-    let mut crowd = resources.resource_mut::<Crowd>();
-    let half = PERSON_SIZE.x * 0.5;
-    for (index, walker) in crowd.walkers.iter_mut().enumerate() {
-        let index = index as u32;
-        walker.position.snapshot();
-        if (tick.index + u64::from(index)).is_multiple_of(TURN_TICKS) {
+/// Now and then turns each walker: once every [`TURN_TICKS`], each at its
+/// own time, to a new heading times the [`Pace`].
+pub(crate) fn turn_crowd(world: &World, tick: &Tick) {
+    let pace = world.resource::<Pace>().0;
+    let walkers = world.read::<Walker>();
+    let mut velocities = world.write::<Velocity>();
+    for (entity, &Walker(index)) in walkers.iter() {
+        if (tick.index + u64::from(index)).is_multiple_of(TURN_TICKS)
+            && let Some(velocity) = velocities.get_mut(entity)
+        {
             let turn = (tick.index / TURN_TICKS) as u32;
-            walker.velocity = heading(index, turn + 1);
+            velocity.0 = heading(index, turn + 1) * pace;
         }
-        let mut next = walker.position.current + walker.velocity * tick.dt;
-        if next.x < half || next.x > VIEW.x - half {
-            walker.velocity.x = -walker.velocity.x;
-            next.x = next.x.clamp(half, VIEW.x - half);
+    }
+}
+
+/// After the engine has moved them: turns back each walker that left the
+/// view, puts it back at the edge, and faces every walker the way it goes.
+fn bounce_crowd(world: &World, _tick: &Tick) {
+    let walkers = world.read::<Walker>();
+    let mut transforms = world.write::<Transform>();
+    let mut velocities = world.write::<Velocity>();
+    let mut sprites = world.write::<Sprite>();
+    let half = PERSON_SIZE.x * 0.5;
+    for (entity, _) in walkers.iter() {
+        let (Some(transform), Some(velocity)) =
+            (transforms.get_mut(entity), velocities.get_mut(entity))
+        else {
+            continue;
+        };
+        let feet = &mut transform.position;
+        if feet.x < half || feet.x > VIEW.x - half {
+            velocity.0.x = -velocity.0.x;
+            feet.x = feet.x.clamp(half, VIEW.x - half);
         }
-        if next.y < PERSON_SIZE.y || next.y > VIEW.y {
-            walker.velocity.y = -walker.velocity.y;
-            next.y = next.y.clamp(PERSON_SIZE.y, VIEW.y);
+        if feet.y < PERSON_SIZE.y || feet.y > VIEW.y {
+            velocity.0.y = -velocity.0.y;
+            feet.y = feet.y.clamp(PERSON_SIZE.y, VIEW.y);
         }
-        walker.position.current = next;
+        if let Some(sprite) = sprites.get_mut(entity) {
+            sprite.flip.x = velocity.0.x < 0.0;
+        }
+    }
+}
+
+/// After the engine has moved them: stops the player at the edges of the
+/// view, which the camera does not leave.
+fn keep_player_in_view(world: &World, _tick: &Tick) {
+    let players = world.read::<Player>();
+    let mut transforms = world.write::<Transform>();
+    let half = PERSON_SIZE.x * 0.5;
+    for (player, _) in players.iter() {
+        if let Some(transform) = transforms.get_mut(player) {
+            let feet = &mut transform.position;
+            feet.x = feet.x.clamp(half, VIEW.x - half);
+            feet.y = feet.y.clamp(PERSON_SIZE.y, VIEW.y);
+        }
     }
 }
 
 /// Keeps the camera on the view's centre, where the crowd is.
-fn fix_camera(resources: &Resources, _frame: &Frame) {
-    resources.resource_mut::<RenderFrame>().camera.position = VIEW * 0.5;
-}
-
-/// The grass, then everything on it from the atlas: the trees and rocks,
-/// the crowd and the player.
-fn draw_crowd(resources: &Resources, frame: &Frame) {
-    let crowd = resources.resource::<Crowd>();
-    let player = resources.resource::<Player>();
-    let mut out = resources.resource_mut::<RenderFrame>();
-    push_grass(&mut out, resources.resource::<Sprites>().grass);
-    let atlas = |position: Vec2, size: Vec2, uv: Rect| {
-        let mut sprite = SpriteDraw::new(crowd.atlas, position, size);
-        sprite.uv = uv;
-        sprite.layer = 1;
-        sprite
-    };
-    for &(kind, x, y) in &PROPS {
-        let position = Vec2::new(x as f32, y as f32);
-        out.sprites.push(match kind {
-            Prop::Tree => atlas(position, Vec2::new(24.0, 48.0), TREE),
-            Prop::Rock => atlas(position, Vec2::new(16.0, 12.0), ROCK),
-        });
-    }
-    for walker in &crowd.walkers {
-        let mut sprite = atlas(walker.position.lerp(frame.alpha), PERSON_SIZE, PERSON);
-        sprite.flip.x = walker.velocity.x < 0.0;
-        sprite.color = walker.tint;
-        out.sprites.push(sprite);
-    }
-    let mut person = atlas(player.position.lerp(frame.alpha), PERSON_SIZE, PERSON);
-    person.flip.x = player.facing_left;
-    out.sprites.push(person);
+fn fix_camera(world: &World, _frame: &Frame) {
+    world.resource_mut::<RenderFrame>().camera.position = VIEW * 0.5;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Scene;
-    use crate::tests::{scene, tick};
-
-    /// One frame of the stress scene, as the loop runs it.
-    fn frame(resources: &Resources, index: u64) {
-        crate::move_player(resources, &tick());
-        walk_crowd(resources, &Tick { index, ..tick() });
-        resources.resource_mut::<RenderFrame>().clear();
-        let frame = Frame {
-            dt: 1.0 / 60.0,
-            alpha: 0.5,
-        };
-        fix_camera(resources, &frame);
-        draw_crowd(resources, &frame);
-    }
+    use crate::tests::{TICK, player, position, scene};
 
     #[test]
     fn a_frame_draws_everything_on_the_grass_from_the_atlas() {
-        let app = scene(Scene::StressSprites);
-        let resources = app.resources();
-        frame(resources, 0);
-        let out = resources.resource::<RenderFrame>();
+        let mut app = scene(Scene::StressSprites);
+        app.update(TICK, &[]);
+        let world = app.world();
+        let out = world.resource::<RenderFrame>();
         assert_eq!(out.sprites.len(), 16 * 12 + PROPS.len() + CROWD + 1);
-        let atlas = resources.resource::<Crowd>().atlas;
-        let (grass, rest) = out.sprites.split_at(16 * 12);
-        assert!(grass.iter().all(|sprite| sprite.layer == 0));
-        assert!(
-            rest.iter()
-                .all(|sprite| sprite.texture == atlas && sprite.layer == 1)
-        );
+        let atlas = world
+            .read::<Sprite>()
+            .get(player(&app))
+            .expect("drawn")
+            .texture;
+        let (grass, rest): (Vec<&SpriteDraw>, Vec<&SpriteDraw>) =
+            out.sprites.iter().partition(|sprite| sprite.layer == 0);
+        assert_eq!(grass.len(), 16 * 12);
+        assert!(rest.iter().all(|sprite| sprite.texture == atlas));
+        // The player, tinted, over everything else on the grass.
+        let (over, crowd): (Vec<&SpriteDraw>, Vec<&SpriteDraw>) =
+            rest.iter().partition(|sprite| sprite.layer == 2);
+        assert!(crowd.iter().all(|sprite| sprite.layer == 1));
+        assert_eq!(over.len(), 1);
+        assert_eq!(over[0].position, position(&app, player(&app)));
+        assert_eq!(over[0].color, PLAYER_TINT);
         assert_eq!(out.camera.position, VIEW * 0.5);
     }
 
     #[test]
-    fn the_crowd_stays_in_view_and_turns() {
-        let app = scene(Scene::StressSprites);
-        let resources = app.resources();
-        let start: Vec<Vec2> = resources
-            .resource::<Crowd>()
-            .walkers
-            .iter()
-            .map(|walker| walker.velocity)
-            .collect();
-        // Long enough for every walker to reach an edge and to turn.
-        for index in 0..600 {
-            walk_crowd(resources, &Tick { index, ..tick() });
+    fn the_person_walks_among_the_crowd_too() {
+        let mut app = scene(Scene::StressSprites);
+        let player = player(&app);
+        let press = nadir::Event::Key {
+            key: Key::D,
+            pressed: true,
+            repeat: false,
+        };
+        app.update(TICK, &[press]);
+        for _ in 0..59 {
+            app.update(TICK, &[]);
         }
-        let crowd = resources.resource::<Crowd>();
+        let moved = position(&app, player) - crate::PLAYER_START;
+        assert!(
+            (moved.x - 120.0).abs() < 1e-2 && moved.y == 0.0,
+            "{moved:?}"
+        );
+        // Held on, they stop at the edge of the view, as the crowd does.
+        for _ in 0..120 {
+            app.update(TICK, &[]);
+        }
+        let feet = position(&app, player);
+        assert_eq!(feet.x, VIEW.x - PERSON_SIZE.x * 0.5, "{feet:?}");
+    }
+
+    #[test]
+    fn the_crowd_stays_in_view_turns_and_faces_the_way_it_goes() {
+        let mut app = scene(Scene::StressSprites);
+        let start: Vec<Vec2> = (0..CROWD as u32).map(|index| heading(index, 0)).collect();
+        // Long enough for every walker to reach an edge and to turn.
+        for _ in 0..600 {
+            app.update(TICK, &[]);
+        }
+        let world = app.world();
+        let walkers = world.read::<Walker>();
+        let transforms = world.read::<Transform>();
+        let velocities = world.read::<Velocity>();
+        let sprites = world.read::<Sprite>();
         let half = PERSON_SIZE.x * 0.5;
-        for walker in &crowd.walkers {
-            let feet = walker.position.current;
+        let mut turned = 0;
+        for (entity, &Walker(index)) in walkers.iter() {
+            let feet = transforms.get(entity).expect("a walker").position;
             assert!((half..=VIEW.x - half).contains(&feet.x), "{feet:?}");
             assert!((PERSON_SIZE.y..=VIEW.y).contains(&feet.y), "{feet:?}");
+            let velocity = velocities.get(entity).expect("a walker").0;
+            let flip = sprites.get(entity).expect("a walker").flip.x;
+            assert_eq!(flip, velocity.x < 0.0, "walker {index}");
+            if velocity != start[index as usize] {
+                turned += 1;
+            }
         }
-        let turned = crowd
-            .walkers
-            .iter()
-            .zip(&start)
-            .filter(|(walker, start)| walker.velocity != **start)
-            .count();
+        assert_eq!(walkers.len(), CROWD);
         assert!(turned > CROWD * 9 / 10, "{turned}");
     }
 
@@ -265,18 +331,18 @@ mod tests {
         }
     }
 
-    /// A steady frame of the scene's own systems allocates nothing.
+    /// A steady frame of the scene allocates nothing.
     #[cfg(feature = "dev")]
     #[test]
     fn a_steady_frame_of_the_scene_allocates_nothing() {
-        let app = scene(Scene::StressSprites);
-        let resources = app.resources();
-        for index in 0..3 {
-            frame(resources, index);
+        let mut app = scene(Scene::StressSprites);
+        crate::tests::without_reports(&app);
+        for _ in 0..3 {
+            app.update(TICK, &[]);
         }
         let start = nadir::thread_alloc_counts();
-        for index in 3..103 {
-            frame(resources, index);
+        for _ in 0..100 {
+            app.update(TICK, &[]);
         }
         let allocated = nadir::thread_alloc_counts().since(start);
         assert_eq!(allocated, nadir::AllocCounts::default());

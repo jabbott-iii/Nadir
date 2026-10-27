@@ -82,7 +82,8 @@ pub trait FromValue: Reflect + Sized {
   needed; the switch trigger is in the dependency policy, row 9.
 - **`TypeRegistry`:** components register with
   `app.register_component::<Health>()` (the facade's, M4.4; the registry's
-  own is `register_component::<T: Component + FromValue>()`), which records:
+  own is `register_component::<T: Component + FromValue>()`; the registry is
+  a world resource), which records:
   - the name (`T::TYPE_NAME`; two types with one name panic)
   - constructors from `Value` (`Registration::from_value`)
   - an insert-into-world function (`insert`, through `Commands`;
@@ -92,6 +93,14 @@ pub trait FromValue: Reflect + Sized {
 
   `xtask` cannot find unregistered components, but a debug-build startup
   check walks prefab files and reports unknown component names.
+- **The engine's components** (the facade's, M4.4, ADR-0022):
+  - reflected: `Transform` as `{"position": [x, y]}`, `Velocity` as
+    `[x, y]` in pixels a second, `Player` as `{}`, and `SaveId` as an
+    integer;
+  - not yet: `Sprite` (a `Handle`, M5.6), `Collider` (layer names, M5.6)
+    and `Parent` (an `Entity`, M9.4);
+  - never in data: `PrevTransform`, which the engine gives every drawn
+    entity.
 
 ## Prefabs
 
