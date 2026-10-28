@@ -218,13 +218,23 @@ pub fn check_sized<T: std::fmt::Debug>(
     checks `FrameAllocs` against its own count frame by frame. Since M4.5
     the ground is a tile layer of 64 × 64 cells, a quarter of them
     animated, whose view moves in the warm-up to where four chunks meet:
-    the counted frames draw 4 chunks;
+    the counted frames draw 4 chunks. Since M4.6 the walkers are animated,
+    a quarter at each of four points of a looping walk, 100 ms apart, and
+    face the way they go;
   - the facade's unit test `steady_ticks` in `crates/engine/src/glue.rs`
     runs 5,000 colliding entities, a tenth of them triggers, with 10
     entities spawned and 10 despawned through commands each tick. It runs
     three identical passes of 28 ticks, frames of two ticks among them,
     and counts the third: movement, triggers and their events, commands
     and drawing (M4.4);
+  - the facade's unit test `steady_animation` in `crates/engine/src/glue.rs`
+    animates 10,000 sprites, a quarter of them on a clip of 40 ms that
+    plays once and that a frame system restarts on `AnimationFinished`. It
+    runs three identical passes of 32 frames, of a third of a tick or two
+    ticks, and counts the third: 20,000 finishes and their events,
+    facings and drawing (M4.6). Its frames have fixed lengths, unlike
+    `steady_frames`', whose real-time frames could not place a burst of
+    finishes before the counting;
   - the sandbox's stress scene, `--scene stress-sprites`, runs 100 frames
     through `App::update`, without a GPU.
 - The sandbox's `--scene stress-entities` (5,000 colliding entities)
@@ -265,7 +275,8 @@ pub fn check_sized<T: std::fmt::Debug>(
   - spatial hash rebuild and query (`collision_hash_5k`, M4.3, with
     `collision_slide_5k` for a tick of movement, ADR-0021)
   - a whole tick of the facade for 5,000 colliding entities
-    (`facade_tick_5k`, M4.4, ADR-0022)
+    (`facade_tick_5k`, M4.4, ADR-0022), with a frame of 10,000 animated
+    sprites (`facade_frame_10k`, M4.6, ADR-0024)
   - A* on 256×256
   - mixer with 32 voices
   - QOI decode 2048²

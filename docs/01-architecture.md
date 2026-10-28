@@ -212,6 +212,7 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
   | tick `Movement` | `nadir::movement` | rebuilds `Collisions`, moves each `Velocity`, sliding `Collider`s |
   | tick `PostMovement` | `nadir::parent_offsets` | puts each `Parent`'s child at its root plus the offsets |
   | tick `PostMovement` | `nadir::triggers` | sends `TriggerEnter` and `TriggerExit` |
+  | frame `Animate` | `nadir::animate` | advances each `Animator` by the clock's step, writes its frame into its `Sprite`, sends `AnimationFinished`, mirrors each Sprite that faces left and unmirrors the rest with a `Facing` (ADR-0024) |
   | frame `Extract` | `nadir::extract_sprites` | draws each `Sprite` between the last two ticks |
 - Structural changes (spawn, despawn, add or remove component) are deferred
   through `Commands`. They are applied after each fixed tick and after the

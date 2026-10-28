@@ -21,10 +21,12 @@ use nadir_platform::{
 use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, TileLayers};
 use nadir_scene::{FromValue, TypeRegistry};
 
+use crate::animation::AnimationClock;
 use crate::limiter::FrameLimiter;
 use crate::{
-    Collider, Collisions, Error, Parent, Player, PrevTransform, SaveId, Sprite, TickStats,
-    Transform, TriggerEnter, TriggerExit, Velocity, glue, log_file,
+    AnimationFinished, Animator, Clips, Collider, Collisions, Error, Facing, Parent, Player,
+    PrevTransform, SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit, Velocity, glue,
+    log_file,
 };
 
 /// How many times a second the simulation steps.
@@ -288,11 +290,16 @@ impl EngineCore {
 ///   a [`Parent`] where its parent is, plus its offset;
 /// - `nadir::triggers` (tick `PostMovement`): sends [`TriggerEnter`] and
 ///   [`TriggerExit`];
+/// - `nadir::animate` (frame `Animate`): advances every [`Animator`] and
+///   writes its frame into its [`Sprite`], sends [`AnimationFinished`],
+///   mirrors the Sprite of each entity that faces [`Facing::Left`], and
+///   unmirrors the rest with a [`Facing`];
 /// - `nadir::extract_sprites` (frame `Extract`): draws every [`Sprite`]
 ///   into the [`RenderFrame`], between the last two ticks.
 ///
 /// So a game sets velocities in `Gameplay`, and reacts to the moves after
-/// the engine's, in `Movement` or `PostMovement`.
+/// the engine's, in `Movement` or `PostMovement`. It sets [`Facing`] and
+/// plays clips in ticks too, and reacts to finished clips in frames.
 ///
 /// The engine's resources:
 ///
@@ -302,15 +309,17 @@ impl EngineCore {
 ///   [`ActionState`], latched once a tick before the tick stages
 /// - [`AssetServer`], loading from [`Config::assets`]
 /// - [`RenderFrame`], emptied before the frame stages, which fill it; the
-///   loop then draws it. Its `time`, which animated tiles show, is how long
-///   the simulation has run, ticks and `alpha`.
+///   loop then draws it. Its `time`, which animated tiles show and
+///   animators follow, is how long the simulation has run, ticks and
+///   `alpha`.
 /// - [`TileLayers`], the game's tile layers, which the frame's
 ///   `tile_layers` name and the loop draws from
 /// - [`FrameStats`], what the last frame drew
 /// - [`TickStats`], how long this frame's ticks took
 /// - [`Collisions`], the colliders
+/// - [`Clips`], the clips that animators play
 /// - [`TypeRegistry`], the reflected component types
-/// - the events [`TriggerEnter`] and [`TriggerExit`]
+/// - the events [`TriggerEnter`], [`TriggerExit`] and [`AnimationFinished`]
 /// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
 ///
 /// ```no_run
@@ -356,9 +365,9 @@ impl App {
     /// Its [`AssetServer`] loads from [`Config::assets`]. With the `dev`
     /// feature, a failed asset shows its placeholder; without it, nothing.
     ///
-    /// Of the engine's components, [`Transform`], [`Velocity`], [`Player`]
-    /// and [`SaveId`] are reflected. [`Sprite`], [`Collider`] and
-    /// [`Parent`] are not yet (roadmap M5.6 and M9.4), and
+    /// Of the engine's components, [`Transform`], [`Velocity`], [`Player`],
+    /// [`SaveId`] and [`Facing`] are reflected. [`Sprite`], [`Collider`],
+    /// [`Animator`] and [`Parent`] are not yet (roadmap M5.6 and M9.4), and
     /// [`PrevTransform`] is the engine's own.
     pub fn new(config: Config) -> Self {
         let on_failure = if cfg!(feature = "dev") {
@@ -374,22 +383,27 @@ impl App {
         world.insert_resource(FrameStats::default());
         world.insert_resource(TickStats::default());
         world.insert_resource(Collisions::new());
+        world.insert_resource(Clips::new());
+        world.insert_resource(AnimationClock::default());
         #[cfg(feature = "dev")]
         world.insert_resource(crate::FrameAllocs::default());
         world.add_event::<TriggerEnter>();
         world.add_event::<TriggerExit>();
+        world.add_event::<AnimationFinished>();
 
         let mut registry = TypeRegistry::new();
         registry.register_component::<Transform>();
         registry.register_component::<Velocity>();
         registry.register_component::<Player>();
         registry.register_component::<SaveId>();
+        registry.register_component::<Facing>();
         registry.register_components(&mut world);
         world.insert_resource(registry);
         world.register::<PrevTransform>();
         world.register::<Sprite>();
         world.register::<Collider>();
         world.register::<Parent>();
+        world.register::<Animator>();
 
         let mut schedule = Schedule::new();
         schedule
@@ -401,6 +415,7 @@ impl App {
                 glue::parent_offsets,
             )
             .add_fixed(FixedStage::PostMovement, "nadir::triggers", glue::triggers)
+            .add_frame(FrameStage::Animate, "nadir::animate", glue::animate)
             .add_frame(
                 FrameStage::Extract,
                 "nadir::extract_sprites",
@@ -814,7 +829,8 @@ mod tests {
             .add_frame_system(FrameStage::Extract, "draw_ground", |_, _| {})
             .add_fixed_system(FixedStage::Movement, "bounce", |_, _| {})
             .add_fixed_system(FixedStage::Gameplay, "walk", |_, _| {})
-            .add_frame_system(FrameStage::Camera, "follow", |_, _| {});
+            .add_frame_system(FrameStage::Camera, "follow", |_, _| {})
+            .add_frame_system(FrameStage::Animate, "react", |_, _| {});
         let printed: Vec<String> = app
             .schedule()
             .describe()
@@ -829,6 +845,8 @@ mod tests {
                 "tick  Movement: bounce",
                 "tick  PostMovement: nadir::parent_offsets",
                 "tick  PostMovement: nadir::triggers",
+                "frame Animate: nadir::animate",
+                "frame Animate: react",
                 "frame Camera: follow",
                 "frame Extract: nadir::extract_sprites",
                 "frame Extract: draw_ground",
@@ -837,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn the_engines_components_are_registered_and_four_are_reflected() {
+    fn the_engines_components_are_registered_and_five_are_reflected() {
         let app = app();
         let world = app.world();
         assert!(world.is_registered::<Transform>());
@@ -848,9 +866,14 @@ mod tests {
         assert!(world.is_registered::<Player>());
         assert!(world.is_registered::<Parent>());
         assert!(world.is_registered::<SaveId>());
+        assert!(world.is_registered::<Facing>());
+        assert!(world.is_registered::<Animator>());
         let registry = world.resource::<TypeRegistry>();
         let names: Vec<&str> = registry.iter().map(|it| it.name()).collect();
-        assert_eq!(names, ["Transform", "Velocity", "Player", "SaveId"]);
+        assert_eq!(
+            names,
+            ["Transform", "Velocity", "Player", "SaveId", "Facing"]
+        );
     }
 
     nadir_scene::reflect_newtype! {
@@ -1577,14 +1600,14 @@ mod tests {
 
         use nadir_assets::Handle;
         use nadir_codec::qoi::{self, Channels, ColorSpace, Header};
-        use nadir_core::{Color, Vec2};
+        use nadir_core::{Color, Rect, Vec2};
         use nadir_platform::{
             AllocCounts, HeadlessGl, PlatformError, create_headless_gl, thread_alloc_counts,
         };
         use nadir_render::{Tile, TileLayer, TileLayerDraw, TileSet};
 
         use super::*;
-        use crate::FrameAllocs;
+        use crate::{Clip, ClipFrame, FrameAllocs, Playback};
 
         /// How many sprites walk about.
         const CROWD: usize = 10_000;
@@ -1678,7 +1701,7 @@ mod tests {
         fn walk(world: &World, tick: &Tick) {
             let transforms = world.read::<Transform>();
             let mut velocities = world.write::<Velocity>();
-            let mut sprites = world.write::<Sprite>();
+            let mut facings = world.write::<Facing>();
             for (entity, velocity) in velocities.iter_mut() {
                 let Some(transform) = transforms.get(entity) else {
                     continue;
@@ -1690,11 +1713,19 @@ mod tests {
                 if !(16.0..=VIEW.y).contains(&next.y) {
                     velocity.0.y = -velocity.0.y;
                 }
-                if let Some(sprite) = sprites.get_mut(entity) {
-                    sprite.flip.x = velocity.0.x < 0.0;
+                if let Some(facing) = facings.get_mut(entity) {
+                    *facing = facing_of(velocity.0);
                 }
             }
             world.resource::<SharedSeen>().borrow_mut().ticks += 1;
+        }
+
+        fn facing_of(velocity: Vec2) -> Facing {
+            if velocity.x < 0.0 {
+                Facing::Left
+            } else {
+                Facing::Right
+            }
         }
 
         fn draw_ground(world: &World, _: &Frame) {
@@ -1763,6 +1794,19 @@ mod tests {
                 }
             }
             let ground = app.world().resource_mut::<TileLayers>().add(layer);
+            // A walk of 4 frames, the quarters of the walker's texture. Clips
+            // that play once, and the events they send, are in
+            // `glue::tests::steady_animation`, whose frames are not timed by
+            // the clock on the wall.
+            let quarter = |index: u32| {
+                let left = index as f32 * 0.25;
+                let uv = Rect::new(Vec2::new(left, 0.0), Vec2::new(left + 0.25, 1.0));
+                ClipFrame::new(walker, uv, 100 * MS)
+            };
+            let walk = app
+                .world()
+                .resource_mut::<Clips>()
+                .add(Clip::new((0..4).map(quarter).collect(), Playback::Loop));
             let mut seed = 1u32;
             let mut random = move || {
                 // A xorshift: the same walkers every run.
@@ -1782,17 +1826,20 @@ mod tests {
                 if index % 4 == 0 {
                     sprite.color = Color::rgb(255, 200, 200);
                 }
+                let phase = 400 * MS * (index % 4) as u32 / 4;
                 app.world_mut()
                     .spawn()
                     .with(Transform::at(position))
                     .with(Velocity(velocity))
-                    .with(sprite);
+                    .with(sprite)
+                    .with(Animator::starting_at(walk, phase))
+                    .with(facing_of(velocity));
             }
             app.insert_resource(Ground(ground, 0))
         }
 
         #[test]
-        fn a_steady_frame_of_10k_sprites_and_a_tile_layer_allocates_nothing() {
+        fn a_steady_frame_of_10k_animated_sprites_and_a_tile_layer_allocates_nothing() {
             // The counter is the global allocator, so a known allocation
             // shows: a count of zero below means something.
             let start = thread_alloc_counts();

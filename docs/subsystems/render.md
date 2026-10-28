@@ -87,7 +87,7 @@ pub struct RenderFrame {
     pub texts: Vec<TextDraw>,             // world or screen space
     pub debug: DebugDrawList,             // lines/rects/circles, cleared per frame
     pub post: PostSettings,               // fade, tint, color grade LUT handle (optional)
-    pub time: Duration,                   // for animated tiles/shaders; whole ms reach the shader
+    pub time: Duration,                   // for animated tiles/shaders (and the facade's clips, ADR-0024); whole ms reach the shader
 }
 
 pub struct SpriteDraw {

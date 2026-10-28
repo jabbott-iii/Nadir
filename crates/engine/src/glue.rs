@@ -1,5 +1,6 @@
 //! The engine's systems, which connect the components to the subsystems:
-//! interpolation, movement and collision, triggers, parents, and drawing.
+//! interpolation, movement and collision, triggers, parents, animation and
+//! drawing.
 //! [`App::new`](crate::App::new) adds each first in its stage (ADR-0022).
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,9 +11,10 @@ use nadir_core::time::{Frame, Tick};
 use nadir_ecs::{Entity, Events, SparseSet, World};
 use nadir_render::RenderFrame;
 
+use crate::animation::AnimationClock;
 use crate::{
-    Collider, Collisions, Parent, PrevTransform, Sprite, Transform, TriggerEnter, TriggerExit,
-    Velocity,
+    AnimationFinished, Animator, Clips, Collider, Collisions, Facing, Parent, PrevTransform,
+    Sprite, Transform, TriggerEnter, TriggerExit, Velocity,
 };
 
 /// The most steps from a child up to the entity it goes with.
@@ -20,6 +22,9 @@ const MOST_PARENTS: usize = 8;
 
 /// Whether a chain of parents too long, or a loop, has been reported.
 static WARNED_OF_CHAIN: AtomicBool = AtomicBool::new(false);
+
+/// Whether an animator of a clip no longer in [`Clips`] has been reported.
+static WARNED_OF_CLIP: AtomicBool = AtomicBool::new(false);
 
 /// `nadir::snapshot`, first in the tick's `Input` stage: remembers where
 /// each entity is before the tick moves it, for frames to draw from. It
@@ -104,6 +109,55 @@ pub(crate) fn triggers(world: &World, _tick: &Tick) {
     collisions.update_triggers(&mut enter, &mut exit);
 }
 
+/// `nadir::animate`, first in the frame's `Animate` stage: advances every
+/// [`Animator`] by how long the simulation ran since the last frame (the
+/// change in `RenderFrame::time`), writes the texture and uv of the frame
+/// it shows into its entity's [`Sprite`], and sends [`AnimationFinished`]
+/// for each clip that plays once and ended. Then it mirrors the Sprite of
+/// each entity that faces [`Facing::Left`], and unmirrors the rest that
+/// have a `Facing`.
+pub(crate) fn animate(world: &World, _frame: &Frame) {
+    let by = {
+        let now = world.resource::<RenderFrame>().time;
+        let mut clock = world.resource_mut::<AnimationClock>();
+        let by = now.saturating_sub(clock.0);
+        clock.0 = now;
+        by
+    };
+    let clips = world.resource::<Clips>();
+    let mut animators = world.write::<Animator>();
+    let mut sprites = world.write::<Sprite>();
+    let mut finished = world.resource_mut::<Events<AnimationFinished>>();
+    for (entity, animator) in animators.iter_mut() {
+        let Some(clip) = clips.get(animator.clip()) else {
+            if !WARNED_OF_CLIP.swap(true, Ordering::Relaxed) {
+                warn!(
+                    "{entity:?} plays {:?}, which is not in `Clips`: it stays where it is",
+                    animator.clip()
+                );
+            }
+            continue;
+        };
+        let (index, ended) = animator.advance(clip, by);
+        if ended {
+            finished.send(AnimationFinished {
+                entity,
+                clip: animator.clip(),
+            });
+        }
+        if let Some(sprite) = sprites.get_mut(entity) {
+            let frame = clip.frames()[index];
+            sprite.texture = frame.texture;
+            sprite.uv = frame.uv;
+        }
+    }
+    for (entity, &facing) in world.read::<Facing>().iter() {
+        if let Some(sprite) = sprites.get_mut(entity) {
+            sprite.flip.x = facing == Facing::Left;
+        }
+    }
+}
+
 /// `nadir::extract_sprites`, first in the frame's `Extract` stage: draws
 /// every entity with a [`Sprite`] and a [`Transform`], the frame's `alpha`
 /// of the way from its [`PrevTransform`]. A child is drawn where its
@@ -157,16 +211,17 @@ fn root(parents: &SparseSet<Parent>, child: Entity) -> Option<(Entity, Vec2)> {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
     use std::time::Duration;
 
     use nadir_assets::Handle;
     use nadir_collision::{LayerMask, Shape, TileGrid};
-    use nadir_core::{GenIndex, IVec2};
+    use nadir_core::{GenIndex, IVec2, Rect};
     use nadir_ecs::{FixedStage, FrameStage};
-    use nadir_render::Texture;
+    use nadir_render::{Flip, Texture};
 
     use super::*;
-    use crate::{App, Config};
+    use crate::{App, Clip, ClipFrame, Config, Playback};
 
     /// One tick's length, as a frame: it runs one tick.
     const TICK: Duration = Duration::from_nanos(16_666_667);
@@ -797,6 +852,336 @@ mod tests {
         assert!(app.world().read::<PrevTransform>().contains(root));
     }
 
+    // -- animation ----------------------------------------------------------------
+
+    /// A texture handle other than [`texture`]'s: the clips' own.
+    fn sheet() -> Handle<Texture> {
+        Handle::new(GenIndex::new(1, NonZeroU32::MIN))
+    }
+
+    /// The region of frame `index` of a strip of 8 across [`sheet`].
+    fn strip(index: u32) -> Rect {
+        let left = index as f32 / 8.0;
+        Rect::new(Vec2::new(left, 0.0), Vec2::new(left + 0.125, 1.0))
+    }
+
+    /// A clip of frames of `ms` milliseconds each, the i-th showing
+    /// `strip(i)` of [`sheet`], added to the app's [`Clips`].
+    fn add_clip(app: &App, ms: &[u64], playback: Playback) -> Handle<Clip> {
+        let frames = (0..)
+            .zip(ms)
+            .map(|(index, &ms)| ClipFrame::new(sheet(), strip(index), Duration::from_millis(ms)))
+            .collect();
+        app.world()
+            .resource_mut::<Clips>()
+            .add(Clip::new(frames, playback))
+    }
+
+    fn sprite_of(app: &App, entity: Entity) -> Sprite {
+        *app.world().read::<Sprite>().get(entity).expect("a sprite")
+    }
+
+    fn animator_of(app: &App, entity: Entity) -> Animator {
+        *app.world()
+            .read::<Animator>()
+            .get(entity)
+            .expect("an animator")
+    }
+
+    // `RenderFrame::time` can be a few nanoseconds short of the frames' sum,
+    // except at multiples of 50 ms (three ticks), so the tests' frames end
+    // a millisecond or more from the clips' frame ends, or on 50 ms.
+
+    #[test]
+    fn an_animator_draws_its_clips_frames_texture_and_uv() {
+        let mut app = app();
+        let clip = add_clip(&app, &[30, 30, 30], Playback::Loop);
+        app.world_mut()
+            .spawn()
+            .with(at(0.0, 0.0))
+            .with(Sprite::new(texture(), Vec2::ONE))
+            .with(Animator::new(clip));
+        // At 10, 35, 65 and 95 ms: the last is 5 ms into the second time
+        // round.
+        for (elapsed, frame) in [(10 * MS, 0), (25 * MS, 1), (30 * MS, 2), (30 * MS, 0)] {
+            app.update(elapsed, &[]);
+            let drawn = app.world().resource::<RenderFrame>().sprites[0];
+            assert_eq!(
+                (drawn.texture, drawn.uv),
+                (sheet(), strip(frame)),
+                "frame {frame}"
+            );
+        }
+    }
+
+    #[test]
+    fn animators_follow_the_simulation_clock_not_the_frames_length() {
+        let mut app = app();
+        let clip = add_clip(&app, &[100, 100, 100], Playback::Loop);
+        let walker = app
+            .world_mut()
+            .spawn()
+            .with(Sprite::new(texture(), Vec2::ONE))
+            .with(Animator::new(clip))
+            .id();
+        // A long frame while the clock stands still, as in a pause.
+        animate(
+            app.world(),
+            &Frame {
+                dt: 0.1,
+                alpha: 0.0,
+            },
+        );
+        assert_eq!(animator_of(&app, walker).elapsed(), Duration::ZERO);
+        // The clock goes on 150 ms in a frame of 1 ms.
+        app.world().resource_mut::<RenderFrame>().time = 150 * MS;
+        animate(
+            app.world(),
+            &Frame {
+                dt: 0.001,
+                alpha: 0.0,
+            },
+        );
+        assert_eq!(animator_of(&app, walker).elapsed(), 150 * MS);
+        assert_eq!(sprite_of(&app, walker).uv, strip(1));
+        // And back, which it never goes: nothing moves.
+        app.world().resource_mut::<RenderFrame>().time = 100 * MS;
+        animate(
+            app.world(),
+            &Frame {
+                dt: 0.001,
+                alpha: 0.0,
+            },
+        );
+        assert_eq!(animator_of(&app, walker).elapsed(), 150 * MS);
+    }
+
+    /// What the frames' readers of [`AnimationFinished`] saw, frame by
+    /// frame, and how many the ticks' readers saw.
+    #[derive(Default)]
+    struct Finishes {
+        frames: Vec<Vec<AnimationFinished>>,
+        ticks: usize,
+    }
+
+    fn record_finishes(world: &World, _: &Frame) {
+        let events = world.resource::<Events<AnimationFinished>>();
+        let seen = events.frame_events().to_vec();
+        world.resource_mut::<Finishes>().frames.push(seen);
+    }
+
+    fn count_tick_finishes(world: &World, _: &Tick) {
+        let seen = world
+            .resource::<Events<AnimationFinished>>()
+            .tick_events()
+            .len();
+        world.resource_mut::<Finishes>().ticks += seen;
+    }
+
+    #[test]
+    fn a_clip_that_plays_once_is_announced_once_in_the_frame_it_ends() {
+        let mut app = app()
+            .insert_resource(Finishes::default())
+            .add_fixed_system(FixedStage::Gameplay, "count", count_tick_finishes)
+            .add_frame_system(FrameStage::Ui, "record", record_finishes);
+        let once = add_clip(&app, &[20, 30], Playback::Once);
+        let looping = add_clip(&app, &[10, 10], Playback::Loop);
+        let world = app.world_mut();
+        let burst = world
+            .spawn()
+            .with(Sprite::new(texture(), Vec2::ONE))
+            .with(Animator::new(once))
+            .id();
+        world
+            .spawn()
+            .with(Sprite::new(texture(), Vec2::ONE))
+            .with(Animator::new(looping));
+        // 50 ms, three ticks: exactly to the clip's end.
+        app.update(50 * MS, &[]);
+        assert_eq!(sprite_of(&app, burst).uv, strip(1));
+        assert!(animator_of(&app, burst).is_finished());
+        for _ in 0..4 {
+            app.update(TICK, &[]);
+        }
+        assert_eq!(sprite_of(&app, burst).uv, strip(1), "held at its end");
+        app.world()
+            .write::<Animator>()
+            .get_mut(burst)
+            .expect("an animator")
+            .restart();
+        app.update(60 * MS, &[]);
+        app.update(TICK, &[]);
+
+        let ended = AnimationFinished {
+            entity: burst,
+            clip: once,
+        };
+        let finishes = app.world().resource::<Finishes>();
+        // Once at its end, and once more after the restart; the looping
+        // clip, round 9 times, never.
+        let none = Vec::new();
+        assert_eq!(
+            finishes.frames,
+            [
+                vec![ended],
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                vec![ended],
+                none,
+            ]
+        );
+        // Sent in a frame, the event is cleared before the next tick's
+        // systems run: a guard against `nadir::animate` in a tick stage.
+        assert_eq!(finishes.ticks, 0);
+    }
+
+    #[test]
+    fn facing_left_mirrors_a_sprite_and_every_other_way_unmirrors_it() {
+        let mut app = app();
+        let mut mirrored = Sprite::new(texture(), Vec2::ONE);
+        mirrored.flip = Flip { x: true, y: true };
+        let world = app.world_mut();
+        let facing = world.spawn().with(mirrored).with(Facing::Up).id();
+        let animated_clip = add_clip(&app, &[30], Playback::Loop);
+        let world = app.world_mut();
+        let animated = world
+            .spawn()
+            .with(Sprite::new(texture(), Vec2::ONE))
+            .with(Animator::new(animated_clip))
+            .with(Facing::Left)
+            .id();
+        let unfacing = world.spawn().with(mirrored).id();
+        let mut flips = Vec::new();
+        for way in [
+            Facing::Up,
+            Facing::Left,
+            Facing::Right,
+            Facing::Left,
+            Facing::Down,
+        ] {
+            *app.world()
+                .write::<Facing>()
+                .get_mut(facing)
+                .expect("a facing") = way;
+            app.update(TICK, &[]);
+            flips.push(sprite_of(&app, facing).flip);
+        }
+        let flip = |x| Flip { x, y: true };
+        assert_eq!(
+            flips,
+            [
+                flip(false),
+                flip(true),
+                flip(false),
+                flip(true),
+                flip(false)
+            ]
+        );
+        assert!(sprite_of(&app, animated).flip.x, "an animated one too");
+        // Without a Facing, the flip is the game's.
+        assert_eq!(sprite_of(&app, unfacing).flip, flip(true));
+    }
+
+    #[test]
+    fn an_animator_added_late_moves_by_its_first_frames_step_only() {
+        let mut app = app();
+        let once = add_clip(&app, &[20, 30], Playback::Once);
+        // 200 ms with no animator.
+        app.update(200 * MS, &[]);
+        let late = app
+            .world_mut()
+            .spawn()
+            .with(Sprite::new(texture(), Vec2::ONE))
+            .with(Animator::new(once))
+            .id();
+        app.update(10 * MS, &[]);
+        assert_eq!(sprite_of(&app, late).uv, strip(0));
+        assert!(!animator_of(&app, late).is_finished());
+    }
+
+    #[test]
+    fn an_animator_without_a_sprite_plays_and_announces_its_end() {
+        let mut app = app().insert_resource(Finishes::default()).add_frame_system(
+            FrameStage::Ui,
+            "record",
+            record_finishes,
+        );
+        let once = add_clip(&app, &[20, 30], Playback::Once);
+        let bare = app.world_mut().spawn().with(Animator::new(once)).id();
+        app.update(50 * MS, &[]);
+        assert!(animator_of(&app, bare).is_finished());
+        let ended = AnimationFinished {
+            entity: bare,
+            clip: once,
+        };
+        assert_eq!(app.world().resource::<Finishes>().frames, [vec![ended]]);
+    }
+
+    /// The entity to start an animator on in tick 20, and its clip.
+    #[derive(Clone, Copy)]
+    struct Late(Entity, Handle<Clip>);
+
+    /// Starts an animator in tick 20, at the time of the frame before.
+    fn start_in_step(world: &World, tick: &Tick) {
+        if tick.index == 20 {
+            let Late(entity, clip) = *world.resource::<Late>();
+            let time = world.resource::<RenderFrame>().time;
+            world
+                .write::<Animator>()
+                .insert(entity, Animator::starting_at(clip, time));
+        }
+    }
+
+    #[test]
+    fn an_animator_started_at_the_frames_time_keeps_in_step_with_the_tiles() {
+        let mut app = app().add_fixed_system(FixedStage::Gameplay, "start", start_in_step);
+        let clip = add_clip(&app, &[100, 100, 100], Playback::Loop);
+        let walker = app
+            .world_mut()
+            .spawn()
+            .with(Sprite::new(texture(), Vec2::ONE))
+            .id();
+        let mut app = app.insert_resource(Late(walker, clip));
+        let mut checked = 0;
+        for _ in 0..200 {
+            app.update(7 * MS, &[]);
+            let time = app.world().resource::<RenderFrame>().time;
+            let started = app.world().read::<Animator>().contains(walker);
+            // A millisecond or more from a frame's end: the tiles' time is
+            // whole milliseconds.
+            let into = time.as_nanos() % 100_000_000;
+            if started && (1_000_000..99_000_000).contains(&into) {
+                // The frame tiles of 3 frames of 100 ms show (the
+                // `tile_chunk` shader).
+                let tile = (time.as_millis() / 100 % 3) as u32;
+                assert_eq!(sprite_of(&app, walker).uv, strip(tile), "at {time:?}");
+                checked += 1;
+            }
+        }
+        assert!(checked > 100, "{checked}");
+    }
+
+    #[test]
+    fn an_animator_whose_clip_was_removed_leaves_its_sprite_as_it_was() {
+        let mut app = app();
+        let clip = add_clip(&app, &[30, 30], Playback::Loop);
+        let walker = app
+            .world_mut()
+            .spawn()
+            .with(Sprite::new(texture(), Vec2::ONE))
+            .with(Animator::new(clip))
+            .id();
+        app.update(10 * MS, &[]);
+        assert_eq!(sprite_of(&app, walker).uv, strip(0));
+        let before = animator_of(&app, walker);
+        app.world().resource_mut::<Clips>().remove(clip);
+        app.update(30 * MS, &[]);
+        assert_eq!(sprite_of(&app, walker).uv, strip(0));
+        assert_eq!(animator_of(&app, walker), before);
+    }
+
     /// 5,000 colliding entities tick after tick, with entities spawned
     /// and despawned through commands and trigger events each tick:
     /// nothing allocates once the buffers have grown (the M4 exit, and the
@@ -996,6 +1381,105 @@ mod tests {
             assert!(stopped > 500, "{stopped} bodies were stopped");
             // The last frame ran two ticks.
             assert_eq!(app.world().resource::<crate::TickStats>().ticks, 2);
+        }
+    }
+
+    /// Animators by the thousand, a quarter of them on a clip that plays
+    /// once and that a frame system restarts when it ends, in frames of
+    /// fixed lengths, some with no tick and some with two.
+    #[cfg(feature = "dev")]
+    mod steady_animation {
+        use nadir_platform::{AllocCounts, thread_alloc_counts};
+
+        use super::*;
+
+        /// How many animate.
+        const ANIMATORS: u32 = 10_000;
+        /// The frames of a pass: three of a third of a tick, then one of
+        /// two ticks, eight times, 400 ms in all.
+        const FRAMES: usize = 32;
+
+        /// Each animator as it starts a pass.
+        struct Start(Vec<(Entity, Animator)>);
+
+        /// The clips that ended in the counted frames.
+        #[derive(Default)]
+        struct Finished(usize);
+
+        /// Restarts each clip that ended, as a game replays an effect.
+        fn replay(world: &World, _: &Frame) {
+            let events = world.resource::<Events<AnimationFinished>>();
+            let mut animators = world.write::<Animator>();
+            for ended in events.frame_events() {
+                if let Some(animator) = animators.get_mut(ended.entity) {
+                    animator.restart();
+                }
+            }
+            world.resource_mut::<Finished>().0 += events.frame_events().len();
+        }
+
+        fn scene() -> App {
+            let mut app = app().insert_resource(Finished::default()).add_frame_system(
+                FrameStage::Animate,
+                "replay",
+                replay,
+            );
+            // Longer than a tick: between two ends of these clips a tick
+            // clears the events' tick buffer, which frame sends fill too.
+            let once = add_clip(&app, &[20, 20], Playback::Once);
+            let walk = add_clip(&app, &[100, 100, 100, 100], Playback::Loop);
+            let ways = [Facing::Down, Facing::Up, Facing::Left, Facing::Right];
+            let world = app.world_mut();
+            let mut start = Vec::with_capacity(ANIMATORS as usize);
+            for index in 0..ANIMATORS {
+                let animator = if index % 4 == 0 {
+                    Animator::new(once)
+                } else {
+                    Animator::starting_at(walk, MS * index)
+                };
+                let entity = world
+                    .spawn()
+                    .with(at(index as f32, 0.0))
+                    .with(Sprite::new(texture(), Vec2::ONE))
+                    .with(animator)
+                    .with(ways[index as usize % 4])
+                    .id();
+                start.push((entity, animator));
+            }
+            app.insert_resource(Start(start))
+        }
+
+        /// Runs a pass from the start and returns what it allocated.
+        fn pass(app: &mut App) -> AllocCounts {
+            {
+                let world = app.world();
+                let start = world.resource::<Start>();
+                let mut animators = world.write::<Animator>();
+                for &(entity, animator) in &start.0 {
+                    *animators.get_mut(entity).expect("an animator") = animator;
+                }
+                world.resource_mut::<Finished>().0 = 0;
+            }
+            let before = thread_alloc_counts();
+            for frame in 0..FRAMES {
+                let length = if frame % 4 == 3 { TICK * 2 } else { TICK / 3 };
+                app.update(length, &[]);
+            }
+            thread_alloc_counts().since(before)
+        }
+
+        #[test]
+        fn a_steady_frame_of_10k_animators_allocates_nothing() {
+            let mut app = scene();
+            assert_ne!(pass(&mut app), AllocCounts::default(), "the first grows");
+            pass(&mut app);
+            let second = app.world().resource::<Finished>().0;
+            let third = pass(&mut app);
+            assert_eq!(third, AllocCounts::default(), "the steady pass allocated");
+            // Each of the 2,500 clips of 40 ms ended in each 50 ms of
+            // frames, in the frame of two ticks, and was restarted.
+            let finished = app.world().resource::<Finished>().0;
+            assert_eq!((finished, second), (2_500 * 8, 2_500 * 8));
         }
     }
 }

@@ -62,6 +62,13 @@
       "p95_ns": 6434491.5,
       "samples": 50,
       "iterations": 2
+    },
+    {
+      "name": "facade_frame_10k",
+      "median_ns": 296316.74242424243,
+      "p95_ns": 305308.57575757575,
+      "samples": 50,
+      "iterations": 33
     }
   ]
 }

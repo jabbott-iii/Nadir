@@ -3,8 +3,9 @@
 //! A person walks a field, a map of tiles built by hand (`map.rs`): grass,
 //! paths, flowers and rippling water, walled in stone, with tall walls,
 //! trees and rocks to walk behind and in front of. They are moved with WASD
-//! or the arrow keys, collide with the walls, the water, the trees and the
-//! rocks, and the camera follows them. Once a second it logs how fast the
+//! or the arrow keys, walk in a cycle of four frames facing the way they
+//! go, collide with the walls, the water, the trees and the rocks, and the
+//! camera follows them. Once a second it logs how fast the
 //! simulation ticks and the frames come, how long the ticks take, and what
 //! was drawn; with the `dev` feature, also how often the frames allocated.
 //! Close the window to quit.
@@ -126,6 +127,37 @@ const SPEED: f32 = 120.0;
 /// Where the person starts: where their feet are.
 const PLAYER_START: Vec2 = Vec2::new(240.0, 160.0);
 
+/// How long each frame of a walk shows: the four frames take 400 ms.
+const STEP: Duration = Duration::from_millis(100);
+
+/// Frame `index` of `sprites/person.qoi`: five frames of 12 × 20 pixels
+/// in a row, standing, then four of a walk.
+fn person_frame(index: u32) -> Rect {
+    let left = index as f32 / 5.0;
+    Rect::new(Vec2::new(left, 0.0), Vec2::new(left + 0.2, 1.0))
+}
+
+/// The clips of a person: standing, and walking. `move_player` plays them,
+/// and each scene makes them from the texture it draws people from.
+struct Gait {
+    stand: Handle<Clip>,
+    walk: Handle<Clip>,
+}
+
+impl Gait {
+    /// A person in `texture`: standing in the region `stand`, and walking
+    /// through the four regions `walk`, each for [`STEP`]. Adds the clips
+    /// to the app's [`Clips`].
+    fn new(app: &App, texture: Handle<Texture>, stand: Rect, walk: [Rect; 4]) -> Self {
+        let frame = |uv| ClipFrame::new(texture, uv, STEP);
+        let mut clips = app.world().resource_mut::<Clips>();
+        Self {
+            stand: clips.add(Clip::new(vec![frame(stand)], Playback::Loop)),
+            walk: clips.add(Clip::new(walk.map(frame).to_vec(), Playback::Loop)),
+        }
+    }
+}
+
 /// The textures.
 struct Sprites {
     person: Handle<Texture>,
@@ -230,6 +262,8 @@ fn at_feet(half: Vec2, layer: LayerMask, mask: LayerMask) -> Collider {
 /// The field: the map's ground and grid, its tall walls, trees and rocks,
 /// then the person, and the camera on them.
 fn field(mut app: App, sprites: &Sprites) -> App {
+    let walk = [1, 2, 3, 4].map(person_frame);
+    let gait = Gait::new(&app, sprites.person, person_frame(0), walk);
     let set = map::tile_set(sprites.tiles);
     let map = map::build(set);
     let world = app.world_mut();
@@ -262,7 +296,7 @@ fn field(mut app: App, sprites: &Sprites) -> App {
     }
     let mut person = Sprite::new(sprites.person, Vec2::new(12.0, 20.0));
     person.layer = 1;
-    let player = spawn_player(world, person);
+    let player = spawn_player(world, person, &gait);
     world.write::<Collider>().insert(
         player,
         at_feet(Vec2::new(5.0, 3.0), map::PEOPLE, map::WORLD),
@@ -273,35 +307,55 @@ fn field(mut app: App, sprites: &Sprites) -> App {
         tiles,
         outside: Color::rgb(84, 84, 96),
     })
+    .insert_resource(gait)
     .add_frame_system(FrameStage::Camera, "follow_camera", follow_camera)
     .add_frame_system(FrameStage::Extract, "draw_tiles", draw_tiles)
 }
 
-/// The person, at [`PLAYER_START`], drawn as `sprite`.
-fn spawn_player(world: &mut World, sprite: Sprite) -> Entity {
+/// The person, at [`PLAYER_START`], drawn as `sprite`, standing as `gait`
+/// stands, facing right.
+fn spawn_player(world: &mut World, sprite: Sprite, gait: &Gait) -> Entity {
     world
         .spawn()
         .with(Player)
         .with(Transform::at(PLAYER_START))
         .with(Velocity::default())
         .with(sprite)
+        .with(Animator::new(gait.stand))
+        .with(Facing::Right)
         .id()
 }
 
-/// Walks the person by the `Move` action, and faces them the way they go.
+/// Walks the person by the `Move` action, faces them the way they go, and
+/// plays their walk while they go, or has them stand.
 fn move_player(world: &World, _tick: &Tick) {
     let direction = world.resource::<ActionState<Act>>().axis2(Act::Move);
+    let gait = world.resource::<Gait>();
     let players = world.read::<Player>();
     let mut velocities = world.write::<Velocity>();
-    let mut sprites = world.write::<Sprite>();
+    let mut facings = world.write::<Facing>();
+    let mut animators = world.write::<Animator>();
     for (player, _) in players.iter() {
         if let Some(velocity) = velocities.get_mut(player) {
             velocity.0 = direction * SPEED;
         }
+        // The art is drawn from the side: going up or down, they keep the
+        // way they faced.
         if direction.x != 0.0
-            && let Some(sprite) = sprites.get_mut(player)
+            && let Some(facing) = facings.get_mut(player)
         {
-            sprite.flip.x = direction.x < 0.0;
+            *facing = if direction.x < 0.0 {
+                Facing::Left
+            } else {
+                Facing::Right
+            };
+        }
+        if let Some(animator) = animators.get_mut(player) {
+            animator.play(if direction == Vec2::ZERO {
+                gait.stand
+            } else {
+                gait.walk
+            });
         }
     }
 }
@@ -606,6 +660,7 @@ mod tests {
                 "tick  PostMovement: nadir::parent_offsets",
                 "tick  PostMovement: nadir::triggers",
                 "tick  Cleanup: count_ticks",
+                "frame Animate: nadir::animate",
                 "frame Camera: follow_camera",
                 "frame Ui: report",
                 "frame Extract: nadir::extract_sprites",
@@ -618,6 +673,9 @@ mod tests {
     fn the_person_walks_two_pixels_a_tick_and_faces_the_way_they_go() {
         let mut app = sandbox();
         let player = player(&app);
+        // Standing, they face right, as the art is drawn.
+        let facing = app.world().read::<Facing>().get(player).copied();
+        assert_eq!(facing, Some(Facing::Right));
         let press = nadir::Event::Key {
             key: Key::A,
             pressed: true,
@@ -632,6 +690,56 @@ mod tests {
         // Held for another tick: two more pixels.
         app.update(TICK, &[]);
         assert_eq!(position(&app, player) - PLAYER_START, Vec2::new(-4.0, 0.0));
+        // Going up instead, they still face left: the art is drawn from the
+        // side.
+        let key = |key, pressed| nadir::Event::Key {
+            key,
+            pressed,
+            repeat: false,
+        };
+        app.update(TICK, &[key(Key::A, false), key(Key::W, true)]);
+        app.update(TICK, &[]);
+        assert_eq!(position(&app, player).x - PLAYER_START.x, -4.0);
+        let world = app.world();
+        assert_eq!(world.read::<Facing>().get(player), Some(&Facing::Left));
+        assert!(world.read::<Sprite>().get(player).expect("drawn").flip.x);
+    }
+
+    /// Where the last frame drew the person from in their sheet.
+    fn drawn_person(app: &App) -> Rect {
+        let person = app.world().resource::<Sprites>().person;
+        let out = app.world().resource::<RenderFrame>();
+        let drawn = out.sprites.iter().find(|sprite| sprite.texture == person);
+        drawn.expect("the person is drawn").uv
+    }
+
+    #[test]
+    fn the_person_walks_through_four_frames_while_they_go_and_stands_when_they_stop() {
+        let mut app = sandbox();
+        app.update(TICK, &[]);
+        assert_eq!(drawn_person(&app), person_frame(0));
+        let key = |pressed| nadir::Event::Key {
+            key: Key::D,
+            pressed,
+            repeat: false,
+        };
+        // 25 frames, a tick each, D held: 417 ms of a walk of four frames of
+        // 100 ms, in order and round again.
+        app.update(TICK, &[key(true)]);
+        let mut seen = vec![drawn_person(&app)];
+        for _ in 1..25 {
+            app.update(TICK, &[]);
+            seen.push(drawn_person(&app));
+        }
+        seen.dedup();
+        let walk = [1, 2, 3, 4, 1].map(person_frame);
+        assert_eq!(seen, walk);
+        // Let go: standing at once, the walk's next start from its first
+        // frame.
+        app.update(TICK, &[key(false)]);
+        assert_eq!(drawn_person(&app), person_frame(0));
+        app.update(TICK, &[key(true)]);
+        assert_eq!(drawn_person(&app), person_frame(1));
     }
 
     #[test]
@@ -653,6 +761,8 @@ mod tests {
         assert_eq!(drawn.len(), 1);
         assert_eq!(drawn[0].position, PLAYER_START);
         assert_eq!((drawn[0].layer, drawn[0].size), (1, Vec2::new(12.0, 20.0)));
+        // Standing, the first frame of the sheet.
+        assert_eq!(drawn[0].uv, person_frame(0));
         assert_eq!(out.camera.position, PLAYER_START);
         // The ground, under everything, and around it the stone's color.
         let ground = world.resource::<Ground>();
@@ -811,5 +921,25 @@ mod tests {
             assert!(bytes.starts_with(b"qoif"), "{name}");
         }
         assert!(app.world().resource::<AssetServer>().has_pending());
+    }
+
+    #[test]
+    fn the_person_sheet_is_five_frames_of_12_by_20_in_a_row() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/sprites/person.qoi"
+        ))
+        .expect("the person");
+        let size = |at: usize| {
+            u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
+        };
+        assert_eq!((size(4), size(8)), (60, 20));
+        for index in 0..5 {
+            let frame = person_frame(index);
+            let left = 12.0 * index as f32;
+            assert!((frame.min.x * 60.0 - left).abs() < 1e-3, "{frame:?}");
+            assert!((frame.max.x * 60.0 - left - 12.0).abs() < 1e-3, "{frame:?}");
+            assert_eq!((frame.min.y, frame.max.y), (0.0, 1.0));
+        }
     }
 }

@@ -1857,8 +1857,11 @@ by the batched sprite renderer.
     - nadir-bench: 45 tests.
   - Note: Windows and macOS were not run. The render GPU tests and the
     goldens skip there until M2.6 and M2.7 give them an OpenGL context.
+  - Note: CI run 21, for the M4.5 commit `ed35dfa`, passed on all three
+    systems, as the user reported; the session saw it on the public
+    Actions page. CodeQL run 2 passed on the same commit.
 
-- [ ] **M4.6 — animation**
+- [x] **M4.6 — animation**
   - Note (from M4.4): `Sprite` holds `uv` and `flip`. An `Animate` system
     writes them before `nadir::extract_sprites` (`Extract`) draws them. The
     sandbox faces the player in `move_player`, and its crowds by velocity.
@@ -1872,6 +1875,60 @@ by the batched sprite renderer.
   - Accept: unit tests for clip timing, looping and one-shot completion
     events.
   - Verify: `cargo test -p nadir`
+  - Note: decided by the user on 2026-10-28 (ADR-0024): clips in a store
+    in the facade, `Clips`; clip time from the simulation clock, the change
+    in `RenderFrame.time`; `Facing::Left` mirrors a sprite and the other
+    ways unmirror it; and the sandbox's people walk, with `Facing` in place
+    of its hand-written flips.
+  - Note: the design critique made 43 points, and 37 survived their
+    refuters. From them: `Clips` is the only source of `Handle<Clip>`;
+    `ClipFrame` is `#[non_exhaustive]`, for a trimmed frame's size and
+    pivot later; `Repeat` became `Playback`; `Animator::starting_at`
+    replaced four phase-shifted copies of the crowds' walk; frame-state
+    warnings on the getters and on `AnimationFinished`; and the event's
+    allocation test moved out of the real-time `steady_frames` test, where
+    a burst of finishes could fall in the counted frames or never come.
+  - Note: built:
+    - `crates/engine/src/animation.rs`: `Clip`, `ClipFrame`, `Playback`,
+      `Clips`, `Animator` (`new`, `starting_at`, `play`, `restart`) and
+      `AnimationFinished`; `Facing` beside the other components.
+    - `nadir::animate`, first in the frame stage `Animate`.
+    - The sandbox: `assets/sprites/person.qoi` is a sheet of 5 frames of
+      12 × 20 (standing, then a walk of 4), and the atlas is 128 × 64 with
+      the 4 walk frames. Each scene has a `Gait` of clips, which
+      `move_player` plays; the crowds start at their own points
+      (`stress::stagger`) and face by velocity.
+    - nadir-bench: `facade_frame_10k`.
+  - Note: measured on the i7-11800H, 2026-10-28:
+    - `facade_frame_10k`: 296 µs median for a 240 Hz frame of 10,000
+      animated sprites: animate and extract, and a tick's snapshot in about
+      one frame in four.
+    - The sandbox in release with `dev`, 13 s a scene, all at 60 frames a
+      second with no allocation:
+      - the field: a tick 0.02 ms;
+      - `stress-sprites`: 10,203 sprites in 2 batches, a tick 0.25 to
+        0.31 ms;
+      - `stress-entities`: 5,001 sprites in 1 batch, a tick 5.3 to 5.4 ms.
+        That is unchanged: animation runs in frames.
+  - Note: the code review made 34 points, all real at least in part,
+    mostly about docs and tests. Docs had wrong numbers and stale notes
+    (M5.6, M5.8, M7.6); tests were missing for a late animator, phase with
+    the tiles, an animator without a sprite, the person's sheet,
+    stress-entities' walk, and facing while going up. All were fixed but
+    one: pixel-checking the atlas regions in a test needs a QOI decoder the
+    sandbox may not depend on. A separate check confirmed each fix, and
+    found one more wrong sentence in ADR-0024, which was fixed.
+  - Note: 47 planted bugs, one at a time, in a copy of the tree, through
+    the facade (`dev`), sandbox (`dev`) and bench tests. 46 failed a test.
+    The one that survived, the player spawned facing down (drawn the same
+    as right), now fails one too.
+  - Note: tests:
+    - The facade: 69 unit tests (73 with `dev`), and 2 doc tests.
+    - The sandbox: 23 tests (24 with `dev`).
+    - nadir-bench: 47 tests.
+  - Note: the session did not look at the walks in a window. Windows and
+    macOS were not run: the facade's `steady_frames` test runs undrawn
+    there.
 
 - [ ] **M4.7 — determinism test infrastructure**
   - Note (from M4.4):
@@ -1879,9 +1936,10 @@ by the batched sprite renderer.
       `App::run`. A frame of `Duration::from_nanos(16_666_667)` runs one
       tick.
     - The `TypeRegistry` is a world resource. Of the engine's components,
-      `Transform`, `Velocity`, `Player` and `SaveId` are reflected;
-      `PrevTransform` follows from `Transform`; `Sprite`, `Collider` and
-      `Parent` are not (ADR-0022).
+      `Transform`, `Velocity`, `Player` and `SaveId` are reflected, and
+      `Facing` since M4.6; `PrevTransform` follows from `Transform`;
+      `Sprite`, `Collider` and `Parent` are not (ADR-0022), nor `Animator`
+      (ADR-0024).
     - Movers move in the `Collider` storage's order, which its insert and
       remove history fixes. `TickStats` and the profile drain read the
       clock; nothing in the simulation reads them.
@@ -1897,6 +1955,16 @@ by the batched sprite renderer.
     hash the tiles, not the revisions, if a layer must be hashed.
     `RenderFrame.time` follows the clock, and nothing in the simulation
     reads it.
+  - Note (from M4.6, ADR-0024):
+    - `Facing` is simulation state, set in ticks: hash it.
+    - An `Animator`'s time and finished flag, and the `Sprite` texture, uv
+      and flip that `nadir::animate` writes, are frame state: they move once
+      a frame, by however the ticks fell into frames. Leave them out of the
+      hash, and those Sprite fields once M5.6 reflects `Sprite`.
+    - Frame systems may spawn and despawn cosmetic entities, on
+      `AnimationFinished` say, at ticks that depend on frame timing: the
+      hash must leave such entities out, or games remove them by tick
+      count. The sandbox's clips all loop, and it spawns nothing in frames.
   - Depends: M4.4, M3.1
   - Note (from M3.1): `InputRecorder` and `InputPlayer` hold only the
     actions' states, tick after tick: no seed, no pointer, no wheel. Keep
@@ -1982,6 +2050,9 @@ by the batched sprite renderer.
       for yet.
     - The root directory is the only source so far: `AssetServer::new(root,
       ..)`.
+  - Note (from M4.6): the facade's `Clips` is outside the asset server and
+    its scopes, as `TileLayers` is: a level's clips must be removed with its
+    scope (ADR-0024).
   - Do: worker threads; decode on workers and finalize on main; load
     states; scopes (global/level/transient); `Source`, `LooseSource`; path
     normalization.
@@ -1998,6 +2069,15 @@ by the batched sprite renderer.
     `games/sandbox/src/map.rs`), is hand-made too. A `TileSet` must be a
     whole texture cut into equal tiles, with no padding (ADR-0023): pack
     tile sets as pages of their own, or revisit that ADR.
+  - Note (from M4.6): the person's walk is hand-made too:
+    `assets/sprites/person.qoi` (5 frames of 12 × 20 in a row, standing,
+    then 4 of a walk) and the atlas's 4 walk frames (`stress::WALK`). A
+    `ClipFrame` has no size or pivot of its own, so a trimmed frame would
+    be stretched to its Sprite's size (ADR-0024). Pack animation frames
+    untrimmed, or give `ClipFrame` (`#[non_exhaustive]` for this) a size
+    and pivot that `nadir::animate` writes. Then a flip must mirror about
+    the pivot: render's flip mirrors about the quad's centre, for every
+    sprite.
   - Depends: M5.1, M5.2, M2.4
   - Do: the `nadir-cook` library and CLI; the incremental cache; the
     PNG → trim → MaxRects atlas (padding + extrusion) → QOI pipeline;
@@ -2010,6 +2090,24 @@ by the batched sprite renderer.
     compare hashes
 
 - [ ] **M5.5 — cook: Aseprite animations, data, fonts**
+  - Note (from M4.6, ADR-0024):
+    - Clips are `nadir::Clip`s in the facade's `Clips`, the only source of
+      `Handle<Clip>`: a clip never becomes an asset of the asset server.
+    - nadir-cook cannot depend on the facade. The cooked KBJ holds, per
+      clip, a name, loop or once, and frames of an atlas page path, a
+      region and milliseconds (`assets-and-codecs.md`). A facade loader
+      resolves the pages with `AssetServer::load` and adds the clips to
+      `Clips` under their names: add a name index (`find`, `name`).
+    - It checks the data first: `Clip::new` panics on no frames or a frame
+      of zero. Add `Clip::try_new`, or check before.
+    - A tag's direction (forward, reverse, ping-pong) and repeat count
+      expand to the frames Aseprite plays: no count gives
+      `Playback::Loop`, and a count N the sequence N times, then
+      `Playback::Once`.
+    - The sandbox builds its clips in `Gait::new`
+      (`games/sandbox/src/main.rs`), from `person.qoi` and the atlas. Its
+      crowds start each walker at its own point with
+      `Animator::starting_at`, from one walk clip.
   - Depends: M5.4, M4.6
   - Do: the Aseprite `json-array` + tags importer → clips; JSONC → KBJ;
     BMFont → font asset.
@@ -2042,6 +2140,16 @@ by the batched sprite renderer.
       prefabs call "World" (the sandbox's `map::WORLD`).
     - A layer replaced in place on reload is drawn anew: revisions are
       unique to the process.
+  - Note (from M4.6, ADR-0024): reflect `Animator` by hand.
+    - It writes only its clip's name, looked up in the facade's `Clips`,
+      which `AssetServer::path` cannot see: `ReflectContext` needs a way to
+      reach `Clips` beside the asset server. scene.md's
+      `"clip": "anim/slime_idle"` is a clip's name, not a file's path.
+    - Its time and finished flag are transient.
+    - On an entity with an `Animator`, `Sprite`'s texture and uv are written
+      each frame by `nadir::animate`; on one with a `Facing`, its `flip.x`.
+      The other fields, and these on entities without the component, are
+      the game's.
   - Depends: M5.5, M4.5, M4.2
   - Do:
     - LDtk → `.klvl` (tile layers, IntGrid → collision, entities, tall
@@ -2067,6 +2175,12 @@ by the batched sprite renderer.
     `cargo xtask fuzz-smoke --target kpak --secs 300`
 
 - [ ] **M5.8 — hot reload**
+  - Note (from M4.6): `Clips` cannot replace a clip in place yet: add
+    `get_mut` or `replace`. An animator then goes on from its time on the
+    new clip: a looping one wraps it by the new duration, and a finished
+    `Once` one plays the rest of a longer clip, still finished, with no
+    second `AnimationFinished`. Decide then whether a finished one should
+    hold the new last frame (`Animator::advance`).
   - Depends: M5.6
   - Do: `xtask cook --watch`; the runtime mtime watcher; reloading
     textures, data, levels and shaders in dev.
@@ -2232,6 +2346,10 @@ by the batched sprite renderer.
     `FixedClock`'s ticks and `alpha` (`simulated_time` in
     `crates/engine/src/app.rs`). Pausing or scaling the clock pauses or
     scales the tiles; a pause that stops the ticks some other way does not.
+  - Note (from M4.6): sprite clips follow `RenderFrame.time` too
+    (ADR-0024): a frame of zero length holds every clip, and a step of the
+    clock steps them. Such a frame sends `AnimationFinished` only for a
+    `Once` animator started at or past its end.
   - Depends: M7.2, M4.3
   - Do: the F4 overlays and the F5–F7 time controls.
   - Accept: manual check on the sandbox.
@@ -2345,6 +2463,11 @@ by the batched sprite renderer.
       too large for an `i64` are written as strings.
   - Note (from M4.4): `SaveId` is a facade component, reflected as an
     integer. The world-level counter that assigns them is not built.
+  - Note (from M4.6): `Facing` is reflected: save it, and the flip follows
+    from it. An `Animator` is not, and its time is transient: rebuild a
+    held pose from gameplay state. A `Once` clip started at its end with
+    `Animator::starting_at` holds its last frame, but sends
+    `AnimationFinished` on its first frame.
   - Depends: M4.2, M9.1
   - Do: the `.ksav` format; atomic write with `.bak`; CRC; migration
     scaffolding with a v1 fixture; fuzz target.

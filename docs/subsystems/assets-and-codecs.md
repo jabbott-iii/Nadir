@@ -297,7 +297,7 @@ string table (optional, dev builds and debugging): path strings in TOC order
 | Source | Pipeline | Output |
 | :- | :- | :- |
 | `*.png` (+ optional `*.sprite.jsonc` sidecar: pivot, slicing) | Decode → trim → atlas pack → QOI | Atlas pages `atlas/<group>_<n>.qoi` + `atlas/<group>.kbj` (regions) |
-| Aseprite export (`aseprite -b in.aseprite --sheet out.png --data out.json --format json-array --list-tags`) | Parse frames and tags → animation clips → join the atlas group | Clips in `anim/<name>.kbj` |
+| Aseprite export (`aseprite -b in.aseprite --sheet out.png --data out.json --format json-array --list-tags`) | Parse frames and tags → animation clips → join the atlas group. Per clip: a name, loop or once, and frames of an atlas page path, a region and milliseconds; a tag's direction and repeat count expand to the frames Aseprite plays. The facade's loader turns them into `Clip`s with texture handles, in its `Clips` (ADR-0024) | Clips in `anim/<name>.kbj` |
 | `*.ldtk` (LDtk project, optionally with external level files) | Tile layers → chunked tile data; IntGrid → collision grid; entities → prefab references + field overrides; tall tiles → sprite list | `levels/<name>.klvl` (KBJ-based) |
 | `*.wav` | Resample policy from the sidecar; long or music → QOA, short SFX → PCM16 | `.qoa` / `.kpcm` |
 | `*.fnt` + pages (BMFont text) | Parse, pack pages into the atlas | `fonts/<name>.kbj` + atlas regions |

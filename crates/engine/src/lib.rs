@@ -8,7 +8,9 @@
 //! its systems run in stages (`docs/subsystems/ecs.md`). The engine's own
 //! components ([`Transform`], [`Velocity`], [`Sprite`], [`Collider`]...)
 //! and systems interpolate, move and collide entities, send trigger
-//! events, and draw sprites (ADR-0022). The game's tile layers are the
+//! events, and draw sprites (ADR-0022). An [`Animator`] plays a [`Clip`]
+//! from [`Clips`] on its entity's sprite, and [`Facing`] mirrors it
+//! (ADR-0024). The game's tile layers are the
 //! resource [`TileLayers`](nadir_render::TileLayers), which the renderer
 //! draws from (ADR-0023). With the `dev` feature, the global
 //! allocator counts allocations, and the resource `FrameAllocs` holds the
@@ -28,6 +30,7 @@
 //! }
 //! ```
 
+mod animation;
 mod app;
 mod collisions;
 mod components;
@@ -48,10 +51,11 @@ pub use {
     nadir_render as render, nadir_scene as scene,
 };
 
+pub use animation::{AnimationFinished, Animator, Clip, ClipFrame, Clips, Playback};
 pub use app::{App, Config, TICK_HZ};
 pub use collisions::{Collisions, TriggerEnter, TriggerExit};
 pub use components::{
-    Collider, Parent, Player, PrevTransform, SaveId, Sprite, Transform, Velocity,
+    Collider, Facing, Parent, Player, PrevTransform, SaveId, Sprite, Transform, Velocity,
 };
 pub use error::Error;
 #[cfg(feature = "dev")]
@@ -74,7 +78,8 @@ pub mod prelude {
     };
 
     pub use crate::{
-        App, Collider, Collisions, Config, Parent, Player, PrevTransform, SaveId, Sprite,
-        TickStats, Transform, TriggerEnter, TriggerExit, Velocity,
+        AnimationFinished, Animator, App, Clip, ClipFrame, Clips, Collider, Collisions, Config,
+        Facing, Parent, Playback, Player, PrevTransform, SaveId, Sprite, TickStats, Transform,
+        TriggerEnter, TriggerExit, Velocity,
     };
 }

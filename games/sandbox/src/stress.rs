@@ -9,14 +9,18 @@
 //! one atlas texture, so that the 10,203 sprites are 2 batches: the grass,
 //! and the rest. The camera stays on the view's centre, and the crowd
 //! inside the view. Each walker is an entity, which the engine moves by
-//! its velocity. The player is tinted yellow and drawn over the crowd, one
+//! its velocity and animates: a walk of four frames from the atlas, each
+//! walker at its own point in it, facing the way it goes. The player is
+//! tinted yellow and drawn over the crowd, one
 //! layer up, to be found in it: the crowd covers each spot about 20 deep.
 //! They walk with WASD inside the view, which stays put, and stop at its
 //! edges.
 
+use std::time::Duration;
+
 use nadir::prelude::*;
 
-use crate::{Prop, Sprites, spawn_player};
+use crate::{Gait, Prop, STEP, Sprites, spawn_player};
 
 /// How many people walk about.
 pub(crate) const CROWD: usize = 10_000;
@@ -38,23 +42,31 @@ const PROPS: [(Prop, i32, i32); 10] = [
 /// The view, which the crowd stays inside.
 const VIEW: Vec2 = Vec2::new(480.0, 270.0);
 
-/// The atlas: `assets/sprites/atlas.qoi`, 64 pixels square.
+/// The atlas: `assets/sprites/atlas.qoi`, 128 × 64 pixels.
 pub(crate) const ATLAS: &str = "sprites/atlas.qoi";
-const ATLAS_SIZE: f32 = 64.0;
+const ATLAS_SIZE: Vec2 = Vec2::new(128.0, 64.0);
 
 /// A region of the atlas, from pixels to its normalized `uv`.
 const fn region(x: f32, y: f32, width: f32, height: f32) -> Rect {
     Rect::new(
-        Vec2::new(x / ATLAS_SIZE, y / ATLAS_SIZE),
-        Vec2::new((x + width) / ATLAS_SIZE, (y + height) / ATLAS_SIZE),
+        Vec2::new(x / ATLAS_SIZE.x, y / ATLAS_SIZE.y),
+        Vec2::new((x + width) / ATLAS_SIZE.x, (y + height) / ATLAS_SIZE.y),
     )
 }
 
-/// Where the person, the tree and the rock are in the atlas. Each has a
-/// transparent pixel around it.
+/// Where the person standing, the tree and the rock are in the atlas. Each
+/// has a transparent pixel around it.
 pub(crate) const PERSON: Rect = region(1.0, 1.0, 12.0, 20.0);
 const TREE: Rect = region(18.0, 1.0, 24.0, 48.0);
 const ROCK: Rect = region(1.0, 22.0, 16.0, 12.0);
+
+/// The four frames of the person's walk in the atlas, in a row, apart.
+pub(crate) const WALK: [Rect; 4] = [
+    region(65.0, 1.0, 12.0, 20.0),
+    region(78.0, 1.0, 12.0, 20.0),
+    region(91.0, 1.0, 12.0, 20.0),
+    region(104.0, 1.0, 12.0, 20.0),
+];
 
 /// A person's size, in pixels.
 pub(crate) const PERSON_SIZE: Vec2 = Vec2::new(12.0, 20.0);
@@ -80,6 +92,7 @@ pub(crate) struct Pace(pub(crate) f32);
 pub(crate) fn add(app: App) -> App {
     let atlas = app.world().resource_mut::<AssetServer>().load(ATLAS);
     let mut app = app.register_component::<Walker>();
+    let gait = Gait::new(&app, atlas, PERSON, WALK);
     let world = app.world_mut();
     let sprite = |size: Vec2, uv: Rect| {
         let mut sprite = Sprite::new(atlas, size);
@@ -101,21 +114,23 @@ pub(crate) fn add(app: App) -> App {
         let velocity = heading(index, 0);
         let mut walker = sprite(PERSON_SIZE, PERSON);
         walker.color = tint(index);
-        walker.flip.x = velocity.x < 0.0;
         world
             .spawn()
             .with(Walker(index))
             .with(Transform::at(start(index)))
             .with(Velocity(velocity))
-            .with(walker);
+            .with(walker)
+            .with(Animator::starting_at(gait.walk, stagger(index)))
+            .with(facing(velocity));
     }
     // Last, and a layer up: the same atlas right after the crowd, so still
     // one batch with it.
     let mut person = sprite(PERSON_SIZE, PERSON);
     person.color = PLAYER_TINT;
     person.layer = 2;
-    spawn_player(world, person);
+    spawn_player(world, person, &gait);
     app.insert_resource(Pace(1.0))
+        .insert_resource(gait)
         .add_fixed_system(FixedStage::Gameplay, "turn_crowd", turn_crowd)
         .add_fixed_system(FixedStage::Movement, "bounce_crowd", bounce_crowd)
         .add_fixed_system(
@@ -166,6 +181,22 @@ fn tint(index: u32) -> Color {
     }
 }
 
+/// How far into the walk walker `index` starts, so that the crowd is not
+/// in step.
+pub(crate) fn stagger(index: u32) -> Duration {
+    (STEP * 4).mul_f32(unit(index, 70))
+}
+
+/// The way a walker going at `velocity` faces: the art is drawn from the
+/// side.
+pub(crate) fn facing(velocity: Vec2) -> Facing {
+    if velocity.x < 0.0 {
+        Facing::Left
+    } else {
+        Facing::Right
+    }
+}
+
 /// A velocity of 20 to 60 pixels a second in a direction chosen by
 /// `index` and `turn`.
 pub(crate) fn heading(index: u32, turn: u32) -> Vec2 {
@@ -208,7 +239,7 @@ fn bounce_crowd(world: &World, _tick: &Tick) {
     let walkers = world.read::<Walker>();
     let mut transforms = world.write::<Transform>();
     let mut velocities = world.write::<Velocity>();
-    let mut sprites = world.write::<Sprite>();
+    let mut facings = world.write::<Facing>();
     let half = PERSON_SIZE.x * 0.5;
     for (entity, _) in walkers.iter() {
         let (Some(transform), Some(velocity)) =
@@ -225,8 +256,8 @@ fn bounce_crowd(world: &World, _tick: &Tick) {
             velocity.0.y = -velocity.0.y;
             feet.y = feet.y.clamp(PERSON_SIZE.y, VIEW.y);
         }
-        if let Some(sprite) = sprites.get_mut(entity) {
-            sprite.flip.x = velocity.0.x < 0.0;
+        if let Some(way) = facings.get_mut(entity) {
+            *way = facing(velocity.0);
         }
     }
 }
@@ -269,6 +300,12 @@ mod tests {
             .get(player(&app))
             .expect("drawn")
             .texture;
+        let assets = world.resource::<AssetServer>();
+        let loaded = assets.assets::<Texture>();
+        assert_eq!(
+            loaded.and_then(|textures| textures.handle(ATLAS)),
+            Some(atlas)
+        );
         let (grass, rest): (Vec<&SpriteDraw>, Vec<&SpriteDraw>) =
             out.sprites.iter().partition(|sprite| sprite.layer == 0);
         assert_eq!(grass.len(), 16 * 12);
@@ -280,7 +317,17 @@ mod tests {
         assert_eq!(over.len(), 1);
         assert_eq!(over[0].position, position(&app, player(&app)));
         assert_eq!(over[0].color, PLAYER_TINT);
+        assert_eq!(over[0].uv, PERSON, "the player stands");
         assert_eq!(out.camera.position, VIEW * 0.5);
+        // The crowd walks, out of step: every frame of the walk is drawn,
+        // each by about a quarter of the crowd. The rest are the props.
+        let mut frames = [0; 4];
+        for walker in crowd.iter().filter(|sprite| sprite.size == PERSON_SIZE) {
+            let frame = WALK.iter().position(|&uv| uv == walker.uv);
+            frames[frame.expect("a frame of the walk")] += 1;
+        }
+        assert_eq!(frames.iter().sum::<usize>(), CROWD);
+        assert!(frames.iter().all(|&n| n > CROWD / 5), "{frames:?}");
     }
 
     #[test]
@@ -349,8 +396,8 @@ mod tests {
         let size = |at: usize| {
             u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
         };
-        assert_eq!((size(4), size(8)), (64, 64));
-        let regions = [PERSON, TREE, ROCK];
+        assert_eq!((size(4), size(8)), (128, 64));
+        let regions = [PERSON, TREE, ROCK, WALK[0], WALK[1], WALK[2], WALK[3]];
         for (index, region) in regions.iter().enumerate() {
             assert!(region.min.x > 0.0 && region.min.y > 0.0, "{region:?}");
             assert!(region.max.x < 1.0 && region.max.y < 1.0, "{region:?}");

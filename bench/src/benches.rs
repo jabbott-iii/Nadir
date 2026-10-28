@@ -58,6 +58,10 @@ pub(crate) const ALL: &[Benchmark] = &[
         name: "facade_tick_5k",
         run: facade::tick,
     },
+    Benchmark {
+        name: "facade_frame_10k",
+        run: facade::frame,
+    },
 ];
 
 #[cfg(test)]

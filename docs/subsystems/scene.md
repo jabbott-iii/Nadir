@@ -26,6 +26,9 @@ nadir_scene::reflect_enum! {
 }
 ```
 
+(Since M4.6, `Facing` is the engine's own component, as here, which
+`nadir::animate` mirrors sprites by: ADR-0024.)
+
 Generated (built in M4.2; ADR-0020 records where this differs from the
 first sketch):
 
@@ -95,10 +98,11 @@ pub trait FromValue: Reflect + Sized {
   check walks prefab files and reports unknown component names.
 - **The engine's components** (the facade's, M4.4, ADR-0022):
   - reflected: `Transform` as `{"position": [x, y]}`, `Velocity` as
-    `[x, y]` in pixels a second, `Player` as `{}`, and `SaveId` as an
-    integer;
-  - not yet: `Sprite` (a `Handle`, M5.6), `Collider` (layer names, M5.6)
-    and `Parent` (an `Entity`, M9.4);
+    `[x, y]` in pixels a second, `Player` as `{}`, `SaveId` as an
+    integer, and `Facing` (M4.6) as its variant's name;
+  - not yet: `Sprite` (a `Handle`, M5.6), `Collider` (layer names, M5.6),
+    `Animator` (a `Handle<Clip>` from the facade's `Clips`, M5.6,
+    ADR-0024) and `Parent` (an `Entity`, M9.4);
   - never in data: `PrevTransform`, which the engine gives every drawn
     entity.
 

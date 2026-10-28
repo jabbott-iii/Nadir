@@ -1062,3 +1062,116 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** a tile set is cooked into a shared atlas page, or
   carries LDtk padding or spacing (M5.4, M5.6); a level's layers are too
   many to draw a layer at a time; or the asset server can hold layers.
+
+## ADR-0024 — Clips live in a store the facade owns; an Animator plays one in a frame stage on the simulation clock; Facing mirrors a sprite that faces left
+
+- **Status:** Accepted
+- **Date:** 2026-10-28
+- **Context:**
+  - M4.6 asks for the `Animator` component and clips, hand-defined until
+    M5, a frame-stage system, and a flip by `Facing`.
+  - `01-architecture.md` puts animation playback in frame stages. Events
+    sent there reach only frame readers: a tick clears its buffer before
+    fixed systems run (`ecs.md`).
+  - The asset server cannot hold an asset made in code (ADR-0023). M5.5
+    will import clips from Aseprite, and M5.6 names one in a prefab
+    (`"Animator": { "clip": "anim/slime_idle" }`). M5.4 trims frames in
+    the atlas.
+  - `RenderFrame.time` follows the `FixedClock` (ADR-0023). Animated tiles
+    pick their frame from it.
+  - The user decided four points on 2026-10-28: clips in a store in the
+    facade; clip time from the simulation clock; `Facing::Left` mirrors
+    and the other ways unmirror; and the sandbox's people walking, with
+    `Facing` in place of its hand-written flips. The design critique (37
+    of 43 findings survived their refuters) led to the rest.
+- **Decision:**
+  - **Clips:** the facade has `Clip`, `ClipFrame`, `Playback` and
+    `Clips`.
+    - A `ClipFrame` is a region of a texture shown for a `Duration`. It is
+      `#[non_exhaustive]` and made with `ClipFrame::new`, so that a trimmed
+      frame's size and pivot can be added later.
+    - A `Clip` is frames in order, and `Playback::Loop` or
+      `Playback::Once`. `Clip::new` panics on no frames, a frame of zero,
+      or frames longer than a `Duration` holds in all.
+    - `Clip::frame_at(elapsed)` gives the frame shown at a time:
+      half-open frames, wrapped by the duration for `Loop`, and the last
+      from the end on for `Once`.
+    - `Clips` is a generational store handing out `Handle<Clip>`, a
+      resource that `App::new` adds. It is the only source of
+      `Handle<Clip>`: a clip is never an asset of the asset server too,
+      whose handles index another arena.
+  - **Animator:** a component of a clip handle, a time into the clip, and
+    whether a `Once` clip finished. `new`, `starting_at(clip, elapsed)`,
+    `play(clip)` (which goes on if the clip is already playing) and
+    `restart()`.
+  - **`nadir::animate`**, first in the frame stage `Animate`:
+    - Each frame it advances every animator by the change in
+      `RenderFrame.time` since the last frame. So clips slow, stop and step
+      with the clock, as tiles do. An animator that starts is advanced on
+      its first frame by that frame's whole step.
+    - It writes the shown frame's texture and uv into the entity's
+      `Sprite`. An animator whose clip left `Clips` stays as it is, after
+      one warning.
+    - It sends `AnimationFinished { entity, clip }` once, on the step at
+      which a `Once` clip reaches its end. It is sent again only after
+      `restart`, or after `play` of another clip.
+    - Then it sets `flip.x` of the Sprite of every entity with a `Facing`:
+      true for `Left`, false otherwise. It leaves `flip.y` alone.
+  - **Facing:** a reflected unit enum, `Down` (the default), `Up`, `Left`
+    or `Right`. It is registered by `App::new`: simulation state, set in
+    fixed systems. An entity with no `Facing` keeps the flip its game
+    gives it.
+  - **Frame state:** an animator's time and finished flag, and the
+    texture, uv and flip that `nadir::animate` writes, move once a frame.
+    Fixed systems may call `play` and `restart`, but must not decide
+    gameplay by them.
+  - **Crates:** the facade, the sandbox and nadir-bench.
+    - The sandbox's people stand or walk four frames from a new sheet
+      (`person.qoi`, 60 × 20) and the atlas, now 128 × 64.
+    - nadir-bench adds `facade_frame_10k`.
+- **Consequences:**
+  - Steady frames allocate nothing: the real-loop `steady_frames` test
+    animates its 10,000 walkers, and `steady_animation` sends and replays
+    2,500 finishes a cycle in frames of fixed lengths.
+  - A frame-stage send also fills the event's tick buffer until the next
+    tick. Its peak is the finishes of the step of the last frame that ran
+    a tick, and of the frames without a tick after it: less than a tick
+    plus that step. That is up to two ticks' worth at 60 frames a second
+    (a frame that straddles a tick runs none or two), and up to 250 ms and
+    a tick of clips after a hitch.
+  - After a hitch (a frame counts for at most 250 ms), early frames of a
+    clip can be skipped, and a `Once` clip no longer than the step ends on
+    its first frame.
+  - An animator's phase counts from the frame that first sees it.
+    `Animator::starting_at(clip, RenderFrame.time)` keeps a looping clip
+    in step with tiles of the same frame lengths, to the millisecond
+    their time is rounded to.
+  - Readers of `AnimationFinished` run in frames. A spawn or despawn they
+    make lands at a tick that depends on frame timing, so the world hash
+    (M4.7) must leave such cosmetic entities out, or games time them in
+    ticks.
+  - `Animator` is not reflected: its clip is a handle (M5.6). Its time is
+    transient: saves rebuild it (`scene.md`).
+  - `Facing` mirrors only its own entity's Sprite, about the quad's centre
+    (render's flip): a `Parent`'s child needs its own `Facing`, and its
+    offset is not mirrored.
+- **Alternatives considered:**
+  - Clips as assets, through a new `AssetServer::add`: a second crate now,
+    and `Clip` would need an `Asset` impl that cannot decode until M5.5.
+  - `&'static [ClipFrame]` clips: no store, but M5.5 could not load clips
+    without breaking the API.
+  - Advancing by `Frame::dt`: clips would keep playing while the
+    simulation is paused, out of step with the tiles.
+  - Advancing a new animator by zero on its first frame: frame 0 always
+    shows, but every clip then lags the clock by a frame, and
+    `starting_at` could not match the tiles.
+  - Up and Down keeping the last flip: side-only art works with no game
+    code, but the flip would depend on history, and asymmetric up and down
+    art could come out mirrored.
+  - Four phase-shifted copies of a walk clip for the crowds: three clips
+    with nothing new in them, which an Aseprite export (M5.5) would not
+    have.
+- **Revisit when:** a clip's frames are trimmed in the atlas (per-frame
+  size and pivot, and mirroring about the pivot, M5.4 and M5.5); a game
+  needs held items that follow their root's `Facing`; or the asset server
+  can hold assets made in code.

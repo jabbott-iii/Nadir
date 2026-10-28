@@ -51,6 +51,10 @@ nadir_scene::reflect_newtype! {
 ///
 /// It holds what [`SpriteDraw`] holds but the position. It is not reflected
 /// until prefabs bring the `Handle` encoding (roadmap M5.6, ADR-0020).
+///
+/// On an entity with an [`Animator`](crate::Animator), the system
+/// `nadir::animate` writes its `texture` and `uv` each frame; on one with a
+/// [`Facing`], its `flip.x`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sprite {
     /// The texture, usually an atlas page.
@@ -150,6 +154,28 @@ nadir_scene::reflect_struct! {
     pub struct Player;
 }
 
+nadir_scene::reflect_enum! {
+    /// Which way an entity faces. Art is drawn facing right: the system
+    /// `nadir::animate` mirrors the [`Sprite`] of an entity that faces left
+    /// (`flip.x`), and unmirrors it whichever other way it faces. Only the
+    /// entity's own Sprite: a [`Parent`]'s children need their own.
+    ///
+    /// It is simulation state, reflected: set it in fixed systems. Set in a
+    /// frame system, it mirrors the Sprite from the next frame.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub enum Facing {
+        /// Toward +Y, down the screen.
+        #[default]
+        Down,
+        /// Toward −Y, up the screen.
+        Up,
+        /// Toward −X: the Sprite is mirrored.
+        Left,
+        /// Toward +X, as the art is drawn.
+        Right,
+    }
+}
+
 /// Puts an entity at another's position plus `offset`: the system
 /// `nadir::parent_offsets` writes its [`Transform`] after each tick's
 /// movement, and frames draw it at its parent's drawn position plus the
@@ -185,5 +211,6 @@ impl Component for Velocity {}
 impl Component for Sprite {}
 impl Component for Collider {}
 impl Component for Player {}
+impl Component for Facing {}
 impl Component for Parent {}
 impl Component for SaveId {}

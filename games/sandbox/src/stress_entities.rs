@@ -8,16 +8,18 @@
 //! a wall all round. Each person collides at their feet, turns now and
 //! then, and walks 1 to 3 pixels a tick; a tenth of them are triggers,
 //! which walk through the others and notice them. The people are drawn from
-//! the atlas, in 1 batch, and the walls are a tile layer of stone, drawn a
+//! the atlas, in 1 batch, walking as in `stress-sprites`, and the walls are
+//! a tile layer of stone, drawn a
 //! chunk at a time: the 4 chunks or fewer of 32 × 32 tiles in view. The
 //! camera follows the player, tinted yellow, who walks through everything.
 
 use nadir::prelude::*;
 
 use crate::stress::{
-    ATLAS, PERSON, PERSON_SIZE, PLAYER_TINT, Pace, Walker, heading, turn_crowd, unit,
+    ATLAS, PERSON, PERSON_SIZE, PLAYER_TINT, Pace, WALK, Walker, facing, heading, stagger,
+    turn_crowd, unit,
 };
-use crate::{Ground, map, spawn_player};
+use crate::{Gait, Ground, map, spawn_player};
 
 /// How many people jostle.
 pub(crate) const BODIES: usize = 5_000;
@@ -34,6 +36,7 @@ const PACE: f32 = 3.0;
 pub(crate) fn add(app: App, tiles: Handle<Texture>) -> App {
     let atlas = app.world().resource_mut::<AssetServer>().load(ATLAS);
     let mut app = app.register_component::<Walker>();
+    let gait = Gait::new(&app, atlas, PERSON, WALK);
     let (grid, open) = maze();
     let walls = walls(&grid, map::tile_set(tiles));
     let world = app.world_mut();
@@ -61,23 +64,25 @@ pub(crate) fn add(app: App, tiles: Handle<Texture>) -> App {
         let mut sprite = Sprite::new(atlas, PERSON_SIZE);
         sprite.uv = PERSON;
         sprite.layer = 1;
-        sprite.flip.x = velocity.x < 0.0;
         world
             .spawn()
             .with(Walker(index))
             .with(Transform::at(feet))
             .with(Velocity(velocity))
             .with(collider)
-            .with(sprite);
+            .with(sprite)
+            .with(Animator::starting_at(gait.walk, stagger(index)))
+            .with(facing(velocity));
     }
     let mut person = Sprite::new(atlas, PERSON_SIZE);
     person.uv = PERSON;
     person.layer = 1;
     person.color = PLAYER_TINT;
-    spawn_player(world, person);
+    spawn_player(world, person, &gait);
     world.resource_mut::<Collisions>().set_grid(grid);
     let walls = world.resource_mut::<TileLayers>().add(walls);
     app.insert_resource(Pace(PACE))
+        .insert_resource(gait)
         .insert_resource(Ground {
             tiles: walls,
             outside: Color::rgb(70, 60, 50),
@@ -128,10 +133,10 @@ fn maze() -> (TileGrid, Vec<IVec2>) {
 fn face_crowd(world: &World, _tick: &Tick) {
     let walkers = world.read::<Walker>();
     let velocities = world.read::<Velocity>();
-    let mut sprites = world.write::<Sprite>();
+    let mut facings = world.write::<Facing>();
     for (entity, _) in walkers.iter() {
-        if let (Some(velocity), Some(sprite)) = (velocities.get(entity), sprites.get_mut(entity)) {
-            sprite.flip.x = velocity.0.x < 0.0;
+        if let (Some(velocity), Some(way)) = (velocities.get(entity), facings.get_mut(entity)) {
+            *way = facing(velocity.0);
         }
     }
 }
@@ -178,6 +183,27 @@ mod tests {
         let stats = *world.resource::<TickStats>();
         assert_eq!(stats.ticks, 1);
         assert_eq!(world.resource::<Collisions>().world().len(), BODIES);
+    }
+
+    #[test]
+    fn the_people_walk_out_of_step_and_face_the_way_they_go() {
+        let mut app = scene(Scene::StressEntities);
+        for _ in 0..30 {
+            app.update(TICK, &[]);
+        }
+        let world = app.world();
+        let walkers = world.read::<Walker>();
+        let velocities = world.read::<Velocity>();
+        let sprites = world.read::<Sprite>();
+        let mut frames = [0; 4];
+        for (entity, _) in walkers.iter() {
+            let sprite = sprites.get(entity).expect("drawn");
+            let frame = WALK.iter().position(|&uv| uv == sprite.uv);
+            frames[frame.expect("a frame of the walk")] += 1;
+            let velocity = velocities.get(entity).expect("one").0;
+            assert_eq!(sprite.flip.x, velocity.x < 0.0, "{entity:?}");
+        }
+        assert!(frames.iter().all(|&n| n > BODIES / 5), "{frames:?}");
     }
 
     #[test]
