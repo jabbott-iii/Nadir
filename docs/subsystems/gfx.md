@@ -251,10 +251,12 @@ pub struct ShaderSource<'a> {
   uniform blocks with sizes, texture slots. Both sources must agree with it.
   A parity test parses the GLSL `layout(location = N) in` lines and the MSL
   `[[attribute(N)]]` annotations and checks both against the constant.
-- As built (M3.3), `sprite` and `blit` exist, in `crates/render`. Render's
-  parity test checks each `layout(location = N) in` line of their GLSL
-  against the interface constant, and that each uniform block and sampler
-  is declared. MSL comes with M10.3.
+- As built (M3.3), `sprite` and `blit` exist, in `crates/render`, and
+  since M4.5 `tile_chunk` (ADR-0023), whose `TileLayer` uniform block has
+  a `uvec4` that Rust fills as `u32`s. Render's parity test checks each
+  `layout(location = N) in` line of their GLSL against the interface
+  constant, and that each uniform block and sampler is declared. MSL comes
+  with M10.3.
 - Expected programs:
   - `sprite` (instanced quads)
   - `tile_chunk`

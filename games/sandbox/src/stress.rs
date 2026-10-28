@@ -1,7 +1,9 @@
-//! The stress scene, `--scene stress-sprites`: the field with 10,000 more
-//! people walking about in view, for the budget of 10,000 sprites on
-//! screen at 60 frames a second, in at most 30 draw calls, with no
-//! allocation in a frame (`docs/00-overview.md`, roadmap M3).
+//! The stress scene, `--scene stress-sprites`: 10,000 people walking about
+//! in view, on a lawn of grass sprites with ten trees and rocks (the field
+//! as it was before its map of tiles, kept so that the scene measures
+//! sprites alone), for the budget of 10,000 sprites on screen at 60 frames
+//! a second, in at most 30 draw calls, with no allocation in a frame
+//! (`docs/00-overview.md`, roadmap M3).
 //!
 //! Everything that stands on the grass, the player included, is drawn from
 //! one atlas texture, so that the 10,203 sprites are 2 batches: the grass,
@@ -14,10 +16,24 @@
 
 use nadir::prelude::*;
 
-use crate::{PROPS, Prop, spawn_player};
+use crate::{Prop, Sprites, spawn_player};
 
 /// How many people walk about.
 pub(crate) const CROWD: usize = 10_000;
+
+/// Where the trees and rocks stand: where their feet are.
+const PROPS: [(Prop, i32, i32); 10] = [
+    (Prop::Tree, 120, 120),
+    (Prop::Tree, 200, 90),
+    (Prop::Tree, 330, 140),
+    (Prop::Tree, 420, 230),
+    (Prop::Tree, 90, 260),
+    (Prop::Tree, 300, 300),
+    (Prop::Rock, 160, 200),
+    (Prop::Rock, 280, 220),
+    (Prop::Rock, 380, 110),
+    (Prop::Rock, 60, 170),
+];
 
 /// The view, which the crowd stays inside.
 const VIEW: Vec2 = Vec2::new(480.0, 270.0);
@@ -108,7 +124,24 @@ pub(crate) fn add(app: App) -> App {
             keep_player_in_view,
         )
         .add_frame_system(FrameStage::Camera, "fix_camera", fix_camera)
-        .add_frame_system(FrameStage::Extract, "draw_grass", crate::draw_grass)
+        .add_frame_system(FrameStage::Extract, "draw_grass", draw_grass)
+}
+
+/// The clear color, and grass in 32-pixel tiles over the view, under
+/// everything.
+fn draw_grass(world: &World, _frame: &Frame) {
+    let grass = world.resource::<Sprites>().grass;
+    let mut out = world.resource_mut::<RenderFrame>();
+    out.clear = Color::rgb(60, 90, 50);
+    for row in 0..12 {
+        for column in 0..16 {
+            let corner = Vec2::new(column as f32 * 32.0, row as f32 * 32.0);
+            let mut tile = SpriteDraw::new(grass, corner, Vec2::splat(32.0));
+            tile.pivot = Vec2::ZERO;
+            tile.sort = SortMode::Fixed(0);
+            out.sprites.push(tile);
+        }
+    }
 }
 
 /// Where walker `index` starts: somewhere in view.

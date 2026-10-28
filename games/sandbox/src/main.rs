@@ -1,17 +1,22 @@
 //! The sandbox game. It drives the Nadir engine's requirements.
 //!
-//! A person walks a field of grass among trees and rocks, moved with WASD
-//! or the arrow keys, and the camera follows them. Once a second it logs
-//! how fast the simulation ticks and the frames come, how long the ticks
-//! take, and what was drawn; with the `dev` feature, also how often the
-//! frames allocated. Close the window to quit.
+//! A person walks a field, a map of tiles built by hand (`map.rs`): grass,
+//! paths, flowers and rippling water, walled in stone, with tall walls,
+//! trees and rocks to walk behind and in front of. They are moved with WASD
+//! or the arrow keys, collide with the walls, the water, the trees and the
+//! rocks, and the camera follows them. Once a second it logs how fast the
+//! simulation ticks and the frames come, how long the ticks take, and what
+//! was drawn; with the `dev` feature, also how often the frames allocated.
+//! Close the window to quit.
 //!
 //! - `--fps N`: at most `N` frames a second; 0 for no limit (default 60)
 //! - `--no-vsync`: do not wait for the display's refresh
 //! - `--scene NAME`: `field` (the default); `stress-sprites`, where 10,000
-//!   more people walk about in view (`stress.rs`); or `stress-entities`,
-//!   where 5,000 people jostle in a maze of walls (`stress_entities.rs`)
+//!   people walk about in view on a lawn of grass sprites (`stress.rs`); or
+//!   `stress-entities`, where 5,000 people jostle in a maze of walls
+//!   (`stress_entities.rs`)
 
+mod map;
 mod stress;
 mod stress_entities;
 
@@ -65,7 +70,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 enum Scene {
     /// The person among trees and rocks.
     Field,
-    /// The field with 10,000 more people walking about in view.
+    /// 10,000 people walking about in view, on a lawn of grass sprites with
+    /// ten trees and rocks: the field as it was before its map of tiles.
     StressSprites,
     /// 5,000 people jostling in a maze of walls.
     StressEntities,
@@ -126,6 +132,8 @@ struct Sprites {
     tree: Handle<Texture>,
     rock: Handle<Texture>,
     grass: Handle<Texture>,
+    /// The tile set of the field and of the maze ([`map::TILE_SET`]).
+    tiles: Handle<Texture>,
 }
 
 /// A thing that does not move.
@@ -135,19 +143,12 @@ enum Prop {
     Rock,
 }
 
-/// Where the trees and rocks stand: where their feet are.
-const PROPS: [(Prop, i32, i32); 10] = [
-    (Prop::Tree, 120, 120),
-    (Prop::Tree, 200, 90),
-    (Prop::Tree, 330, 140),
-    (Prop::Tree, 420, 230),
-    (Prop::Tree, 90, 260),
-    (Prop::Tree, 300, 300),
-    (Prop::Rock, 160, 200),
-    (Prop::Rock, 280, 220),
-    (Prop::Rock, 380, 110),
-    (Prop::Rock, 60, 170),
-];
+/// The tile layer a scene draws, and its clear color, which shows outside
+/// it.
+struct Ground {
+    tiles: Handle<TileLayer>,
+    outside: Color,
+}
 
 /// What the once-a-second report counts.
 struct Report {
@@ -172,6 +173,7 @@ fn game(app: App, scene: Scene) -> Result<App, nadir::input::InputError> {
             tree: assets.load("sprites/tree.qoi"),
             rock: assets.load("sprites/rock.qoi"),
             grass: assets.load("sprites/grass.qoi"),
+            tiles: assets.load(map::TILE_SET),
         }
     };
 
@@ -209,30 +211,70 @@ fn game(app: App, scene: Scene) -> Result<App, nadir::input::InputError> {
     let app = match scene {
         Scene::Field => field(app, &sprites),
         Scene::StressSprites => stress::add(app),
-        Scene::StressEntities => stress_entities::add(app),
+        Scene::StressEntities => stress_entities::add(app, sprites.tiles),
     };
     Ok(app.insert_resource(sprites))
 }
 
-/// The field: trees and rocks, then the person, and the camera on them.
+/// A collider at the feet: a box of `half` half-extents, whose bottom edge
+/// is the entity's position, on `layer`, colliding with `mask`.
+fn at_feet(half: Vec2, layer: LayerMask, mask: LayerMask) -> Collider {
+    Collider(nadir::collision::Collider {
+        offset: Vec2::new(0.0, -half.y),
+        layer,
+        mask,
+        ..nadir::collision::Collider::solid(Shape::Aabb { half })
+    })
+}
+
+/// The field: the map's ground and grid, its tall walls, trees and rocks,
+/// then the person, and the camera on them.
 fn field(mut app: App, sprites: &Sprites) -> App {
+    let set = map::tile_set(sprites.tiles);
+    let map = map::build(set);
     let world = app.world_mut();
-    for &(kind, x, y) in &PROPS {
-        let mut sprite = match kind {
-            Prop::Tree => Sprite::new(sprites.tree, Vec2::new(24.0, 48.0)),
-            Prop::Rock => Sprite::new(sprites.rock, Vec2::new(16.0, 12.0)),
+    for &feet in &map.walls {
+        world
+            .spawn()
+            .with(Transform::at(feet))
+            .with(map::tall_wall(set));
+    }
+    // A trunk or a rock stops the person at its foot, so that they are
+    // drawn behind it when they walk into it from above, and in front of it
+    // from below.
+    for &(kind, feet) in &map.props {
+        let (mut sprite, half) = match kind {
+            Prop::Tree => (
+                Sprite::new(sprites.tree, Vec2::new(24.0, 48.0)),
+                Vec2::new(4.0, 3.0),
+            ),
+            Prop::Rock => (
+                Sprite::new(sprites.rock, Vec2::new(16.0, 12.0)),
+                Vec2::new(7.0, 4.0),
+            ),
         };
         sprite.layer = 1;
         world
             .spawn()
-            .with(Transform::at(Vec2::new(x as f32, y as f32)))
-            .with(sprite);
+            .with(Transform::at(feet))
+            .with(sprite)
+            .with(at_feet(half, map::WORLD, map::WORLD));
     }
     let mut person = Sprite::new(sprites.person, Vec2::new(12.0, 20.0));
     person.layer = 1;
-    spawn_player(world, person);
-    app.add_frame_system(FrameStage::Camera, "follow_camera", follow_camera)
-        .add_frame_system(FrameStage::Extract, "draw_grass", draw_grass)
+    let player = spawn_player(world, person);
+    world.write::<Collider>().insert(
+        player,
+        at_feet(Vec2::new(5.0, 3.0), map::PEOPLE, map::WORLD),
+    );
+    world.resource_mut::<Collisions>().set_grid(map.grid);
+    let tiles = world.resource_mut::<TileLayers>().add(map.ground);
+    app.insert_resource(Ground {
+        tiles,
+        outside: Color::rgb(84, 84, 96),
+    })
+    .add_frame_system(FrameStage::Camera, "follow_camera", follow_camera)
+    .add_frame_system(FrameStage::Extract, "draw_tiles", draw_tiles)
 }
 
 /// The person, at [`PLAYER_START`], drawn as `sprite`.
@@ -284,25 +326,12 @@ fn follow_camera(world: &World, frame: &Frame) {
     }
 }
 
-/// The grass, under everything.
-fn draw_grass(world: &World, _frame: &Frame) {
-    let grass = world.resource::<Sprites>().grass;
-    push_grass(&mut world.resource_mut::<RenderFrame>(), grass);
-}
-
-/// The clear color, and grass in 32-pixel tiles over the field, under
-/// everything.
-fn push_grass(out: &mut RenderFrame, grass: Handle<Texture>) {
-    out.clear = Color::rgb(60, 90, 50);
-    for row in 0..12 {
-        for column in 0..16 {
-            let corner = Vec2::new(column as f32 * 32.0, row as f32 * 32.0);
-            let mut tile = SpriteDraw::new(grass, corner, Vec2::splat(32.0));
-            tile.pivot = Vec2::ZERO;
-            tile.sort = SortMode::Fixed(0);
-            out.sprites.push(tile);
-        }
-    }
+/// The scene's tile layer, under everything, and its clear color around it.
+fn draw_tiles(world: &World, _frame: &Frame) {
+    let ground = world.resource::<Ground>();
+    let mut out = world.resource_mut::<RenderFrame>();
+    out.clear = ground.outside;
+    out.tile_layers.push(TileLayerDraw::new(ground.tiles));
 }
 
 /// How often the frames allocated since the last report (feature `dev`).
@@ -389,14 +418,16 @@ fn report(world: &World, _frame: &Frame) {
         info!(
             "tick rate: {:.2} Hz over the last second, {:.2} Hz since the start \
              ({} ticks in {:.1} s); {times}; {fps:.1} frames a second; drawn: {} sprites \
-             in {} batches, {} not ready{allocations}",
+             in {} batches, {} not ready, {} tiles in {} chunks{allocations}",
             rate.recent_hz,
             rate.average_hz,
             rate.ticks,
             rate.elapsed.as_secs_f64(),
             stats.sprites,
             stats.batches,
-            stats.skipped
+            stats.skipped,
+            stats.tiles,
+            stats.chunks
         );
         #[cfg(feature = "dev")]
         {
@@ -578,7 +609,7 @@ mod tests {
                 "frame Camera: follow_camera",
                 "frame Ui: report",
                 "frame Extract: nadir::extract_sprites",
-                "frame Extract: draw_grass",
+                "frame Extract: draw_tiles",
             ]
         );
     }
@@ -604,13 +635,15 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_draws_the_grass_the_props_and_the_person() {
+    fn a_frame_draws_the_map_its_walls_and_props_and_the_person() {
         let mut app = sandbox();
         // Half a tick: drawn where everything is, with no tick yet.
         app.update(8 * MS, &[]);
         let world = app.world();
         let out = world.resource::<RenderFrame>();
-        assert_eq!(out.sprites.len(), 16 * 12 + PROPS.len() + 1);
+        let map = map::build(map::tile_set(world.resource::<Sprites>().tiles));
+        assert_eq!(out.sprites.len(), map.walls.len() + map.props.len() + 1);
+        assert!(out.sprites.iter().all(|sprite| sprite.layer == 1));
         let person = world.resource::<Sprites>().person;
         let drawn: Vec<&SpriteDraw> = out
             .sprites
@@ -621,8 +654,121 @@ mod tests {
         assert_eq!(drawn[0].position, PLAYER_START);
         assert_eq!((drawn[0].layer, drawn[0].size), (1, Vec2::new(12.0, 20.0)));
         assert_eq!(out.camera.position, PLAYER_START);
-        let grass = out.sprites.iter().filter(|sprite| sprite.layer == 0);
-        assert_eq!(grass.count(), 16 * 12);
+        // The ground, under everything, and around it the stone's color.
+        let ground = world.resource::<Ground>();
+        assert_eq!(out.tile_layers, [TileLayerDraw::new(ground.tiles)]);
+        assert_eq!(out.clear, ground.outside);
+        let layers = world.resource::<TileLayers>();
+        let tiles = layers.get(ground.tiles).expect("the ground");
+        assert_eq!(tiles.size(), UVec2::new(map::WIDTH, map::HEIGHT));
+    }
+
+    /// Holds `key` down for `ticks` ticks.
+    fn hold(app: &mut App, key: Key, ticks: u32) {
+        let press = nadir::Event::Key {
+            key,
+            pressed: true,
+            repeat: false,
+        };
+        app.update(TICK, &[press]);
+        for _ in 1..ticks {
+            app.update(TICK, &[]);
+        }
+        let release = nadir::Event::Key {
+            key,
+            pressed: false,
+            repeat: false,
+        };
+        app.update(TICK, &[release]);
+    }
+
+    /// Moves the player to `feet`, between ticks.
+    fn put(app: &mut App, feet: Vec2) {
+        let player = player(app);
+        app.world()
+            .write::<Transform>()
+            .insert(player, Transform::at(feet));
+        app.world()
+            .write::<PrevTransform>()
+            .insert(player, PrevTransform(Transform::at(feet)));
+    }
+
+    #[test]
+    fn the_person_slides_along_the_maps_border_wall_without_snagging() {
+        // Under the top wall, whose bottom is at y = 16: with W and D held,
+        // the person goes up to it, then slides along it to the right,
+        // across its seams, never stopped. `Move` is a unit direction, so
+        // they go 2 / √2 pixels a tick each way.
+        let mut app = sandbox();
+        let player = player(&app);
+        put(&mut app, Vec2::new(100.5, 40.0));
+        let press = |key| nadir::Event::Key {
+            key,
+            pressed: true,
+            repeat: false,
+        };
+        app.update(TICK, &[press(Key::W), press(Key::D)]);
+        let step = SPEED / 60.0 / 2f32.sqrt();
+        let mut last = position(&app, player);
+        for tick in 0..150 {
+            app.update(TICK, &[]);
+            let now = position(&app, player);
+            assert!(
+                (now.x - last.x - step).abs() < 1e-3,
+                "tick {tick}: from {last:?} to {now:?}"
+            );
+            last = now;
+        }
+        // The collider's top, 6 above the feet, is at the wall's bottom.
+        assert!((last.y - 22.0).abs() < 1e-2, "{last:?}");
+        assert!(last.x > 100.5 + 150.0 * step - 1e-2, "{last:?}");
+    }
+
+    #[test]
+    fn a_tree_is_in_front_of_the_person_above_it_and_behind_the_one_below() {
+        // The tree of the map at cell (6, 9), whose feet are at (104, 160),
+        // a trunk 8 wide and 6 high above them.
+        let mut app = sandbox();
+        let tree = Vec2::new(104.0, 160.0);
+        let player = player(&app);
+        // From above, walking down into the trunk: stopped above its foot.
+        put(&mut app, tree - Vec2::new(0.0, 30.0));
+        hold(&mut app, Key::S, 40);
+        let above = position(&app, player);
+        assert!((above.y - (tree.y - 6.0)).abs() < 1e-2, "{above:?}");
+        // From below, walking up: stopped 6 below its foot.
+        put(&mut app, tree + Vec2::new(0.0, 30.0));
+        hold(&mut app, Key::W, 40);
+        let below = position(&app, player);
+        assert!((below.y - (tree.y + 6.0)).abs() < 1e-2, "{below:?}");
+        // So the frame draws the person behind the tree, then in front.
+        let mut order = |feet: Vec2| {
+            put(&mut app, feet);
+            app.update(TICK, &[]);
+            let out = app.world().resource::<RenderFrame>();
+            let sprites = app.world().resource::<Sprites>();
+            let nearest = |texture| {
+                out.sprites
+                    .iter()
+                    .filter(|sprite| sprite.texture == texture)
+                    .min_by(|a, b| {
+                        (a.position - tree)
+                            .length()
+                            .total_cmp(&(b.position - tree).length())
+                    })
+                    .copied()
+                    .expect("drawn")
+            };
+            let (person, tree) = (nearest(sprites.person), nearest(sprites.tree));
+            // Sorted against each other by their feet: one layer, y-sorted.
+            assert_eq!((person.layer, person.sort), (tree.layer, SortMode::YSort));
+            assert_eq!(tree.sort, SortMode::YSort);
+            (person.position.y, tree.position.y)
+        };
+        let (person, tree_y) = order(above);
+        assert!(person < tree_y, "{person} {tree_y}");
+        let (person, tree_y) = order(below);
+        assert!(person > tree_y, "{person} {tree_y}");
     }
 
     #[test]
@@ -659,7 +805,7 @@ mod tests {
     #[test]
     fn every_sprite_file_is_there() {
         let app = sandbox();
-        for name in ["person", "tree", "rock", "grass", "atlas"] {
+        for name in ["person", "tree", "rock", "grass", "atlas", "tiles"] {
             let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sprites/");
             let bytes = std::fs::read(format!("{path}{name}.qoi")).expect("the sprite file");
             assert!(bytes.starts_with(b"qoif"), "{name}");

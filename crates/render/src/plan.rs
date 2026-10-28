@@ -128,6 +128,15 @@ impl<K: Copy + Eq> Plan<K> {
             }
         }
     }
+
+    /// Where tiles of `layer` and `depth` go in the order: before every
+    /// drawn sprite of the same layer and depth or later, after every one
+    /// before. The keys are sorted, so their layer and depth bits are too.
+    pub(crate) fn position(&self, layer: u8, depth: u32) -> u32 {
+        let bound = u64::from(layer) << 32 | u64::from(depth);
+        // The plan numbers its sprites with a u32, so this fits.
+        self.keys.partition_point(|&(key, _)| key >> 24 < bound) as u32
+    }
 }
 
 #[cfg(test)]
@@ -229,6 +238,25 @@ mod tests {
             ]
         );
         assert_eq!(batches(&plan), [(20, 0, 1), (3, 1, 1)]);
+    }
+
+    #[test]
+    fn tiles_go_before_the_sprites_of_their_layer_and_depth() {
+        let mut ground = sprite(0, 100.0);
+        ground.sort = SortMode::Fixed(0);
+        let mut above = sprite(0, -100.0);
+        above.layer = 2;
+        let mut front = sprite(1, 50.0);
+        front.sort = SortMode::Fixed(u32::MAX);
+        // Drawn: ground, the y-sorted sprite, front, then above.
+        let plan = plan(&[above, sprite(0, 0.0), ground, front]);
+        assert_eq!(order(&plan), [2, 1, 3, 0]);
+        assert_eq!(plan.position(0, 0), 0, "before the ground decal");
+        assert_eq!(plan.position(0, 1), 1, "after it");
+        assert_eq!(plan.position(0, u32::MAX), 2, "before front");
+        assert_eq!(plan.position(1, 0), 3);
+        assert_eq!(plan.position(2, 0), 3, "before the sprite above");
+        assert_eq!(plan.position(3, 0), 4, "after everything");
     }
 
     #[test]

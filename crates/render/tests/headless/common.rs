@@ -8,7 +8,7 @@ use nadir_assets::{AssetServer, FinalizeCtx, Handle, OnFailure};
 use nadir_codec::qoi::{self, Channels, ColorSpace, Header};
 use nadir_core::UVec2;
 use nadir_gfx::{Device, GfxError, RenderTargetId, TextureFormat};
-use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, Texture};
+use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, Texture, TileLayers};
 
 /// Names a part of the renderer, such as `llvmpipe`, that the context must
 /// have. Unset or empty, any renderer will do.
@@ -93,11 +93,13 @@ pub(crate) fn read(device: &mut Device, target: RenderTargetId) -> Vec<[u8; 4]> 
     pixels.as_chunks::<4>().0.to_vec()
 }
 
-/// A device, an asset server over a fresh root, and a renderer.
+/// A device, an asset server over a fresh root, a renderer, and the tile
+/// layers it draws from.
 pub(crate) struct Stage {
     // The renderer and the textures are the device's, so it goes last.
     pub(crate) renderer: Renderer,
     pub(crate) server: AssetServer,
+    pub(crate) tiles: TileLayers,
     root: PathBuf,
     pub(crate) device: Device,
 }
@@ -118,6 +120,7 @@ impl Stage {
         Some(Self {
             renderer,
             server: AssetServer::new(&root, OnFailure::Placeholder),
+            tiles: TileLayers::new(),
             root,
             device,
         })
@@ -157,6 +160,7 @@ impl Stage {
             .render(
                 &mut self.device,
                 &self.server,
+                &self.tiles,
                 frame,
                 Output {
                     target: target.into(),

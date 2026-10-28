@@ -31,8 +31,15 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
     `screen_to_world` and `world_to_screen`
   - golden scenes: `y_sort`, and `upscale_320x180`, `upscale_300x200` and
     `upscale_333x147`
+- M4.5: tile layers (ADR-0023), in "Tilemaps" below:
+  - `TileSet`, `Tile`, `TileLayer`, the `TileLayers` store and
+    `TileLayerDraw`
+  - the `tile_chunk` program, the chunk cache, culling, animated and
+    flipped tiles, and tile layers ordered among the sprites
+  - golden scenes: `tile_layers`, `animated_tiles_0ms` and
+    `animated_tiles_350ms`
 - Not built yet:
-  - tilemaps, text, UI sprites, debug draw and post
+  - text, UI sprites, debug draw and post
   - the smooth-camera and native-resolution modes
   - shader hot reload (M5.8), and the Metal sources (M10.3)
 
@@ -41,14 +48,15 @@ impl Renderer {
     pub fn new(device: &mut Device, config: &RenderConfig) -> Result<Self, RenderError>;
     /// Inside a device frame: the world pass into the virtual image, then the
     /// blit into `output` (the window, or a render target; Rgba8Srgb).
-    pub fn render(&mut self, device: &mut Device, assets: &AssetServer,
+    pub fn render(&mut self, device: &mut Device, assets: &AssetServer, tiles: &TileLayers,
                   frame: &RenderFrame, output: Output) -> Result<FrameStats, RenderError>;
     pub fn upscale(&self, output_size: UVec2) -> Upscale;          // factor + where the image lands
     pub fn screen_to_world(&self, camera: &Camera2D, output_size: UVec2, screen: Vec2) -> Vec2;
     pub fn world_to_screen(&self, camera: &Camera2D, output_size: UVec2, world: Vec2) -> Vec2;
 }
 pub struct Output { pub target: PassTarget, pub size: UVec2 }      // the caller knows the window's size
-pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32 }
+pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
+                        pub tiles: u32, pub chunks: u32 }
 ```
 
 - Textures are looked up in the `AssetServer`.
@@ -56,8 +64,13 @@ pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32 }
   - One whose texture failed draws all of its placeholder, uv 0 to 1,
     whatever its `uv`, when the server shows placeholders. Without them
     (`OnFailure::Nothing`) it is skipped too.
-- `RenderFrame` so far has `camera`, `clear` and `sprites`. The other
-  fields below come with their tasks. `Camera2D` has no rotation yet.
+- `RenderFrame` so far has `camera`, `clear`, `sprites`, and since M4.5
+  `tile_layers` and `time`. The other fields below come with their tasks.
+  `Camera2D` has no rotation yet.
+- `FrameStats.batches` counts the sprite draws made, a batch split by a
+  tile layer counting twice. `tiles` and `chunks` count the tiles and the
+  chunk draws. `SpriteBatcher::stats` knows no tile layers: its `batches`
+  is before any split, and its `tiles` and `chunks` are 0.
 
 ## Input: `RenderFrame`
 
@@ -69,12 +82,12 @@ pub struct RenderFrame {
     pub camera: Camera2D,                 // position, zoom, rotation (0 for now), shake offset
     pub clear: Color,
     pub sprites: Vec<SpriteDraw>,         // world-space sprites
-    pub tile_layers: Vec<TileLayerDraw>,  // references to cached chunk sets + layer/depth info
+    pub tile_layers: Vec<TileLayerDraw>,  // layers in the TileLayers store + layer/depth info
     pub ui_sprites: Vec<SpriteDraw>,      // screen-space
     pub texts: Vec<TextDraw>,             // world or screen space
     pub debug: DebugDrawList,             // lines/rects/circles, cleared per frame
     pub post: PostSettings,               // fade, tint, color grade LUT handle (optional)
-    pub time: f32,                        // seconds, for animated tiles/shaders
+    pub time: Duration,                   // for animated tiles/shaders; whole ms reach the shader
 }
 
 pub struct SpriteDraw {
@@ -181,6 +194,83 @@ fn push_instance(out: &mut Vec<f32>, s: &SpriteDraw, uv: [f32; 4], color: [f32; 
   y-sorted sprites, not chunk tiles. Otherwise they can't interleave with
   characters.
 
+As built (M4.5, ADR-0023):
+
+```rust
+pub struct TileSet { pub texture: Handle<Texture>, pub columns: u16, pub rows: u16 }
+impl TileSet { pub fn block_uv(&self, index: u16, size: UVec2) -> Rect; }   // a tall tile's region
+pub struct Tile { pub index: u16, pub frames: u16, pub frame_ms: u16, pub flip: Flip }
+impl TileLayer {
+    pub const CHUNK: u32 = 32;
+    pub fn new(tileset: TileSet, size: UVec2, tile_size: f32, origin: Vec2) -> Self;
+    pub fn get(&self, cell: IVec2) -> Option<Tile>;
+    pub fn set(&mut self, cell: IVec2, tile: Option<Tile>);           // panics outside
+    pub fn pack_chunk(&self, chunk: UVec2, out: &mut Vec<f32>) -> u32; // public for the bench
+}
+impl TileLayers { pub fn add(&mut self, layer: TileLayer) -> Handle<TileLayer>; get, get_mut, remove }
+pub struct TileLayerDraw { pub tiles: Handle<TileLayer>, pub layer: u8, pub depth: u32 }
+```
+
+- **The data:** a `TileLayer` is a grid of square cells, each empty or a
+  `Tile` of its `TileSet`, placed as a `TileGrid` is. The game keeps its
+  layers in a `TileLayers` store; the facade's is a world resource. The
+  renderer is given the store beside each frame, whose `TileLayerDraw`s
+  name the layers to draw.
+- **The tile set** is a whole texture cut into `columns` × `rows` equal
+  tiles, numbered row by row. 0 counts as 1, and an index past the last
+  tile wraps to the first. In pixel-perfect mode the layer's origin is
+  moved to a whole virtual pixel, as sprite corners are. Its texels land
+  on whole pixels when the tile size times the zoom is a whole multiple
+  of a tile's texels.
+- **Revisions, not dirty flags:**
+  - Each chunk has a revision from one counter for the whole process. A
+    new layer takes a fresh one, and each `set` that changes a cell gives
+    its chunk a fresh one.
+  - The renderer packs a chunk the first time the view shows it, and again
+    only when its revision differs from the one it packed.
+  - A layer replaced in place, or a store replaced whose handles come
+    again, is never mistaken for one already packed. Frames that are not
+    drawn need nothing.
+- **The cache:** each chunk with tiles gets a `Static` buffer of 1,024
+  instances the first time it has some. A layer's buffers are freed at the
+  first frame after it leaves the store. A layer with no cells, or none in
+  view, makes no buffer and no draw.
+- **An instance** is `TILE_INSTANCE_FLOATS` = 6 `f32`s: the cell's column
+  and row, then the tile's index, frames, frame length in ms, and flip
+  bits (1: x, 2: y).
+- **The `tile_chunk` program:**
+  - Its `TileLayer` uniform block holds the snapped origin and the tile
+    size, the tile set's columns and rows and a placeholder flag, and the
+    time in whole milliseconds as a `uint`. Rust packs it as `u32`s, so
+    the clock arrives bit-exact.
+  - The vertex shader picks the frame, `(ms / frame_ms) % frames`, and the
+    tile in `uint`, and flips the tile's corner.
+  - The block is set once per layer, and each visible non-empty chunk is
+    one instanced draw.
+- **Culling:** the view's world rect (shake included), a tile wider all
+  round, to the chunks whose cells overlap it. A cell that only touches
+  its far edge does not count. A 480 × 270 view of 16-pixel tiles at zoom
+  1 spans at most 2 × 2 chunks per layer.
+- **Order:**
+  - A tile layer sorts as a sprite at `SortMode::Fixed(depth)` in its
+    layer, and before the sprites of the same layer and depth. So ground
+    decals at `Fixed(0)` lie on ground tiles at depth 0, and tiles over
+    every sprite of a layer go in a higher layer.
+  - It goes into the sorted sprites at its place, splitting a batch it
+    falls inside, and the sprite program, buffers and texture are bound
+    again after it.
+- **Textures:** a layer whose tile set's texture is loading is not drawn.
+  A failed one shows all of its placeholder in every tile, when the server
+  shows placeholders; otherwise nothing.
+- **Time:** `RenderFrame.time` is a `Duration`, not the `f32` seconds
+  first planned, which lose millisecond precision after about 4.6 hours.
+  The facade sets it each frame from the simulation clock, ticks and
+  `alpha`. The shader gets whole milliseconds, which wrap after 2^32,
+  about 49.7 days.
+- **Tall tiles:** a sprite whose `uv` is `TileSet::block_uv(index,
+  size)`, y-sorted by its feet at the bottom of its cell. The sandbox
+  spawns its tall walls as entities with a `Sprite`.
+
 ## Camera and resolution
 
 - `Camera2D { position, zoom: f32, shake: Vec2 }`. The view matrix maps the
@@ -243,6 +333,11 @@ Measured on min-spec; see `docs/00-overview.md`.
     holds one; it adds the asset lookups and the upload.
 - Tilemap: a 256×256 level visible at zoom 1 adds ≤ 1 ms CPU and ≤ 30 draw
   calls.
+  - As built (M4.5), the draws hold by construction for 16-pixel tiles: at
+    most 4 chunks a layer (a unit test sweeps the camera over such a
+    level). The CPU work is the cull, O(chunks in view), and packing a
+    chunk that changed: `tile_chunk_rebuild`, 3.3 µs for a full chunk on
+    the i7-11800H.
 - Zero heap allocations per frame in steady state.
 
 ## Tests
@@ -260,4 +355,10 @@ Measured on min-spec; see `docs/00-overview.md`.
   - text alignment
   - pixel-perfect upscale at 3 window sizes
   - debug draw primitives
-- **Benchmarks:** sort+batch for 10k sprites; chunk rebuild.
+- **Benchmarks:** sort+batch for 10k sprites; chunk rebuild
+  (`tile_chunk_rebuild`, M4.5).
+- As built (M4.5), the unit tests cover the chunks' revisions, packing,
+  culling, the uniform's words, the clock's wrap and the order of tile
+  layers among sprites. The headless tests draw placement, a change, a
+  replaced layer or store, empty, unknown and removed layers, texture
+  states, culling, order and batch splits, animation and flips.

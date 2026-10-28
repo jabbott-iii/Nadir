@@ -1741,8 +1741,11 @@ by the batched sprite renderer.
     batches) and stop at the view's edges.
     `the_person_walks_among_the_crowd_too` tests that WASD moves them there
     and that they stop. The user then saw them walk and stop.
+  - Note: CI run 18, for the M4.4 commit `b3fbd60`, passed on all three
+    systems, as the user reported; the session saw it on the public
+    Actions page.
 
-- [ ] **M4.5 — tilemap rendering and collision grid**
+- [x] **M4.5 — tilemap rendering and collision grid**
   - Note (from M3.3): tile chunks draw in the renderer's world pass, into
     the virtual image, before or among the sprites by layer. Tall tiles are
     sprites (`render.md`). Draw each tile at whole pixels per texel, as the
@@ -1766,11 +1769,103 @@ by the batched sprite renderer.
   - Accept: tilemap goldens (including animated tiles at fixed times); the
     player slides along walls without snagging.
   - Verify: `cargo xtask golden`; `cargo test -p nadir-render -p nadir`
+  - Note: the user decided four points on 2026-10-27 (ADR-0023):
+    - The game's `TileLayers` store goes to `Renderer::render` beside the
+      frame, a break of its signature.
+    - The task spans four crates (render, the facade, the sandbox and
+      nadir-bench), and adds the `tile_chunk_rebuild` benchmark that
+      `04-quality.md` requires.
+    - `RenderFrame.time` is a `Duration` from the simulation clock.
+    - The field becomes a hand-built map, and `stress-entities` draws its
+      walls as a tile layer.
+  - Note: built as ADR-0023 says. The design critique (46 of 51 findings
+    survived their refuters) changed the draft:
+    - Revisions come from one counter for the whole process. Counted per
+      layer, a layer replaced in place, or a store replaced, filled the
+      same way, kept drawing the old chunks.
+    - Each chunk has a `Static` buffer of its own, made when it first has
+      tiles. One buffer per layer would have been made for chunks never
+      shown, and an empty layer's zero-size buffer would have ended the
+      game.
+    - The shader's frame and tile arithmetic converts every operand to
+      `uint`: GLSL 330 converts nothing by itself, and Mesa refused the
+      draft's.
+    - The pass binds the sprite program and buffers again after a tile
+      layer.
+    - The time comes from the `FixedClock`, not a sum of its own.
+    - The facade's slide test is one test through `App::update`, since
+      the collision crate's tests cover the matrix of shapes and sizes.
+    - The sandbox moved the items `stress-sprites` shares to `stress.rs`.
+    - The sandbox's colliders stand at the feet: the person's 10 × 6, a
+      trunk's 8 × 6, a rock's 14 × 8.
+  - Note: the sandbox's field is `games/sandbox/src/map.rs`:
+    - 64 × 48 tiles of 16 pixels, written as rows of letters, from the
+      hand-made tile set `assets/sprites/tiles.qoi` (8 × 4 tiles)
+    - grass of three kinds, a path, flowers in 2 frames, water in 4, stone
+      walls all round
+    - three runs of tall walls, sprites of two tiles y-sorted by their
+      feet, with their bottom cell solid
+    - ten trees and six rocks, from their old textures, each with a
+      collider at its foot
+    - grid layer `WORLD`, the person on `PEOPLE`
+  - Note: measured on the i7-11800H (Linux, 2026-10-27):
+    - `tile_chunk_rebuild` 3.3 µs for a full chunk, in
+      `bench/baseline.json`. In the same full run every other benchmark
+      was within 2% of its baseline, but `ecs_join3_5k`, 7.6% faster.
+    - The sandbox, each scene run for 10 to 14 s, logged:
+      - `field`, as `cargo dev` builds it: 60 ticks and 60 frames a
+        second, a tick 0.11 ms, 57 sprites in 18 batches and 1,024 tiles in
+        1 chunk, and no allocations.
+      - `stress-sprites`, in debug: 10,203 sprites in 2 batches, a tick
+        2.8 ms, and no allocations.
+      - `stress-entities`, in release: 5,001 sprites in 1 batch and 255
+        tiles in 1 chunk, a tick 5.0 to 5.7 ms as in M4.4, and one
+        allocation in each of the reports at 4 and 5 s, then none.
+  - Note: the three new golden scenes were drawn on llvmpipe and blessed by
+    the agent, after it looked at each one as a PNG. A human should look
+    at them before they are committed. `cargo xtask golden` passes all 13
+    scenes on llvmpipe and on the NVIDIA RTX 3070.
+  - Note: the code review (23 of 27 findings survived their refuters) and
+    a check of its fixes found mostly tests that could not fail; each was
+    shown with a planted bug, and all are fixed:
+    - The chunk cache's packing on change only, its freeing of a layer gone
+      or resized, and its size change are now checked on a GPU, in
+      `crates/render/src/chunks.rs` (behind `headless-test`).
+    - Revisions counted per layer from a global base, layers given out of
+      order, a chunk emptied, a skipped layer before a drawn one, culling
+      at zoom 2, 0 frames, 0 ms, a clock past 2^24 ms, and a wrap that the
+      atlas can show now each fail a test.
+    - The facade's seam test was at coordinates that never round. It now
+      fails without the collision crate's tolerance.
+    - The facade's steady test drew its 10,000 walkers off screen. The
+      ground now moves instead of the camera.
+    - The sandbox's tree test now checks that the person and the tree
+      y-sort in one layer.
+    - Docs: ADR-0023 promised cheap tile set and origin changes that no
+      setter offers; the revision doc and `stress-sprites`' descriptions
+      are corrected.
+  - Note: 40 planted bugs, one at a time, in a copy of the tree, through
+    the render (on llvmpipe), facade and sandbox tests, with the goldens
+    for those that survived. All 40 failed a test, after a near-side case
+    for the cull's margin was added. The first run reused stale builds,
+    because the copy kept the repo's file times, and was discarded.
+  - Note: tests:
+    - nadir-render: 53 unit tests, 55 with `headless-test`, and 30
+      headless tests.
+    - The facade: 52 unit tests, 55 with `dev`, and 2 doc tests.
+    - The sandbox: 20 tests, 21 with `dev`.
+    - nadir-bench: 45 tests.
+  - Note: Windows and macOS were not run. The render GPU tests and the
+    goldens skip there until M2.6 and M2.7 give them an OpenGL context.
 
 - [ ] **M4.6 — animation**
   - Note (from M4.4): `Sprite` holds `uv` and `flip`. An `Animate` system
     writes them before `nadir::extract_sprites` (`Extract`) draws them. The
     sandbox faces the player in `move_player`, and its crowds by velocity.
+  - Note (from M4.5): tiles animate in the `tile_chunk` shader, from
+    `RenderFrame.time`, which the facade sets from the simulation clock
+    (ADR-0023). Sprite clips are this task's own; a clip that should keep
+    in step with the tiles can read the same time.
   - Depends: M4.4
   - Do: the `Animator` component and clips (hand-defined until M5), a
     frame-stage system, a flip by `Facing`.
@@ -1795,6 +1890,13 @@ by the batched sprite renderer.
     hooks only: add a per-type walk in registration order. Components that
     hold a `Handle` are not reflected before M5.6 (ADR-0020): hash them
     another way, or leave them out and say so.
+  - Note (from M4.5): the game's tile layers are the resource
+    `TileLayers`, of nadir-render's types, which reflection does not know.
+    The sandbox's maps are fixed once set up. Their chunks' revisions come
+    from a counter for the whole process, so they differ from run to run:
+    hash the tiles, not the revisions, if a layer must be hashed.
+    `RenderFrame.time` follows the clock, and nothing in the simulation
+    reads it.
   - Depends: M4.4, M3.1
   - Note (from M3.1): `InputRecorder` and `InputPlayer` hold only the
     actions' states, tick after tick: no seed, no pointer, no wheel. Keep
@@ -1814,6 +1916,10 @@ by the batched sprite renderer.
     `move_and_slide` with 4,200 of 5,000 moves stopped, and about 0.6 ms
     from the queries that `set_position` widens. The triggers are
     0.15 ms.
+  - Note (from M4.5): `stress-entities` now draws its walls as one tile
+    layer: 5,001 sprites in 1 batch, and the walls in the 1 to 4 chunks in
+    view. Its tick is unchanged: 5.0 to 5.7 ms in release on the
+    i7-11800H, 2026-10-27.
   - Depends: M4.4
   - Do: make `move_and_slide` and its queries cheaper in nadir-collision,
     keeping ADR-0021's rules. Candidates:
@@ -1887,6 +1993,11 @@ by the batched sprite renderer.
   - Note (from M3.5): the sandbox has a hand-made atlas,
     `assets/sprites/atlas.qoi`, with its regions as constants in
     `games/sandbox/src/stress.rs`. Cooked atlases replace both.
+  - Note (from M4.5): the sandbox's tile set, `assets/sprites/tiles.qoi`
+    (8 × 4 tiles of 16 pixels, its tiles named in
+    `games/sandbox/src/map.rs`), is hand-made too. A `TileSet` must be a
+    whole texture cut into equal tiles, with no padding (ADR-0023): pack
+    tile sets as pages of their own, or revisit that ADR.
   - Depends: M5.1, M5.2, M2.4
   - Do: the `nadir-cook` library and CLI; the incremental cache; the
     PNG → trim → MaxRects atlas (padding + extrusion) → QOI pipeline;
@@ -1919,6 +2030,18 @@ by the batched sprite renderer.
     so its `Reflect` is hand-written. Prefabs never list `PrevTransform`:
     the engine gives one to every entity with a `Sprite`.
     `app.register_component::<T>()` adds a game's reflected component.
+  - Note (from M4.5, ADR-0023):
+    - nadir-scene may not depend on nadir-render, so the facade turns a
+      level's tile layers into `TileLayer`s in its `TileLayers` resource,
+      and draws them with `TileLayerDraw`s from an engine system in
+      `Extract`.
+    - A tall tile is a `Sprite` whose `uv` is `TileSet::block_uv`, with
+      its feet at the bottom of its cell, as the sandbox's tall walls are
+      (`games/sandbox/src/map.rs`).
+    - The grid comes from the IntGrid, with `grid.layer` the layer the
+      prefabs call "World" (the sandbox's `map::WORLD`).
+    - A layer replaced in place on reload is drawn anew: revisions are
+      unique to the process.
   - Depends: M5.5, M4.5, M4.2
   - Do:
     - LDtk → `.klvl` (tile layers, IntGrid → collision, entities, tall
@@ -2067,6 +2190,8 @@ by the batched sprite renderer.
     they took. `App::update` drains the `profile` feature's scope records
     each frame into a buffer the `App` keeps (`profile`, in
     `crates/engine/src/app.rs`): hand them to the profiler's ring there.
+  - Note (from M4.5): `FrameStats` has `tiles` and `chunks` beside the
+    sprites and batches: the chunk draws count as draw calls too.
   - Depends: M7.2, M0.4
   - Do: the overlay; profiler ring, graph and scope tree; Chrome trace
     export; GL timer queries.
@@ -2103,6 +2228,10 @@ by the batched sprite renderer.
   - Note (from M4.3): `CollisionWorld` gives each collider (`len`,
     `collider`, `position`) and the grid. The spatial hash's cells are
     private: add a read-only visitor for the F4 overlay.
+  - Note (from M4.5): `RenderFrame.time`, which animated tiles show, is the
+    `FixedClock`'s ticks and `alpha` (`simulated_time` in
+    `crates/engine/src/app.rs`). Pausing or scaling the clock pauses or
+    scales the tiles; a pause that stops the ticks some other way does not.
   - Depends: M7.2, M4.3
   - Do: the F4 overlays and the F5–F7 time controls.
   - Accept: manual check on the sandbox.
@@ -2301,6 +2430,10 @@ by the batched sprite renderer.
     - An output smaller than the virtual image sets a viewport outside the
       target. Metal's validation refuses that, so clamp the viewport and
       the uv then.
+  - Note (from M4.5): `tile_chunk` (ADR-0023) has a second uniform block,
+    `TileLayer`, whose last member is a `uvec4` clock that Rust fills as
+    `u32`s (`layer_uniform` in `crates/render/src/chunks.rs`): `uint4` in
+    MSL. Its frame and tile arithmetic is unsigned.
   - Depends: M10.2
   - Do: write a `.metal` source for every program; extend the parity test
     to parse MSL attributes.

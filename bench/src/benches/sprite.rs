@@ -103,7 +103,9 @@ mod tests {
             FrameStats {
                 sprites: 10_203,
                 skipped: 0,
-                batches: 2
+                batches: 2,
+                tiles: 0,
+                chunks: 0,
             }
         );
     }

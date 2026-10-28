@@ -138,10 +138,11 @@ pub fn run(mut app: App) -> Result<(), Error> {
             app.schedule.run_fixed(&mut app.world, &tick);   // snapshot first; then its commands (ecs.md)
         }
         draw.clear();                                        // the RenderFrame resource
+        draw.time = simulated_time(&clock);                  // ticks + alpha: animated tiles (ADR-0023)
         app.schedule.run_frame(&mut app.world, &frame);      // frame.dt, frame.alpha; Extract fills `draw`
 
         gfx.begin_frame(platform.gpu_surface())?;
-        renderer.render(&mut gfx, &app.assets, &draw,
+        renderer.render(&mut gfx, &app.assets, &app.tiles, &draw,   // the TileLayers resource
                         Output { target: PassTarget::Surface, size: platform.window_size() })?;
         gfx.end_frame(platform.gpu_surface())?;              // present: GL swap or Metal drawable
 

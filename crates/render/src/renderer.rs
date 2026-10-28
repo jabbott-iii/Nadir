@@ -1,5 +1,5 @@
-//! The renderer: draws a frame's sprites into the virtual image, then
-//! scales that up into the output.
+//! The renderer: draws a frame's sprites and tile layers into the virtual
+//! image, then scales that up into the output.
 
 use nadir_assets::{AssetServer, LoadState};
 use nadir_core::{UVec2, Vec2};
@@ -9,9 +9,12 @@ use nadir_gfx::{
     VertexStep,
 };
 
-use crate::shader::{BLIT, SPRITE, packed};
+use crate::chunks::{self, ChunkDraw, Step, TileCache};
+use crate::shader::{BLIT, SPRITE, TILE_CHUNK, packed};
 use crate::view::{self, Upscale, View};
-use crate::{Camera2D, RenderError, RenderFrame, SPRITE_INSTANCE_FLOATS, SpriteBatcher, Texture};
+use crate::{
+    Camera2D, RenderError, RenderFrame, SPRITE_INSTANCE_FLOATS, SpriteBatcher, Texture, TileLayers,
+};
 
 /// How the renderer draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +47,10 @@ pub struct FrameStats {
     pub skipped: u32,
     /// The instanced draws of sprites.
     pub batches: u32,
+    /// The tiles drawn, of every tile layer.
+    pub tiles: u32,
+    /// The instanced draws of tiles: one for each chunk drawn.
+    pub chunks: u32,
 }
 
 /// The unit quad, as a triangle strip: (0, 0) to (1, 1).
@@ -63,15 +70,41 @@ const BLIT_QUAD: [f32; 16] = [
 /// never shrinks.
 const FIRST_CAPACITY: usize = 256;
 
+/// A tile layer of the frame that draws at least one chunk.
+#[derive(Clone, Copy, Debug)]
+struct ReadyLayer {
+    /// Its layer and depth, as the high bits of a sprite's sort key.
+    layer: u8,
+    depth: u32,
+    /// Its place among the frame's tile layers.
+    submission: u32,
+    texture: TextureId,
+    uniform: [u32; 12],
+    /// Its draws, in `Renderer::chunk_draws`.
+    first: u32,
+    end: u32,
+}
+
+/// The program a pass has bound last.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Bound {
+    Nothing,
+    Sprites,
+    Tiles,
+}
+
 /// The 2D renderer.
 ///
-/// Each frame, [`Renderer::render`] draws the sprites into a render target
-/// of the virtual resolution, sorted by layer and depth and batched by
-/// texture. It then scales that image up into the output by the largest
-/// whole factor that fits, with bars in the clear color around it.
+/// Each frame, [`Renderer::render`] draws the sprites and tile layers into
+/// a render target of the virtual resolution: the sprites sorted by layer
+/// and depth and batched by texture, each tile layer at its own layer and
+/// depth among them, a chunk at a time. It then scales that image up into
+/// the output by the largest whole factor that fits, with bars in the
+/// clear color around it.
 pub struct Renderer {
     virtual_size: UVec2,
     sprite: PipelineId,
+    tile_chunk: PipelineId,
     blit: PipelineId,
     quad: BufferId,
     blit_quad: BufferId,
@@ -80,6 +113,13 @@ pub struct Renderer {
     capacity: usize,
     world: RenderTargetId,
     batcher: SpriteBatcher<TextureId>,
+    tiles: TileCache,
+    // The tile work of a frame, in lists reused from frame to frame.
+    ready: Vec<ReadyLayer>,
+    chunk_draws: Vec<ChunkDraw>,
+    /// (Position among the sprites, index in `ready`) of each ready layer.
+    positions: Vec<(u32, u32)>,
+    steps: Vec<Step<TextureId>>,
 }
 
 impl Renderer {
@@ -119,6 +159,29 @@ impl Renderer {
             topology: Topology::TriangleStrip,
             target_format: TextureFormat::Rgba8Srgb,
         })?;
+        let (tile_attributes, tile_stride) = packed::<2>(TILE_CHUNK.instance);
+        let (tile_corner, tile_corner_stride) = packed::<1>(TILE_CHUNK.vertex_attributes);
+        let tile_chunk = device.create_pipeline(&PipelineDesc {
+            label: TILE_CHUNK.name,
+            shader: TILE_CHUNK.source(),
+            vertex_layouts: &[
+                VertexLayout {
+                    stride: tile_stride,
+                    step: VertexStep::Instance,
+                    attributes: &tile_attributes,
+                },
+                VertexLayout {
+                    stride: tile_corner_stride,
+                    step: VertexStep::Vertex,
+                    attributes: &tile_corner,
+                },
+            ],
+            uniform_blocks: TILE_CHUNK.uniform_blocks,
+            textures: TILE_CHUNK.textures,
+            blend: BlendMode::Alpha,
+            topology: Topology::TriangleStrip,
+            target_format: TextureFormat::Rgba8Srgb,
+        })?;
         let (blit_attributes, blit_stride) = packed::<2>(BLIT.vertex_attributes);
         let blit = device.create_pipeline(&PipelineDesc {
             label: BLIT.name,
@@ -154,6 +217,7 @@ impl Renderer {
         Ok(Self {
             virtual_size,
             sprite,
+            tile_chunk,
             blit,
             quad,
             blit_quad,
@@ -161,17 +225,30 @@ impl Renderer {
             capacity: FIRST_CAPACITY,
             world,
             batcher: SpriteBatcher::new(),
+            tiles: TileCache::default(),
+            ready: Vec::new(),
+            chunk_draws: Vec::new(),
+            positions: Vec::new(),
+            steps: Vec::new(),
         })
     }
 
-    /// Draws `frame` into `output`. Call it inside a frame of the device
-    /// (`begin_frame` and `end_frame`, or their offscreen forms).
+    /// Draws `frame` into `output`, with the tile layers its
+    /// [`TileLayerDraw`](crate::TileLayerDraw)s name in `tiles`. Call it
+    /// inside a frame of the device (`begin_frame` and `end_frame`, or their
+    /// offscreen forms).
     ///
     /// Sprites whose texture is still loading are not drawn. A texture that
     /// failed to load shows its placeholder, all of it, whatever the
     /// sprite's `uv`, when the server shows placeholders
     /// ([`OnFailure::Placeholder`](nadir_assets::OnFailure)); otherwise its
-    /// sprites are not drawn either.
+    /// sprites are not drawn either. Tile layers do the same with their tile
+    /// set's texture, every tile showing all of a placeholder.
+    ///
+    /// A tile layer that is not in `tiles` is not drawn. The renderer keeps
+    /// each chunk of a layer on the GPU once the view has shown it, packs it
+    /// again only after one of its tiles changes, and frees a layer's chunks
+    /// at the first frame after it leaves `tiles`.
     ///
     /// # Errors
     ///
@@ -180,19 +257,24 @@ impl Renderer {
         &mut self,
         device: &mut Device,
         assets: &AssetServer,
+        tiles: &TileLayers,
         frame: &RenderFrame,
         output: Output,
     ) -> Result<FrameStats, RenderError> {
         let textures = assets.assets::<Texture>();
-        self.batcher.build(&frame.sprites, &frame.camera, |sprite| {
+        let texture = |handle| {
             let textures = textures?;
-            let texture = textures.get(sprite.texture)?;
-            let failed = textures.state(sprite.texture) == Some(LoadState::Failed);
+            let texture = textures.get(handle)?;
+            let failed = textures.state(handle) == Some(LoadState::Failed);
             Some((texture.id(), failed))
+        };
+        self.batcher.build(&frame.sprites, &frame.camera, |sprite| {
+            texture(sprite.texture)
         });
 
         let view = View::new(&frame.camera, self.virtual_size);
-        let stats = self.batcher.stats();
+        self.prepare_tiles(device, tiles, frame, &view, texture)?;
+        let mut stats = self.batcher.stats();
         let count = stats.sprites as usize;
         if count > self.capacity {
             let capacity = count.next_power_of_two().max(self.capacity * 2);
@@ -206,16 +288,46 @@ impl Renderer {
         }
 
         let clear = frame.clear.to_linear();
+        stats.batches = 0;
         {
             let mut pass = device.begin_pass(self.world.into(), Some(clear))?;
-            if count > 0 {
-                pass.set_pipeline(self.sprite)?;
-                pass.set_vertex_buffer(0, self.instances, 0)?;
-                pass.set_vertex_buffer(1, self.quad, 0)?;
-                pass.set_uniforms(0, &view.uniform())?;
-                for batch in self.batcher.batches() {
-                    pass.set_texture(0, batch.texture, Sampler::NearestClamp)?;
-                    pass.draw(0..4, batch.start..batch.start + batch.count)?;
+            pass.set_uniforms(0, &view.uniform())?;
+            let mut bound = Bound::Nothing;
+            for &step in &self.steps {
+                match step {
+                    Step::Sprites {
+                        texture,
+                        start,
+                        count,
+                    } => {
+                        // A tile layer between two batches, or in one,
+                        // leaves its own program and buffers bound.
+                        if bound != Bound::Sprites {
+                            pass.set_pipeline(self.sprite)?;
+                            pass.set_vertex_buffer(0, self.instances, 0)?;
+                            pass.set_vertex_buffer(1, self.quad, 0)?;
+                            bound = Bound::Sprites;
+                        }
+                        pass.set_texture(0, texture, Sampler::NearestClamp)?;
+                        pass.draw(0..4, start..start + count)?;
+                        stats.batches += 1;
+                    }
+                    Step::Tiles(index) => {
+                        let layer = self.ready[index as usize];
+                        if bound != Bound::Tiles {
+                            pass.set_pipeline(self.tile_chunk)?;
+                            pass.set_vertex_buffer(1, self.quad, 0)?;
+                            bound = Bound::Tiles;
+                        }
+                        pass.set_uniforms(1, &layer.uniform)?;
+                        pass.set_texture(0, layer.texture, Sampler::NearestClamp)?;
+                        for chunk in &self.chunk_draws[layer.first as usize..layer.end as usize] {
+                            pass.set_vertex_buffer(0, chunk.buffer, 0)?;
+                            pass.draw(0..4, 0..chunk.count)?;
+                            stats.tiles += chunk.count;
+                            stats.chunks += 1;
+                        }
+                    }
                 }
             }
         }
@@ -229,6 +341,63 @@ impl Renderer {
             pass.draw(0..4, 0..1)?;
         }
         Ok(stats)
+    }
+
+    /// Before the world pass, which borrows the device: frees the chunks of
+    /// layers gone from `tiles`, culls and uploads the chunks of the frame's
+    /// tile layers, and orders the pass's draws, with each layer that draws
+    /// a chunk among the sprites.
+    fn prepare_tiles(
+        &mut self,
+        device: &mut Device,
+        tiles: &TileLayers,
+        frame: &RenderFrame,
+        view: &View,
+        texture: impl Fn(nadir_assets::Handle<Texture>) -> Option<(TextureId, bool)>,
+    ) -> Result<(), RenderError> {
+        self.tiles.evict(device, tiles);
+        self.ready.clear();
+        self.chunk_draws.clear();
+        let clock = chunks::clock_ms(frame.time);
+        let shown = view.world_rect();
+        // A frame of more than u32::MAX tile layers is far past any
+        // budget; such layers are not drawn.
+        for (submission, draw) in (0..u32::MAX).zip(&frame.tile_layers) {
+            let Some(layer) = tiles.get(draw.tiles) else {
+                continue;
+            };
+            let Some((texture, placeholder)) = texture(layer.tileset().texture) else {
+                continue;
+            };
+            let Some(range) = chunks::visible_chunks(layer, shown) else {
+                continue;
+            };
+            // Fewer draws than chunks in all the layers, so they fit.
+            let first = self.chunk_draws.len() as u32;
+            self.tiles
+                .prepare(device, draw.tiles, layer, range, &mut self.chunk_draws)?;
+            let end = self.chunk_draws.len() as u32;
+            if end > first {
+                self.ready.push(ReadyLayer {
+                    layer: draw.layer,
+                    depth: draw.depth,
+                    submission,
+                    texture,
+                    uniform: chunks::layer_uniform(layer, view.zoom(), placeholder, clock),
+                    first,
+                    end,
+                });
+            }
+        }
+        self.ready
+            .sort_unstable_by_key(|layer| (layer.layer, layer.depth, layer.submission));
+        self.positions.clear();
+        for (index, layer) in (0..).zip(&self.ready) {
+            let position = self.batcher.position(layer.layer, layer.depth);
+            self.positions.push((position, index));
+        }
+        chunks::steps(self.batcher.batches(), &self.positions, &mut self.steps);
+        Ok(())
     }
 
     /// Where the virtual image lands in an output of `size`.

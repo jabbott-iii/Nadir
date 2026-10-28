@@ -80,6 +80,13 @@ pub fn check_sized<T: std::fmt::Debug>(
       output sizes: `upscale_320x180` (an exact fit),
       `upscale_300x200` (bars all round) and `upscale_333x147` (bars of
       uneven widths)
+    - `tile_layers` (M4.5): a ground layer across a chunk edge, with
+      flipped tiles and animated water at time 0, a decal on it, a tall
+      tile between two people, a roof layer over a third, and a failed
+      tile set's placeholder
+    - `animated_tiles_0ms` and `animated_tiles_350ms` (M4.5): four
+      animated or flipped tiles at two fixed times, one of them wrapping
+      past the tile set's last tile
 
     Each sprite is drawn at a whole number of pixels per texel, with its
     corner on a whole pixel, so that every GPU draws it alike.
@@ -208,7 +215,10 @@ pub fn check_sized<T: std::fmt::Debug>(
   - the facade's unit test `steady_frames` in `crates/engine/src/app.rs`
     draws 10,000 sprite entities of its own through the real loop,
     offscreen, for 100 frames (`cargo test -p nadir --features dev`), and
-    checks `FrameAllocs` against its own count frame by frame;
+    checks `FrameAllocs` against its own count frame by frame. Since M4.5
+    the ground is a tile layer of 64 × 64 cells, a quarter of them
+    animated, whose view moves in the warm-up to where four chunks meet:
+    the counted frames draw 4 chunks;
   - the facade's unit test `steady_ticks` in `crates/engine/src/glue.rs`
     runs 5,000 colliding entities, a tenth of them triggers, with 10
     entities spawned and 10 despawned through commands each tick. It runs
@@ -248,7 +258,8 @@ pub fn check_sized<T: std::fmt::Debug>(
     The numbers only mean something on the machine that recorded them.
 - Required benchmarks:
   - sprite sort + batch for 10k sprites (`sprite_sort_batch`, M3.5)
-  - tilemap chunk rebuild
+  - tilemap chunk rebuild (`tile_chunk_rebuild`, M4.5: packing a full chunk
+    of 1,024 tiles)
   - ECS join over 5k entities (`ecs_join2_5k`, `ecs_join3_5k`, with
     `ecs_spawn_despawn` for churn, M4.1)
   - spatial hash rebuild and query (`collision_hash_5k`, M4.3, with

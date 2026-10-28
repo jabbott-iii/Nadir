@@ -236,6 +236,72 @@ mod tests {
         assert_eq!(position(&app, resting), Vec2::new(20.0, 30.0));
     }
 
+    #[test]
+    fn a_player_slides_along_a_wall_of_tiles_without_stopping_at_a_seam() {
+        // A floor of 40 tiles of 16 px, its top at y = 160.3, on layer 1,
+        // and a player's collider at the feet: 10 × 5.4, on layer 0,
+        // colliding with layer 1. Pushed 1.7 px a tick into the floor and
+        // 1.3 along it, the player reaches it in six ticks, and then slides
+        // 1.3 px every tick across 25 seams. The floor and the collider are
+        // off the binary fractions, so that the contact rounds, and only the
+        // collision crate's tolerance keeps the seams from stopping it.
+        let mut app = app();
+        let mut grid = TileGrid::new(40, 20, 16.0, Vec2::new(0.0, 0.3));
+        for x in 0..40 {
+            grid.set_solid(IVec2::new(x, 10), true);
+        }
+        grid.layer = LayerMask::bit(1);
+        app.world().resource_mut::<Collisions>().set_grid(grid);
+        let feet = |mask| {
+            Collider(nadir_collision::Collider {
+                offset: Vec2::new(0.0, -2.7),
+                layer: LayerMask::bit(0),
+                mask,
+                ..nadir_collision::Collider::solid(Shape::Aabb {
+                    half: Vec2::new(5.0, 2.7),
+                })
+            })
+        };
+        let push = Velocity(Vec2::new(1.3, 1.7) * 60.0);
+        let world = app.world_mut();
+        let player = world
+            .spawn()
+            .with(at(20.5, 150.3))
+            .with(push)
+            .with(feet(LayerMask::bit(1)))
+            .id();
+        // A mover whose mask lacks the tiles' layer, and the player's, goes
+        // through them.
+        let ghost = world
+            .spawn()
+            .with(at(20.5, 150.3))
+            .with(push)
+            .with(feet(LayerMask::bit(2)))
+            .id();
+        let mut last = position(&app, player);
+        for tick in 1..=300 {
+            app.update(TICK, &[]);
+            let now = position(&app, player);
+            assert!(
+                (now.x - last.x - 1.3).abs() < 1e-3,
+                "tick {tick}: from {last:?} to {now:?}"
+            );
+            assert!(
+                now.y <= 160.3 + 1e-3,
+                "tick {tick}: into the floor at {now:?}"
+            );
+            if tick > 6 {
+                assert!(
+                    now.y > 160.3 - 0.02,
+                    "tick {tick}: off the floor at {now:?}"
+                );
+            }
+            last = now;
+        }
+        assert!(last.x > 20.5 + 25.0 * 16.0 - 16.0);
+        assert!(position(&app, ghost).y > 600.0, "the ghost fell through");
+    }
+
     /// Two boxes 10 px apart: `front` moves 10 px, `back` 20 px after it.
     fn convoy(front_first: bool) -> (App, Entity, Entity) {
         let mut app = app();

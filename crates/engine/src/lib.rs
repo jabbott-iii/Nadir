@@ -8,7 +8,9 @@
 //! its systems run in stages (`docs/subsystems/ecs.md`). The engine's own
 //! components ([`Transform`], [`Velocity`], [`Sprite`], [`Collider`]...)
 //! and systems interpolate, move and collide entities, send trigger
-//! events, and draw sprites (ADR-0022). With the `dev` feature, the global
+//! events, and draw sprites (ADR-0022). The game's tile layers are the
+//! resource [`TileLayers`](nadir_render::TileLayers), which the renderer
+//! draws from (ADR-0023). With the `dev` feature, the global
 //! allocator counts allocations, and the resource `FrameAllocs` holds the
 //! last frame's. A game needs only this crate:
 //!
@@ -67,7 +69,8 @@ pub mod prelude {
     };
     pub use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Binding, Input};
     pub use nadir_render::{
-        Camera2D, Flip, FrameStats, RenderFrame, SortMode, SpriteDraw, Texture,
+        Camera2D, Flip, FrameStats, RenderFrame, SortMode, SpriteDraw, Texture, Tile, TileLayer,
+        TileLayerDraw, TileLayers, TileSet,
     };
 
     pub use crate::{

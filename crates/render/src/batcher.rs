@@ -65,19 +65,29 @@ impl<K: Copy + Eq> SpriteBatcher<K> {
         &self.packed
     }
 
-    /// What the last build drew.
+    /// What the last build drew. It knows nothing of tile layers: `tiles`
+    /// and `chunks` are 0, and `batches` counts the batches before a tile
+    /// layer drawn among the sprites splits one in two.
     pub fn stats(&self) -> FrameStats {
         // The plan numbers its sprites with a u32, so these fit.
         FrameStats {
             sprites: self.plan.order.len() as u32,
             skipped: self.plan.skipped,
             batches: self.plan.batches.len() as u32,
+            tiles: 0,
+            chunks: 0,
         }
     }
 
     /// The batches of the last build, in draw order.
     pub(crate) fn batches(&self) -> &[Batch<K>] {
         &self.plan.batches
+    }
+
+    /// Where tiles of `layer` and `depth` go among the sprites drawn: see
+    /// [`Plan::position`].
+    pub(crate) fn position(&self, layer: u8, depth: u32) -> u32 {
+        self.plan.position(layer, depth)
     }
 }
 
@@ -122,7 +132,9 @@ mod tests {
             FrameStats {
                 sprites: 3,
                 skipped: 1,
-                batches: 3
+                batches: 3,
+                tiles: 0,
+                chunks: 0,
             }
         );
         let order: Vec<u32> = batcher

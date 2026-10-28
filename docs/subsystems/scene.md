@@ -135,7 +135,10 @@ pub trait FromValue: Reflect + Sized {
   2. Request the new assets and show the loading state until they're done.
   3. Spawn the entities.
   4. Hand the tile layers to `render`'s chunk cache and the grid to
-     `collision`.
+     `collision`. As built (M4.5, ADR-0023), that is: add each layer to the
+     facade's `TileLayers` resource and draw it with a `TileLayerDraw`, and
+     set the grid with `Collisions::set_grid`. nadir-scene cannot depend on
+     nadir-render, so the facade does the first.
 
 ## Saves
 

@@ -1,9 +1,11 @@
 //! What the game asks the renderer to draw in a frame.
 
+use std::time::Duration;
+
 use nadir_assets::Handle;
 use nadir_core::{Color, Rect, Vec2};
 
-use crate::Texture;
+use crate::{Texture, TileLayerDraw};
 
 /// The view of the world: what is at the centre of the screen, and how
 /// large.
@@ -106,21 +108,31 @@ pub struct RenderFrame {
     pub clear: Color,
     /// The sprites of the world, in any order.
     pub sprites: Vec<SpriteDraw>,
+    /// The tile layers of the world, in any order: each in the
+    /// [`TileLayers`](crate::TileLayers) the renderer is given.
+    pub tile_layers: Vec<TileLayerDraw>,
+    /// The time animated tiles show. The shader reads it in whole
+    /// milliseconds, which wrap after 2^32 (49.7 days).
+    pub time: Duration,
 }
 
 impl RenderFrame {
-    /// An empty frame with a black background.
+    /// An empty frame with a black background, at time 0.
     pub fn new() -> Self {
         Self {
             camera: Camera2D::default(),
             clear: Color::BLACK,
             sprites: Vec::new(),
+            tile_layers: Vec::new(),
+            time: Duration::ZERO,
         }
     }
 
-    /// Empties the lists for the next frame, keeping their capacity.
+    /// Empties the lists for the next frame, keeping their capacity. The
+    /// camera, the clear color and the time stay as they are.
     pub fn clear(&mut self) {
         self.sprites.clear();
+        self.tile_layers.clear();
     }
 }
 

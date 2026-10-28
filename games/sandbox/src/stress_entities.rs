@@ -8,7 +8,8 @@
 //! a wall all round. Each person collides at their feet, turns now and
 //! then, and walks 1 to 3 pixels a tick; a tenth of them are triggers,
 //! which walk through the others and notice them. The people are drawn from
-//! the atlas and the walls as dark grass, so the frame is 2 batches. The
+//! the atlas, in 1 batch, and the walls are a tile layer of stone, drawn a
+//! chunk at a time: the 4 chunks or fewer of 32 × 32 tiles in view. The
 //! camera follows the player, tinted yellow, who walks through everything.
 
 use nadir::prelude::*;
@@ -16,7 +17,7 @@ use nadir::prelude::*;
 use crate::stress::{
     ATLAS, PERSON, PERSON_SIZE, PLAYER_TINT, Pace, Walker, heading, turn_crowd, unit,
 };
-use crate::{Sprites, spawn_player};
+use crate::{Ground, map, spawn_player};
 
 /// How many people jostle.
 pub(crate) const BODIES: usize = 5_000;
@@ -30,10 +31,11 @@ const TILE: f32 = 16.0;
 const PACE: f32 = 3.0;
 
 /// Adds the maze, the people, the player and the systems to `app`.
-pub(crate) fn add(app: App) -> App {
+pub(crate) fn add(app: App, tiles: Handle<Texture>) -> App {
     let atlas = app.world().resource_mut::<AssetServer>().load(ATLAS);
     let mut app = app.register_component::<Walker>();
     let (grid, open) = maze();
+    let walls = walls(&grid, map::tile_set(tiles));
     let world = app.world_mut();
     for (index, &cell) in (0u32..).zip(&open[..BODIES]) {
         let half = Vec2::new(5.0 + 2.0 * unit(index, 90), 3.0 + 2.0 * unit(index, 91));
@@ -74,11 +76,32 @@ pub(crate) fn add(app: App) -> App {
     person.color = PLAYER_TINT;
     spawn_player(world, person);
     world.resource_mut::<Collisions>().set_grid(grid);
+    let walls = world.resource_mut::<TileLayers>().add(walls);
     app.insert_resource(Pace(PACE))
+        .insert_resource(Ground {
+            tiles: walls,
+            outside: Color::rgb(70, 60, 50),
+        })
         .add_fixed_system(FixedStage::Gameplay, "turn_crowd", turn_crowd)
         .add_fixed_system(FixedStage::Movement, "face_crowd", face_crowd)
         .add_frame_system(FrameStage::Camera, "follow_camera", crate::follow_camera)
-        .add_frame_system(FrameStage::Extract, "draw_walls", draw_walls)
+        .add_frame_system(FrameStage::Extract, "draw_tiles", crate::draw_tiles)
+}
+
+/// The walls of `grid`, as a tile layer of stone from `set`. The floor
+/// is empty, and shows the clear color.
+fn walls(grid: &TileGrid, set: TileSet) -> TileLayer {
+    let size = UVec2::new(grid.width(), grid.height());
+    let mut walls = TileLayer::new(set, size, grid.cell_size(), grid.origin());
+    for y in 0..TILES {
+        for x in 0..TILES {
+            let cell = IVec2::new(x, y);
+            if grid.is_solid(cell) {
+                walls.set(cell, Some(Tile::new(map::STONE)));
+            }
+        }
+    }
+    walls
 }
 
 /// The maze, and its open tiles in an order that looks random and is the
@@ -109,27 +132,6 @@ fn face_crowd(world: &World, _tick: &Tick) {
     for (entity, _) in walkers.iter() {
         if let (Some(velocity), Some(sprite)) = (velocities.get(entity), sprites.get_mut(entity)) {
             sprite.flip.x = velocity.0.x < 0.0;
-        }
-    }
-}
-
-/// The walls, as dark grass, under everything else.
-fn draw_walls(world: &World, _frame: &Frame) {
-    let grass = world.resource::<Sprites>().grass;
-    let collisions = world.resource::<Collisions>();
-    let grid = collisions.grid();
-    let mut out = world.resource_mut::<RenderFrame>();
-    out.clear = Color::rgb(70, 60, 50);
-    for y in 0..TILES {
-        for x in 0..TILES {
-            let cell = IVec2::new(x, y);
-            if grid.is_solid(cell) {
-                let mut wall = SpriteDraw::new(grass, grid.cell_rect(cell).min, Vec2::splat(TILE));
-                wall.pivot = Vec2::ZERO;
-                wall.sort = SortMode::Fixed(0);
-                wall.color = Color::rgb(90, 90, 110);
-                out.sprites.push(wall);
-            }
         }
     }
 }
@@ -179,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_draws_the_walls_and_the_people_in_two_batches_worth_of_textures() {
+    fn a_frame_draws_the_people_from_the_atlas_and_the_walls_as_tiles() {
         let mut app = scene(Scene::StressEntities);
         app.update(TICK, &[]);
         let world = app.world();
@@ -189,14 +191,26 @@ mod tests {
             .get(player(&app))
             .expect("drawn")
             .texture;
-        let grass = world.resource::<Sprites>().grass;
-        let (walls, people): (Vec<&SpriteDraw>, Vec<&SpriteDraw>) =
-            out.sprites.iter().partition(|sprite| sprite.layer == 0);
-        assert!(walls.iter().all(|wall| wall.texture == grass));
-        assert!(people.iter().all(|person| person.texture == atlas));
-        assert_eq!(people.len(), BODIES + 1);
+        assert!(out.sprites.iter().all(|person| person.texture == atlas));
+        assert_eq!(out.sprites.len(), BODIES + 1);
+        let ground = world.resource::<Ground>();
+        assert_eq!(out.tile_layers, [TileLayerDraw::new(ground.tiles)]);
+        // A wall tile on each solid cell, and nothing elsewhere.
+        let layers = world.resource::<TileLayers>();
+        let walls = layers.get(ground.tiles).expect("the maze's walls");
+        let collisions = world.resource::<Collisions>();
+        let grid = collisions.grid();
+        let mut solid = 0;
+        for y in 0..TILES {
+            for x in 0..TILES {
+                let cell = IVec2::new(x, y);
+                let wall = walls.get(cell);
+                assert_eq!(wall.is_some(), grid.is_solid(cell), "{cell:?}");
+                solid += usize::from(wall.is_some());
+            }
+        }
         // The edge, and about a fifth of the rest.
         let edge = 4 * (TILES as usize - 1);
-        assert!(walls.len() > edge + 2_500 && walls.len() < edge + 3_900);
+        assert!(solid > edge + 2_500 && solid < edge + 3_900, "{solid}");
     }
 }

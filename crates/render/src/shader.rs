@@ -74,6 +74,32 @@ pub(crate) const SPRITE: Interface = Interface {
     textures: &["sprite_texture"],
 };
 
+/// Instanced tiles: one quad each, from a chunk's instance buffer, with
+/// the tile picked from the layer's tile set and the frame's time.
+pub(crate) const TILE_CHUNK: Interface = Interface {
+    name: "tile_chunk",
+    vertex: include_str!("../shaders/tile_chunk/tile_chunk.vert.glsl"),
+    fragment: include_str!("../shaders/tile_chunk/tile_chunk.frag.glsl"),
+    instance: &[
+        attribute("cell", 0, VertexFormat::Float32x2),
+        attribute("tile", 1, VertexFormat::Float32x4),
+    ],
+    vertex_attributes: &[attribute("corner", 2, VertexFormat::Float32x2)],
+    uniform_blocks: &[
+        UniformBlockDesc {
+            name: "Camera",
+            binding: 0,
+            size: 16,
+        },
+        UniformBlockDesc {
+            name: "TileLayer",
+            binding: 1,
+            size: 48,
+        },
+    ],
+    textures: &["tile_texture"],
+};
+
 /// The integer upscale: the virtual image over the viewport.
 pub(crate) const BLIT: Interface = Interface {
     name: "blit",
@@ -90,7 +116,7 @@ pub(crate) const BLIT: Interface = Interface {
 
 /// Every program, for the parity test.
 #[cfg(test)]
-const ALL: [Interface; 2] = [SPRITE, BLIT];
+const ALL: [Interface; 3] = [SPRITE, TILE_CHUNK, BLIT];
 
 /// The vertex attributes of `attributes`, packed one after another.
 pub(crate) fn packed<const N: usize>(attributes: &[Attribute]) -> ([VertexAttribute; N], u32) {
@@ -114,7 +140,7 @@ pub(crate) fn packed<const N: usize>(attributes: &[Attribute]) -> ([VertexAttrib
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SPRITE_INSTANCE_FLOATS;
+    use crate::{SPRITE_INSTANCE_FLOATS, TILE_INSTANCE_FLOATS};
 
     /// The GLSL type of a format.
     fn glsl_type(format: VertexFormat) -> &'static str {
@@ -197,5 +223,15 @@ mod tests {
         let offsets: Vec<u32> = attributes.iter().map(|a| a.offset / 4).collect();
         // The float each attribute starts at, as `push_instance` packs them.
         assert_eq!(offsets, [0, 2, 4, 6, 10, 14]);
+    }
+
+    #[test]
+    fn the_tile_instance_is_its_floats() {
+        let (attributes, stride) = packed::<2>(TILE_CHUNK.instance);
+        assert_eq!(stride, TILE_INSTANCE_FLOATS as u32 * 4);
+        let offsets: Vec<u32> = attributes.iter().map(|a| a.offset / 4).collect();
+        // The float each attribute starts at, as `TileLayer::pack_chunk`
+        // packs them.
+        assert_eq!(offsets, [0, 2]);
     }
 }

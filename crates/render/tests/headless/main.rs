@@ -1,5 +1,6 @@
 //! Tests that draw on an offscreen OpenGL context from
-//! `Device::new_headless`: textures, the renderer, and the golden scenes.
+//! `Device::new_headless`: textures, the renderer's sprites and tile
+//! layers, and the golden scenes.
 //!
 //! They need the `headless-test` feature and a working driver:
 //!
@@ -15,3 +16,4 @@ mod common;
 mod golden;
 mod sprites;
 mod textures;
+mod tiles;

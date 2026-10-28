@@ -15,6 +15,13 @@
       "iterations": 13
     },
     {
+      "name": "tile_chunk_rebuild",
+      "median_ns": 3314.635630252101,
+      "p95_ns": 3385.2776470588237,
+      "samples": 50,
+      "iterations": 2975
+    },
+    {
       "name": "ecs_join2_5k",
       "median_ns": 8150.101333333333,
       "p95_ns": 8446.385777777778,

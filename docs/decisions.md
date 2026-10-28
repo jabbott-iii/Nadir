@@ -942,3 +942,123 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   action set, contact events, or plugins (the API sketch's
   `add_plugin`); or M4.8 changes what `nadir::movement` asks of the
   collision crate.
+
+## ADR-0023 — Tile layers live in a store the game owns, which the renderer reads beside the frame; chunks rebuild by revisions unique to the process; the frame's time is a Duration from the simulation clock
+
+- **Status:** Accepted
+- **Date:** 2026-10-27
+- **Context:**
+  - M4.5 asks for tile chunks: the `tile_chunk` shader, a chunk cache,
+    culling and animated tiles; tall tiles as y-sorted sprites; and a
+    hand-built map with a collision grid.
+  - `render.md` gives the layer data to the facade or scene, and the
+    renderer `TileChunkSet` GPU caches keyed by layer ID. `RenderFrame`'s
+    `tile_layers` are "references to cached chunk sets + layer/depth
+    info". It does not say how the renderer reaches the data.
+  - `Renderer::render(device, assets, frame, output)` sees only the frame
+    and the asset server. The asset server (M3.2) cannot hold an asset
+    made in code, nor hand one out to change. Systems see only the
+    `World`, and the renderer lives in the facade's loop, which skips
+    drawing on modal frames and when there is no GPU.
+  - `render.md` gives `RenderFrame.time` as `f32` seconds. An `f32` holds
+    milliseconds exactly only up to 2^24, about 4.6 hours.
+  - `FrameStats` is a public struct with no `#[non_exhaustive]`, built as
+    a literal in nadir-bench and the facade's tests.
+  - The user decided four points on 2026-10-27: the store beside the
+    frame; four crates, with the chunk benchmark that `04-quality.md`
+    requires; the time as a `Duration` from the simulation clock; and the
+    sandbox's field as a hand-built map, with `stress-entities`' walls as
+    a tile layer. The design critique (46 of 51 findings survived their
+    refuters) led to the rest.
+- **Decision:**
+  - nadir-render holds the CPU side as plain data:
+    - `TileSet { texture, columns, rows }`: a grid of equal tiles,
+      numbered row by row. Its `block_uv(index, size)` gives a tall tile's
+      sprite region.
+    - `Tile { index, frames, frame_ms, flip }`: an animation is
+      consecutive tiles, picked in the shader from the frame's time.
+    - `TileLayer`: square cells of `tile_size` world units from an
+      origin, as `TileGrid`'s, cut into chunks of `TileLayer::CHUNK` = 32
+      cells a side.
+    - `TileLayers`, a generational store handing out `Handle<TileLayer>`.
+    - `TileLayerDraw { tiles, layer, depth }` in the frame.
+  - **Breaking:** `Renderer::render` takes `tiles: &TileLayers` beside the
+    asset server. The facade inserts a `TileLayers` resource and passes it.
+    A game adds its layers to the resource, and pushes a `TileLayerDraw`
+    for each to draw in an `Extract` system.
+  - **Revisions:** each chunk of a layer has a revision, a `u64` from one
+    counter for the whole process. A new layer takes a fresh one, and each
+    `set` that changes a cell gives its chunk a fresh one.
+    - The renderer packs a chunk when the view first shows it, and again
+      only when its revision differs from the one it built. Frames that are
+      not drawn need nothing.
+    - A layer replaced in place, or a store replaced whose handles come
+      again, can never pass for the chunks already built.
+    - The renderer frees a layer's chunks at its first frame after the
+      layer leaves the store.
+  - **GPU:**
+    - Each non-empty chunk has a `Static` buffer of 1,024 tile instances,
+      made when it first has tiles.
+    - An instance is six `f32`s: the cell, then the tile's index, frames,
+      frame length and flip bits.
+    - The `TileLayer` uniform block packs the snapped origin, the tile
+      size, the tile set's grid, a placeholder flag, and the time in
+      milliseconds as a `uint` (bit-exact). It is set once per layer, and
+      there is one draw per visible non-empty chunk.
+    - The shader does the frame and tile arithmetic in `uint`.
+  - **Culling:** the view's world rect, a tile wider all round, to the
+    chunks whose cells overlap it. Touching its far edge does not count.
+    For 16-pixel tiles at 480 × 270 that is at most 2 × 2 chunks per
+    layer.
+  - **Order:** a tile layer sorts as a sprite at `SortMode::Fixed(depth)`
+    in its layer, before the sprites of the same layer and depth. It goes
+    into the sorted sprites at its position, splitting a batch it falls
+    in. The sprite program, buffers and texture are bound again after it.
+    `FrameStats` gains `tiles` and `chunks`. Its `batches` counts the
+    sprite draws made; `SpriteBatcher::stats` still counts before any
+    split.
+  - **Textures:** a layer whose tile set's texture is loading is not
+    drawn. A failed one shows its placeholder, all of it in every tile,
+    when the server shows placeholders, as sprites do.
+  - **Time:** `RenderFrame.time` is a `Duration`, which `clear()` leaves
+    alone. `App::update` sets it before the frame stages from the
+    `FixedClock`: its ticks and `alpha`. So whatever slows or pauses the
+    clock (M7.6) slows or pauses tile animation. The shader gets the
+    milliseconds modulo 2^32, so they wrap after 49.7 days.
+  - **Tall tiles:** these are sprites of a tile set's block, y-sorted by
+    their feet. The sandbox spawns them as entities; the level importer
+    (M5.6) will emit them.
+  - **Crates:** nadir-render, the facade, the sandbox and nadir-bench,
+    four crates with the user's agreement. nadir-bench adds
+    `tile_chunk_rebuild`, which `TileLayer::pack_chunk` makes public.
+- **Consequences:**
+  - Steady frames allocate nothing. The facade's `steady_frames` test now
+    draws a tile layer of animated tiles across a chunk corner.
+  - A tile set must be a whole texture cut into equal tiles, with no
+    margin or spacing. Pixel-perfect tiles need a whole tile size, and a
+    texture whose size is a whole multiple of the grid, as for sprites.
+  - `tile_chunk` has GLSL only; its MSL comes with M10.3, as for the other
+    programs.
+  - A layer's tile set and origin reach the shader only as uniforms, so a
+    setter for either would need no repacking. There is none yet: they
+    are fixed when a layer is made, and a new layer packs anew.
+- **Alternatives considered:**
+  - The store as a field of `RenderFrame` that `clear()` keeps: no
+    signature change, but the frame would mix per-frame lists with state
+    that lasts, and `clear()` would mean two things.
+  - `Rc<RefCell<TileLayer>>` in each draw: shared mutable state in the
+    frame.
+  - Tile layers as assets: needs the asset server to take assets made in
+    code and to hand them out to change, a fifth crate, before M5.3
+    rewrites that server.
+  - Revisions counted per layer from 0: a layer replaced in place, or a
+    store replaced, filled in the same order, keeps drawing the old
+    chunks.
+  - One buffer per layer for every chunk: memory for chunks never shown,
+    and a zero-size buffer for an empty layer.
+  - `f32` seconds for the time: milliseconds drift after hours.
+  - Wall-clock time: tile animation would not follow the simulation's
+    pause and time scale.
+- **Revisit when:** a tile set is cooked into a shared atlas page, or
+  carries LDtk padding or spacing (M5.4, M5.6); a level's layers are too
+  many to draw a layer at a time; or the asset server can hold layers.

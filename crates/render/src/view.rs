@@ -1,7 +1,7 @@
 //! Pixel-perfect views: the camera's snapped origin, the integer upscale
 //! with its letterbox, and the mapping between screen and world.
 
-use nadir_core::{IRect, IVec2, UVec2, Vec2};
+use nadir_core::{IRect, IVec2, Rect, UVec2, Vec2};
 
 use crate::Camera2D;
 
@@ -82,6 +82,16 @@ impl View {
             -2.0 * self.origin.x / self.size.x - 1.0,
             1.0 + 2.0 * self.origin.y / self.size.y,
         ]
+    }
+
+    /// The virtual pixels per world unit: a whole number.
+    pub(crate) fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    /// The part of the world the image shows.
+    pub(crate) fn world_rect(&self) -> Rect {
+        Rect::new(self.unproject(Vec2::ZERO), self.unproject(self.size))
     }
 
     /// A world point in virtual pixels from the image's top left.
@@ -167,6 +177,24 @@ mod tests {
                 "{width}x{height}"
             );
         }
+    }
+
+    #[test]
+    fn the_world_rect_is_what_the_view_shows_at_any_zoom() {
+        // At zoom 2, shaken: the corner snaps to (103, 49) × 2 - (32, 18),
+        // pixel (174, 80), which is world (87, 40); the view is 32 × 18
+        // world units.
+        let camera = Camera2D {
+            position: Vec2::new(100.0, 50.0),
+            zoom: 2.0,
+            shake: Vec2::new(3.0, -1.0),
+        };
+        let view = View::new(&camera, UVec2::new(64, 36));
+        assert_eq!(
+            view.world_rect(),
+            Rect::new(Vec2::new(87.0, 40.0), Vec2::new(119.0, 58.0))
+        );
+        assert_eq!(view.zoom(), 2.0);
     }
 
     #[test]

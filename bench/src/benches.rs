@@ -6,6 +6,7 @@ mod ecs;
 mod facade;
 mod json;
 mod sprite;
+mod tiles;
 
 use crate::harness::Bencher;
 
@@ -28,6 +29,10 @@ pub(crate) const ALL: &[Benchmark] = &[
     Benchmark {
         name: "sprite_sort_batch",
         run: sprite::sort_batch,
+    },
+    Benchmark {
+        name: "tile_chunk_rebuild",
+        run: tiles::chunk_rebuild,
     },
     Benchmark {
         name: "ecs_join2_5k",

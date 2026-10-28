@@ -18,7 +18,7 @@ use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Input};
 use nadir_platform::{
     Event, GpuSurface, ModalFrame, Platform, WindowConfig, precise_sleep, show_error_dialog,
 };
-use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer};
+use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, TileLayers};
 use nadir_scene::{FromValue, TypeRegistry};
 
 use crate::limiter::FrameLimiter;
@@ -213,13 +213,14 @@ impl Graphics {
         self.device.begin_frame(surface)?;
         let stats = {
             let assets = world.resource::<AssetServer>();
+            let tiles = world.resource::<TileLayers>();
             let frame = world.resource::<RenderFrame>();
             let output = Output {
                 target: PassTarget::Surface,
                 size,
             };
             self.renderer
-                .render(&mut self.device, &assets, &frame, output)?
+                .render(&mut self.device, &assets, &tiles, &frame, output)?
         };
         *world.resource_mut::<FrameStats>() = stats;
         self.device.end_frame(surface)?;
@@ -301,7 +302,10 @@ impl EngineCore {
 ///   [`ActionState`], latched once a tick before the tick stages
 /// - [`AssetServer`], loading from [`Config::assets`]
 /// - [`RenderFrame`], emptied before the frame stages, which fill it; the
-///   loop then draws it
+///   loop then draws it. Its `time`, which animated tiles show, is how long
+///   the simulation has run, ticks and `alpha`.
+/// - [`TileLayers`], the game's tile layers, which the frame's
+///   `tile_layers` name and the loop draws from
 /// - [`FrameStats`], what the last frame drew
 /// - [`TickStats`], how long this frame's ticks took
 /// - [`Collisions`], the colliders
@@ -366,6 +370,7 @@ impl App {
         world.insert_resource(Input::new());
         world.insert_resource(AssetServer::new(&config.assets, on_failure));
         world.insert_resource(RenderFrame::new());
+        world.insert_resource(TileLayers::new());
         world.insert_resource(FrameStats::default());
         world.insert_resource(TickStats::default());
         world.insert_resource(Collisions::new());
@@ -527,7 +532,8 @@ impl App {
     /// 2. runs the ticks that are due: for each, latches the actions and
     ///    runs the tick stages, which apply their commands;
     /// 3. sets [`TickStats`];
-    /// 4. empties the [`RenderFrame`], and runs the frame stages;
+    /// 4. empties the [`RenderFrame`], sets its `time` to how long the
+    ///    simulation has run, and runs the frame stages;
     /// 5. collects the profile scopes the systems recorded, with the
     ///    `profile` feature of `nadir-core`, so that they do not pile up.
     ///
@@ -558,7 +564,11 @@ impl App {
             stats.longest = stats.longest.max(took);
         }
         *self.world.resource_mut::<TickStats>() = stats;
-        self.world.resource_mut::<RenderFrame>().clear();
+        {
+            let mut out = self.world.resource_mut::<RenderFrame>();
+            out.clear();
+            out.time = simulated_time(&self.clock);
+        }
         self.schedule.run_frame(&mut self.world, &frame);
         profile::take_frame(&mut self.profile);
         // Records came back, so the feature is on. The recorder gets this
@@ -668,6 +678,16 @@ impl App {
         }
         Ok(())
     }
+}
+
+/// How long the simulation has run, as a frame shows it: the ticks so far
+/// and the `alpha` of a tick more. Whatever slows or stops the clock slows
+/// or stops what follows this, such as animated tiles.
+fn simulated_time(clock: &FixedClock) -> Duration {
+    let hz = u128::from(TICK_HZ);
+    let ticks = u128::from(clock.ticks()) * 1_000_000_000 / hz;
+    let part = (f64::from(clock.alpha()) * 1e9 / TICK_HZ as f64) as u128;
+    Duration::from_nanos(u64::try_from(ticks + part).unwrap_or(u64::MAX))
 }
 
 /// Logs an error that ends the game and shows it to the player. Returns it,
@@ -947,6 +967,31 @@ mod tests {
     }
 
     // -- the tick rate ------------------------------------------------------
+
+    #[test]
+    fn the_frame_time_is_how_long_the_simulation_has_run() {
+        let mut app = app();
+        // A quarter of a tick: no tick yet.
+        app.update(TICK / 4, &[]);
+        let time = |app: &App| app.world().resource::<RenderFrame>().time;
+        let close = |found: Duration, expected: Duration| {
+            assert!(
+                found.abs_diff(expected) < Duration::from_micros(1),
+                "{found:?}, not {expected:?}"
+            );
+        };
+        close(time(&app), TICK / 4);
+        for _ in 0..3 {
+            app.update(TICK, &[]);
+        }
+        close(time(&app), TICK * 3 + TICK / 4);
+        // A hitch counts for a quarter of a second, as the ticks do.
+        app.update(Duration::from_secs(5), &[]);
+        close(time(&app), TICK * 3 + TICK / 4 + Duration::from_millis(250));
+        // Emptying the frame for the next leaves the time to the engine.
+        app.world().resource_mut::<RenderFrame>().clear();
+        assert!(time(&app) > Duration::ZERO);
+    }
 
     #[test]
     fn ten_seconds_run_600_ticks_whatever_the_frame_rate() {
@@ -1536,25 +1581,32 @@ mod tests {
         use nadir_platform::{
             AllocCounts, HeadlessGl, PlatformError, create_headless_gl, thread_alloc_counts,
         };
-        use nadir_render::{SortMode, SpriteDraw, Texture};
+        use nadir_render::{Tile, TileLayer, TileLayerDraw, TileSet};
 
         use super::*;
         use crate::FrameAllocs;
 
         /// How many sprites walk about.
         const CROWD: usize = 10_000;
-        /// Ground tiles under them: 16 × 12 of 32 pixels.
-        const TILES: usize = 192;
+        /// The ground under them: a tile layer of 64 × 64 cells of 16
+        /// pixels, so chunks of 32 × 32 cells, a quarter of them animated.
+        /// Its four chunks meet at the view's centre.
+        const GROUND: u32 = 64;
         /// Frames before the counting starts: the textures load after the
-        /// first draw, and the buffers grow in the frames after it.
+        /// first draw, the buffers grow in the frames after it, and the
+        /// camera moves from the ground's first chunk to the view, where
+        /// four meet, packing three more.
         const WARM_UP: usize = 10;
+        /// The frame of the warm-up from which the camera is where four
+        /// chunks meet.
+        const MOVED: usize = 6;
         /// Frames counted.
         const COUNTED: usize = 100;
         /// The view, which the walkers stay inside.
         const VIEW: Vec2 = Vec2::new(480.0, 270.0);
 
-        /// The ground's texture.
-        struct Ground(Handle<Texture>);
+        /// The ground's layer, and the frames drawn so far.
+        struct Ground(Handle<TileLayer>, usize);
 
         /// What each frame saw: the last frame's allocations and drawing,
         /// and the ticks so far. Room for every frame is made up front, and
@@ -1646,16 +1698,17 @@ mod tests {
         }
 
         fn draw_ground(world: &World, _: &Frame) {
-            let ground = world.resource::<Ground>().0;
+            let mut ground = world.resource_mut::<Ground>();
             let mut out = world.resource_mut::<RenderFrame>();
-            out.camera.position = VIEW * 0.5;
-            for tile in 0..TILES {
-                let corner = Vec2::new((tile % 16) as f32, (tile / 16) as f32) * 32.0;
-                let mut sprite = SpriteDraw::new(ground, corner, Vec2::splat(32.0));
-                sprite.pivot = Vec2::ZERO;
-                sprite.sort = SortMode::Fixed(0);
-                out.sprites.push(sprite);
-            }
+            // Over the first chunk only, then on the walkers, where four
+            // chunks meet.
+            out.camera.position = if ground.1 < MOVED {
+                VIEW * 0.5 - Vec2::splat(256.0)
+            } else {
+                VIEW * 0.5
+            };
+            ground.1 += 1;
+            out.tile_layers.push(TileLayerDraw::new(ground.0));
         }
 
         fn probe(world: &World, _: &Frame) {
@@ -1691,6 +1744,25 @@ mod tests {
                 let mut server = app.world().resource_mut::<AssetServer>();
                 (server.load("walker.qoi"), server.load("ground.qoi"))
             };
+            let set = TileSet {
+                texture: ground,
+                columns: 2,
+                rows: 2,
+            };
+            // Cell (32, 32), the corner of four chunks, at the view's centre.
+            let corner = VIEW * 0.5 - Vec2::splat(512.0);
+            let mut layer = TileLayer::new(set, UVec2::splat(GROUND), 16.0, corner);
+            for y in 0..GROUND as i32 {
+                for x in 0..GROUND as i32 {
+                    let tile = if (x + y) % 4 == 0 {
+                        Tile::animated(1, 3, 100)
+                    } else {
+                        Tile::new(0)
+                    };
+                    layer.set(nadir_core::IVec2::new(x, y), Some(tile));
+                }
+            }
+            let ground = app.world().resource_mut::<TileLayers>().add(layer);
             let mut seed = 1u32;
             let mut random = move || {
                 // A xorshift: the same walkers every run.
@@ -1716,11 +1788,11 @@ mod tests {
                     .with(Velocity(velocity))
                     .with(sprite);
             }
-            app.insert_resource(Ground(ground))
+            app.insert_resource(Ground(ground, 0))
         }
 
         #[test]
-        fn a_steady_frame_of_10k_sprites_allocates_nothing() {
+        fn a_steady_frame_of_10k_sprites_and_a_tile_layer_allocates_nothing() {
             // The counter is the global allocator, so a known allocation
             // shows: a count of zero below means something.
             let start = thread_alloc_counts();
@@ -1790,9 +1862,11 @@ mod tests {
                     "the first full draw grows its lists"
                 );
                 let all = FrameStats {
-                    sprites: (CROWD + TILES) as u32,
+                    sprites: CROWD as u32,
                     skipped: 0,
-                    batches: 2,
+                    batches: 1,
+                    tiles: 4 * 32 * 32,
+                    chunks: 4,
                 };
                 assert_eq!(seen[WARM_UP].1, all, "drawn before the counting starts");
                 assert_eq!(seen[WARM_UP + COUNTED - 1].1, all);
