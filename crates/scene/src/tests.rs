@@ -583,3 +583,221 @@ fn two_types_with_one_name_cannot_both_be_registered() {
     registry.register_component::<Thing>();
     registry.register_component::<other::Thing>();
 }
+
+// ---- The world's hash ------------------------------------------------------
+
+impl Component for SaveId {}
+
+/// A registry of `Thing` then `SaveId`, and a world that can hold them.
+fn hashed_world() -> (TypeRegistry, World) {
+    let mut registry = TypeRegistry::new();
+    registry.register_component::<Thing>();
+    registry.register_component::<SaveId>();
+    let mut world = World::new();
+    registry.register_components(&mut world);
+    (registry, world)
+}
+
+fn thing(count: i32, speed: f32, tags: &[&str]) -> Thing {
+    Thing {
+        count,
+        speed,
+        tags: tags.iter().map(|&tag| tag.to_string()).collect(),
+        ..Thing::default()
+    }
+}
+
+/// The world of `hashed_world` with two things, one with a save id.
+fn two_things() -> (TypeRegistry, World) {
+    let (registry, mut world) = hashed_world();
+    world.spawn().with(thing(1, 0.5, &["a"])).with(SaveId(7));
+    world.spawn().with(thing(2, 1.5, &[]));
+    (registry, world)
+}
+
+#[test]
+fn each_visits_every_component_of_a_type_in_its_storages_order() {
+    let (registry, mut world) = hashed_world();
+    let entities: Vec<_> = (0..4)
+        .map(|count| world.spawn().with(thing(count, 0.0, &[])).id())
+        .collect();
+    // A remove moves the last into its place.
+    world.write::<Thing>().remove(entities[1]);
+    let mut seen = Vec::new();
+    let mut cx = ReflectContext::new("test");
+    registry
+        .get("Thing")
+        .expect("registered")
+        .each(&world, &mut |entity, thing| {
+            seen.push((entity, thing.to_value(&mut cx).get("count").cloned()));
+        });
+    let count = |n| Some(Value::Int(n));
+    assert_eq!(
+        seen,
+        [
+            (entities[0], count(0)),
+            (entities[3], count(3)),
+            (entities[2], count(2)),
+        ]
+    );
+    let mut none = 0;
+    registry
+        .get("SaveId")
+        .expect("registered")
+        .each(&world, &mut |_, _| none += 1);
+    assert_eq!(none, 0);
+}
+
+#[test]
+fn worlds_made_alike_hash_alike_and_any_reflected_difference_shows() {
+    let hash = |(registry, world): &(TypeRegistry, World)| {
+        registry.hash_world(world, &mut ReflectContext::new("test"))
+    };
+    let base = hash(&two_things());
+    assert_eq!(base, hash(&two_things()));
+
+    // A value.
+    let changed = two_things();
+    changed
+        .1
+        .write::<Thing>()
+        .iter_mut()
+        .next()
+        .expect("a thing")
+        .1
+        .count = 3;
+    assert_ne!(hash(&changed), base);
+    // A float, by its bits.
+    let (registry, mut world) = hashed_world();
+    world.spawn().with(thing(1, 1.0, &[]));
+    let one = registry.hash_world(&world, &mut ReflectContext::new("test"));
+    world
+        .write::<Thing>()
+        .iter_mut()
+        .next()
+        .expect("a thing")
+        .1
+        .speed = 1.0 + f32::EPSILON;
+    assert_ne!(
+        registry.hash_world(&world, &mut ReflectContext::new("test")),
+        one
+    );
+    // Strings split differently.
+    let (registry, mut world) = hashed_world();
+    world.spawn().with(thing(1, 0.5, &["ab", "c"]));
+    let (_, mut other) = hashed_world();
+    other.spawn().with(thing(1, 0.5, &["a", "bc"]));
+    assert_ne!(
+        registry.hash_world(&world, &mut ReflectContext::new("test")),
+        registry.hash_world(&other, &mut ReflectContext::new("test"))
+    );
+    // The entity: the same values on a later generation of the slot.
+    let (registry, mut world) = hashed_world();
+    let gone = world.spawn().id();
+    world.despawn(gone);
+    world.spawn().with(thing(1, 0.5, &["a"])).with(SaveId(7));
+    world.spawn().with(thing(2, 1.5, &[]));
+    assert_ne!(
+        registry.hash_world(&world, &mut ReflectContext::new("test")),
+        base
+    );
+    // The storage's order: the same components inserted the other way.
+    let (registry, mut world) = hashed_world();
+    let first = world.spawn().id();
+    let second = world.spawn().id();
+    world.write::<Thing>().insert(second, thing(2, 1.5, &[]));
+    world.write::<Thing>().insert(first, thing(1, 0.5, &["a"]));
+    world.write::<SaveId>().insert(first, SaveId(7));
+    assert_ne!(
+        registry.hash_world(&world, &mut ReflectContext::new("test")),
+        base
+    );
+    // A component removed.
+    let (registry, world) = two_things();
+    let saved = world.read::<SaveId>().entities()[0];
+    world.write::<SaveId>().remove(saved);
+    assert_ne!(
+        registry.hash_world(&world, &mut ReflectContext::new("test")),
+        base
+    );
+}
+
+#[test]
+fn the_hash_counts_the_types_and_their_order_but_nothing_unregistered() {
+    let (_, world) = two_things();
+    let mut reversed = TypeRegistry::new();
+    reversed.register_component::<SaveId>();
+    reversed.register_component::<Thing>();
+    let (registry, _) = two_things();
+    assert_ne!(
+        reversed.hash_world(&world, &mut ReflectContext::new("test")),
+        registry.hash_world(&world, &mut ReflectContext::new("test"))
+    );
+    // A type with no components still counts, by its name.
+    let mut fewer = TypeRegistry::new();
+    fewer.register_component::<Thing>();
+    let mut only_things = World::new();
+    fewer.register_components(&mut only_things);
+    only_things.register::<SaveId>();
+    only_things.spawn().with(thing(1, 0.5, &[]));
+    let mut with_ids = TypeRegistry::new();
+    with_ids.register_component::<Thing>();
+    with_ids.register_component::<SaveId>();
+    assert_ne!(
+        fewer.hash_world(&only_things, &mut ReflectContext::new("test")),
+        with_ids.hash_world(&only_things, &mut ReflectContext::new("test"))
+    );
+    // A component of a type the registry does not know changes nothing.
+    let before = fewer.hash_world(&only_things, &mut ReflectContext::new("test"));
+    only_things.spawn().with(SaveId(3));
+    assert_eq!(
+        fewer.hash_world(&only_things, &mut ReflectContext::new("test")),
+        before
+    );
+}
+
+#[test]
+fn zeros_of_either_sign_hash_alike_and_so_do_all_nans() {
+    let (registry, mut world) = hashed_world();
+    let entity = world.spawn().with(thing(1, 0.0, &[])).id();
+    let hash_of = |speed: f32| {
+        world
+            .write::<Thing>()
+            .get_mut(entity)
+            .expect("a thing")
+            .speed = speed;
+        registry.hash_world(&world, &mut ReflectContext::new("test"))
+    };
+    assert_eq!(hash_of(0.0), hash_of(-0.0));
+    let nan = hash_of(f32::from_bits(0x7fc0_0000));
+    assert_eq!(nan, hash_of(f32::from_bits(0xffc0_0000)));
+    assert_eq!(nan, hash_of(f32::from_bits(0x7f80_0001)));
+    assert_ne!(nan, hash_of(0.0));
+    assert_ne!(nan, hash_of(f32::INFINITY));
+}
+
+#[test]
+fn the_hash_of_a_known_world_is_fixed() {
+    // The form the hash is taken of, on every system, as `hash_world`
+    // documents it: these values were worked out from that description
+    // apart from the code. Changing the form changes every stored
+    // determinism hash (`crates/engine/tests/determinism`).
+    let (registry, world) = two_things();
+    let mut cx = ReflectContext::new("test");
+    assert_eq!(registry.hash_world(&world, &mut cx), 0x9fd6_59a3_36d7_b47a);
+    // A NaN, whatever its bits, as `0x7ff8_0000_0000_0000`.
+    let first = world.read::<Thing>().entities()[0];
+    world
+        .write::<Thing>()
+        .get_mut(first)
+        .expect("a thing")
+        .speed = f32::from_bits(0xffc0_0001);
+    assert_eq!(registry.hash_world(&world, &mut cx), 0x74d3_3433_a0cf_2672);
+}
+
+#[test]
+#[should_panic(expected = "is not registered")]
+fn hashing_a_world_that_cannot_hold_a_type_panics() {
+    let (registry, _) = hashed_world();
+    registry.hash_world(&World::new(), &mut ReflectContext::new("test"));
+}

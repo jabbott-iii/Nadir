@@ -93,6 +93,11 @@ pub trait FromValue: Reflect + Sized {
     `TypeRegistry::register_components` registers the types with a world)
   - inspector hooks (`inspect` and `inspect_mut`, which hold the type's
     borrow while their callback runs)
+  - a walk of the type's components in storage order (`each`, M4.7), under
+    `TypeRegistry::hash_world(world, cx)`: a 64-bit FNV-1a of every
+    registered type's components, by entity, through `to_value`. Zeros of
+    either sign hash as one, and so do all NaNs. Determinism tests compare
+    it tick after tick (ADR-0025).
 
   `xtask` cannot find unregistered components, but a debug-build startup
   check walks prefab files and reports unknown component names.

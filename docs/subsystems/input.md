@@ -184,6 +184,21 @@ impl<A: ActionSet> ActionState<A> {
 - `InputRecorder` writes the per-tick stream. `InputPlayer` replaces live
   latching with recorded states.
 - This powers determinism tests and bug reproductions.
+- The facade plays one with `App::play_replay` (M4.7, ADR-0025):
+  - It reads one tick ahead, so its `Replay` resource is `Ended` as soon
+    as the last tick has run; the ticks after it are latched live.
+  - While it plays, the live input is latched into a set of its own:
+    `Input` keeps its ticks, and nothing reaches the actions. The pointer
+    and the wheel stay live: fixed systems read input only through the
+    `ActionState` if they are to replay.
+  - At the handover the live ticks' edges are the live keys' alone: an
+    action held in the replay's last tick is not just released, and a key
+    held through it is held but not just pressed. `ActionState` has no
+    public way to latch from a given state.
+- The sandbox records with `--record FILE`, writing each tick as it comes,
+  and plays with `--replay FILE`, in the window or `--headless`. Both log
+  the ticks and the world's hash after them: a recording when its window
+  is closed, a replay when it ends.
 - Format version 1, little endian:
   - The header:
     - the magic `NRPL`, the version (`u16`) and the action count (`u16`)

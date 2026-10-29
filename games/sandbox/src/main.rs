@@ -16,54 +16,133 @@
 //!   people walk about in view on a lawn of grass sprites (`stress.rs`); or
 //!   `stress-entities`, where 5,000 people jostle in a maze of walls
 //!   (`stress_entities.rs`)
+//! - `--record FILE`: records the input, tick after tick, into a replay,
+//!   hashing the world each frame, which slows the frames
+//! - `--replay FILE`: plays a replay in place of the keys, then lets them
+//!   take over; pass the scene it was recorded in
+//! - `--headless`, with `--replay`: plays it with no window, as fast as it
+//!   runs, then quits
+//!
+//! A recording, when its window is closed, and its replay each log their
+//! ticks and the world's hash after them (`replay.rs`); a recording whose
+//! file failed logs how many ticks reached it.
 
 mod map;
+mod replay;
 mod stress;
 mod stress_entities;
 
+use std::error::Error;
 use std::fmt;
+use std::path::PathBuf;
 use std::time::Duration;
 
+use nadir::cli::Args;
 use nadir::log::info;
 use nadir::prelude::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = nadir::cli::Args::from_env();
-    let fps: Option<u32> = args.parsed("--fps")?;
-    let vsync = !args.flag("--no-vsync");
-    let scene = match args.value("--scene")? {
-        None => Scene::Field,
-        Some(name) => Scene::from_name(&name).ok_or_else(|| {
-            format!(
-                "there is no scene `{name}`: try `field`, `stress-sprites` or `stress-entities`"
-            )
-        })?,
-    };
-    // `cargo dev` ends in `--` already, so `cargo dev -- --fps 144` would
-    // pass the options as positionals: refuse them rather than ignore them.
-    if let Some(extra) = args.finish()?.first() {
-        return Err(format!("unexpected argument `{extra}`").into());
-    }
-
+fn main() -> Result<(), Box<dyn Error>> {
+    let options = Options::parse(Args::from_env())?;
     let config = Config {
         title: "Sandbox".into(),
         game: "Sandbox".into(),
-        frame_rate_limit: Some(fps.unwrap_or(60)),
-        vsync,
+        frame_rate_limit: Some(options.fps.unwrap_or(60)),
+        vsync: options.vsync,
         assets: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into(),
         ..Config::default()
     };
-    info!(
-        "sandbox: scene {}, at most {} frames a second, vsync {}",
-        scene.name(),
-        config
-            .frame_rate_limit
-            .filter(|&fps| fps > 0)
-            .map_or("unlimited".to_string(), |fps| fps.to_string()),
-        if vsync { "on" } else { "off" }
-    );
-    game(App::new(config), scene)?.run()?;
-    Ok(())
+    if options.headless {
+        info!(
+            "sandbox: scene {}, a replay with no window",
+            options.scene.name()
+        );
+    } else {
+        info!(
+            "sandbox: scene {}, at most {} frames a second, vsync {}",
+            options.scene.name(),
+            config
+                .frame_rate_limit
+                .filter(|&fps| fps > 0)
+                .map_or("unlimited".to_string(), |fps| fps.to_string()),
+            if options.vsync { "on" } else { "off" }
+        );
+    }
+    let mut app = game(App::new(config), options.scene)?;
+    let mut recording = None;
+    if let Some(path) = &options.record {
+        let (recorded, session) = replay::record(app, path)?;
+        app = recorded;
+        recording = Some(session);
+    }
+    if let Some(path) = &options.replay {
+        app = replay::play(app, path)?;
+    }
+    let result = if options.headless {
+        replay::headless(app).map(|_| ())
+    } else {
+        app.run().map_err(Into::into)
+    };
+    if let Some(recording) = recording {
+        recording.report();
+    }
+    result
+}
+
+/// What the command line asks for.
+#[derive(Debug, PartialEq, Eq)]
+struct Options {
+    fps: Option<u32>,
+    vsync: bool,
+    scene: Scene,
+    record: Option<PathBuf>,
+    replay: Option<PathBuf>,
+    headless: bool,
+}
+
+impl Options {
+    /// Reads the options from `args`.
+    ///
+    /// # Errors
+    ///
+    /// If an option's value is missing or wrong, an argument is left over,
+    /// or two options do not go together.
+    fn parse(mut args: Args) -> Result<Self, Box<dyn Error>> {
+        let fps: Option<u32> = args.parsed("--fps")?;
+        let vsync = !args.flag("--no-vsync");
+        let scene = match args.value("--scene")? {
+            None => Scene::Field,
+            Some(name) => Scene::from_name(&name).ok_or_else(|| {
+                format!(
+                    "there is no scene `{name}`: try `field`, `stress-sprites` or `stress-entities`"
+                )
+            })?,
+        };
+        let record = args.value("--record")?.map(PathBuf::from);
+        let replay = args.value("--replay")?.map(PathBuf::from);
+        let headless = args.flag("--headless");
+        // `cargo dev` ends in `--` already, so `cargo dev -- --fps 144` would
+        // pass the options as positionals: refuse them rather than ignore them.
+        if let Some(extra) = args.finish()?.first() {
+            return Err(format!("unexpected argument `{extra}`").into());
+        }
+        if record.is_some() && replay.is_some() {
+            return Err("`--record` and `--replay` do not go together".into());
+        }
+        if headless && replay.is_none() {
+            return Err("`--headless` plays a replay: give one with `--replay FILE`".into());
+        }
+        if headless && (fps.is_some() || !vsync) {
+            return Err("`--headless` draws no frames: leave out `--fps` and `--no-vsync`".into());
+        }
+        Ok(Self {
+            fps,
+            vsync,
+            scene,
+            record,
+            replay,
+            headless,
+        })
+    }
 }
 
 /// What the sandbox shows.
@@ -642,6 +721,58 @@ mod tests {
     pub(crate) fn position(app: &App, entity: Entity) -> Vec2 {
         let transforms = app.world().read::<Transform>();
         transforms.get(entity).expect("it has a Transform").position
+    }
+
+    fn options(args: &[&str]) -> Result<Options, String> {
+        Options::parse(Args::new(args.iter().copied())).map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn the_command_line_records_or_replays_and_plays_headless_only_a_replay() {
+        let plain = Options {
+            fps: None,
+            vsync: true,
+            scene: Scene::Field,
+            record: None,
+            replay: None,
+            headless: false,
+        };
+        assert_eq!(options(&[]), Ok(Options { ..plain }));
+        let recording = options(&["--record", "a.nrpl", "--scene", "stress-sprites"]);
+        assert_eq!(
+            recording,
+            Ok(Options {
+                record: Some("a.nrpl".into()),
+                scene: Scene::StressSprites,
+                fps: None,
+                vsync: true,
+                replay: None,
+                headless: false,
+            })
+        );
+        let headless = options(&["--replay", "a.nrpl", "--headless"]).expect("valid");
+        assert_eq!(
+            (headless.replay, headless.headless),
+            (Some("a.nrpl".into()), true)
+        );
+        let refused = [
+            (&["--headless"][..], "give one with `--replay FILE`"),
+            (&["--record", "a", "--replay", "b"], "do not go together"),
+            (
+                &["--replay", "a", "--headless", "--fps", "30"],
+                "draws no frames",
+            ),
+            (
+                &["--replay", "a", "--headless", "--no-vsync"],
+                "draws no frames",
+            ),
+            (&["--record"], "--record"),
+            (&["extra"], "unexpected argument `extra`"),
+        ];
+        for (args, why) in refused {
+            let error = options(args).expect_err("refused");
+            assert!(error.contains(why), "{args:?}: {error}");
+        }
     }
 
     #[test]

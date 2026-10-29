@@ -10,7 +10,9 @@
 //! and systems interpolate, move and collide entities, send trigger
 //! events, and draw sprites (ADR-0022). An [`Animator`] plays a [`Clip`]
 //! from [`Clips`] on its entity's sprite, and [`Facing`] mirrors it
-//! (ADR-0024). The game's tile layers are the
+//! (ADR-0024). [`App::play_replay`] plays recorded actions in place of the
+//! live input, and [`App::world_hash`] hashes the reflected world, for
+//! determinism tests (ADR-0025). The game's tile layers are the
 //! resource [`TileLayers`](nadir_render::TileLayers), which the renderer
 //! draws from (ADR-0023). With the `dev` feature, the global
 //! allocator counts allocations, and the resource `FrameAllocs` holds the
@@ -40,6 +42,7 @@ mod frame_allocs;
 mod glue;
 mod limiter;
 mod log_file;
+mod replay;
 mod tick_stats;
 
 pub use nadir_core::{cli, log};
@@ -60,6 +63,7 @@ pub use components::{
 pub use error::Error;
 #[cfg(feature = "dev")]
 pub use frame_allocs::FrameAllocs;
+pub use replay::{Replay, world_hash};
 pub use tick_stats::TickStats;
 
 /// What most games use, for one `use nadir::prelude::*`.
@@ -67,7 +71,7 @@ pub mod prelude {
     pub use nadir_assets::{AssetServer, Handle, LoadState};
     pub use nadir_collision::{LayerMask, Shape, TileGrid};
     pub use nadir_core::time::{Frame, Stopwatch, Tick};
-    pub use nadir_core::{Color, IVec2, Key, MouseButton, Rect, UVec2, Vec2};
+    pub use nadir_core::{Color, IVec2, Key, MouseButton, Pcg32, Rect, UVec2, Vec2};
     pub use nadir_ecs::{
         Commands, Component, Entity, Events, FixedStage, FrameStage, Res, ResMut, World,
     };

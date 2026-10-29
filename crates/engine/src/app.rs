@@ -14,7 +14,7 @@ use nadir_core::profile::{self, ScopeRecord};
 use nadir_core::time::{FixedClock, Stopwatch};
 use nadir_ecs::{Component, FixedStage, FixedSystem, FrameStage, FrameSystem, Schedule, World};
 use nadir_gfx::{Device, PassTarget};
-use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Input};
+use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Input, InputPlayer};
 use nadir_platform::{
     Event, GpuSurface, ModalFrame, Platform, WindowConfig, precise_sleep, show_error_dialog,
 };
@@ -23,10 +23,11 @@ use nadir_scene::{FromValue, TypeRegistry};
 
 use crate::animation::AnimationClock;
 use crate::limiter::FrameLimiter;
+use crate::replay::{PlayReplay, ReplayInput};
 use crate::{
     AnimationFinished, Animator, Clips, Collider, Collisions, Error, Facing, Parent, Player,
-    PrevTransform, SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit, Velocity, glue,
-    log_file,
+    PrevTransform, Replay, SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit,
+    Velocity, glue, log_file,
 };
 
 /// How many times a second the simulation steps.
@@ -117,26 +118,35 @@ impl Config {
 }
 
 /// Latches the input into the game's action state.
-type LatchFn = Box<dyn FnMut(&mut Input, &World)>;
+pub(crate) type LatchFn = Box<dyn FnMut(&mut Input, &World)>;
 
-/// The game's action set: latches the input into its state once a tick.
+/// The game's action set: latches the input into its state once a tick, or
+/// plays a replay into it.
 struct Actions {
     /// The set's type, for messages, or `None` before the game adds one.
     set: Option<&'static str>,
     latch: LatchFn,
+    /// The replay that [`App::play_replay`] plays, until it ends.
+    replay: Option<Box<dyn PlayReplay>>,
 }
 
 impl Actions {
     /// Before the game adds its actions: a latch into a set of its own, so
     /// that each tick still ends, and [`Input::wheel`] moves on.
     fn none() -> Self {
-        let map = ActionMap::<NoActions>::new().expect("a set of one action is valid");
-        let mut state = ActionState::new();
         Self {
             set: None,
-            latch: Box::new(move |input, _| input.latch(&map, &mut state)),
+            latch: latch_into_nothing(),
+            replay: None,
         }
     }
+}
+
+/// A latch of the input into a set of its own, which nothing reads.
+fn latch_into_nothing() -> LatchFn {
+    let map = ActionMap::<NoActions>::new().expect("a set of one action is valid");
+    let mut state = ActionState::new();
+    Box::new(move |input, _| input.latch(&map, &mut state))
 }
 
 /// The action set the input is latched into before the game adds its own:
@@ -319,6 +329,7 @@ impl EngineCore {
 /// - [`Collisions`], the colliders
 /// - [`Clips`], the clips that animators play
 /// - [`TypeRegistry`], the reflected component types
+/// - with [`App::play_replay`], [`Replay`], how far the replay got
 /// - the events [`TriggerEnter`], [`TriggerExit`] and [`AnimationFinished`]
 /// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
 ///
@@ -473,7 +484,8 @@ impl App {
     /// # Panics
     ///
     /// An app has one action set: adding another type panics. Adding the
-    /// same type again replaces its bindings.
+    /// same type again replaces its bindings. Adding actions while a replay
+    /// plays panics: [`App::play_replay`] comes after `add_actions`.
     #[must_use]
     pub fn add_actions<A: ActionSet>(mut self, map: ActionMap<A>) -> Self {
         let set = type_name::<A>();
@@ -483,6 +495,10 @@ impl App {
                 "an App has one action set: it has `{existing}`, so it cannot add `{set}`",
             );
         }
+        assert!(
+            self.actions.replay.is_none(),
+            "a replay is playing: play_replay must come after add_actions"
+        );
         self.world.insert_resource(map);
         self.world.insert_resource(ActionState::<A>::new());
         self.actions = Actions {
@@ -492,8 +508,57 @@ impl App {
                 let mut state = world.resource_mut::<ActionState<A>>();
                 input.latch(&map, &mut state);
             }),
+            replay: None,
         };
         self
+    }
+
+    /// Plays `replay` into the game's actions in place of the live input:
+    /// each tick from the next on takes its [`ActionState<A>`] from the
+    /// replay's next tick. It adds the resource [`Replay`], which says how
+    /// far it got. The replay is read a tick ahead, so it is
+    /// [`Replay::Ended`] as soon as its last tick has run, and the ticks
+    /// after that are latched live.
+    ///
+    /// While it plays, the live input still reaches [`Input`], but not the
+    /// actions. The pointer and the wheel stay live: replays do not hold
+    /// them, so a fixed system that reads them does not replay. When the
+    /// replay ends, the first live tick's edges are those of the live keys
+    /// alone: an action held in the replay's last tick is not just
+    /// released, and a key held all along is held but not just pressed.
+    ///
+    /// A damaged tick ends the replay as [`Replay::Failed`], after an error
+    /// in the log; the ticks before it play. A replay with no ticks is
+    /// [`Replay::Ended`] at once. Playing another replay replaces this one.
+    ///
+    /// # Panics
+    ///
+    /// If the game's action set, added with [`App::add_actions`], is not
+    /// `A`.
+    #[must_use]
+    pub fn play_replay<A: ActionSet>(mut self, replay: InputPlayer<'static, A>) -> Self {
+        let set = type_name::<A>();
+        assert!(
+            self.actions.set == Some(set),
+            "a replay of `{set}` plays into those actions: add them with add_actions first"
+        );
+        let replay = ReplayInput::new(replay, latch_into_nothing());
+        let status = match replay.ahead() {
+            Ok(true) => Replay::Playing { ticks: 0 },
+            Ok(false) => Replay::Ended { ticks: 0 },
+            Err(error) => failed(0, error),
+        };
+        self.actions.replay = matches!(status, Replay::Playing { .. })
+            .then(|| Box::new(replay) as Box<dyn PlayReplay>);
+        self.world.insert_resource(status);
+        self
+    }
+
+    /// The [`world_hash`](crate::world_hash) of the world: the same after
+    /// the same ticks of the same replay, from the same start, whatever the
+    /// frames were, under the conditions that function gives.
+    pub fn world_hash(&self) -> u64 {
+        crate::world_hash(&self.world)
     }
 
     /// Adds a system to a stage of each simulation tick, after the stage's
@@ -544,7 +609,8 @@ impl App {
     /// that came before it, without drawing it:
     ///
     /// 1. feeds the events to [`Input`];
-    /// 2. runs the ticks that are due: for each, latches the actions and
+    /// 2. runs the ticks that are due: for each, latches the actions, or
+    ///    takes them from the replay that [`App::play_replay`] plays, and
     ///    runs the tick stages, which apply their commands;
     /// 3. sets [`TickStats`];
     /// 4. empties the [`RenderFrame`], sets its `time` to how long the
@@ -556,7 +622,9 @@ impl App {
     /// Tests, benchmarks and headless runs call it themselves. A frame of
     /// `Duration::from_nanos(16_666_667)` runs one tick: the third of a
     /// nanosecond it holds past a tick adds up to another only after 50
-    /// million frames.
+    /// million frames. Asset loads finish only in a drawn frame, so a
+    /// headless run finishes none: tick systems must not depend on whether
+    /// an asset has loaded.
     pub fn update(&mut self, elapsed: Duration, events: &[Event]) {
         {
             let mut input = self.world.resource_mut::<Input>();
@@ -568,11 +636,24 @@ impl App {
         let mut stats = TickStats::default();
         while let Some(tick) = self.clock.consume_tick() {
             let start = Instant::now();
-            {
+            let replayed = {
                 let mut input = self.world.resource_mut::<Input>();
-                (self.actions.latch)(&mut input, &self.world);
-            }
+                match &mut self.actions.replay {
+                    Some(replay) => {
+                        let ticks = replay.latch(&mut input, &self.world);
+                        *self.world.resource_mut::<Replay>() = Replay::Playing { ticks };
+                        true
+                    }
+                    None => {
+                        (self.actions.latch)(&mut input, &self.world);
+                        false
+                    }
+                }
+            };
             self.schedule.run_fixed(&mut self.world, &tick);
+            if replayed {
+                self.end_replay_tick();
+            }
             let took = start.elapsed();
             stats.ticks += 1;
             stats.time += took;
@@ -695,6 +776,37 @@ impl App {
     }
 }
 
+impl App {
+    /// After a replayed tick: if it was the replay's last, or the next
+    /// cannot be read, says so in [`Replay`] and lets the live input latch
+    /// from the next tick on.
+    fn end_replay_tick(&mut self) {
+        let Some(replay) = &self.actions.replay else {
+            return;
+        };
+        let ticks = replay.ticks();
+        let status = match replay.ahead() {
+            Ok(true) => return,
+            Ok(false) => Replay::Ended { ticks },
+            Err(error) => failed(ticks, error),
+        };
+        *self.world.resource_mut::<Replay>() = status;
+        self.actions.replay = None;
+    }
+}
+
+/// [`Replay::Failed`] after `ticks` ticks, logged.
+fn failed(ticks: u64, error: &nadir_input::InputError) -> Replay {
+    error!(
+        "the replay's tick {} cannot be read: {error}; the input is live from now on",
+        ticks + 1
+    );
+    Replay::Failed {
+        ticks,
+        error: error.clone(),
+    }
+}
+
 /// How long the simulation has run, as a frame shows it: the ticks so far
 /// and the `alpha` of a tick more. Whatever slows or stops the clock slows
 /// or stops what follows this, such as animated tiles.
@@ -721,7 +833,7 @@ mod tests {
     use nadir_core::time::{Frame, Tick};
     use nadir_core::{Key, Vec2};
     use nadir_ecs::Entity;
-    use nadir_input::Binding;
+    use nadir_input::{Binding, InputRecorder};
 
     use super::*;
 
@@ -1479,6 +1591,218 @@ mod tests {
         assert_eq!(x(&app), 0.0, "D is no longer bound");
         app.update(20 * MS, &[key(Key::Right, true)]);
         assert_eq!(x(&app), SPEED / 60.0, "one latch a tick, with the new map");
+    }
+
+    // -- replays ----------------------------------------------------------------
+
+    /// The replay of a run of `moving_app` that gets `frames`' events, a
+    /// frame of one tick each.
+    fn recording(frames: &[&[Event]]) -> &'static [u8] {
+        let mut app = moving_app(&shared())
+            .insert_resource(InputRecorder::<Act>::new().expect("a valid set"))
+            .add_fixed_system(FixedStage::Input, "record", |world, _| {
+                let state = world.resource::<ActionState<Act>>();
+                world.resource_mut::<InputRecorder<Act>>().record(&state);
+            });
+        for events in frames {
+            app.update(TICK, events);
+        }
+        let bytes = app
+            .world()
+            .resource::<InputRecorder<Act>>()
+            .bytes()
+            .to_vec();
+        Box::leak(bytes.into_boxed_slice())
+    }
+
+    fn replaying(bytes: &'static [u8]) -> App {
+        let player = InputPlayer::<Act>::new(bytes).expect("a replay of Act");
+        moving_app(&shared()).play_replay(player)
+    }
+
+    fn replay(app: &App) -> Replay {
+        app.world().resource::<Replay>().clone()
+    }
+
+    /// `Act::Move`'s held, just pressed and just released, in the last tick.
+    fn moving(app: &App) -> (bool, bool, bool) {
+        let state = app.world().resource::<ActionState<Act>>();
+        (
+            state.pressed(Act::Move),
+            state.just_pressed(Act::Move),
+            state.just_released(Act::Move),
+        )
+    }
+
+    /// One tick's move at [`SPEED`].
+    const STEP: f32 = SPEED / 60.0;
+
+    #[test]
+    fn a_replay_moves_as_the_recording_did_whatever_the_live_input() {
+        let bytes = recording(&[&[key(Key::D, true)], &[], &[]]);
+        let mut app = replaying(bytes);
+        assert_eq!(replay(&app), Replay::Playing { ticks: 0 });
+        // Live input that the recording did not have. Losing the focus
+        // releases every key, so A goes down after it.
+        let noise = [
+            Event::Focused(false),
+            Event::MouseWheel(Vec2::new(0.0, 3.0)),
+            Event::MouseMoved(Vec2::new(5.0, 5.0)),
+            key(Key::A, true),
+        ];
+        app.update(TICK, &noise);
+        assert_eq!(
+            (x(&app), replay(&app)),
+            (STEP, Replay::Playing { ticks: 1 })
+        );
+        assert_eq!(moving(&app), (true, true, false));
+        app.update(TICK, &[]);
+        assert_eq!(replay(&app), Replay::Playing { ticks: 2 });
+        // The last tick: ended as soon as it has run.
+        app.update(TICK, &[]);
+        assert_eq!(
+            (x(&app), replay(&app)),
+            (3.0 * STEP, Replay::Ended { ticks: 3 })
+        );
+        // Then the live input: A, held since the first tick, with no edge.
+        app.update(TICK, &[]);
+        assert_eq!(x(&app), 2.0 * STEP);
+        assert_eq!(moving(&app), (true, false, false));
+        assert_eq!(replay(&app), Replay::Ended { ticks: 3 });
+    }
+
+    #[test]
+    fn a_frame_of_two_ticks_plays_two_replayed_ticks_and_a_short_frame_none() {
+        let bytes = recording(&[&[key(Key::D, true)], &[], &[], &[]]);
+        let mut app = replaying(bytes);
+        app.update(40 * MS, &[]);
+        assert_eq!(
+            (x(&app), replay(&app)),
+            (2.0 * STEP, Replay::Playing { ticks: 2 })
+        );
+        app.update(5 * MS, &[]);
+        assert_eq!(
+            (x(&app), replay(&app)),
+            (2.0 * STEP, Replay::Playing { ticks: 2 })
+        );
+        app.update(40 * MS, &[]);
+        assert_eq!(
+            (x(&app), replay(&app)),
+            (4.0 * STEP, Replay::Ended { ticks: 4 })
+        );
+    }
+
+    #[test]
+    fn after_a_replay_the_live_ticks_have_only_the_live_keys_edges() {
+        // Held at the replay's end: not just released after it.
+        let mut app = replaying(recording(&[&[key(Key::D, true)], &[]]));
+        app.update(TICK, &[]);
+        app.update(TICK, &[]);
+        assert_eq!(replay(&app), Replay::Ended { ticks: 2 });
+        app.update(TICK, &[]);
+        assert_eq!(moving(&app), (false, false, false));
+
+        // A tap during the replay was latched into nothing: no edge after.
+        let mut app = replaying(recording(&[&[], &[]]));
+        app.update(TICK, &[key(Key::D, true), key(Key::D, false)]);
+        app.update(TICK, &[]);
+        app.update(TICK, &[]);
+        assert_eq!(moving(&app), (false, false, false));
+        assert_eq!(x(&app), 0.0);
+    }
+
+    /// What `Replay` said in each tick, as its systems saw it.
+    #[derive(Default)]
+    struct SeenReplays(Vec<Replay>);
+
+    #[test]
+    fn each_tick_sees_its_own_count_and_the_first_after_the_end_sees_it_ended() {
+        let mut app = replaying(recording(&[&[], &[], &[], &[]]))
+            .insert_resource(SeenReplays::default())
+            .add_fixed_system(FixedStage::Gameplay, "see", |world, _| {
+                let replay = world.resource::<Replay>().clone();
+                world.resource_mut::<SeenReplays>().0.push(replay);
+            });
+        // Frames of two ticks and of three: the second runs past the end.
+        app.update(TICK * 2, &[]);
+        app.update(TICK * 3, &[]);
+        let playing = |ticks| Replay::Playing { ticks };
+        assert_eq!(
+            app.world().resource::<SeenReplays>().0,
+            [
+                playing(1),
+                playing(2),
+                playing(3),
+                playing(4),
+                Replay::Ended { ticks: 4 }
+            ]
+        );
+    }
+
+    #[test]
+    fn a_damaged_tick_fails_the_replay_and_the_input_goes_live() {
+        let mut bytes = recording(&[&[key(Key::D, true)], &[], &[]]).to_vec();
+        // The header is 16 bytes and a kind; each tick a flag byte and an
+        // x and a y. Bit 7 of the second tick's flags belongs to no action.
+        bytes[17 + 5] |= 0x80;
+        let mut app = replaying(Box::leak(bytes.into_boxed_slice()));
+        app.update(TICK, &[key(Key::A, true)]);
+        assert_eq!(x(&app), STEP, "the first tick plays");
+        let Replay::Failed { ticks: 1, error } = replay(&app) else {
+            panic!("{:?}", replay(&app));
+        };
+        assert!(error.to_string().contains("22"), "{error}");
+        // A, live from now on.
+        app.update(TICK, &[]);
+        assert_eq!(x(&app), 0.0);
+    }
+
+    #[test]
+    fn a_replay_of_no_ticks_ends_at_once() {
+        let mut app = replaying(recording(&[]));
+        assert_eq!(replay(&app), Replay::Ended { ticks: 0 });
+        app.update(TICK, &[key(Key::D, true)]);
+        assert_eq!(x(&app), STEP, "live");
+    }
+
+    #[test]
+    #[should_panic(expected = "add them with add_actions first")]
+    fn a_replay_needs_its_actions_first() {
+        let bytes = recording(&[&[]]);
+        let _ = app().play_replay(InputPlayer::<Act>::new(bytes).expect("a replay"));
+    }
+
+    #[test]
+    #[should_panic(expected = "play_replay must come after add_actions")]
+    fn the_actions_cannot_be_added_while_a_replay_plays() {
+        let map = ActionMap::<Act>::new().expect("a valid set");
+        let _ = replaying(recording(&[&[]])).add_actions(map);
+    }
+
+    #[test]
+    fn the_world_hash_follows_the_reflected_components_only() {
+        let mut app = app();
+        let walker = app
+            .world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::ZERO))
+            .with(Sprite::new(texture(), Vec2::ONE))
+            .id();
+        let start = app.world_hash();
+        assert_eq!(app.world_hash(), start);
+        app.world()
+            .write::<Sprite>()
+            .get_mut(walker)
+            .expect("drawn")
+            .size = Vec2::splat(2.0);
+        assert_eq!(app.world_hash(), start, "a Sprite is not reflected");
+        app.world()
+            .write::<Transform>()
+            .get_mut(walker)
+            .expect("placed")
+            .position
+            .x = 1.0;
+        assert_ne!(app.world_hash(), start);
     }
 
     #[test]

@@ -150,12 +150,43 @@ pub fn check_sized<T: std::fmt::Debug>(
 ### Determinism
 
 - A recording is an initial seed plus the per-tick `ActionState` stream.
-- The test runs the sandbox headless (no window; render extract skipped) for
-  N ticks.
-- Each tick, it hashes the serialized world (reflection → binary → FNV-1a 64)
-  and compares the hash sequence against a stored one.
-- Scope: same build, same OS. Cross-OS float determinism is not a goal
-  (single-player).
+  As built (M4.7, ADR-0025), the seed is the test's constant `SEED`,
+  written as the `seed` line of `hashes.txt` and checked against it; the
+  stream is `replay.nrpl`.
+- The test, `crates/engine/tests/determinism.rs`, runs a game of its own
+  built from the facade's public API (the sandbox is a binary crate): a
+  player, 200 walkers on a grid of tiles, triggers and pickups, all from one
+  seeded `Pcg32`.
+- Before each tick, and after the last, it hashes the world
+  (`TypeRegistry::hash_world`: reflection, a byte form, FNV-1a 64), whole
+  and by type. It compares the sequence with the stored one in
+  `tests/determinism/hashes.txt`:
+  - for a live run of a scripted input in frames of mixed lengths, which
+    must also record `tests/determinism/replay.nrpl` byte for byte, and must
+    match a second live run in the same process;
+  - for that replay, played in frames of one tick, of seven (whose last
+    runs live ticks after the replay's end) and of other mixed lengths
+    (`App::play_replay`).
+- The runs are headless: `App::update` with no window. Every frame stage
+  runs, logs go to the standard error, and no asset load finishes.
+- `NADIR_BLESS=1 cargo test -p nadir --test determinism` writes the
+  fixtures, after it checks two live runs alike and their replay at three
+  pacings.
+- Scope: the same build. One hash file serves Linux, Windows and macOS for
+  the test's game, which keeps the rules of ADR-0025:
+  - no `sin`, `cos`, `atan2` or the like in tick systems;
+  - no iteration of `FastHashMap` or `FastHashSet`, whose order is fixed
+    per target only;
+  - no state set by a zero's sign or a NaN's bits.
+  Games that break them are deterministic on one system only, as the
+  sandbox's stress scenes are. Cross-system float determinism is not a
+  goal for games (single-player).
+- A game replays alike at any frame rate only if its frame systems write
+  no reflected state and spawn or despawn nothing, and its tick systems
+  read nothing that frames set (an `Animator`'s time, the `Sprite` fields
+  `nadir::animate` writes, `TickStats`).
+- Each new reflected type, or change to the simulation's results, changes
+  the stored hashes: bless them again, and say why.
 
 ### Fuzz smoke (stable Rust, no dependencies)
 

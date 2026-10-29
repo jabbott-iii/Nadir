@@ -1929,8 +1929,11 @@ by the batched sprite renderer.
   - Note: the session did not look at the walks in a window. Windows and
     macOS were not run: the facade's `steady_frames` test runs undrawn
     there.
+  - Note: CI run 22, for the M4.6 commit `9cfff53`, passed on all three
+    systems, as the user reported; the session saw it on the public
+    Actions page. CodeQL run 3 passed on the same commit.
 
-- [ ] **M4.7 — determinism test infrastructure**
+- [x] **M4.7 — determinism test infrastructure**
   - Note (from M4.4):
     - The headless run is `App::update(elapsed, events)` without
       `App::run`. A frame of `Duration::from_nanos(16_666_667)` runs one
@@ -1975,6 +1978,67 @@ by the batched sprite renderer.
   - Accept: the test passes and fails when a system is deliberately made
     nondeterministic (demonstrate, then revert).
   - Verify: `cargo test -p nadir --test determinism`
+  - Note: decided by the user on 2026-10-28 (ADR-0025): the test runs a
+    game of its own, from the facade's public API (the sandbox is a binary
+    crate); three crates (nadir-scene, the facade, the sandbox), the App
+    taking a `'static` replay; one stored hash file for all three systems;
+    and the sandbox records, replays, and replays headless.
+  - Note: the design critique made 61 points, and 60 survived their
+    refuters. From them:
+    - the replay is read a tick ahead, so it is `Ended` as soon as its last
+      tick has run;
+    - `hash_world` takes the `ReflectContext`, for M5.6 and M9.4;
+    - zeros of either sign, and all NaNs, hash alike;
+    - the stored run uses mixed frame lengths and the replays others, and
+      two runs in one process are compared;
+    - the run's coverage is checked, and the hashes are kept by type too.
+  - Note: built:
+    - nadir-scene: `Registration::each` and `TypeRegistry::hash_world`,
+      whose byte form its doc gives exactly.
+    - The facade: `App::play_replay`, the resource `Replay`,
+      `nadir::world_hash` and `App::world_hash`, and `Pcg32` in the
+      prelude.
+    - The test, `crates/engine/tests/determinism.rs`, with
+      `tests/determinism/replay.nrpl` (600 ticks, 3,018 bytes) and
+      `hashes.txt` (601 lines of the whole hash and 9 by type).
+    - The sandbox: `--record FILE`, `--replay FILE` and `--headless`
+      (`games/sandbox/src/replay.rs`).
+  - Note: the Accept demonstration, each change in a copy of the tree and
+    never in the repo: bless it, then run the test three times.
+    - A deterministic control (walkers 1 px/s faster): blessed, then 3 of
+      3 passed.
+    - Nondeterministic (all refused by the bless, whose second live run
+      differed from tick 1, or 7 for the engine; then 3 of 3 failed):
+      - the walkers' turns in a std `HashSet`'s order;
+      - the player's speed scaled by the wall clock;
+      - the engine moving the colliders in a std `HashSet`'s order.
+    - Frame-dependent (a frame system moving a walker): refused, the replay
+      at another pacing differing from tick 1; 3 of 3 failed.
+  - Note: the scripted run covers 3 dashes, 8 pickups collected, 7
+    entity slots reused and 177 entries into walkers' triggers.
+  - Note: the sandbox, in release on the i7-11800H, 2026-10-28:
+    - `stress-entities --record` for 5 s, stopped by a kill, kept 297
+      ticks.
+    - Two `--headless` replays of it and one in the window logged the same
+      world hash.
+  - Note: the code review made 34 points, all real at least in part. They
+    were mostly docs and tests, and one bug: `--record` reported ticks and
+    a hash its file did not hold after a failed write. All were fixed but
+    one, temp files left by a failing sandbox test. A separate check
+    confirmed the fixes and found four overstated sentences, which were
+    corrected.
+  - Note: 27 planted bugs, one at a time, in a copy of the tree, through
+    the nadir-scene, facade (`dev`) and sandbox (`dev`) tests: all 27
+    failed a test. One plant first did not compile, and was rewritten.
+  - Note: tests:
+    - nadir-scene: 18 unit tests, 1 integration test and 3 doc tests.
+    - The facade: 78 unit tests (82 with `dev`), 3 determinism tests (also
+      run with `dev` and `nadir-core/profile`) and 2 doc tests.
+    - The sandbox: 29 tests (30 with `dev`).
+  - Note: not run here:
+    - Windows and macOS: whether one `hashes.txt` holds there shows first
+      in CI. If it does not, the fallback is in ADR-0025.
+    - A session recorded with real keys, then replayed.
 
 - [ ] **M4.8 — collision: the 5,000-entity tick within budget**
   - Note (from M4.4): `facade_tick_5k` measured 6.3 ms on the i7-11800H,
@@ -1988,6 +2052,13 @@ by the batched sprite renderer.
     layer: 5,001 sprites in 1 batch, and the walls in the 1 to 4 chunks in
     view. Its tick is unchanged: 5.0 to 5.7 ms in release on the
     i7-11800H, 2026-10-27.
+  - Note (from M4.7): the determinism test (`cargo test -p nadir --test
+    determinism`, in this task's Verify) compares the world after every tick
+    with `crates/engine/tests/determinism/hashes.txt`. A change to
+    `move_and_slide`'s results changes them: bless them again
+    (`NADIR_BLESS=1`) and say why. An unchanged file shows the results
+    stayed bit for bit. Iterate no `FastHashMap` in the tick path: its order
+    is fixed per target only, and the hashes serve every system (ADR-0025).
   - Depends: M4.4
   - Do: make `move_and_slide` and its queries cheaper in nadir-collision,
     keeping ADR-0021's rules. Candidates:
@@ -2038,6 +2109,11 @@ by the batched sprite renderer.
     `cargo xtask fuzz-smoke --secs 300`
 
 - [ ] **M5.3 — assets: async server, worker pool, scopes, LooseSource**
+  - Note (from M4.7): asset loads finish only in a drawn frame, and a
+    headless run (`App::update`) finishes none. A replay recorded in the
+    window must not depend on when a load finished: let ticks wait for a
+    load at a tick the simulation decides, or keep tick systems off load
+    state (ADR-0025).
   - Depends: M3.2
   - Note (from M3.2):
     - `load` reads and decodes at once, and `finish_completed_loads`
@@ -2150,6 +2226,18 @@ by the batched sprite renderer.
       each frame by `nadir::animate`; on one with a `Facing`, its `flip.x`.
       The other fields, and these on entities without the component, are
       the game's.
+  - Note (from M4.7, ADR-0025): registering `Sprite`, `Collider` or
+    `Animator` changes every world hash in
+    `crates/engine/tests/determinism/hashes.txt`: bless it again. The hash
+    must leave out what `nadir::animate` writes each frame (`Sprite`'s
+    texture, uv and `flip.x`): a per-field "not hashed" marker in the
+    reflect macros is the likely way, which M9.4's `saved` flag could share.
+    `nadir::world_hash` (which `App::world_hash`, the sandbox and the test's
+    whole-world column call) builds the `ReflectContext`, so it can give it
+    the asset server and `Clips`; the test's per-type columns (`hash_line`)
+    build their own and need the same. The test's `the_hashes_follow_the_order_the_walkers_move_in`
+    compares the `Transform` column, which a reflected `Collider` leaves
+    alone; the test's `each_type` must list the new types.
   - Depends: M5.5, M4.5, M4.2
   - Do:
     - LDtk → `.klvl` (tile layers, IntGrid → collision, entities, tall
@@ -2275,6 +2363,9 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-render`; `cargo xtask golden`
 
 - [ ] **M7.2 — debug: immediate-mode UI core**
+  - Note (from M4.7): while a replay plays (`App::play_replay`), the
+    actions come from it, not from the input. Capturing input for the debug
+    UI must not stop a replayed tick.
   - Depends: M7.1, M3.1
   - Note (from M3.1): typed text does not exist yet. The platform needs
     `Event::Text`:
@@ -2320,6 +2411,9 @@ by the batched sprite renderer.
     the entity list needs one of those. `FieldInfo::doc` keeps each line's
     leading space; trim it for display.
   - Note (from M4.4): the `TypeRegistry` is a world resource.
+  - Note (from M4.7): edits from the inspector or the console (teleports,
+    spawns, values) are not input, so a replay does not hold them: a world
+    edited by hand replays differently.
   - Depends: M7.2, M4.2
   - Do: the entity list with filter; component editors via `Reflect`;
     add/remove; despawn; save as prefab.
@@ -2350,6 +2444,9 @@ by the batched sprite renderer.
     (ADR-0024): a frame of zero length holds every clip, and a step of the
     clock steps them. Such a frame sends `AnimationFinished` only for a
     `Once` animator started at or past its end.
+  - Note (from M4.7): a step must go through `App::update`, which takes the
+    replay's next tick (`App::play_replay`); a run of `run_fixed` alone
+    would skip it.
   - Depends: M7.2, M4.3
   - Do: the F4 overlays and the F5–F7 time controls.
   - Accept: manual check on the sandbox.
@@ -2391,6 +2488,13 @@ by the batched sprite renderer.
     (manual)
 
 - [ ] **M8.4 — input: pad bindings, deadzones, active device, prompt data**
+  - Note (from M4.7): a pad's analog values go into replays as the keys'
+    do. If the recorder moves to a version 2, bless the determinism test's
+    fixtures again: its live run compares its recording with `replay.nrpl`
+    byte for byte. To keep a version 1 fixture instead, check the live
+    run's recording by playing it back, and keep `InputPlayer` reading
+    version 1. A handover from a replay to live input loses edges
+    (ADR-0025): latching from a given state would keep them.
   - Depends: M8.1
   - Note (from M3.1):
     - `Binding` is not `#[non_exhaustive]`: adding the pad variants breaks
@@ -2419,6 +2523,9 @@ by the batched sprite renderer.
 ## M9 — Vertical slice
 
 - [ ] **M9.1 — game states and level transitions**
+  - Note (from M4.7): a level transition must finish at a tick the
+    simulation decides, the same with or without a window, or a replay
+    recorded in the window drifts (ADR-0025).
   - Depends: M5.6
   - Do: the `GameState` machine with on-enter/on-exit and run conditions;
     a loading screen; level transitions that unload the previous level's
@@ -2468,6 +2575,12 @@ by the batched sprite renderer.
     held pose from gameplay state. A `Once` clip started at its end with
     `Animator::starting_at` holds its last frame, but sends
     `AnimationFinished` on its first frame.
+  - Note (from M4.7): `TypeRegistry::hash_world` takes the
+    `ReflectContext`, so `nadir::world_hash` (and the determinism test's
+    `hash_line`, for its columns) can give it the SaveId map once
+    `Entity` is reflected. A hash compared across a save and a load needs
+    entity numbers that do not depend on slots (first seen, say): today it
+    hashes each entity's index and generation (ADR-0025).
   - Depends: M4.2, M9.1
   - Do: the `.ksav` format; atomic write with `.bak`; CRC; migration
     scaffolding with a v1 fixture; fuzz target.
@@ -2685,3 +2798,4 @@ three OSes from a tag, and the release checklist is complete.
 | Lock-free audio command queue | Measured `try_lock` contention |
 | Localization pipeline (string tables, plurals) | Before the first non-English release |
 | Per-cell tile shapes in `TileGrid` (half cells, corner triangles; M4.3 has full cells) | A level needs half-height ledges or diagonal walls |
+| A determinism lint (clippy `disallowed-methods` or `xtask`): std `HashMap::new`/`HashSet::new`, `Instant::now`, `sin`/`cos`/`atan2` in tick systems; and `FxLikeHasher`'s rustdoc saying its order holds on one target only (ADR-0025) | A determinism regression that slipped past review, or CI disagreeing with the stored hashes |

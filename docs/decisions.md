@@ -1175,3 +1175,149 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   size and pivot, and mirroring about the pivot, M5.4 and M5.5); a game
   needs held items that follow their root's `Facing`; or the asset server
   can hold assets made in code.
+
+## ADR-0025 — The facade plays replays a tick ahead in place of the live input; the world hash is FNV-1a of the reflected components; the determinism test runs a game of its own against one hash file for every system
+
+- **Status:** Accepted
+- **Date:** 2026-10-28
+- **Context:**
+  - M4.7 asks for a headless run mode, input recording in the sandbox, a
+    world hash through reflection, and `nadir/tests/determinism.rs` with a
+    stored recording and hash sequence. The test must fail when a system
+    is made nondeterministic.
+  - `04-quality.md` scoped determinism to the same build and the same
+    system.
+  - The facts:
+    - The sandbox is a binary crate, so the facade's tests cannot run its
+      field.
+    - nadir-input's `InputPlayer` borrows its bytes, and its end shows only
+      on the read after its last tick.
+    - `World` cannot list its entities.
+    - KBJ is not built (M5.2).
+    - The engine's tick systems use only exactly rounded float operations,
+      but `min`, `max` and `clamp` may give either zero, and NaN bits vary,
+      from one processor to another.
+  - The user decided four points on 2026-10-28:
+    - the test runs a game of its own, from the facade's public API;
+    - three crates (nadir-scene, the facade and the sandbox), the App
+      taking a `'static` player;
+    - one stored hash file for all three systems;
+    - the sandbox records, replays, and replays headless.
+  - The design critique made 61 points, and 60 survived their refuters.
+    They led to the rest.
+- **Decision:**
+  - **The world hash** is `TypeRegistry::hash_world(world, cx)`, with
+    `Registration::each` (a type's components in storage order) under it.
+    - It is a 64-bit FNV-1a of a byte form: for each type in registration
+      order, its name; then for each component, the entity's index and
+      generation and its `to_value` with `cx`.
+    - Values are written as tag bytes and contents, with lengths and counts
+      first. Floats count by their bits, but zeros of either sign count as
+      one, and so do all NaNs.
+    - It takes the `ReflectContext`, so that the asset server (M5.6) and
+      the SaveId map (M9.4) can reach it without a break.
+    - Components of types not registered, and resources, are not in it.
+    - `nadir::world_hash(world)` takes it with the engine's context.
+      `App::world_hash()`, the sandbox and the test's whole-world column
+      call it, so later context slots reach them. The test's per-type
+      columns build a context of their own, which must get the same
+      slots.
+  - **Replays:** `App::play_replay(InputPlayer<'static, A>)` comes after
+    `add_actions::<A>`.
+    - From the next tick on, each tick's `ActionState<A>` is the replay's
+      next tick, swapped in from a state read one tick ahead. The live
+      input is latched into a set of its own, so `Input` keeps its ticks
+      and nothing of it reaches the actions.
+    - The resource `Replay` says how far it got: `Playing { ticks }`,
+      then `Ended { ticks }` as soon as the last tick has run, or
+      `Failed { ticks, error }` when the next cannot be read (logged). The
+      ticks after it are latched live.
+    - `add_actions` while a replay plays panics. So does `play_replay`
+      before the game's actions are added, or with another set.
+    - The pointer and the wheel stay live: replays do not hold them.
+  - **The headless run** is `App::update` in frames of one tick, with no
+    window. It runs every frame stage, logs only to the standard error, and
+    finishes no asset load: tick systems must not depend on load state.
+  - **The test** (`crates/engine/tests/determinism.rs`):
+    - The game: a player steered and dashing, 200 walkers on a walled grid
+      of tiles, a tenth of them triggers, and pickups dropped near the
+      player, all from one seeded `Pcg32` (now re-exported by the facade).
+    - The fixtures: `tests/determinism/replay.nrpl` and `hashes.txt`, the
+      hash before the first tick and after each, whole and by type. They
+      come from a live run of a scripted input in frames of mixed lengths.
+      `NADIR_BLESS=1` writes them, after it checks two live runs alike and
+      their replay at three other pacings.
+    - The checks:
+      - two live runs in one process agree, so nondeterminism shows
+        without the fixtures;
+      - the live run matches the fixtures;
+      - the replay matches them in frames of one tick, of seven (whose last
+        runs live ticks past the end) and of mixed lengths, so the world
+        cannot depend on how ticks fall into frames;
+      - the run covers dashes, pickups, reused entity slots and trigger
+        entries;
+      - the walkers moving in another order give other hashes.
+    - On a mismatch it names the first tick and the types that differ, and
+      writes the hashes found under the build's test output, a file for
+      each check.
+  - **The sandbox:**
+    - `--record FILE` writes each tick as it comes.
+    - `--replay FILE` plays one in the window, then the keys take over.
+    - `--headless` plays one with no window.
+    - Recording and replaying each log the ticks and the world's hash after
+      them.
+  - **Crates:** nadir-scene, the facade, the sandbox.
+- **Consequences:**
+  - One `hashes.txt` serves Linux, Windows and macOS only while the tick
+    path keeps these rules:
+    - no `sin`, `cos`, `atan2`, `powf`, `exp` or the like (so not
+      `Vec2::from_angle` or `angle`);
+    - no iteration of a `FastHashMap` or `FastHashSet`, whose order is
+      fixed per target only;
+    - no state whose bits a zero's sign or a NaN could set.
+    The sandbox's stress scenes use `sin` and `cos`, so their hashes hold
+    on one system only. If a system's CI run disagrees, the fallback is
+    files per target (`hashes.<os>-<arch>.txt`, chosen by
+    `std::env::consts::{OS, ARCH}`), made from the hashes the failure
+    prints: the differences named above come from the processor. CI runs
+    x86_64 Linux and Windows and arm64 macOS; x86_64 macOS is not run.
+  - A game replays alike at any frame rate only if its frame systems write
+    no reflected state and spawn or despawn nothing, and its tick systems
+    read nothing that frames set (an `Animator`'s time, the `Sprite` fields
+    that `nadir::animate` writes, `TickStats`). A frame spawn shifts
+    the entity slots, and through collider ids the trigger order, of later
+    tick spawns. So leaving cosmetic entities out of the hash, which
+    ADR-0024 offered, is not enough: games spawn them in ticks.
+  - The handover from a replay to live keys loses edges: an action held
+    in the replay's last tick is not just released, and a key held through
+    it is held but not just pressed. nadir-input would need a way to latch
+    from a given state.
+  - Each new reflected type, or change to the simulation's results,
+    changes `hashes.txt`: bless it again, and say why. An unchanged file
+    shows that results stayed bit for bit.
+  - The sandbox's `--record` hashes the world after each frame that ran a
+    tick, which allocates and takes time (about 16 ms a frame for
+    `stress-sprites` in a debug build), so a recording run's frame rate
+    and allocations are not the scene's own. It logs its ticks and hash
+    when the window is closed; after a crash or a kill its file keeps
+    every tick, but nothing is logged. The replay plays in the scene it is
+    given, as nothing in a replay names one.
+- **Alternatives considered:**
+  - The sandbox as a library, with the test in its crate: the test would
+    replay the real field, but the Verify line and `04-quality.md` name the
+    facade's test.
+  - An `InputPlayer` that owns its bytes, in nadir-input: no leak, but a
+    fourth crate.
+  - Finding the end on the tick after the last: that tick runs live, so a
+    headless hash would be one tick late.
+  - Hashing only stored per-system hashes, or comparing on Linux alone:
+    safer for CI, but nothing would catch a difference elsewhere.
+  - Leaving cosmetic entities out of the hash by a tag: frame spawns still
+    shift later ids.
+  - A canonical entity numbering in the hash: independent of slots, but it
+    would hide an id divergence until it changed a value. Saves (M9.4) may
+    need it.
+- **Revisit when:** CI disagrees with `hashes.txt` on another system;
+  M5.6 reflects `Sprite`, whose frame-written fields must stay out of the
+  hash; M8.4 changes the replay format or needs edges across a handover;
+  or M9.4 compares a world across a save and a load.

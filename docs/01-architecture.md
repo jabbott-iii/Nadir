@@ -134,7 +134,7 @@ pub fn run(mut app: App) -> Result<(), Error> {
 
         let frame = clock.begin_frame(stopwatch.lap());      // clamps hitches
         while let Some(tick) = clock.consume_tick() {
-            app.input.latch(&app.action_map, &mut app.actions); // edges -> this tick
+            app.input.latch(&app.action_map, &mut app.actions); // edges -> this tick; or a replay's (ADR-0025)
             app.schedule.run_fixed(&mut app.world, &tick);   // snapshot first; then its commands (ecs.md)
         }
         draw.clear();                                        // the RenderFrame resource

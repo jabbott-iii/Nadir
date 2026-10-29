@@ -34,9 +34,11 @@ dependencies.
 - `Pcg32` output is identical across OSes for the same seed (unit-tested
   against fixed vectors).
 - `FastHashMap` iteration order depends only on insertion history, not on
-  per-process random state. This keeps replays deterministic. Never use
-  `std::collections::HashMap` with `RandomState` in simulation code. A lint
-  helper in `xtask` greps for it under `crates/` (except tooling).
+  per-process random state, on one target. It can differ between targets
+  (x86_64 and aarch64), so a tick system that must hash alike on every
+  system does not iterate one (ADR-0025). Never use
+  `std::collections::HashMap` with `RandomState` in simulation code. No
+  lint checks this yet.
 
 ## Tests
 
