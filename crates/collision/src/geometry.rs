@@ -91,6 +91,13 @@ pub(crate) fn overlaps(a: Placed, b: Placed) -> bool {
     }
 }
 
+/// Whether the boxes `a` and `b` overlap, either of them perhaps no more
+/// than a point: boxes that only touch do not. False if either is not a
+/// number.
+pub(crate) fn boxes_overlap(a: Rect, b: Rect) -> bool {
+    a.min.x < b.max.x && a.max.x > b.min.x && a.min.y < b.max.y && a.max.y > b.min.y
+}
+
 /// Whether `placed` overlaps the box `rect`, tested against the box's
 /// edges, so that a box far wider than the shape keeps the shape's
 /// precision.

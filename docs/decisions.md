@@ -1321,3 +1321,171 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   M5.6 reflects `Sprite`, whose frame-written fields must stay out of the
   hash; M8.4 changes the replay format or needs edges across a handover;
   or M9.4 compares a world across a save and a load.
+
+## ADR-0026 — `move_and_slide` gathers a move's solids once and takes contacts from the first pass; hash entries hold their bounds; moves end where per-sweep queries put them
+
+- **Status:** Accepted
+- **Date:** 2026-10-29
+- **Context:**
+  - ADR-0022 measured the facade's 5,000-entity tick at 6.3 ms on the
+    i7-11800H, against the M4 exit budget of 4 ms on min-spec. That met
+    ADR-0021's revisit trigger. Roadmap task M4.8 makes collision cheaper
+    and keeps ADR-0021's rules.
+  - Counted in one jammed tick of `facade_tick_5k`:
+    - 10,000 axis sweeps, of which 7,511 were stopped. Each stopped sweep
+      asked for its solids a second time, for the contacts.
+    - 16,438 hash queries returned 193,550 candidates, of which 49,218
+      overlapped the mover across its motion.
+  - M4.8 named three ways:
+    - gather the hash's candidates once per move;
+    - find the contacts in the first pass, or skip that pass;
+    - re-bucket moved colliders, which needs an ADR because it changes
+      ADR-0021's `set_position`.
+  - A design critique, with each point checked by a refuter, found two
+    gaps in the first design:
+    - A margin scaled to the mover alone drops giants kept aside, whose
+      edges round by pixels.
+    - Negative sizes break the overlap argument.
+    The critique also found that the existing tests and the determinism
+    hashes caught none of nine planted bugs in the gather.
+  - The user decided on 2026-10-29:
+    - all three steps below;
+    - an old defect in `CollisionWorld::candidates`, found by the
+      critique, goes to the backlog.
+- **Decision:**
+  - **One query per move.** `move_and_slide` gathers, once, the solid
+    colliders on its mask, other than its own, whose bounds overlap the
+    box round the collider at both ends of the move.
+    - The box is grown by a margin of 1 px plus 2^-16 (128 f32 steps) of
+      the largest coordinate rounding could involve: the box's own, plus
+      the widest collider in the hash. The hash records that width at each
+      rebuild. It is usually under 1,024 cells, but cells past the `i32`
+      range saturate, so a collider there can be any width.
+    - Colliders kept aside, which can be wider, are all gathered.
+    - A negative size counts as its absolute value.
+    - Each sweep then scans its tiles, as before, and offers those
+      colliders.
+    - The gather holds up to 32, in a fixed array on the stack. A move
+      with more near it asks the hash on each sweep, as before. So does a
+      mover of negative or not-a-number size, or whose box is not finite.
+  - **Contacts from the first pass.** A sweep remembers up to 16 solids
+    that would stop it, and where. Those within `EPSILON` of where it stops
+    are its contacts, in the order the second pass would have found them.
+    A sweep that more than 16 would stop, anywhere along it, takes the
+    second pass.
+  - **Bounds in the hash.**
+    - Each hash entry holds the bounds its collider was hashed with, so
+      entries grow from 12 to 28 bytes.
+    - `CollisionWorld::near_candidates` serves the gather. It passes over
+      a hashed collider whose hull misses the region grown by the drift
+      plus 2^-16 of it. A collider not moved far is within the drift of
+      where it was hashed, up to rounding.
+    - Other queries are unchanged.
+  - **The contacts' order.** Within a sweep the tiles come row by row,
+    then the colliders, in an order that is fixed but not specified. It
+    may differ between a move with up to 32 solids near and one with more.
+  - **No change to the public API**, nor to ADR-0021's rules or
+    `set_position`.
+  - **The moves end where per-sweep queries put them,** bit for bit, with
+    two exceptions:
+    - The sign of a zero coordinate can differ. The order of the solids
+      can choose it when zero-width colliders meet at ±0, and the world
+      hash takes zeros of either sign alike (ADR-0025).
+    - Where rounding exceeds `EPSILON`, a sweep's own query, widened only
+      by `EPSILON` and the drift, can miss a solid that its arithmetic
+      stops at. The gather finds it and stops where the sweep's arithmetic
+      says. Rounding exceeds `EPSILON` beyond about 2^17 px from the
+      origin, or at a hashed solid whose half extent is 2^18 px or more
+      (about 2^19 px wide), which cells over 512 px allow. This is the
+      backlog's defect in `candidates`.
+  - **Tests.** A crate-private `Shortcuts` turns each shortcut off, for:
+    - a differential test of 15,000 random moves (`src/tests.rs`, about
+      2 s in debug). Test-only counters show that moves fell back and that
+      sweeps took a second pass.
+    - giants kept aside, hashed in cells of 1e8 px, and hashed in one
+      saturated cell, against the sweeps' own queries;
+    - a solid whose edge rounds, to even, onto the gather's region at
+      100,000 px. A margin of 0 would drop it; the margin's size rests on
+      the argument above.
+    - scenarios at the limits: a solid kept aside, 33 solids near with the
+      stopper last, 17 stoppers at once, and a contact exactly `EPSILON`
+      behind.
+- **Consequences:**
+  - On the i7-11800H, 2026-10-29: old and new runs interleaved, pinned to
+    one core, medians of four rounds:
+
+    | Benchmark | Old | New |
+    | :- | :- | :- |
+    | `facade_tick_5k` | 6.32–6.38 ms | 2.40–2.43 ms |
+    | `collision_slide_5k` | 2.17–2.19 ms | 1.04–1.07 ms |
+    | `collision_hash_5k` | 1.43–1.45 ms | 1.50–1.54 ms (about +4%) |
+
+    - The hash bench is slower, by 3.7 to 7.5% round by round, because
+      every query, and the rebuild, walk the larger entries.
+    - In three full unpinned runs earlier that day, of the code before the
+      review, every benchmark moved by up to ±12% from one run to the
+      next. Those runs were not saved.
+    - `bench/baseline.json` holds `facade_tick_5k` 2.39 ms and
+      `collision_slide_5k` 1.05 ms, from a full run pinned to one core. In
+      that run the other entries were 0.6% slower to 10.9% faster than
+      their baselines, which were left as they were. `collision_hash_5k`
+      read 0.4% slower.
+  - Per step, as the critique measured `facade_tick_5k` on its prototype:
+    the first-pass contacts alone gave about 4.0 ms; with the gather,
+    3.2 ms; with bounds in the entries, 2.7 to 2.9 ms. For
+    `collision_slide_5k`, the steps gave about 2.0, 1.7 and 1.4 ms. The
+    code review's two changes took it the rest of the way:
+    - all-zero fillers, so that the gather's array is filled by a
+      memset;
+    - a margin from the widest collider in the hash, rather than 1,024
+      cells.
+  - The sizes of the fixed arrays:
+    - In a jammed tick, of the bench or of the stress scene, a move
+      gathers at most 6 solids, and a sweep has at most 4 stoppers.
+    - 1,000 dashes of 150 px in the bench's crowd gather up to 29, and
+      take 5.8 ms against 13.6 ms before.
+    - At 300 px, 621 of the 1,000 moves fall back, and 489 sweeps take a
+      second pass. They take 11.5 ms against 19.5 ms.
+    - Both arrays are zeroed each move and each sweep: the gather's by a
+      memset, a sweep's by sixteen 16-byte stores. Nothing allocates:
+      `steady_ticks` still counts 0.
+  - `--scene stress-entities`, 12 s in release with `dev`:
+    - Headless, timing 120 ticks after 120, 600 and 1,200 ticks of
+      settling, `App::update` takes 2.50 to 2.63 ms a tick, against 5.81
+      to 6.57 ms before.
+    - In a window with `--no-vsync --fps 1000`, a tick takes 2.1 to
+      2.3 ms. Before, it took 4.8 to 6.4 ms, settling near 5.7 ms.
+    - With vsync at 60 frames a second, the old build reports 5.0 to
+      5.5 ms after 8.0 ms in its first second. The new one swings from
+      2.0 to 6.1 ms from one second to the next. The likely cause is
+      Linux's `schedutil` governor lowering the clock under that light
+      load. The clock was not recorded.
+    - So a vsynced tick time measures the clock as much as the code.
+      M11.5's min-spec measurement should say which governor ran.
+  - The determinism test's `hashes.txt` is unchanged. Its game never
+    reaches the cases the gather changes, so the differential test is
+    what shows the moves unchanged.
+  - The facade's `move_colliders` is untouched. ADR-0022's revisit trigger
+    on what `nadir::movement` asks of the crate is not met.
+- **Alternatives considered:**
+  - Re-bucketing moved colliders: the drift, about 4.3 px in a jammed
+    tick, now widens one query per move rather than up to four.
+  - Smaller hash cells: with the gather, cells of 48 to 16 px were no
+    faster than 64 px.
+  - Skipping the contacts' pass when the caller wants none: an API change,
+    for less than remembering the stoppers costs.
+  - A scratch `Vec` behind a `RefCell`, which would make `CollisionWorld`
+    not `Sync`, or a scratch argument, an API break, instead of fixed
+    arrays with fallbacks.
+  - Hashed bounds in a parallel array, or read from the hash's
+    per-collider bounds: the critique measured both slower in the facade
+    tick.
+  - Turning a zero stop of -0.0 into +0.0: a single stopper at -0.0 would
+    then differ from before instead.
+  - A margin of the mover's scale alone: giants kept aside were dropped,
+    as above.
+- **Revisit when:** M11.5's min-spec machine measures `facade_tick_5k` or
+  the stress scene over 4 ms a tick; a game's moves often fall back to
+  per-sweep queries (more than 32 solids near, or more than 16 stopping a
+  sweep); or the backlog fix to `candidates` lands, which ends the second
+  exception.

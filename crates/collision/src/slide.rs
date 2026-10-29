@@ -3,11 +3,28 @@
 
 use nadir_core::{IVec2, Rect, Vec2};
 
-use crate::geometry::{self, Axis};
+use crate::geometry::{self, Axis, Placed};
 use crate::{Collider, ColliderKind, CollisionWorld, EPSILON, Obstacle, Shape};
 
 /// The most substeps a move takes, however far it goes.
 const MOST_SUBSTEPS: u32 = 16;
+
+/// The most solid colliders a move gathers for its sweeps. A move near more
+/// asks the spatial hash on each sweep instead. In a jammed crowd a move has
+/// up to 6 near it, and a dash of 150 px up to 29.
+const MOST_NEAR: usize = 32;
+
+/// The most solids a sweep remembers as stopping it. A sweep that more
+/// would stop, somewhere along it, finds its contacts in a second pass.
+const MOST_AHEAD: usize = 16;
+
+#[cfg(test)]
+thread_local! {
+    /// For the tests: how many moves had more solids near them than they
+    /// gather, and how many sweeps took a second pass for their contacts.
+    pub(crate) static FALLBACKS: std::cell::Cell<(u64, u64)> =
+        const { std::cell::Cell::new((0, 0)) };
+}
 
 /// A solid that stopped a move along an axis.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -47,6 +64,13 @@ pub struct Contact {
 ///   ±65,536 px.
 /// - No motion, or a position or motion that is not finite, returns
 ///   `start` and no contacts.
+/// - The contacts come sweep by sweep, and within a sweep the tiles row by
+///   row before the colliders, whose order is fixed but not specified.
+///
+/// A solid mover asks the spatial hash once for the solid colliders near
+/// the whole move, and sweeps against those; one with more than 32 near
+/// it, or of negative or not-a-number size, asks on each sweep instead
+/// (ADR-0026).
 ///
 /// # Panics
 ///
@@ -57,6 +81,47 @@ pub fn move_and_slide(
     start: Vec2,
     delta: Vec2,
     out_contacts: &mut Vec<Contact>,
+) -> Vec2 {
+    move_with(
+        world,
+        self_index,
+        start,
+        delta,
+        out_contacts,
+        Shortcuts {
+            gather: true,
+            first_pass: true,
+        },
+    )
+}
+
+/// Which of [`move_and_slide`]'s shortcuts a move takes. Tests turn them
+/// off to check that they change nothing:
+///
+/// - the first pass changes neither where a move ends nor its contacts,
+///   their order included;
+/// - the gather changes neither where it ends nor the set of its contacts,
+///   but in ADR-0026's two cases: the sign of a zero, and where rounding
+///   exceeds `EPSILON`, far from the origin or at a solid hundreds of
+///   thousands of pixels wide.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Shortcuts {
+    /// Gather the solid colliders near the move once, rather than ask the
+    /// spatial hash on each sweep.
+    pub(crate) gather: bool,
+    /// Take a sweep's contacts from the pass that finds where it stops,
+    /// rather than from a second pass.
+    pub(crate) first_pass: bool,
+}
+
+/// [`move_and_slide`], taking the `shortcuts` given.
+pub(crate) fn move_with(
+    world: &CollisionWorld,
+    self_index: u32,
+    start: Vec2,
+    delta: Vec2,
+    out_contacts: &mut Vec<Contact>,
+    shortcuts: Shortcuts,
 ) -> Vec2 {
     out_contacts.clear();
     let collider = *world.collider(self_index);
@@ -73,10 +138,20 @@ pub fn move_and_slide(
     }
     .max(1);
 
+    let mut near = Near::new();
+    if collider.kind == ColliderKind::Solid {
+        if shortcuts.gather {
+            near.gather(world, self_index, &collider, start, delta);
+        } else {
+            near.per_sweep = true;
+        }
+    }
     let mover = Mover {
         world,
         index: self_index,
         collider,
+        near: &near,
+        first_pass: shortcuts.first_pass,
     };
     let mut position = start;
     for substep in 1..=substeps {
@@ -101,6 +176,105 @@ struct Mover<'a> {
     world: &'a CollisionWorld,
     index: u32,
     collider: Collider,
+    /// The solid colliders near the move.
+    near: &'a Near,
+    /// Whether a sweep takes its contacts from its first pass when it can.
+    first_pass: bool,
+}
+
+/// The solid colliders near a move, gathered once for all its sweeps: each
+/// one's index, and its shape where it is.
+struct Near {
+    solids: [(u32, Placed); MOST_NEAR],
+    len: usize,
+    /// Whether the sweeps ask the spatial hash themselves instead: the move
+    /// had more than [`MOST_NEAR`] solids near it, or the gather could not
+    /// vouch for its region.
+    per_sweep: bool,
+}
+
+impl Near {
+    /// None gathered yet.
+    fn new() -> Self {
+        // All zeros, so that filling the array is one memset.
+        let none = Placed::new(Vec2::ZERO, Shape::Aabb { half: Vec2::ZERO });
+        Self {
+            solids: [(0, none); MOST_NEAR],
+            len: 0,
+            per_sweep: false,
+        }
+    }
+
+    /// The solids gathered.
+    fn solids(&self) -> &[(u32, Placed)] {
+        &self.solids[..self.len]
+    }
+
+    /// Gathers the solid colliders that collider `index` could meet moving
+    /// from `start` by `delta`: those on a layer of its mask, other than
+    /// itself, whose bounds overlap a region around the move.
+    ///
+    /// Every position the move passes is between `start` and
+    /// `start + delta` on each axis, so each sweep's box is inside the
+    /// box around the collider's bounds at both ends. A solid stops a sweep
+    /// only if it overlaps that sweep's box, but the stop is worked out
+    /// from centers and half extents, and rounds differently from the
+    /// bounds. So the region is that box grown by a margin of 1 px plus
+    /// 2^-16 (128 f32 steps) of the largest coordinate rounding could
+    /// involve: the box's own, plus the widest collider in the hash. A
+    /// solid that matters is near the box, so its coordinates are no
+    /// larger. Colliders kept aside, which can be wider, are all kept. A
+    /// mover whose size is negative or not a number, or whose box is not
+    /// finite, is left to the sweeps.
+    fn gather(
+        &mut self,
+        world: &CollisionWorld,
+        index: u32,
+        collider: &Collider,
+        start: Vec2,
+        delta: Vec2,
+    ) {
+        let (from, to) = (collider.bounds(start), collider.bounds(start + delta));
+        let (min, max) = (from.min.min(to.min), from.max.max(to.max));
+        let half = collider.shape.half_extents();
+        let finite =
+            min.x.is_finite() && min.y.is_finite() && max.x.is_finite() && max.y.is_finite();
+        // Written so that NaN is left to the sweeps.
+        if !(half.x >= 0.0 && half.y >= 0.0 && finite) {
+            self.per_sweep = true;
+            return;
+        }
+        let largest = min.abs().max(max.abs());
+        let widest = world.widest_hashed();
+        let margin = Vec2::splat(1.0 + (largest.x.max(largest.y) + widest) / 65_536.0);
+        let region = Rect::new(min - margin, max + margin);
+        world.near_candidates(region, |other, aside| {
+            let solid = world.collider(other);
+            if self.per_sweep
+                || other == index
+                || solid.kind != ColliderKind::Solid
+                || !collider.mask.intersects(solid.layer)
+            {
+                return;
+            }
+            let placed = world.placed(other);
+            // The size taken as positive: a negative one (meaningless) can
+            // still stop a move, but never from further than this.
+            let half = placed.shape.half_extents().abs();
+            let bounds = Rect::new(placed.center - half, placed.center + half);
+            if !aside && !geometry::boxes_overlap(bounds, region) {
+                return;
+            }
+            if self.len == MOST_NEAR {
+                self.per_sweep = true;
+                #[cfg(test)]
+                FALLBACKS.with(|taken| taken.set((taken.get().0 + 1, taken.get().1)));
+                return;
+            }
+            self.solids[self.len] = (other, placed);
+            self.len += 1;
+        });
+    }
 }
 
 impl Mover<'_> {
@@ -127,9 +301,17 @@ impl Mover<'_> {
             }
         };
         let mut stop = finish;
-        self.solids(center, axis, swept, |_, other, reach| {
+        // The solids that would stop it and where, in the order found: its
+        // contacts are those that stop it within EPSILON of where it stops.
+        let mut ahead = [(Obstacle::Tile(IVec2::ZERO), 0.0); MOST_AHEAD];
+        let mut count = 0;
+        self.solids(center, axis, swept, |obstacle, other, reach| {
             if let Some(at) = stop_at(other, reach) {
                 stop = if forward { stop.min(at) } else { stop.max(at) };
+                if let Some(slot) = ahead.get_mut(count) {
+                    *slot = (obstacle, at);
+                }
+                count += 1;
             }
         });
         if stop == finish {
@@ -137,14 +319,30 @@ impl Mover<'_> {
         }
 
         let normal = axis.unit(if forward { -1.0 } else { 1.0 });
-        self.solids(center, axis, swept, |obstacle, other, reach| {
-            if stop_at(other, reach).is_some_and(|at| (at - stop).abs() <= EPSILON) {
+        let mut touch = |obstacle, at: f32| {
+            if (at - stop).abs() <= EPSILON {
                 let contact = Contact { obstacle, normal };
                 if !contacts.contains(&contact) {
                     contacts.push(contact);
                 }
             }
-        });
+        };
+        if self.first_pass && count <= MOST_AHEAD {
+            for &(obstacle, at) in &ahead[..count] {
+                touch(obstacle, at);
+            }
+        } else {
+            #[cfg(test)]
+            if self.first_pass {
+                FALLBACKS.with(|taken| taken.set((taken.get().0, taken.get().1 + 1)));
+            }
+            // The same solids in the same order, so the same contacts.
+            self.solids(center, axis, swept, |obstacle, other, reach| {
+                if let Some(at) = stop_at(other, reach) {
+                    touch(obstacle, at);
+                }
+            });
+        }
         // Back from the center to the entity, and never past either end.
         let reached = stop - axis.of(self.collider.offset);
         reached.clamp(from.min(to), from.max(to))
@@ -153,7 +351,9 @@ impl Mover<'_> {
     /// Calls `visit` with each solid under `swept` that the collider at
     /// `center` overlaps across `axis` by more than [`EPSILON`]: the solid,
     /// its center along the axis, and how far the collider's center
-    /// reaches past it along the axis while they overlap.
+    /// reaches past it along the axis while they overlap. The tiles come
+    /// row by row, then the colliders the move gathered, or else those the
+    /// spatial hash gives for `swept`.
     fn solids(
         &self,
         center: Vec2,
@@ -214,6 +414,12 @@ impl Mover<'_> {
         }
 
         if self.collider.kind == ColliderKind::Trigger {
+            return;
+        }
+        if !self.near.per_sweep {
+            for &(index, placed) in self.near.solids() {
+                offer(Obstacle::Collider(index), placed.center, placed.shape);
+            }
             return;
         }
         self.world.candidates(swept, |index| {

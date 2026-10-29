@@ -57,7 +57,10 @@ pub struct Collider {
     live when it belongs to the current build, so clearing is O(1).
   - entries pointing into one flat array, filled with a two-pass counting
     sort (count per cell, prefix sum, scatter). Each entry holds the
-    collider's index and its first cell.
+    collider's index, its first cell, and the bounds it was hashed with,
+    so that `move_and_slide`'s gather can pass over a collider without
+    looking it up. The hash also records the widest collider in it, which
+    the gather's margin counts (ADR-0026).
 - A query reports a collider only from the top-left cell where its cells
   and the query's overlap, so it reports each collider once, with no
   visited set.
@@ -108,8 +111,30 @@ pub fn move_and_slide(
    thin wall however long the move.
 5. A trigger mover is stopped by tiles only.
 6. `out_contacts` gets each solid that stopped an axis, once per solid and
-   normal.
-7. Projectiles use `sweep_aabb`/`sweep_circle` (ray against
+   normal: sweep by sweep, and within a sweep the tiles row by row, then
+   the colliders, whose order is fixed but not specified.
+7. The move asks the spatial hash once (ADR-0026):
+   - It gathers the solid colliders on its mask whose bounds overlap the
+     box round the collider at both ends of the move, grown by a margin of
+     1 px plus 2^-16 of the largest coordinate rounding could involve: the
+     box's own plus the widest collider in the hash. Colliders kept aside
+     are all gathered.
+   - Each sweep then scans the tiles under it, and offers those colliders.
+     It takes its contacts from the same pass that finds where it stops.
+   - More than 32 solids near the move fall back to a query per sweep, as
+     does a mover of negative or not-a-number size. More than 16 that
+     would each stop one sweep, anywhere along it, fall back to a second
+     pass for its contacts.
+   - The moves end where per-sweep queries put them, bit for bit, but for
+     two cases:
+     - the sign of a zero;
+     - where rounding exceeds `EPSILON`: beyond about 2^17 px from the
+       origin, or at a hashed solid whose half extent is 2^18 px or more
+       (about 2^19 px wide), which cells over 512 px allow. There a
+       sweep's own query, widened only by `EPSILON` and the drift, can
+       miss a solid that its arithmetic stops at, and the gather finds it
+       (backlog).
+8. Projectiles use `sweep_aabb`/`sweep_circle` (ray against
    Minkowski-expanded shapes) instead, and report the first hit.
 
 ## Triggers
@@ -252,7 +277,28 @@ picking.
     precision; a collider over the whole f32 range neither overflows nor
     hangs the hash; the last cell there is has a rect; a cast from inside
     with a motion too long to square still finds its way;
-  - far from the origin, the overlap bound holds to within one f32 step.
+  - far from the origin, the overlap bound holds to within one f32 step;
+  - the gather's limits (ADR-0026):
+    - a solid too big for the hash stops a mover;
+    - a move with 31 to 41 solids near it meets the one that stops it,
+      last in the hash's order;
+    - a sweep stopped by 15 to 20 solids at once has each for a contact;
+    - a solid that would stop a sweep exactly `EPSILON` further on is a
+      contact, both ways.
+- The shortcuts change no move (`src/tests.rs`, ADR-0026).
+  - The test makes 15,000 random moves among tiles, crowds, colliders
+    moved since the rebuild or to no number, negative sizes, zero-width
+    walls at ±0, and colliders too big for the hash, up to 4e20 px across.
+  - With first-pass contacts, the gather gives the contacts of a second
+    pass, in order.
+  - Against a query per sweep, it ends at the same bits, a zero of either
+    sign counting as one, with the same contacts.
+  - Colliders in the hash, and movers other than those giants, stay within
+    ±131,072 px.
+  - It counts that moves fell back and sweeps took a second pass.
+  - Giants stop moves as the sweeps have them, whether kept aside or
+    hashed: in cells of 1e8 px, or in one saturated cell of 1e-6 px.
+  - A solid whose edge rounds onto the gather's region still stops a move.
 - A steady tick keeps every buffer's capacity, and a lighter tick after a
   heavier one keeps the heavier one's (`src/tests.rs`). The facade's
   allocation counter counts 0 allocations in a steady tick of 5,000

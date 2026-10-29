@@ -51,17 +51,17 @@
     },
     {
       "name": "collision_slide_5k",
-      "median_ns": 2235002.6,
-      "p95_ns": 2291101.8,
+      "median_ns": 1049260.8333333335,
+      "p95_ns": 1076997.5555555555,
       "samples": 50,
-      "iterations": 5
+      "iterations": 9
     },
     {
       "name": "facade_tick_5k",
-      "median_ns": 6310331.25,
-      "p95_ns": 6434491.5,
+      "median_ns": 2392315.25,
+      "p95_ns": 2455379.75,
       "samples": 50,
-      "iterations": 2
+      "iterations": 4
     },
     {
       "name": "facade_frame_10k",

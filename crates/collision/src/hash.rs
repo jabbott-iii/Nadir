@@ -33,6 +33,9 @@ struct Entry {
     index: u32,
     /// The first cell it covers, its top-left.
     first: IVec2,
+    /// The bounds it was hashed with, so that a query can pass over it
+    /// without looking it up.
+    bounds: Rect,
 }
 
 const EMPTY: Slot = Slot {
@@ -46,8 +49,9 @@ const EMPTY: Slot = Slot {
 /// from scratch each tick.
 ///
 /// The cells that hold colliders sit in an open-addressing table, and each
-/// points into one flat array of collider indices, filled by a counting
-/// sort: count per cell, prefix sum, scatter. A cell's colliders are in
+/// points into one flat array of entries (a collider's index, first cell
+/// and bounds), filled by a counting sort: count per cell, prefix sum,
+/// scatter. A cell's colliders are in
 /// the order they were added. Rebuilding keeps every buffer, so a steady
 /// tick allocates nothing.
 pub(crate) struct SpatialHash {
@@ -67,6 +71,10 @@ pub(crate) struct SpatialHash {
     oversized: Vec<u32>,
     /// The first and last cell that hold colliders, if any do.
     occupied: Option<(IVec2, IVec2)>,
+    /// The widest any collider in the hash is, along either axis. Usually
+    /// no more than [`MOST_CELLS`] cells, but cells past the `i32` range
+    /// saturate, so a collider there can be any width.
+    widest: f32,
     /// The cells of this build and their slots, row by row: what a query
     /// walks when its region spans more cells than there are here.
     order: Vec<(IVec2, u32)>,
@@ -87,6 +95,7 @@ impl SpatialHash {
             bounds: Vec::new(),
             oversized: Vec::new(),
             occupied: None,
+            widest: 0.0,
             order: Vec::new(),
             #[cfg(test)]
             looked_at: std::cell::Cell::new(0),
@@ -107,13 +116,17 @@ impl SpatialHash {
         self.filled = 0;
         self.oversized.clear();
         self.occupied = None;
+        self.widest = 0.0;
 
         // Count each cell's colliders.
         for index in 0..self.bounds.len() {
-            let Some((min, max)) = self.cells_of(self.bounds[index]) else {
+            let bounds = self.bounds[index];
+            let Some((min, max)) = self.cells_of(bounds) else {
                 self.oversized.push(index as u32);
                 continue;
             };
+            let size = (bounds.max - bounds.min).abs();
+            self.widest = self.widest.max(size.x.max(size.y));
             self.occupied = Some(match self.occupied {
                 Some((first, last)) => (first.min(min), last.max(max)),
                 None => (min, max),
@@ -143,11 +156,13 @@ impl SpatialHash {
         let unfilled = Entry {
             index: 0,
             first: IVec2::ZERO,
+            bounds: Rect::new(Vec2::ZERO, Vec2::ZERO),
         };
         self.entries.resize(start as usize, unfilled);
 
         for index in 0..self.bounds.len() {
-            let Some((min, max)) = self.cells_of(self.bounds[index]) else {
+            let bounds = self.bounds[index];
+            let Some((min, max)) = self.cells_of(bounds) else {
                 continue;
             };
             for y in min.y..=max.y {
@@ -159,6 +174,7 @@ impl SpatialHash {
                     self.entries[(slot.start + slot.len) as usize] = Entry {
                         index: index as u32,
                         first: min,
+                        bounds,
                     };
                     slot.len += 1;
                 }
@@ -169,6 +185,12 @@ impl SpatialHash {
     /// The side of a cell, in pixels.
     pub(crate) fn cell_size(&self) -> f32 {
         self.cell_size
+    }
+
+    /// The widest any collider in the hash, not kept aside, is along either
+    /// axis.
+    pub(crate) fn widest(&self) -> f32 {
+        self.widest
     }
 
     /// The colliders kept aside, which every query visits: those that
@@ -186,6 +208,11 @@ impl SpatialHash {
     /// region spans more cells than hold any, at each cell that does: so a
     /// query never costs more than the colliders' cells.
     pub(crate) fn query(&self, region: Rect, mut visit: impl FnMut(u32)) {
+        self.query_bounded(region, |index, _| visit(index));
+    }
+
+    /// As [`Self::query`], with the bounds each collider was hashed with.
+    pub(crate) fn query_bounded(&self, region: Rect, mut visit: impl FnMut(u32, Rect)) {
         // Written so that NaN finds nothing.
         if !(region.min.x <= region.max.x && region.min.y <= region.max.y) {
             return;
@@ -210,7 +237,7 @@ impl SpatialHash {
                 // another: they share the block where they overlap, so
                 // take the collider only in its top-left cell.
                 if entry.first.max(region_first) == cell {
-                    visit(entry.index);
+                    visit(entry.index, entry.bounds);
                 }
             }
         };

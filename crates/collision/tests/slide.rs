@@ -920,3 +920,119 @@ fn far_from_the_origin_the_overlap_bound_holds_to_within_one_f32_step() {
         assert!(worst <= f64::from(EPSILON) + step, "±{far}: {worst}");
     }
 }
+
+/// A box of half size `half` on every layer.
+fn block(half: Vec2) -> Collider {
+    Collider::solid(Shape::Aabb { half })
+}
+
+/// The colliders among `contacts`, in index order, each with its normal.
+fn colliders_in(contacts: &[Contact]) -> Vec<(u32, Vec2)> {
+    let mut found: Vec<(u32, Vec2)> = contacts
+        .iter()
+        .map(|contact| match contact.obstacle {
+            Obstacle::Collider(index) => (index, contact.normal),
+            Obstacle::Tile(cell) => panic!("a tile {cell:?} in {contacts:?}"),
+        })
+        .collect();
+    found.sort_by_key(|&(index, _)| index);
+    found
+}
+
+#[test]
+fn a_solid_too_big_for_the_hash_stops_a_mover() {
+    // 400 px across in cells of 8 px: 51 by 51 cells, so it is kept aside.
+    let mut world = CollisionWorld::with_cell_size(8.0);
+    world.rebuild([
+        (0, Vec2::ZERO, block(Vec2::splat(5.0))),
+        (1, Vec2::new(300.0, 0.0), block(Vec2::splat(200.0))),
+    ]);
+    let mut contacts = Vec::new();
+    let end = move_and_slide(&world, 0, Vec2::ZERO, Vec2::new(200.0, 0.0), &mut contacts);
+    assert_eq!(end, Vec2::new(95.0, 0.0));
+    assert_eq!(colliders_in(&contacts), [(1, Vec2::new(-1.0, 0.0))]);
+}
+
+#[test]
+fn a_move_with_more_solids_near_than_it_gathers_still_meets_the_last() {
+    // Bystanders just below the mover, near enough to be gathered but not
+    // in its way, then the solid that stops it, last in the hash's order:
+    // 32 solids near it are gathered; 33 or more leave it to the sweeps.
+    for bystanders in [30, 31, 32, 40] {
+        let mut colliders = vec![(0, Vec2::splat(32.0), block(Vec2::splat(4.0)))];
+        for i in 0..bystanders {
+            let at = Vec2::new(28.0 + i as f32 * 0.45, 37.5);
+            colliders.push((u64::from(i) + 1, at, block(Vec2::new(0.2, 1.0))));
+        }
+        let stopper = bystanders + 1;
+        colliders.push((
+            u64::from(stopper),
+            Vec2::new(44.0, 32.0),
+            block(Vec2::splat(4.0)),
+        ));
+        let mut world = CollisionWorld::new();
+        world.rebuild(colliders);
+        let mut contacts = Vec::new();
+        let end = move_and_slide(
+            &world,
+            0,
+            Vec2::splat(32.0),
+            Vec2::new(10.0, 0.0),
+            &mut contacts,
+        );
+        assert_eq!(end, Vec2::new(36.0, 32.0), "{bystanders} bystanders");
+        assert_eq!(
+            colliders_in(&contacts),
+            [(stopper, Vec2::new(-1.0, 0.0))],
+            "{bystanders} bystanders"
+        );
+    }
+}
+
+#[test]
+fn a_sweep_stopped_by_many_solids_at_once_has_each_for_a_contact() {
+    // A row of small blocks across a tall mover's way, all stopping it at
+    // once: up to 16 are remembered from the first pass, and more are found
+    // in a second.
+    for count in [15u32, 16, 17, 20] {
+        let mut colliders = vec![(0, Vec2::ZERO, block(Vec2::new(2.0, 100.0)))];
+        for i in 1..=count {
+            let y = -95.0 + 190.0 * i as f32 / (count + 1) as f32;
+            colliders.push((u64::from(i), Vec2::new(20.0, y), block(Vec2::ONE)));
+        }
+        let mut world = CollisionWorld::new();
+        world.rebuild(colliders);
+        let mut contacts = Vec::new();
+        let end = move_and_slide(&world, 0, Vec2::ZERO, Vec2::new(30.0, 0.0), &mut contacts);
+        assert_eq!(end, Vec2::new(17.0, 0.0), "{count} blocks");
+        let all: Vec<(u32, Vec2)> = (1..=count).map(|i| (i, Vec2::new(-1.0, 0.0))).collect();
+        assert_eq!(colliders_in(&contacts), all, "{count} blocks");
+    }
+}
+
+#[test]
+fn a_solid_that_would_stop_a_sweep_epsilon_further_on_is_a_contact() {
+    // Blocks 0.01 px wide in a row: the first stops the mover at 0, the
+    // next would stop it exactly EPSILON on (0.02f32 - 0.01f32 is
+    // 0.01f32), and the last a little more than EPSILON on. Both ways.
+    for sign in [1.0f32, -1.0] {
+        let thin = block(Vec2::new(0.005, 1.0));
+        let start = Vec2::new(-sign, 0.0);
+        let mut world = CollisionWorld::new();
+        world.rebuild([
+            (0, start, thin),
+            (1, Vec2::new(0.01 * sign, 0.0), thin),
+            (2, Vec2::new(0.02 * sign, 0.0), thin),
+            (3, Vec2::new(0.021 * sign, 0.0), thin),
+        ]);
+        let mut contacts = Vec::new();
+        let end = move_and_slide(&world, 0, start, Vec2::new(2.0 * sign, 0.0), &mut contacts);
+        assert_eq!(end, Vec2::ZERO, "sign {sign}");
+        let normal = Vec2::new(-sign, 0.0);
+        assert_eq!(
+            colliders_in(&contacts),
+            [(1, normal), (2, normal)],
+            "sign {sign}"
+        );
+    }
+}

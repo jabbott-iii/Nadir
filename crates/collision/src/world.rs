@@ -291,6 +291,45 @@ impl CollisionWorld {
         });
     }
 
+    /// Calls `visit` with each collider that [`Self::candidates`] would
+    /// give for `region` grown by a further 2^-16 of the drift, and
+    /// whether it was kept aside, but passes over a collider in the hash
+    /// whose box when it was hashed misses that region grown by the
+    /// drift.
+    ///
+    /// It is for [`move_and_slide`]'s gather, whose region is grown past
+    /// what rounding can shift at its own coordinates and at the widest
+    /// collider in the hash ([`Self::widest_hashed`]). A collider in the
+    /// hash, not moved far, is within the drift of where it was hashed, up
+    /// to rounding at where it was and where it is: the drift is grown by
+    /// 2^-16 of itself for that.
+    ///
+    /// [`move_and_slide`]: crate::move_and_slide
+    pub(crate) fn near_candidates(&self, region: Rect, mut visit: impl FnMut(u32, bool)) {
+        for &index in self.hash.oversized() {
+            visit(index, true);
+        }
+        for &index in &self.far {
+            visit(index, false);
+        }
+        let drift = self.drift + self.drift / 65_536.0;
+        let region = Rect::new(region.min - drift, region.max + drift);
+        self.hash.query_bounded(region, |index, bounds| {
+            // Bounds the wrong way round, from a negative size, as the box
+            // round them.
+            let hull = Rect::new(bounds.min.min(bounds.max), bounds.min.max(bounds.max));
+            if !self.is_far[index as usize] && geometry::boxes_overlap(hull, region) {
+                visit(index, false);
+            }
+        });
+    }
+
+    /// The widest any collider in the spatial hash, not kept aside, is
+    /// along either axis, as of the last rebuild.
+    pub(crate) fn widest_hashed(&self) -> f32 {
+        self.hash.widest()
+    }
+
     /// Whether collider `index` is on a layer of `mask`.
     pub(crate) fn on(&self, index: u32, mask: LayerMask) -> bool {
         self.colliders[index as usize].layer.intersects(mask)

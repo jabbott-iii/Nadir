@@ -2039,8 +2039,17 @@ by the batched sprite renderer.
     - Windows and macOS: whether one `hashes.txt` holds there shows first
       in CI. If it does not, the fallback is in ADR-0025.
     - A session recorded with real keys, then replayed.
+  - Note: after the task, the user recorded 647 ticks of the field scene
+    with real keys (`--record walk.nrpl`, release); its headless replay,
+    run by the session and again by the user, logged the same tick count
+    and world hash, `d6b7bf3ff9719e12`.
+  - Note: CI run 23, for the M4.7 commit `367f6fb`, passed on all three
+    systems; the session saw it on the public Actions page. Each job runs
+    `cargo xtask ci`, the determinism test with it, so the one
+    `hashes.txt` held on Windows x86_64 and macOS arm64 as well as Linux.
+    macOS x86_64 is not in CI. CodeQL run 4 passed on the same commit.
 
-- [ ] **M4.8 — collision: the 5,000-entity tick within budget**
+- [x] **M4.8 — collision: the 5,000-entity tick within budget**
   - Note (from M4.4): `facade_tick_5k` measured 6.3 ms on the i7-11800H,
     and `--scene stress-entities` 5.5 ms a tick in release, against 4 ms
     on min-spec: ADR-0021's revisit (ADR-0022). Of a jammed tick of
@@ -2074,6 +2083,104 @@ by the batched sprite renderer.
     judges whether the new number leaves room for 4 ms there.
   - Verify: `cargo test -p nadir-collision -p nadir`;
     `cargo xtask bench collision`; `cargo xtask bench facade`
+  - Note: decided by the user on 2026-10-29 (ADR-0026): all three steps
+    below, and the old defect in `CollisionWorld::candidates` that the
+    critique found goes to the backlog.
+  - Note: built, in nadir-collision only, with no public API change:
+    - `move_and_slide` gathers once, for the whole move, the solid
+      colliders near it, in a fixed array of 32. More near it, or a mover
+      of negative or not-a-number size, falls back to a query per sweep.
+    - Each sweep takes its contacts from the pass that finds where it
+      stops, remembering up to 16 stoppers. More than 16 take a second
+      pass.
+    - Hash entries hold the bounds their collider was hashed with. The
+      hash records its widest collider, which the gather's margin counts.
+      A crate-private `near_candidates` passes over the far ones.
+    - A crate-private `Shortcuts` turns each shortcut off for the tests,
+      and test-only counters show the fallbacks ran.
+  - Note: the design critique made 28 points, and 26 survived their
+    refuters. From them:
+    - giants kept aside are gathered whatever their bounds;
+    - the margin also counts the widest collider in the hash;
+    - negative sizes are taken as their size;
+    - a differential test with boundary scenarios;
+    - the arrays are filled in place;
+    - the two exceptions to "bit for bit" are named.
+  - Note: the code review made 21 findings, several of them one point
+    seen through two lenses: 16 real, 3 partly real and 2 refuted. Fixed:
+    - A giant in one saturated hash cell broke the margin's "1,024
+      cells". For a mover near the origin that takes cells under
+      2^-14 px; with any cells, colliders past 2^31 cells. The hash now
+      records its widest collider.
+    - The second exception also covers an unmoved hashed solid whose half
+      extent is 2^18 px or more.
+    - The differential test could not see a margin of 0. Added: a tie at
+      100,000 px, and giants hashed in cells of 1e8 and 1e-6 px.
+    - The coverage asserts counted stand-ins. They now count the
+      fallbacks.
+    - The fillers were not all zeros, which cost a memset. Zeroing them
+      saved about 3% of the facade tick and 5 to 8% of
+      `collision_slide_5k`, as the review measured.
+    - Wrong counts and overstated sentences in the docs, the rustdoc and
+      the test comments.
+    Not taken: storing each entry's hull at rebuild, which measured 1 to
+    2% faster.
+  - Note: 24 planted bugs, one at a time, in a copy of the tree, through
+    `cargo test -p nadir-collision -p nadir --features nadir/dev`: 23
+    failed a test. The survivor drops the 2^-16 growth of the prefilter's
+    drift, which matters only with cells and moves of millions of pixels.
+    It rests on the argument in `near_candidates`'s doc.
+  - Note: measured on the i7-11800H, 2026-10-29, old and new interleaved
+    and pinned to one core, medians of four rounds (ADR-0026):
+    - `facade_tick_5k`: 6.32–6.38 ms before, 2.40–2.43 ms after.
+    - `collision_slide_5k`: 2.17–2.19 ms before, 1.04–1.07 ms after.
+    - `collision_hash_5k`: 1.43–1.45 ms before, 1.50–1.54 ms after, about
+      4% slower (3.7 to 7.5% round by round) from the larger entries.
+    - In three full unpinned runs earlier that day, of the code before the
+      review, every benchmark moved by up to ±12% from one run to the
+      next. Those runs were not saved.
+    - `bench/baseline.json` now has `facade_tick_5k` (2.39 ms) and
+      `collision_slide_5k` (1.05 ms), from a full run pinned to one core.
+      In that run the other entries were 0.6% slower to 10.9% faster than
+      their baselines. Those entries were left as they were, among them
+      `collision_hash_5k` at +0.4%.
+  - Note: `--scene stress-entities`, 12 s in release with `dev`:
+    - Headless, timing 120 ticks after 120, 600 and 1,200 ticks of
+      settling: 2.50–2.63 ms a tick after, 5.81–6.57 ms before.
+    - In a window with `--no-vsync --fps 1000`: 2.1–2.3 ms after; 4.8–6.4 ms
+      before, settling near 5.7 ms.
+    - With vsync at 60 frames a second: 5.0–5.5 ms before, after 8.0 ms
+      in its first second. After, a swing from 2.0 to 6.1 ms from one
+      second to the next. The likely cause is the `schedutil` governor
+      lowering the clock under the light load; the clock was not
+      recorded.
+    - The allocation reports are the same in both builds: 268 in the
+      first second, then 0 a second, but 1 in each of the 4th and 5th.
+  - Note: the moves are unchanged:
+    - The determinism test's `hashes.txt` is unchanged, but its game never
+      reaches the gather's edge cases.
+    - The permanent differential test (`src/tests.rs`) runs 15,000 moves in
+      about 2 s in debug.
+    - A one-off run of its generator for 200,000 moves was compared with a
+      frozen copy of the old `move_and_slide`. Every end matched, with
+      zeros of either sign alike, and so did every contact set; 827 lists
+      came in another order. The run covered:
+      - 9,045 moves that fell back to per-sweep queries;
+      - 99,459 sweeps that took a second pass;
+      - 38,083 moves stopped by a giant.
+    - It first caught a real slip: a negative-radius circle whose inverted
+      bounds still fit one hash cell was dropped. Both filters now test the
+      box round such bounds.
+  - Note: tests:
+    - nadir-collision: 37 unit tests, 11 query, 21 slide and 1 trigger
+      test. The property and scenario tests that were there before pass
+      unchanged.
+    - The facade: 78 unit tests (82 with `dev`, `steady_ticks` among
+      them) and 3 determinism tests.
+  - Note: the user judged on 2026-10-29 that 2.4 ms on the i7-11800H
+    leaves room for the budget, estimated at about 3.8–4.8 ms on a
+    UHD 620-class laptop (an i5-8250U, say), unmeasured. The M4 exit
+    criterion stays open until a min-spec machine measures it (M11.5).
 
 **Exit criteria (M4):**
 
@@ -2085,6 +2192,12 @@ by the batched sprite renderer.
     stress-entities`, whose report gives the time per tick and the
     allocations. `facade_tick_5k` times the same tick. Both miss 4 ms on
     the i7-11800H: see M4.8.
+  - Note (from M4.8): on the i7-11800H, `facade_tick_5k` now takes
+    2.4 ms, and the scene's tick 2.1–2.6 ms with the CPU kept busy. With
+    vsync at 60 frames a second the scene's tick swings from 2.0 to
+    6.1 ms, likely because the `schedutil` governor lowers the clock under
+    the light load. A min-spec measurement should say which governor ran
+    (ADR-0026).
 - The determinism test passes.
 - 0 allocations per tick in steady state.
 
@@ -2798,4 +2911,5 @@ three OSes from a tag, and the release checklist is complete.
 | Lock-free audio command queue | Measured `try_lock` contention |
 | Localization pipeline (string tables, plurals) | Before the first non-English release |
 | Per-cell tile shapes in `TileGrid` (half cells, corner triangles; M4.3 has full cells) | A level needs half-height ledges or diagonal walls |
+| `CollisionWorld::candidates` widens a query only by the drift, so a query can miss a collider by a rounding step. A moved collider whose center rounds a step further than its move is missed by a step anywhere: `nearest((9, 576.00006103515625), 0.0, ALL, None)` misses a box of half (4, 64 - 2^-13 - 2^-14), offset (0, 2^-15), rebuilt at (9, 512 + 2^-13) and moved to (9, 512 + 3 × 2^-14), and finds it after a rebuild. Past about 2^17 px the miss exceeds `EPSILON`, which `move_and_slide`'s sweeps add: `nearest((9, 268553.40625), 0.0, ALL, None)` misses a box of half (2, 2.03125), offset (0, 0.015625), rebuilt at (9, 268541.9375) and moved to (9, 268551.34375). Unmoved, a hashed solid whose half extent is 2^18 px or more is missed in cells over 512 px. `move_and_slide`'s gather finds the last two (ADR-0026) | A query at an exact edge that must not miss, such as picking; a level past 2^17 px from the origin; or solids that wide. The fix widens queries by a few f32 steps of the moved collider's coordinates and of the widest collider in the hash |
 | A determinism lint (clippy `disallowed-methods` or `xtask`): std `HashMap::new`/`HashSet::new`, `Instant::now`, `sin`/`cos`/`atan2` in tick systems; and `FxLikeHasher`'s rustdoc saying its order holds on one target only (ADR-0025) | A determinism regression that slipped past review, or CI disagreeing with the stored hashes |
