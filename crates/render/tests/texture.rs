@@ -22,7 +22,7 @@ fn a_texture_needs_the_device_in_the_context() {
 
     let mut server = AssetServer::new(root, OnFailure::Placeholder);
     let dot = server.load::<Texture>("dot.qoi");
-    server.finish_completed_loads(&mut FinalizeCtx::new());
+    server.finish_all_loads(&mut FinalizeCtx::new());
     assert_eq!(server.state(dot), Some(LoadState::Failed));
     assert_eq!(
         server.error(dot),

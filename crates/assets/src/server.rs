@@ -1,14 +1,18 @@
-//! The asset server: loads by path, and finalizes once a frame.
+//! The asset server: loads by path on worker threads, and finalizes once a
+//! frame.
 
 use std::any::{Any, TypeId};
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
-use std::{fs, io};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use nadir_codec::Limits;
 use nadir_core::{FastHashMap, Handle};
 
-use crate::assets::{self, Assets};
-use crate::{Asset, AssetError, DecodeCtx, FinalizeCtx, LoadState, path};
+use crate::assets::{self, Assets, Budget, Slot};
+use crate::workers::Workers;
+use crate::{Asset, AssetError, AssetPath, DecodeCtx, FinalizeCtx, LoadState, LooseSource, Source};
 
 /// What a failed load leaves behind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -20,15 +24,89 @@ pub enum OnFailure {
     Nothing,
 }
 
+/// How long an asset stays loaded: until every scope it was loaded in is
+/// unloaded, with [`AssetServer::unload_scope`].
+///
+/// Loading the same path in another scope gives the same asset, which then
+/// stays until both scopes are unloaded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Scope {
+    /// The whole game: the font, the player, the menus.
+    /// [`AssetServer::load`] loads in it.
+    Global,
+    /// The level being played, unloaded when the game leaves it.
+    Level,
+    /// A while shorter than a level: a cutscene, a screen.
+    Transient,
+}
+
 /// The assets of each type, as [`Assets`] boxed and typed away.
 trait Storage: Any {
-    fn finish(&mut self, ctx: &mut FinalizeCtx<'_>, on_failure: OnFailure);
+    fn finish(&mut self, ctx: &mut FinalizeCtx<'_>, on_failure: OnFailure, budget: &mut Budget);
+    fn wait(&mut self);
+    fn unload(&mut self, scope: Scope) -> usize;
     fn has_pending(&self) -> bool;
 }
 
+/// The assets of each type, in the order their types' first loads came.
+#[derive(Default)]
+struct Storages {
+    list: Vec<Box<dyn Storage>>,
+    index: FastHashMap<TypeId, usize>,
+    /// Which type goes first in the next budgeted finish: they take turns,
+    /// so that one type's backlog cannot hold the others back for good.
+    turn: usize,
+}
+
+impl Storages {
+    fn get<T: Asset>(&self) -> Option<&Assets<T>> {
+        let storage: &dyn Any = self
+            .list
+            .get(*self.index.get(&TypeId::of::<T>())?)?
+            .as_ref();
+        storage.downcast_ref()
+    }
+
+    /// The assets of type `T`, made empty if there are none yet.
+    fn get_mut<T: Asset>(&mut self) -> &mut Assets<T> {
+        let list = &mut self.list;
+        let index = *self.index.entry(TypeId::of::<T>()).or_insert_with(|| {
+            list.push(Box::new(Assets::<T>::new()));
+            list.len() - 1
+        });
+        let storage: &mut dyn Any = list[index].as_mut();
+        storage
+            .downcast_mut()
+            .expect("the storage under a type's index holds assets of that type")
+    }
+
+    /// Every type's assets, from the one whose turn it is if `rotate`, and
+    /// from the first otherwise; the next call with `rotate` starts one
+    /// later.
+    fn each(&mut self, rotate: bool) -> impl Iterator<Item = &mut Box<dyn Storage>> {
+        let first = if rotate && !self.list.is_empty() {
+            let first = self.turn % self.list.len();
+            self.turn = first + 1;
+            first
+        } else {
+            0
+        };
+        let (before, after) = self.list.split_at_mut(first);
+        after.iter_mut().chain(before.iter_mut())
+    }
+}
+
 impl<T: Asset> Storage for Assets<T> {
-    fn finish(&mut self, ctx: &mut FinalizeCtx<'_>, on_failure: OnFailure) {
-        Assets::finish(self, ctx, on_failure);
+    fn finish(&mut self, ctx: &mut FinalizeCtx<'_>, on_failure: OnFailure, budget: &mut Budget) {
+        Assets::finish(self, ctx, on_failure, budget);
+    }
+
+    fn wait(&mut self) {
+        Assets::wait(self);
+    }
+
+    fn unload(&mut self, scope: Scope) -> usize {
+        Assets::unload(self, scope)
     }
 
     fn has_pending(&self) -> bool {
@@ -36,70 +114,123 @@ impl<T: Asset> Storage for Assets<T> {
     }
 }
 
-/// Loads assets from files under a root directory, and keeps them.
+/// How long [`AssetServer::finish_completed_loads`] spends making assets,
+/// unless [`AssetServer::set_finish_budget`] changes it.
+const FINISH_BUDGET: Duration = Duration::from_millis(2);
+
+/// Loads assets from a [`Source`] on worker threads, and keeps them.
 ///
-/// Loading is synchronous for now: [`AssetServer::load`] reads and decodes
-/// the file at once. The asset is then made on the main thread by the next
-/// [`AssetServer::finish_completed_loads`], as it will be once decoding moves
-/// to worker threads (roadmap M5.3).
+/// [`AssetServer::load`] returns at once, and a worker reads and decodes the
+/// file. [`AssetServer::finish_completed_loads`] then makes the asset on the
+/// main thread, once a frame, for at most a couple of milliseconds a frame.
+/// A load finishes some frames later, never at a frame that can be known in
+/// advance, so tick systems must not depend on load state (ADR-0025):
+/// [`AssetServer::finish_all_loads`] waits for every load instead.
 ///
-/// Handles are plain ids: nothing counts them, and assets stay until their
-/// scope is unloaded (M5.3).
+/// Handles are plain ids: nothing counts them. An asset stays until every
+/// [`Scope`] it was loaded in is unloaded.
+///
+/// The server has 1 to 4 worker threads, two less than the cores, which
+/// leaves the main thread a core and one to spare. If none can start, it
+/// reads and decodes on the thread that asks for the load. Dropping it waits
+/// for the workers' current files.
 pub struct AssetServer {
-    root: PathBuf,
+    // Dropped first, so that the workers stop before the assets go.
+    workers: Workers,
+    source: Arc<dyn Source>,
     on_failure: OnFailure,
     limits: Limits,
-    storages: FastHashMap<TypeId, Box<dyn Storage>>,
+    finish_budget: Duration,
+    storages: Storages,
 }
 
 impl AssetServer {
-    /// A server that reads files under `root`, with the codecs' default
-    /// limits.
+    /// A server that reads loose files under `root`, as a [`LooseSource`],
+    /// with the codecs' default limits.
     pub fn new(root: impl Into<PathBuf>, on_failure: OnFailure) -> Self {
+        Self::with_source(LooseSource::new(root), on_failure)
+    }
+
+    /// A server that reads from `source`, with the codecs' default limits.
+    pub fn with_source(source: impl Source + 'static, on_failure: OnFailure) -> Self {
         Self {
-            root: root.into(),
+            workers: Workers::new(Workers::count()),
+            source: Arc::new(source),
             on_failure,
             limits: Limits::default(),
-            storages: FastHashMap::default(),
+            finish_budget: FINISH_BUDGET,
+            storages: Storages::default(),
         }
     }
 
-    /// Loads the asset at `path`, a path under the root such as
-    /// `sprites/hero.qoi`, and returns its handle at once.
-    ///
-    /// The same path, once lowercased, gives the same handle, whatever happened to its load.
-    /// Otherwise the file is read and decoded now, and the asset is made by
-    /// the next [`AssetServer::finish_completed_loads`]. Until then it is
-    /// [`LoadState::Loading`]. A failure, a missing file say, shows once it
-    /// is finished: [`LoadState::Failed`], logged with the path.
-    ///
-    /// A path is lowercased (ASCII letters only), so `Sprites/Hero.qoi` is
-    /// `sprites/hero.qoi`: the same asset, read from that file. It is then
-    /// checked as the same string on every system: `/` between its parts,
-    /// none of them empty, `.` or `..`, and the last ending in one of
-    /// [`Asset::EXTENSIONS`].
+    /// Loads the asset at `path`, a path under the source's root such as
+    /// `sprites/hero.qoi`, in [`Scope::Global`], and returns its handle at
+    /// once. [`AssetServer::load_in`] says how.
     pub fn load<T: Asset>(&mut self, path: &str) -> Handle<T> {
+        self.load_in(path, Scope::Global)
+    }
+
+    /// Loads the asset at `path` in `scope`, and returns its handle at once.
+    ///
+    /// The same path, once lowercased, gives the same handle, whatever
+    /// happened to its load, until every scope it was loaded in is
+    /// unloaded; it is then in `scope` too. Otherwise a worker reads and
+    /// decodes the file, and a later
+    /// [`AssetServer::finish_completed_loads`] makes the asset. Until then
+    /// it is [`LoadState::Loading`]. A failure, a missing file say, shows
+    /// once it is finished: [`LoadState::Failed`], logged with the path.
+    ///
+    /// The path is lowercased and checked as an [`AssetPath`], and its last
+    /// part must end in one of [`Asset::EXTENSIONS`].
+    pub fn load_in<T: Asset>(&mut self, path: &str, scope: Scope) -> Handle<T> {
         let path = assets::lowercase(path);
         let path = path.as_ref();
-        let (root, limits) = (&self.root, self.limits);
-        storage_mut::<T>(&mut self.storages).add(path, || {
-            path::check(path).map_err(AssetError::BadPath)?;
-            let extension = path
-                .rsplit('/')
-                .next()
-                .and_then(|name| name.rsplit_once('.'))
-                .map(|(_, extension)| extension);
-            if !extension.is_some_and(|extension| T::EXTENSIONS.contains(&extension)) {
-                return Err(AssetError::Extension {
-                    expected: T::EXTENSIONS,
-                });
-            }
-            let bytes = fs::read(root.join(path)).map_err(|error| match error.kind() {
-                io::ErrorKind::NotFound => AssetError::NotFound,
-                kind => AssetError::Read(kind),
-            })?;
-            T::decode(&bytes, &DecodeCtx::new(path, limits))
-        })
+        let assets = self.storages.get_mut::<T>();
+        if let Some(handle) = assets.find(path, scope) {
+            return handle;
+        }
+        let checked = AssetPath::new(path).and_then(|path| match path.extension() {
+            Some(extension) if T::EXTENSIONS.contains(&extension) => Ok(path),
+            _ => Err(AssetError::Extension {
+                expected: T::EXTENSIONS,
+            }),
+        });
+        let path = match checked {
+            Ok(path) => path,
+            Err(error) => return assets.insert(path, scope, Slot::Pending(Err(error))),
+        };
+        let handle = assets.insert(path.as_str(), scope, Slot::Decoding);
+        let done = assets.job_sender();
+        let (source, limits) = (Arc::clone(&self.source), self.limits);
+        self.workers.run(Box::new(move || {
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                let bytes = source.read(&path)?;
+                T::decode(&bytes, &DecodeCtx::new(path.as_str(), limits))
+            }))
+            .unwrap_or_else(|_| {
+                Err(AssetError::Invalid(
+                    "reading or decoding it panicked".to_string(),
+                ))
+            });
+            // Fails only once the server is gone, when nothing waits for it.
+            let _ = done.send((handle, result));
+        }));
+        handle
+    }
+
+    /// Unloads `scope`: every asset loaded in it and in no other scope goes,
+    /// and returns how many did.
+    ///
+    /// Their handles name nothing from now on: [`AssetServer::state`] gives
+    /// `None`, and loading the path again loads it anew. The next
+    /// [`AssetServer::finish_completed_loads`] frees them with
+    /// [`Asset::release`], their placeholders too; one still being read is
+    /// dropped once its worker is done with it.
+    pub fn unload_scope(&mut self, scope: Scope) -> usize {
+        self.storages
+            .each(false)
+            .map(|storage| storage.unload(scope))
+            .sum()
     }
 
     /// The asset, once loaded. For a failed one, with
@@ -129,35 +260,57 @@ impl AssetServer {
 
     /// The assets of type `T`, if any was loaded.
     pub fn assets<T: Asset>(&self) -> Option<&Assets<T>> {
-        let storage: &dyn Any = self.storages.get(&TypeId::of::<T>())?.as_ref();
-        storage.downcast_ref()
+        self.storages.get()
     }
 
-    /// Whether some loads wait for [`AssetServer::finish_completed_loads`].
-    /// When none do, a game need not make a [`FinalizeCtx`] at all.
+    /// Whether some loads, or some assets of unloaded scopes, wait for
+    /// [`AssetServer::finish_completed_loads`]. When none do, a game need
+    /// not make a [`FinalizeCtx`] at all.
     pub fn has_pending(&self) -> bool {
-        self.storages.values().any(|storage| storage.has_pending())
+        self.storages
+            .list
+            .iter()
+            .any(|storage| storage.has_pending())
     }
 
-    /// Makes every asset loaded since the last call, with the resources in
-    /// `ctx`: call it on the main thread, once a frame.
+    /// Sets how long [`AssetServer::finish_completed_loads`] may spend
+    /// making assets: 2 ms unless set. Each call makes one asset at least,
+    /// so a single slow one can take longer.
+    pub fn set_finish_budget(&mut self, budget: Duration) {
+        self.finish_budget = budget;
+    }
+
+    /// Makes the assets the workers have decoded since the last call, with
+    /// the resources in `ctx`, until the finish budget is spent; the rest
+    /// wait for the next call. It also frees the assets of unloaded scopes,
+    /// all of them, outside the budget. Call it on the main thread, once a
+    /// frame. It never waits for a worker.
+    ///
+    /// The assets of a type are made in the order they were loaded, passing
+    /// over those still decoding, so a later load can be made first. The
+    /// types share the budget and take turns at going first, one call after
+    /// another.
     ///
     /// A failure is logged with the asset's path, and with
     /// [`OnFailure::Placeholder`] the asset gets its type's placeholder.
     pub fn finish_completed_loads(&mut self, ctx: &mut FinalizeCtx<'_>) {
-        for storage in self.storages.values_mut() {
-            storage.finish(ctx, self.on_failure);
+        let mut budget = Budget::until(Instant::now().checked_add(self.finish_budget));
+        for storage in self.storages.each(true) {
+            storage.finish(ctx, self.on_failure, &mut budget);
         }
     }
-}
 
-/// The assets of type `T`, made empty if there are none yet.
-fn storage_mut<T: Asset>(storages: &mut FastHashMap<TypeId, Box<dyn Storage>>) -> &mut Assets<T> {
-    let storage: &mut dyn Any = storages
-        .entry(TypeId::of::<T>())
-        .or_insert_with(|| Box::new(Assets::<T>::new()))
-        .as_mut();
-    storage
-        .downcast_mut()
-        .expect("the storage under a type's id holds assets of that type")
+    /// Waits for the workers to read and decode every file asked for, then
+    /// makes every asset, as [`AssetServer::finish_completed_loads`] does
+    /// but with no budget: for tools, tests, and frames that must show
+    /// every asset loaded before them. It makes them type by type, in the
+    /// order of each type's first load, and each type's in the order they
+    /// were loaded, so the same loads are made in the same order every time.
+    pub fn finish_all_loads(&mut self, ctx: &mut FinalizeCtx<'_>) {
+        let mut budget = Budget::until(None);
+        for storage in self.storages.each(false) {
+            storage.wait();
+            storage.finish(ctx, self.on_failure, &mut budget);
+        }
+    }
 }

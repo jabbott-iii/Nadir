@@ -294,7 +294,7 @@ OS events ─► platform::Event ─► input (device state, edge accumulation)
 | :- | :- | :- |
 | Main | Window, GPU context, ECS world, renderer, input | Channels to workers; a command queue to audio |
 | Audio (one) | Mixer state, voices, streaming decoders, OS audio device | Command queue in; atomic counters/status out |
-| Workers (N = clamp(cores − 1, 1, 4)) | File reads, decode (QOI, QOA, data), dev re-cook | `std::sync::mpsc` jobs in, results out; GPU uploads happen on main |
+| Workers (N = clamp(cores − 2, 1, 4), the asset server's, ADR-0030) | File reads, decode (QOI, QOA, data), dev re-cook | `std::sync::mpsc` jobs in, results out; GPU uploads happen on main |
 | Hot-reload watcher (dev only) | Polling of source/cooked file mtimes | Channel of changed paths to main |
 
 - No thread touches the GPU except main.

@@ -10,12 +10,15 @@ use crate::AssetError;
 ///
 /// Loading one has two steps:
 ///
-/// 1. [`Asset::decode`] turns the file's bytes into data. From roadmap
-///    M5.3 this runs on a worker thread, so it reaches nothing but the
-///    bytes and the [`DecodeCtx`].
+/// 1. [`Asset::decode`] turns the file's bytes into data, on one of the
+///    server's worker threads, so it reaches nothing but the bytes and the
+///    [`DecodeCtx`].
 /// 2. [`Asset::finalize`] makes the asset from that data on the main thread,
 ///    with the resources in the [`FinalizeCtx`]: a texture is uploaded to
 ///    the GPU there.
+///
+/// Once every scope it was loaded in is unloaded, [`Asset::release`] frees
+/// it on the main thread.
 pub trait Asset: Sized + Send + 'static {
     /// What [`Asset::decode`] makes.
     type Decoded: Send + 'static;
@@ -50,6 +53,21 @@ pub trait Asset: Sized + Send + 'static {
     fn placeholder(ctx: &mut FinalizeCtx<'_>) -> Result<Self, AssetError> {
         let _ = ctx;
         Err(AssetError::NoPlaceholder)
+    }
+
+    /// Frees what the asset holds outside the server, such as its GPU
+    /// texture, once every scope it was loaded in is unloaded. The next
+    /// [`AssetServer::finish_completed_loads`](crate::AssetServer::finish_completed_loads)
+    /// calls it, with that frame's context; a placeholder is freed the same
+    /// way. By default the asset is only dropped.
+    ///
+    /// # Errors
+    ///
+    /// Any [`AssetError`]; usually [`AssetError::MissingContext`]. The
+    /// server logs it with the asset's path, and drops the asset.
+    fn release(self, ctx: &mut FinalizeCtx<'_>) -> Result<(), AssetError> {
+        let _ = ctx;
+        Ok(())
     }
 }
 

@@ -10,7 +10,8 @@ use nadir_gfx::{Device, TextureDesc, TextureFormat, TextureId};
 /// It is made by [`Asset::finalize`], which needs the [`Device`] in the
 /// [`FinalizeCtx`]. A QOI file marked sRGB becomes an
 /// [`TextureFormat::Rgba8Srgb`] texture, and one marked linear an
-/// [`TextureFormat::Rgba8`].
+/// [`TextureFormat::Rgba8`]. Once its scopes are unloaded,
+/// [`Asset::release`] destroys it on the device, which then refuses its id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Texture {
     id: TextureId,
@@ -96,6 +97,12 @@ impl Asset for Texture {
             TextureFormat::Rgba8Srgb,
             &checker(),
         )
+    }
+
+    /// Destroys the texture on the [`Device`] in the context.
+    fn release(self, ctx: &mut FinalizeCtx<'_>) -> Result<(), AssetError> {
+        ctx.get_mut::<Device>()?.destroy(self.id);
+        Ok(())
     }
 }
 

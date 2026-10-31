@@ -513,67 +513,112 @@ font asset (M5.5).
 
 ### Handles and storage
 
-As built in M3.2: loading is synchronous, from loose files under a root
-directory. Workers, scopes and `Source` come in M5.3, and `reload` in M5.8.
+As built in M3.2 and M5.3 (ADR-0030): loading on worker threads from a
+`Source`, finalizing on the main thread within a frame budget, and freeing
+by scope. `reload` comes in M5.8.
 
 ```rust
 pub use nadir_core::Handle;                 // { id: GenIndex, _t: PhantomData<fn() -> T> }: Copy, Eq, Hash
-pub struct Assets<T> { arena: GenArena<Entry<T>>, by_path: FastHashMap<String, Handle<T>>, pending: Vec<Handle<T>> }
-enum Slot<T> { Pending(Result<T::Decoded, AssetError>), Loaded(T), Failed { error: AssetError, placeholder: Option<T> } }
-pub enum LoadState { Loading, Loaded, Failed }
+pub struct Assets<T> { arena: GenArena<Entry<T>>, by_path, pending: Vec<Handle<T>>, /* result channel, released */ }
+enum Slot<T> { Decoding, Pending(Result<T::Decoded, AssetError>), Loaded(T), Failed { error: AssetError, placeholder: Option<T> } }
+pub enum LoadState { Loading, Loaded, Failed }   // Loading: decoding, or waiting to be finalized
 pub enum OnFailure { Placeholder, Nothing }
+pub enum Scope { Global, Level, Transient }
 
 impl AssetServer {
-    pub fn new(root: impl Into<PathBuf>, on_failure: OnFailure) -> Self;
-    pub fn load<T: Asset>(&mut self, path: &str) -> Handle<T>;     // dedups by path; reads and decodes now
+    pub fn new(root: impl Into<PathBuf>, on_failure: OnFailure) -> Self;          // a LooseSource
+    pub fn with_source(source: impl Source + 'static, on_failure: OnFailure) -> Self;
+    pub fn load<T: Asset>(&mut self, path: &str) -> Handle<T>;                    // load_in(path, Scope::Global)
+    pub fn load_in<T: Asset>(&mut self, path: &str, scope: Scope) -> Handle<T>;   // dedups by path; queues the read
+    pub fn unload_scope(&mut self, scope: Scope) -> usize;                        // how many went
     pub fn get<T: Asset>(&self, h: Handle<T>) -> Option<&T>;        // loaded, or a failed one's placeholder
     pub fn state<T: Asset>(&self, h: Handle<T>) -> Option<LoadState>;  // None: nothing under that handle
     pub fn error<T: Asset>(&self, h: Handle<T>) -> Option<&AssetError>;
     pub fn path<T: Asset>(&self, h: Handle<T>) -> Option<&str>;
     pub fn assets<T: Asset>(&self) -> Option<&Assets<T>>;
-    pub fn has_pending(&self) -> bool;
-    pub fn finish_completed_loads(&mut self, ctx: &mut FinalizeCtx<'_>); // main thread, once per frame
+    pub fn has_pending(&self) -> bool;                             // loads out, or assets to free
+    pub fn set_finish_budget(&mut self, budget: Duration);         // 2 ms unless set
+    pub fn finish_completed_loads(&mut self, ctx: &mut FinalizeCtx<'_>); // main thread, once a frame; never waits
+    pub fn finish_all_loads(&mut self, ctx: &mut FinalizeCtx<'_>);       // waits for every load: tools, tests, offscreen frames
     // M5.8: pub fn reload(&self, path: &str);                    // dev hot reload
 }
 
 pub trait Asset: Sized + Send + 'static {
-    type Decoded: Send + 'static;                                  // produced on a worker from M5.3
+    type Decoded: Send + 'static;                                  // made on a worker
     const EXTENSIONS: &'static [&'static str];
     fn decode(bytes: &[u8], ctx: &DecodeCtx<'_>) -> Result<Self::Decoded, AssetError>;
     fn finalize(decoded: Self::Decoded, ctx: &mut FinalizeCtx<'_>) -> Result<Self, AssetError>; // main thread (GPU upload)
     fn placeholder(ctx: &mut FinalizeCtx<'_>) -> Result<Self, AssetError>;   // default: NoPlaceholder
+    fn release(self, ctx: &mut FinalizeCtx<'_>) -> Result<(), AssetError>;  // default: drop; a texture destroys itself
 }
 
 pub struct DecodeCtx<'a> { /* path, limits */ }
 pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no allocation */ }
 ```
 
+- **Workers:**
+  - Each server starts `clamp(cores − 2, 1, 4)` threads, `nadir-assets-N`,
+    which take jobs from one queue. That leaves the main thread a core and
+    one to spare, so that no other thread takes the main thread's core
+    while assets load. A job reads the file through the
+    server's `Source` and decodes it, and sends the result on its asset
+    type's channel.
+  - A panic while reading or decoding fails that asset alone, as
+    `Invalid("reading or decoding it panicked")`.
+  - With no thread started, jobs run on the thread that asks for the load.
+  - Dropping the server drops the jobs still queued and waits for those
+    running.
 - **Loading:**
   - `load` gives the same handle for the same path, whatever happened to
-    its load. Otherwise it reads and decodes the file at once.
-  - The asset is made by the next `finish_completed_loads`, and stays
-    `Loading` until then.
-  - A failure shows only then, and is logged with the path: a missing file
-    is `NotFound`.
-- **Paths:**
+    its load, until every scope it was loaded in is unloaded. Otherwise it
+    checks the path and queues the job: it never reads, so it never
+    waits. A path that fails the check fails with no job.
+  - `finish_completed_loads` takes the workers' results and frees the
+    assets of unloaded scopes, all of them, outside the budget. It then
+    makes decoded assets until the budget runs out, and makes one at least
+    each call. An asset stays `Loading` until then.
+  - Each type's assets are made in the order they were loaded, passing
+    over those still decoding, so a later load can be made first. The
+    types share the budget and take turns at going first, so one type's
+    backlog cannot hold another's back for long.
+  - `finish_all_loads` waits for every job and makes every asset, with no
+    budget: type by type, in the order of each type's first load, and each
+    type's in load order, so the same loads are made in the same order on
+    every run.
+  - A failure shows only when it is finished, and is logged with the path:
+    a missing file is `NotFound`.
+  - The facade finishes within the budget after each window frame, and
+    waits for every load after each offscreen frame (`App::offscreen`), so
+    that recordings are the same on every run. A headless run finishes
+    nothing, so tick systems must not depend on load state (ADR-0025).
+- **Paths (`AssetPath`):**
   - ASCII letters are lowercased.
   - The rest is checked as one byte grammar on every system: `/` between
     parts, no empty, `.` or `..` part, and no part ending in a dot or a
     space or named like a Windows device.
-  - No control character, `\`, `:` or `*?"<>|` is allowed.
+  - No control character, `\`, `:` or `*?"<>|` is allowed. A path that
+    fails is refused, not repaired.
   - The last part must end in one of `T::EXTENSIONS`.
-- **`FinalizeCtx`** holds the resources `finalize` needs, by type, such as
-  render's `gfx::Device`. A missing one is `AssetError::MissingContext`.
+- **`FinalizeCtx`** holds the resources `finalize` and `release` need, by
+  type, such as render's `gfx::Device`. A missing one is
+  `AssetError::MissingContext`.
 - **`AssetError`** holds no path: the server logs each failure with its
   path. Its variants are `BadPath`, `Extension`, `NotFound`, `Read`,
   `Decode(CodecError)`, `Invalid(String)` (an asset type's own reason),
   `MissingContext` and `NoPlaceholder`.
 - **Reference handling:** handles are plain IDs; there is no reference
   counting.
-  - Assets live until their owning *scope* (global, level, transient) is
-    unloaded (M5.3).
+  - An asset belongs to every scope (global, level, transient) it was
+    loaded in, and lives until all of them are unloaded. `load` loads in
+    the global scope.
+  - `unload_scope` removes the assets it leaves in no scope. Their handles
+    stop resolving at once. The next finish frees each with
+    `Asset::release`, and each failed one's placeholder too. One still
+    decoding is dropped when its result comes.
   - Levels declare their asset list. Unloading a level frees every asset
-    scoped to it.
+    scoped to it that no other scope also holds.
+  - The facade's `Clips` and `TileLayers` are not assets (ADR-0023,
+    ADR-0024): `load_level` (M5.6) removes a level's own.
   - This is explicit, predictable, and has no hidden `Drop` cost.
 - **Placeholders in dev:**
   - The server's `OnFailure::Placeholder` shows them. It is a runtime
@@ -590,16 +635,19 @@ pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no al
 
 ```rust
 pub trait Source: Send + Sync {
-    fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError>;
-    fn modified(&self, path: &AssetPath) -> Option<std::time::SystemTime>;  // loose only
+    fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError>;      // NotFound, or Read
+    fn modified(&self, path: &AssetPath) -> Option<std::time::SystemTime> { None }  // loose files tell
 }
 ```
 
-- **`LooseSource`** (dev) reads from `target/cooked/`.
-- **`PackSource`** (release) reads from `game.kpak`.
-- **Paths are normalized:** lowercase, forward slashes, no `..`. The cook
-  tool rejects source paths that differ only in case, so Windows/macOS
-  (case-insensitive) and Linux (case-sensitive) behave the same.
+- **`LooseSource`** reads files under a root directory: in development,
+  `target/cooked/`. It is in every build until release builds read the
+  pack (M5.7, ADR-0030).
+- **`PackSource`** (release, M5.7) reads from `game.kpak`.
+- **Paths are normalized** as `AssetPath`s, above: lowercase, forward
+  slashes, no `..`. The cook tool rejects source paths that differ only in
+  case, so Windows/macOS (case-insensitive) and Linux (case-sensitive)
+  behave the same.
 
 ### Pack file `.kpak` (version 1)
 
@@ -694,3 +742,11 @@ string table (optional, dev builds and debugging): path strings in TOC order
   the level reader and the save reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   load every cooked asset through `PackSource` and `LooseSource`.
+- **The asset server** (`crates/assets/tests`): loads that never wait for a
+  source held shut, order, budgets and turns, panics, scopes. The load
+  storm (`storm.rs`) asks for 1,000 images in one frame, and holds every
+  frame's finish under 4 ms in every build, and the whole first frame, the
+  1,000 calls included, only when optimized:
+  `cargo test --release -p nadir-assets --test storm` (ADR-0030). One of
+  three runs must keep to the limit, so that another process taking a core
+  for a time slice does not fail it.

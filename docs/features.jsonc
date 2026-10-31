@@ -141,9 +141,9 @@
     {
       "name": "Asset loading",
       "area": "Content",
-      "summary": "Typed handles to assets loaded from files: the same path gives the same handle, and a development build shows a placeholder for anything missing. Loading on worker threads, in scopes that unload together, will follow.",
+      "summary": "Typed handles to assets loaded from files: the same path gives the same handle, and a development build shows a placeholder for anything missing. Worker threads read and decode the files while the game runs, and each frame makes the decoded ones within a budget of 2 ms: asked for a thousand at once, an optimized build spends under 4 ms of any frame on them. Assets load in scopes, global, level or transient, and unloading a scope frees what no other scope holds, GPU textures included.",
       "tasks": ["M3.2", "M5.3"],
-      "ticked": ["M3.2"]
+      "ticked": ["M3.2", "M5.3"]
     },
     {
       "name": "Entity component system",

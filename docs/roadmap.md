@@ -2413,7 +2413,7 @@ by the batched sprite renderer.
     run, and ran clean again for 300 s each on the final code (107 and 28.9
     million inputs). `cargo xtask ci`: ok. CI has not run this code yet.
 
-- [ ] **M5.3 — assets: async server, worker pool, scopes, LooseSource**
+- [x] **M5.3 — assets: async server, worker pool, scopes, LooseSource**
   - Note (from M4.7): asset loads finish only in a drawn frame, and a
     headless run (`App::update`) finishes none. A replay recorded in the
     window must not depend on when a load finished: let ticks wait for a
@@ -2440,6 +2440,68 @@ by the batched sprite renderer.
   - Accept: a load storm of 1,000 assets completes with no main-thread
     stall over 4 ms per frame; unloading a scope frees its assets.
   - Verify: `cargo test -p nadir-assets`
+  - Note: decided here, in ADR-0030 (Proposed: the user has not reviewed
+    it yet):
+    - `load` loads in `Scope::Global`, and `load_in(path, scope)` in
+      `Global`, `Level` or `Transient`. An asset belongs to every scope it
+      was loaded in, and `unload_scope` frees those it leaves in none.
+    - Each server starts `clamp(cores − 2, 1, 4)` workers, not the
+      architecture's `cores − 1`, which leaves the main thread a spare
+      core.
+    - `finish_completed_loads` makes assets for 2 ms a call at most
+      (`set_finish_budget`), at least one, and never waits.
+      `finish_all_loads` waits for every load. Offscreen frames call it, so
+      recordings stay the same each run; a window's frames call the first.
+    - The 4 ms criterion holds for every frame's finish in every build, and
+      for the whole first frame, the 1,000 `load` calls included, in an
+      optimized build: `cargo test --release -p nadir-assets --test storm`.
+      An unoptimized `load` costs about 3 µs.
+  - Note: built, in nadir-assets, nadir-render and nadir:
+    - `nadir-assets`: the worker pool (`workers.rs`); `AssetPath`;
+      `Source` (`read`, and `modified` for M5.8) and `LooseSource`;
+      `Scope`, `AssetServer::{with_source, load_in, unload_scope,
+      set_finish_budget, finish_all_loads}`; `Asset::release`, with a
+      default. A panic while reading or decoding fails that asset alone.
+      The M4.7 note above stands as ADR-0025 put it: a load finishes at a
+      frame nobody can know ahead, so tick systems stay off load state.
+    - `nadir-render`: `Texture::release` destroys the GPU texture.
+    - `nadir`: `Offscreen::frame` waits for the loads. The render and
+      engine tests that relied on `finish_completed_loads` making an asset
+      loaded just before now wait for it with `finish_all_loads`, or find
+      the frame that draws it.
+  - Note: measured on the i7-11800H, 2026-10-31. The storm of 1,000 QOI
+    images of 64 × 64: optimized, the 1,000 calls took 0.55 to 0.58 ms,
+    the slowest finish about 1 ms, and the storm 8 ms over 5 frames.
+    Unoptimized, the calls took 2.5 to 2.9 ms, every finish 2.2 ms at
+    most, and the storm about 160 ms over 50 frames. On 2 to 4 CPUs
+    (`taskset`), beside up to two busy processes, it passed every run. The
+    sandbox's three captures, 600 frames each, are byte-identical before
+    and after (HEAD's build against this one).
+  - Note: one review round, 4 reviewers and a skeptic for each: 19
+    findings, 16 confirmed, 2 in part and 1 refuted. Fixed:
+    - With `cores − 1` workers, a busy process on 4 CPUs held the main
+      thread for a time slice: frames of 4.2 to 5.6 ms. Hence `cores − 2`,
+      and the storm passing in one run of three.
+    - The order between types was the hash map's, and one budget let a
+      type's backlog hold the others back: the types now take turns at
+      going first, and the docs say the order holds within a type.
+    - `Assets` had stopped being `Sync`.
+    - Tests: one for offscreen frames that wait, which fails 5 of 5 if
+      they do not; the worker drop test now fails if `Drop` does not wait;
+      two tests that would have hung now fail; the storm's directory is
+      the process's own.
+    - Docs: freeing is outside the budget; a shorter scope keeps an asset
+      too; M5.6's note on `load`.
+  - Note: not taken. No automated check runs the optimized storm: CI and
+    `cargo xtask ci` run the dev profile only, so the first-frame half of
+    the criterion is checked by hand, as M4.8's numbers were. The refuted
+    finding asked for a revisit trigger of 500 ms, the overview's level
+    load target, which applies anyway.
+  - Note: verified on 2026-10-31. `cargo test -p nadir-assets` (the Verify
+    line): 19 unit, 16 server, 1 storm and 2 doc tests passed.
+    `cargo test --release -p nadir-assets --test storm`: passed 3 runs of
+    3. `cargo xtask ci`: ok, 1,270 tests, with GL on the RTX 3070. CI has
+    not run this code yet, and neither Windows nor macOS has.
 
 - [ ] **M5.4 — cook: CLI, cache, textures, atlas packer**
   - Note (from M3.5): the sandbox has a hand-made atlas,
@@ -2565,6 +2627,13 @@ by the batched sprite renderer.
     build their own and need the same. The test's `the_hashes_follow_the_order_the_walkers_move_in`
     compares the `Transform` column, which a reflected `Collider` leaves
     alone; the test's `each_type` must list the new types.
+  - Note (from M5.3, ADR-0030): `load` loads in `Scope::Global`, so a
+    level's handles, read back from their paths, are loaded with
+    `load_in(path, Scope::Level)`, and `load_level` unloads the previous
+    level with `unload_scope(Scope::Level)`. `Clips` and `TileLayers` are
+    not assets: `load_level` removes a level's own (M4.6's note to M5.3).
+    Assets show a frame or more after their load in a window, so a loading
+    state (M9.1) can wait for `has_pending` to clear.
   - Depends: M5.5, M4.5, M4.2
   - Do:
     - LDtk → `.klvl` (tile layers, IntGrid → collision, entities, tall
@@ -2581,6 +2650,10 @@ by the batched sprite renderer.
   - Note (from M3.2): `AssetServer::new(root, ..)` reads loose files. If
     the `dev` feature compiles loose reading out of release builds, the
     facade's release path changes with it, as this task's Do says.
+  - Note (from M5.3): `PackSource` implements `Source` (`read`, with
+    `modified` left at `None`), and `AssetServer::with_source` takes it.
+    `LooseSource` is in every build until then (ADR-0030). The workers call
+    `read` from several threads at once (`Source: Send + Sync`).
   - Note (from M5.2): an entry of codec 1 is
     `klz::decompress(stored, raw_size as usize, limits)`, which checks the
     size against the limit and the stream before it allocates. Store an
@@ -2604,6 +2677,11 @@ by the batched sprite renderer.
     second `AnimationFinished`. Decide then whether a finished one should
     hold the new last frame (`Animator::advance`).
   - Depends: M5.6
+  - Note (from M5.3): `Source::modified` gives a loose file's time of change.
+    A reload keeps the handle, but the server takes a worker's result only
+    for an asset in its decoding state, and frees an asset only through an
+    unloaded scope: a reload needs a state of its own, and must
+    `Asset::release` the old value once the new one is made.
   - Do: `xtask cook --watch`; the runtime mtime watcher; reloading
     textures, data, levels and shaders in dev.
   - Accept: an edit appears in the running game within 1 s, and existing
@@ -2867,6 +2945,10 @@ by the batched sprite renderer.
   - Note (from M4.7): a level transition must finish at a tick the
     simulation decides, the same with or without a window, or a replay
     recorded in the window drifts (ADR-0025).
+  - Note (from M5.3): a load finishes at a frame nobody knows ahead, and a
+    headless run finishes none. `AssetServer::finish_all_loads` waits for
+    every load, but needs the device in its context, which the facade has
+    and tick systems do not (ADR-0030).
   - Depends: M5.6
   - Do: the `GameState` machine with on-enter/on-exit and run conditions;
     a loading screen; level transitions that unload the previous level's
@@ -3146,5 +3228,5 @@ three OSes from a tag, and the release checklist is complete.
 | Localization pipeline (string tables, plurals) | Before the first non-English release |
 | Per-cell tile shapes in `TileGrid` (half cells, corner triangles; M4.3 has full cells) | A level needs half-height ledges or diagonal walls |
 | `CollisionWorld::candidates` widens a query only by the drift, so a query can miss a collider by a rounding step. A moved collider whose center rounds a step further than its move is missed by a step anywhere: `nearest((9, 576.00006103515625), 0.0, ALL, None)` misses a box of half (4, 64 - 2^-13 - 2^-14), offset (0, 2^-15), rebuilt at (9, 512 + 2^-13) and moved to (9, 512 + 3 × 2^-14), and finds it after a rebuild. Past about 2^17 px the miss exceeds `EPSILON`, which `move_and_slide`'s sweeps add: `nearest((9, 268553.40625), 0.0, ALL, None)` misses a box of half (2, 2.03125), offset (0, 0.015625), rebuilt at (9, 268541.9375) and moved to (9, 268551.34375). Unmoved, a hashed solid whose half extent is 2^18 px or more is missed in cells over 512 px. `move_and_slide`'s gather finds the last two (ADR-0026) | A query at an exact edge that must not miss, such as picking; a level past 2^17 px from the origin; or solids that wide. The fix widens queries by a few f32 steps of the moved collider's coordinates and of the widest collider in the hash |
-| Two benchmarks `docs/04-quality.md` requires have no task: QOI decode 2048² (from M2.4) and inflate 10 MB (from M5.1). `nadir-bench` already depends on `nadir-codec` | Before M5.3 moves decoding onto workers, or when cook times matter |
+| Two benchmarks `docs/04-quality.md` requires have no task: QOI decode 2048² (from M2.4) and inflate 10 MB (from M5.1). `nadir-bench` already depends on `nadir-codec` | When cook times matter (M5.4), or a decode shows in a profile. M5.3 moved decoding onto workers without them (2026-10-31) |
 | A determinism lint (clippy `disallowed-methods` or `xtask`): std `HashMap::new`/`HashSet::new`, `Instant::now`, `sin`/`cos`/`atan2` in tick systems; and `FxLikeHasher`'s rustdoc saying its order holds on one target only (ADR-0025) | A determinism regression that slipped past review, or CI disagreeing with the stored hashes |

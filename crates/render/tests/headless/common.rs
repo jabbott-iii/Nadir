@@ -65,8 +65,9 @@ pub(crate) fn write_qoi(
     fs::write(path, qoi::encode(&header, &pixels).expect("an image")).expect("write the file");
 }
 
+/// Waits for every load, and makes the textures on `device`.
 pub(crate) fn finish(server: &mut AssetServer, device: &mut Device) {
-    server.finish_completed_loads(&mut FinalizeCtx::new().with(device));
+    server.finish_all_loads(&mut FinalizeCtx::new().with(device));
 }
 
 /// Writes an sRGB QOI file of `width`×`height` texels, from the top row.

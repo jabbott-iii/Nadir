@@ -1831,3 +1831,148 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   packages; jabbott.dev changes its markup or class
   names; an H.264 encoder on the runner honors its bitrate, or visitors
   without VP9 matter; or the page's job takes more than 10 minutes.
+
+## ADR-0030 — The asset server decodes on its own workers and finalizes within a frame budget; an asset stays while any scope it was loaded in holds it; offscreen frames wait for their loads
+
+- **Status:** Proposed
+- **Date:** 2026-10-31
+- **Context:**
+  - M5.3 moves reading and decoding off the main thread. The architecture
+    gives the workers as `clamp(cores − 1, 1, 4)` threads with `mpsc` jobs
+    in and results out, and GPU uploads on the main thread. Until now
+    `load` read and decoded at once (M3.2), and the facade made the assets
+    at the end of each drawn frame. A headless run makes none, so tick
+    systems must not depend on load state (ADR-0025).
+  - The task accepts a storm of 1,000 loads with no main-thread stall over
+    4 ms a frame, and unloading a scope that frees its assets. The spec
+    names three scopes, but `load` gives one handle for one path, and it
+    does not say what an asset loaded in two scopes does. Unloading must
+    destroy GPU textures, and `Asset` had no hook for it.
+  - On the i7-11800H (16 threads), with 1,000 QOI images of 64 × 64: the
+    1,000 calls to `load` take 0.55 ms in an optimized build and 2.5 to
+    2.9 ms in the dev profile, where the hash map, arena and channel code,
+    generic over the asset type, is compiled unoptimized; one run took
+    7 ms. The storm then finishes in 8 ms over 5 frames optimized, and
+    in about 160 ms over 50 frames unoptimized.
+  - The demo page's recordings (ADR-0029) and the engine's offscreen tests
+    must show the same frames on every run.
+  - A review ran the storm on 4 CPUs (`taskset`) beside one busy process.
+    With `cores − 1` workers, the main thread and the workers took every
+    core, and the scheduler held the main thread for a time slice in the
+    middle of a frame: 4.2 to 5.6 ms frames, in 6 runs of 6. With
+    `cores − 2` workers it passed 10 runs of 10, and on 2 to 4 CPUs beside
+    up to two busy processes.
+- **Decision:**
+  - **Workers:**
+    - Each `AssetServer` starts `clamp(cores − 2, 1, 4)` threads named
+      `nadir-assets-N`, not the architecture's `cores − 1`: that leaves the
+      main thread a core and one to spare, for the audio thread, the GPU
+      driver's and the rest of the system. They take jobs from one `mpsc`
+      queue behind a mutex, and each asset type has a channel for its
+      results.
+    - A job reads the file through the server's `Source` and decodes it.
+      A panic in either fails that asset alone, as
+      `AssetError::Invalid("reading or decoding it panicked")`, and the
+      worker goes on.
+    - If no thread starts, jobs run on the thread that asks for the load.
+    - Dropping the server drops the jobs still queued and waits for those
+      running.
+  - **Loading and finishing:**
+    - `load` lowercases and checks the path, finds the asset or adds it,
+      and queues its job. It never reads, so it never waits. A path that
+      fails the check, or has the wrong extension, fails with no job.
+    - `finish_completed_loads` takes the workers' results and frees the
+      assets of unloaded scopes, all of them, outside the budget. It then
+      makes decoded assets until a budget runs out: 2 ms unless
+      `set_finish_budget` changes it. It makes one at least each call, and
+      it never waits for a worker.
+    - Each type's assets are made in the order they were loaded, passing
+      over those still decoding. The types share the budget and take turns
+      at going first, one call after the next, so a backlog of one type
+      cannot hold another's back for long.
+    - `finish_all_loads` waits for every job, then makes every asset, with
+      no budget: for tools, tests, and frames that must show every asset
+      loaded before them. It makes them type by type, in the order of each
+      type's first load, and each type's in load order.
+  - **The facade:** a window's frame calls `finish_completed_loads`.
+    `Offscreen::frame` calls `finish_all_loads`, so a recording is the
+    same on every run. A headless run still makes nothing. A load finishes
+    in a frame nobody can know in advance, so ADR-0025's rule stands: tick
+    systems stay off load state.
+  - **Scopes:**
+    - There are three: `Global`, `Level` and `Transient`. `load` loads in
+      `Global`, and `load_in(path, scope)` in any of them.
+    - An asset belongs to every scope it was loaded in. `unload_scope`
+      removes the assets it leaves in none, and returns how many it
+      removed. Their handles stop resolving at once, and loading the path
+      again loads it anew.
+    - The next finish frees each removed asset, and each failed asset's
+      placeholder, with `Asset::release(self, ctx)` and that frame's
+      context. By default `release` drops the asset; `Texture::release`
+      destroys its GPU texture. An asset unloaded while it decodes is
+      dropped when its result comes.
+  - **Paths and sources:**
+    - `AssetPath` is a normalized path: its ASCII letters are lowercased,
+      then it is checked by M3.2's byte grammar. A path that fails is
+      refused, not repaired, so a `\` is an error, not a separator.
+    - `Source` is `read` and `modified`, which defaults to `None`.
+    - `LooseSource` is in every build until M5.7 gives release builds a
+      `PackSource`: the architecture's loose files in development only
+      wait for that. `AssetServer::new(root, ..)` reads a `LooseSource`,
+      and `with_source` reads any other.
+  - **The 4 ms criterion:** the storm test (`crates/assets/tests/storm.rs`)
+    holds every frame's finish under 4 ms in every build. It holds the
+    whole first frame, with the game's 1,000 calls to `load`, under 4 ms
+    only in an optimized build:
+    `cargo test --release -p nadir-assets --test storm`. One run of three
+    must keep to the limit, so that another process taking a core for a
+    time slice does not fail it.
+  - `Assets` stays `Sync`: it holds its result `Receiver` in a mutex that
+    it reaches only through `&mut self`, so never locks.
+- **Consequences:**
+  - No file is read and nothing is decoded on the main thread, and making
+    assets keeps to a budget each frame. Freeing an unloaded scope's
+    assets does not: the next finish frees them all. Unloading a level's
+    scope gives back its GPU memory.
+  - In a window, an asset shows a frame or more after its load. M9.1's
+    loading state hides a level's.
+  - In a window, which frame makes which asset varies from run to run, and
+    so do the order between types and the GPU ids; offscreen, none of them
+    does.
+  - Each server starts its own threads, so a test that makes a server
+    starts up to four. A machine of 4 cores loads with 2 workers, not 3.
+  - `has_pending` stays true while a job is out, even an unloaded asset's,
+    so the facade makes a `FinalizeCtx` in those frames, which allocates
+    nothing.
+  - A dev build spends about 3 µs of main-thread time on each `load`.
+  - `Clips` and `TileLayers` are not assets (ADR-0023, ADR-0024), so no
+    scope removes them: M5.6's `load_level` must remove a level's own.
+  - The API change: `finish_completed_loads` right after a `load` no longer
+    makes the asset, and code that needs it made calls `finish_all_loads`.
+    `LoadState::Loading` now also covers an asset being decoded. `Asset`
+    gains `release`, with a default.
+- **Alternatives considered:**
+  - One scope per asset, the first it was loaded in or the longest-lived:
+    unloading a level would free an asset the global scope still uses, or
+    keep a level's asset for good.
+  - Counting handles: the spec rejects it for hidden `Drop` costs.
+  - One pool for the whole process: hidden global state, and a game has
+    one server.
+  - Making assets in load order across types too: a merge of every type's
+    list at each step, for an order nothing needs; taking turns is enough
+    to keep one type from holding the others back.
+  - Retrying the storm alone, with `cores − 1` workers: beside a busy
+    process it still failed 3 runs of 8, and a game's frames would hitch
+    the same way while it loads.
+  - A budget that also counts the time the game's `load` calls take: a
+    shorter first frame, but it budgets time the server cannot stop.
+  - Waiting for every load in a window's frames too: that is the stall
+    again.
+  - Holding the first frame to 4 ms in the dev profile too: its 1,000
+    `load` calls alone take 2.5 to 7 ms there.
+- **Revisit when:** M5.6's levels show assets appearing after their loading
+  state ends; a texture's upload alone takes more than the 2 ms budget; a
+  level takes more than a second to load because of the budget; audio
+  (M6.6) or the re-cook (M5.8) needs workers of its own; the platform layer
+  can lower a thread's priority, which could give back the spare core; or
+  a game needs the dev build's `load` to cost less.

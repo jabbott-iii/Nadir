@@ -220,18 +220,20 @@ struct Graphics {
 
 impl Graphics {
     /// Draws the frame the frame systems made, shows it, and then makes the
-    /// assets loaded since the last frame.
+    /// assets the workers have decoded, within the asset server's budget.
     fn draw(&mut self, world: &World, surface: GpuSurface<'_>, size: UVec2) -> Result<(), Error> {
         self.device.begin_frame(surface)?;
         self.render(world, PassTarget::Surface, size)?;
         self.device.end_frame(surface)?;
-        self.finish_loads(world);
+        self.finish_loads(world, false);
         Ok(())
     }
 
     /// Draws the frame the frame systems made into `target`, of `size`, on
     /// the device's offscreen context, as [`Graphics::draw`] does on the
-    /// window, and reads it back.
+    /// window, and reads it back. It then makes every asset loaded so far,
+    /// waiting for the workers, so that a recording shows the same frames
+    /// each time.
     fn draw_offscreen(
         &mut self,
         world: &World,
@@ -241,7 +243,7 @@ impl Graphics {
         self.device.begin_offscreen_frame()?;
         self.render(world, PassTarget::RenderTarget(target), size)?;
         self.device.end_offscreen_frame()?;
-        self.finish_loads(world);
+        self.finish_loads(world, true);
         Ok(self.device.read_pixels(target)?)
     }
 
@@ -259,13 +261,18 @@ impl Graphics {
         Ok(())
     }
 
-    /// Makes the assets loaded since the last frame.
-    fn finish_loads(&mut self, world: &World) {
+    /// Makes the assets the workers have decoded, and frees those of
+    /// unloaded scopes. With `wait`, it waits for every load first.
+    fn finish_loads(&mut self, world: &World, wait: bool) {
         let pending = world.resource::<AssetServer>().has_pending();
         if pending {
-            world
-                .resource_mut::<AssetServer>()
-                .finish_completed_loads(&mut FinalizeCtx::new().with(&mut self.device));
+            let mut server = world.resource_mut::<AssetServer>();
+            let mut ctx = FinalizeCtx::new().with(&mut self.device);
+            if wait {
+                server.finish_all_loads(&mut ctx);
+            } else {
+                server.finish_completed_loads(&mut ctx);
+            }
         }
     }
 }
@@ -839,13 +846,15 @@ pub struct Offscreen {
 
 impl Offscreen {
     /// Runs one frame that comes `elapsed` after the last, with the events
-    /// that came before it, as [`App::update`] does. Then draws it, makes
-    /// the assets loaded since the last frame, as [`App::run`] does, and
-    /// returns its pixels: RGBA8, sRGB-encoded, from the top row, 4 bytes a
-    /// pixel.
+    /// that came before it, as [`App::update`] does. Then draws it as
+    /// [`App::run`] does, waits for every asset loaded so far and makes it,
+    /// and returns the frame's pixels: RGBA8, sRGB-encoded, from the top
+    /// row, 4 bytes a pixel.
     ///
-    /// The assets loaded before the first frame are made after it is
-    /// drawn, so it shows none of them. A first frame of
+    /// Unlike [`App::run`], it waits for the asset server's workers, so that
+    /// each frame shows every asset loaded before it, and a recording is the
+    /// same each time. The assets loaded before the first frame are made
+    /// after it is drawn, so it shows none of them. A first frame of
     /// [`Duration::ZERO`] makes them without a tick.
     ///
     /// # Errors
@@ -2065,9 +2074,6 @@ mod tests {
                 .spawn()
                 .with(Transform::at(Vec2::new(4.0, 0.0)))
                 .with(Sprite::new(red, Vec2::splat(8.0)));
-            // The texture is read and decoded on `load`, and only made later.
-            let assets = app.config.assets.clone();
-            fs::remove_dir_all(&assets).expect("remove the asset folder");
             app
         }
 
@@ -2076,6 +2082,7 @@ mod tests {
         /// and `NADIR_EXPECT_GL_RENDERER` asks for none.
         fn offscreen(app: App, size: UVec2) -> Option<Offscreen> {
             let expected = env::var("NADIR_EXPECT_GL_RENDERER").unwrap_or_default();
+            let assets = app.config.assets.clone();
             match app.offscreen(size) {
                 Ok(offscreen) => {
                     let renderer = offscreen.renderer();
@@ -2085,10 +2092,17 @@ mod tests {
                 Err(Error::Render(RenderError::Gfx(GfxError::NoOffscreenContext)))
                     if expected.is_empty() =>
                 {
+                    fs::remove_dir_all(&assets).expect("remove the asset folder");
                     None
                 }
                 Err(error) => panic!("no offscreen OpenGL context: {error}"),
             }
+        }
+
+        /// Removes the app's asset folder, once a frame has waited for its
+        /// texture to be read: later frames need no file.
+        fn remove_assets(offscreen: &Offscreen) {
+            fs::remove_dir_all(&offscreen.app().config.assets).expect("remove the asset folder");
         }
 
         fn pixel(frame: &[u8], x: u32, y: u32) -> [u8; 4] {
@@ -2108,6 +2122,7 @@ mod tests {
             // frame shows only the clear color, and a frame of no time runs
             // no tick.
             let first = offscreen.frame(Duration::ZERO, &[]).expect("a frame");
+            remove_assets(&offscreen);
             assert_eq!(first.len(), (SIZE.x * SIZE.y * 4) as usize);
             assert!(first.as_chunks::<4>().0.iter().all(|&p| p == CLEAR));
             assert_eq!(log.ticks.get(), 0);
@@ -2136,12 +2151,62 @@ mod tests {
         }
 
         #[test]
+        fn a_frame_waits_for_the_textures_asked_for_before_it_ends() {
+            let log = shared();
+            let app = app("offscreen-wait", &log);
+            // Noise, which takes a worker far longer to decode than the rest
+            // of the frame takes after it asks.
+            const SIDE: u32 = 512;
+            let mut seed = 1u32;
+            let noise: Vec<u8> = (0..SIDE * SIDE)
+                .flat_map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    let [r, g, b, _] = seed.to_le_bytes();
+                    [r, g, b, 255]
+                })
+                .collect();
+            let header = Header {
+                width: SIDE,
+                height: SIDE,
+                channels: Channels::Rgba,
+                color_space: ColorSpace::Srgb,
+            };
+            let bytes = qoi::encode(&header, &noise).expect("a valid image");
+            fs::write(app.config.assets.join("noise.qoi"), bytes).expect("write the texture");
+            // Each frame shows the noise, asked for just before the frame
+            // draws and finishes its loads.
+            let app = app.add_frame_system(FrameStage::Camera, "noise", |world, _| {
+                let noise = world
+                    .resource_mut::<AssetServer>()
+                    .load::<nadir_render::Texture>("noise.qoi");
+                for (_, sprite) in world.write::<Sprite>().iter_mut() {
+                    sprite.texture = noise;
+                }
+            });
+            let Some(mut offscreen) = offscreen(app, SIZE) else {
+                return;
+            };
+            offscreen.frame(Duration::ZERO, &[]).expect("a frame");
+            remove_assets(&offscreen);
+            offscreen.frame(TICK, &[]).expect("a frame");
+            let stats = *offscreen.app().world().resource::<FrameStats>();
+            assert_eq!(
+                (stats.sprites, stats.skipped),
+                (1, 0),
+                "the second frame did not draw the texture the first asked for"
+            );
+        }
+
+        #[test]
         fn frames_bigger_than_the_view_are_scaled_up_by_whole_numbers() {
             let log = shared();
             let Some(mut offscreen) = offscreen(app("offscreen-scaled", &log), SIZE * 2) else {
                 return;
             };
             offscreen.frame(Duration::ZERO, &[]).expect("a frame");
+            remove_assets(&offscreen);
             let frame = offscreen.frame(TICK, &[]).expect("a frame");
             let width = SIZE.x * 2;
             let at = |x: u32, y: u32| {
@@ -2185,10 +2250,11 @@ mod tests {
         /// pixels, so chunks of 32 × 32 cells, a quarter of them animated.
         /// Its four chunks meet at the view's centre.
         const GROUND: u32 = 64;
-        /// Frames before the counting starts: the textures load after the
-        /// first draw, the buffers grow in the frames after it, and the
-        /// camera moves from the ground's first chunk to the view, where
-        /// four meet, packing three more.
+        /// Frames before the counting starts: the textures are made at the
+        /// end of the first frame after the workers decode them (the first
+        /// frame, unless they are slow), the buffers grow in the frames
+        /// after it, and the camera moves from the ground's first chunk to
+        /// the view, where four meet, packing three more.
         const WARM_UP: usize = 10;
         /// The frame of the warm-up from which the camera is where four
         /// chunks meet.
@@ -2474,8 +2540,15 @@ mod tests {
             assert!(seen[5].0.allocations >= 1, "the probe's allocation");
 
             if drawn {
+                // A frame makes the textures after it draws, so the first
+                // to draw them all is the second at the soonest, in the
+                // frames checked against the pumps above.
+                let full = (1..WARM_UP)
+                    .find(|&frame| seen[frame].1.sprites == CROWD as u32)
+                    .expect("the sprites are drawn in the warm-up");
+                assert!(full >= 2, "frame {full} drew the sprites");
                 assert!(
-                    seen[2].0.allocations > 0,
+                    seen[full].0.allocations > 0,
                     "the first full draw grows its lists"
                 );
                 let all = FrameStats {

@@ -2,12 +2,13 @@
 
 use std::fs;
 
-use nadir_assets::{AssetError, AssetServer, LoadState, OnFailure};
+use nadir_assets::{AssetError, AssetServer, LoadState, OnFailure, Scope};
 use nadir_codec::qoi::{self, Channels, ColorSpace, Header};
-use nadir_core::UVec2;
+use nadir_core::{IRect, IVec2, UVec2};
 use nadir_gfx::{
-    BlendMode, BufferDesc, BufferKind, BufferUsage, Device, PipelineDesc, Sampler, ShaderSource,
-    TextureFormat, Topology, VertexAttribute, VertexFormat, VertexLayout, VertexStep,
+    BlendMode, BufferDesc, BufferKind, BufferUsage, Device, GfxError, PipelineDesc, ResourceKind,
+    Sampler, ShaderSource, TextureFormat, TextureId, Topology, VertexAttribute, VertexFormat,
+    VertexLayout, VertexStep,
 };
 use nadir_render::Texture;
 
@@ -102,6 +103,51 @@ fn without_placeholders_a_missing_texture_is_nothing() {
     finish(&mut server, &mut device);
     assert_eq!(server.state(missing), Some(LoadState::Failed));
     assert_eq!(server.get(missing), None);
+}
+
+#[test]
+fn unloading_its_scope_destroys_a_texture_and_a_placeholder() {
+    let Some(mut device) = device() else { return };
+    let root = root("unload");
+    write_qoi(
+        &root.join("sprites/level.qoi"),
+        2,
+        2,
+        ColorSpace::Srgb,
+        [10, 20, 30, 255],
+    );
+    write_qoi(
+        &root.join("sprites/hud.qoi"),
+        1,
+        1,
+        ColorSpace::Srgb,
+        [1, 2, 3, 255],
+    );
+    let mut server = AssetServer::new(root, OnFailure::Placeholder);
+    let level = server.load_in::<Texture>("sprites/level.qoi", Scope::Level);
+    let missing = server.load_in::<Texture>("sprites/missing.qoi", Scope::Level);
+    let hud = server.load::<Texture>("sprites/hud.qoi");
+    finish(&mut server, &mut device);
+    let ids = [level, missing, hud].map(|handle| server.get(handle).expect("a texture").id());
+    let alive = |device: &mut Device, id: TextureId| {
+        let texel = IRect::new(IVec2::ZERO, IVec2::ONE);
+        match device.update_texture(id, texel, &[0, 0, 0, 255]) {
+            Ok(()) => true,
+            Err(GfxError::StaleHandle(ResourceKind::Texture)) => false,
+            Err(error) => panic!("{error}"),
+        }
+    };
+    assert!(ids.iter().all(|&id| alive(&mut device, id)));
+
+    assert_eq!(server.unload_scope(Scope::Level), 2);
+    assert_eq!(server.get(level), None);
+    // They are destroyed by the next finish, which has the device.
+    assert!(alive(&mut device, ids[0]));
+    finish(&mut server, &mut device);
+    assert!(!alive(&mut device, ids[0]), "the level's texture");
+    assert!(!alive(&mut device, ids[1]), "the missing one's placeholder");
+    assert!(alive(&mut device, ids[2]), "the global texture");
+    assert_eq!(server.get(hud).map(Texture::id), Some(ids[2]));
 }
 
 const VS: &str = "#version 330 core
