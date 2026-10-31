@@ -26,8 +26,8 @@ Every decoder:
 
 | Module | Spec | Encode | Decode | Shipped in game? | Notes |
 | :- | :- | :- | :- | :- | :- |
-| `adler32` | RFC 1950 | ✓ | ✓ | no | zlib trailer |
-| `inflate` | RFC 1950/1951 | — | ✓ | no (cook only) | Stored, fixed and dynamic Huffman blocks; output cap from `Limits` |
+| `adler32` | RFC 1950 | ✓ | ✓ | no | zlib trailer: `adler32::checksum` |
+| `inflate` | RFC 1950/1951 | — | ✓ | no (cook only) | Stored, fixed and dynamic Huffman blocks; output cap from `Limits`. See below |
 | `png` (feature `png`) | PNG 1.2 / ISO 15948 | — | ✓ | no | See subset below |
 | `qoi` | qoiformat.org spec | ✓ | ✓ | yes | Textures, golden references |
 | `qoa` | qoaformat.org spec | ✓ | ✓ | yes | Music and long SFX; LMS predictor, 20-sample slices |
@@ -37,21 +37,145 @@ Every decoder:
 | `kbj` | Below | ✓ | ✓ | yes | Binary form of the JSON value tree for cooked data |
 | `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines |
 
+### Inflate (documented, tested)
+
+`inflate::zlib(&[u8], Limits)` decompresses a zlib stream (RFC 1950), and
+`inflate::raw(&[u8], Limits)` a bare DEFLATE stream (RFC 1951), each into a
+new `Vec`. The PNG decoder uses the same code.
+
+- **Accepted:** the streams zlib 1.3 decodes to their end given its largest
+  window, and nothing else. As zlib does, it rejects a set of code lengths
+  that is over-subscribed, or incomplete unless it is one code of one bit
+  (a code-length code may never be incomplete; a distance code may have no
+  codes at all, for a block of literals only); a literal/length code
+  without the end of block; more than 286 literal/length or 30 distance
+  codes; symbols 286 and 287 and distances 30 and 31; a distance before the
+  start of the output; a preset dictionary. It decodes length code 284 with
+  extra bits 31 as 258, as zlib does. The zlib header's method, window size
+  (at most 32 KiB) and check bits, and the Adler-32 at the end, are
+  checked.
+- **Rejected, although zlib accepts it:** bytes after the end of the stream
+  (zlib leaves them unread), and output past `max_decoded_bytes`.
+- **Not checked, as by zlib given its largest window:** that every distance
+  fits the window the zlib header declares. libpng asks zlib for the
+  header's window instead, and rejects a PNG whose image data reaches
+  further back.
+- **Limits:** the output, at most `max_decoded_bytes`. It grows by doubling,
+  clamped to the limit, so no allocation passes it.
+- **Errors:** `CodecError::Inflate { offset, kind }`, with the offset of the
+  byte that holds the first bit of the item at fault: a block header, a
+  code, its extra bits, the zlib header or the Adler-32. A problem with a
+  dynamic block's code lengths (too many codes, over-subscribed,
+  incomplete, no end of block) is placed at the block's header.
+  `UnexpectedEnd` is placed at the end of the input, and says what should
+  have come next.
+- **Vectors:** hand-assembled streams in the unit tests of
+  `crates/codec/src/inflate.rs`, among them every length and distance code
+  at its edges, the farthest match (258 bytes from 32,768 back), and the
+  code shapes zlib accepts but never writes; property tests in
+  `crates/codec/tests/inflate.rs`, whose encoder writes stored, fixed and
+  dynamic blocks with codes of up to 15 bits.
+- **Fuzz target:** `inflate`, with seeds in `fuzz/corpus/inflate/`: streams
+  zlib made, streams the property tests' encoder made with shapes zlib
+  never writes, and one hand-assembled match from 32,768 back. It decodes each input as a zlib stream, and after its two
+  header bytes as a bare one, with a limit of 1 MiB so that `TooMuchOutput`
+  is reachable. It also checks the answers: a zlib stream that decodes holds
+  a bare stream that decodes to the same bytes, and decodes with a limit of
+  exactly its length but not one less.
+
 ### PNG subset (documented, tested)
 
-- **Supported:**
-  - bit depth 8 for color types 0 (gray), 2 (RGB), 3 (palette), 4
-    (gray+alpha) and 6 (RGBA)
-  - bit depth 16, down-converted to 8
-  - palette bit depths 1, 2 and 4
-  - `tRNS`
-  - Adam7 interlacing
+`png::decode(&[u8], Limits)` reads a PNG file into an `Image`: its width,
+height and RGBA8 pixels, rows from the top, alpha straight, and the names
+of the chunks it ignored that the cook tool should warn about.
+
+- **Supported** (ADR-0027):
+  - every color type and bit depth: grayscale at 1, 2, 4, 8 and 16 bits;
+    RGB, grayscale with alpha and RGBA at 8 and 16; palettes at 1, 2, 4
+    and 8
+  - bit depth 16, down-converted to the nearest 8-bit value,
+    `round(v / 257)`; libpng's `png_set_strip_16` truncates instead
+  - grayscale below 8 bits, scaled to 0–255
+  - `tRNS`, compared at the image's own bit depth (16-bit samples before
+    they are rounded)
+  - Adam7 interlacing; a pass with no columns or no rows has no rows at
+    all, not even filter bytes
   - all five filter types
-  - chunk CRCs verified
-- **Ignored, with a single warning:** `gAMA`, `cHRM`, `sRGB`, `iCCP`, text
-  chunks. We assume sRGB.
-- **Rejected with a clear error:** unknown critical chunks, APNG animation
-  chunks.
+  - every chunk's CRC, and the image data's Adler-32, verified
+- **Ignored, and named in `Image::ignored`:** the chunks that say how the
+  colors are encoded, `gAMA`, `cHRM`, `sRGB`, `iCCP`, `cICP`, `mDCV` and
+  `cLLI`, and the text chunks `tEXt`, `zTXt` and `iTXt`; each once, in the
+  order first met. We assume sRGB. The decoder logs nothing: the cook tool
+  warns once for a file that names any (M5.4). Other ancillary chunks are
+  ignored without a word.
+- **Rejected with a clear error:** unknown critical chunks (Apple's `CgBI`
+  among them: it comes before `IHDR`, so the error is that the first chunk
+  is not `IHDR`), APNG animation chunks (`acTL`, `fcTL`, `fdAT`).
+- **Rejected, although libpng 1.6 loads it**, with a warning or none
+  (each measured through GdkPixbuf; a file this damaged is better exported
+  again than cooked):
+  - a CRC that does not match in an ancillary chunk
+  - bytes after `IEND`, or `IEND` with data
+  - bytes after the image data's zlib stream, or image data that inflates
+    to more than the image needs
+  - an `IDAT` after another chunk once the image data has ended, empty or
+    not
+  - a palette index past the end of the palette (libpng draws it black)
+  - `PLTE` in a grayscale image, after `IDAT`, or after `tRNS`; a suggested
+    `PLTE` in an RGB or RGBA image of a length no palette has
+  - `tRNS` in an image with alpha, after `IDAT`, a second time, before the
+    palette, of a length a gray or RGB value does not have, or with more
+    alphas than the palette has entries that the bit depth can index
+- **Accepted, as libpng accepts it** (silently for the first, with a
+  warning for the other two):
+  - a palette longer than the bit depth can index, whose extra entries no
+    pixel can use (Go's image/png rejects it)
+  - a palette `tRNS` with no alphas, as if there were none
+  - a gray or RGB `tRNS` value past the bit depth, read in the bits the
+    depth has: in an 8-bit image, 0x0100 makes 0x00 transparent. Go's image/png reads the low byte at 8 bits, but does not
+    mask the value at gray 1, 2 and 4 bits.
+- **Accepted, although libpng rejects it:** image data that reaches further
+  back than the window its zlib header declares (see Inflate above).
+- **Limits:** width and height each at most `max_texture_dimension` (and
+  PNG's own 2³¹ − 1 whatever the limits say), and `width × height × 4` at
+  most `max_decoded_bytes`. Decoding holds the inflated image data beside
+  the pixels, and it may pass the limit: at most 2.25 times the pixels'
+  bytes (16-bit RGBA one pixel wide, 9 bytes a row for 4). With the image
+  data split over several `IDAT` chunks, it also holds a copy of the
+  compressed data. Before it allocates, the decoder checks the claimed size against the
+  input: DEFLATE gives at most 1,032 bytes a byte, so image data shorter
+  than `needed / 1032` is `TooLittleImageData`. The cook tool decodes
+  source sheets wider than a texture with a raised `max_texture_dimension`
+  (M5.4).
+- **Errors:** `CodecError::Png { offset, kind }`, with the byte offset of
+  the problem in the file. A problem inside the image data is placed at its
+  byte, in whichever `IDAT` chunk holds it; one found after inflating (a
+  filter type, a palette index) at the first `IDAT` chunk.
+- **Vectors:** `crates/codec/tests/png/`: 109 small images, each with the
+  pixels it decodes to (`.rgba`), made by `make_vectors.py` there, which
+  shares no code with the decoder. They cover every color type and bit
+  depth with and without interlacing, each filter on first rows, sizes that
+  leave Adam7 passes empty, transparency and its edge cases, padding bits
+  set, split and stored image data, and ancillary chunks. libpng decodes
+  them to the same pixels, but truncates 16-bit samples. Go's image/png
+  gives the same pixels too, but for the two cases above: it does not mask
+  the `tRNS` of `g2n_trns_masked`, and rejects the long palette of
+  `p2n_pal256`. Error cases are in the
+  unit tests of `crates/codec/src/png.rs`; property tests in
+  `crates/codec/tests/png.rs`.
+- **Fuzz target:** `png`, with seeds in `fuzz/corpus/png/` (a selection of
+  the vectors). It decodes each input, then a repaired copy, so that
+  mutations get past the checksums: the signature restored; the first
+  chunk taken as `IHDR` of 13 bytes; the chunks after an insertion or a
+  deletion found again by their types; a length past the end cut at the
+  next chunk; the walk ended at the first `IEND`, which is emptied, or
+  added; every CRC and the Adler-32 rewritten (when the image data inflates
+  to 1 MiB or less); the `IDAT` chunks kept as they were. When that copy's
+  image data is the wrong size for its header, it also decodes one with the
+  image data re-packed to the size the header needs; when bytes follow the
+  zlib stream, one with them cut. Of 20,000 inputs mutated from the seeds,
+  2 reach the image data as they are; repaired, 9,370 do, and 4,141 reach
+  the filters.
 
 ### KLZ block format (our own, LZ77, byte-oriented)
 
@@ -337,9 +461,10 @@ string table (optional, dev builds and debugging): path strings in TOC order
 
 - **Test vectors:**
   - inflate: a hand-built stored block, fixed Huffman, dynamic Huffman, and
-    edge cases (empty, max distance, length 258)
+    edge cases (empty, max distance, length 258), in `src/inflate.rs`
   - PNG: a small hand-made image per color type, bit depth, interlace mode
-    and filter, committed under `crates/codec/tests/png/`
+    and filter, committed under `crates/codec/tests/png/` with the script
+    that made them
   - QOI and QOA: round-trip; QOA SNR threshold; QOI byte-exact against
     hand-computed small images
   - KLZ: round-trip on random and repetitive data; malformed offsets

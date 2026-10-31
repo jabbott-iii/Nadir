@@ -221,6 +221,11 @@ pub fn check_sized<T: std::fmt::Debug>(
 - The exit status is 0 for a clean run and 1 if there is a finding.
 - Every parser in `nadir-codec`, `nadir-assets`, the save loader and the
   settings loader registers a fuzz target.
+  - A target may do more than call its parser. One whose format carries
+    checksums repairs a copy of each input, so that mutations get past
+    them (`png`). One that can check its own answers asserts them, so that
+    a wrong answer is a finding too (`inflate`). See
+    `docs/subsystems/assets-and-codecs.md`.
 - The optional coverage-guided fuzzing (`cargo fuzz`) is a separate,
   **unapproved** proposal (policy item 29).
 

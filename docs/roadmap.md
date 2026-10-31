@@ -2181,6 +2181,10 @@ by the batched sprite renderer.
     leaves room for the budget, estimated at about 3.8–4.8 ms on a
     UHD 620-class laptop (an i5-8250U, say), unmeasured. The M4 exit
     criterion stays open until a min-spec machine measures it (M11.5).
+  - Note: CI run 24, for the M4.8 commit `0ffc2df`, passed on all three
+    systems; the session saw it on the public Actions page. The
+    determinism test's one `hashes.txt` held on Windows x86_64 and macOS
+    arm64 as well as Linux. CodeQL run 5 passed on the same commit.
 
 **Exit criteria (M4):**
 
@@ -2205,7 +2209,7 @@ by the batched sprite renderer.
 
 ## M5 — Content pipeline
 
-- [ ] **M5.1 — codec: adler32, inflate, PNG subset**
+- [x] **M5.1 — codec: adler32, inflate, PNG subset**
   - Depends: M0.5
   - Do: per the spec. Add the hand-made PNG test vectors and register fuzz
     targets for inflate and PNG.
@@ -2213,8 +2217,117 @@ by the batched sprite renderer.
     findings.
   - Verify: `cargo test -p nadir-codec --features png`;
     `cargo xtask fuzz-smoke --secs 600 --target png`
+  - Note: the user chose on 2026-10-30 (ADR-0027):
+    - Grayscale at bit depths 1, 2 and 4 is supported, beyond the spec's
+      list: every PNG color type and bit depth is.
+    - The decoder is strict. It rejects the damage libpng loads (a bad CRC
+      in an ancillary chunk, bytes after `IEND` or after the zlib stream,
+      too much image data, a palette index past the palette, `PLTE` or
+      `tRNS` where they may not be), and the docs list each difference
+      from libpng (as GdkPixbuf loads it) that was measured.
+    - The vectors' generator, `crates/codec/tests/png/make_vectors.py`, is
+      committed.
+    - CI's fuzzing stays at 120 s a target (a note on M5.2).
+  - Note: built, in nadir-codec and xtask:
+    - `adler32::checksum`; `inflate::zlib` and `inflate::raw`; behind the
+      new `png` feature, `png::decode` into an `Image` of RGBA8 pixels and
+      the names of the color and text chunks it ignored.
+    - `CodecError` gains `Inflate` and, with `png`, `Png`, both with the
+      byte offset of the problem, and becomes `#[non_exhaustive]`.
+      nadir-codec gains a normal dependency on nadir-core, for `crc32`.
+    - Inflate accepts what zlib 1.3 decodes to its end given its largest
+      window, but rejects bytes after the stream and output past the limit.
+      16-bit samples round to the nearest 8-bit value, `round(v / 257)`.
+    - Fuzz targets `inflate` and `png`, with 15 and 22 seeds. The `png`
+      target repairs a copy of each input, so that mutations get past the
+      checksums; the `inflate` target checks its own answers.
+  - Note: a design critique made 42 points, and 21 survived their
+    refuters. From them: passes of Adam7 with no columns have no rows (the
+    design's sum counted their filter bytes); the PNG fuzz repair keeps the
+    `IDAT` chunks as they are and finds chunks again after an insertion;
+    `tRNS` values are masked to the bit depth, as libpng does; `cICP`,
+    `mDCV` and `cLLI` are reported; `CodecError` is `#[non_exhaustive]`;
+    the inflate target checks its answers; Go's image/png became a second
+    oracle; and the vectors gained padding bits, first-row filters and
+    tiny interlaced sizes.
+  - Note: the code review made 37 findings: 31 confirmed by both of their
+    verifiers, 5 by one and 1 by neither. Fixed:
+    - A match copied a byte a call at distance 1, not doubling as its
+      comment said: a 64 KiB PNG of one color took the `png` target 15 s
+      in a debug build, past the hang limit.
+    - The PNG decoder kept a 48-byte record for every `IDAT`, empty ones
+      too, and copied split image data with a growing `Vec`. It now reads
+      the chunks' headers again, so that nothing grows with their number,
+      and copies once, to the exact size.
+    - An image data size past a `usize` was reported as the pixels passing
+      the limit: it is `ImageDataTooLarge` now.
+    - An empty palette `tRNS` is accepted, as libpng and Go accept it.
+    - The fuzz repair built overlapping chunks, which made it quadratic
+      (a 64 KiB input took 17.6 s), inflated with the 256 MiB limit, and
+      left several repairs untested. It now walks ranges, inflates to 1 MiB
+      at most, also cuts bytes after the zlib stream, re-packs whenever the
+      image data is the wrong size, takes the first chunk as `IHDR` of 13
+      bytes, and ends at the first `IEND`; a test catches each repair taken
+      out.
+    - The docs' list of differences from libpng was missing cases (a second
+      `tRNS`, one before `PLTE` or of a wrong length, a stray `IDAT`, a bad
+      suggested `PLTE`), and their memory bound missed Adam7's filter bytes
+      and the copy of split image data. Several comments had wrong numbers.
+    Not taken: fuzzing a release build (on M5.2's note) and reading the
+    image data across chunks without a copy.
+  - Note: 36 planted bugs in the codec and the repair, one at a time, in a
+    copy of the tree through `cargo test -p nadir-codec --features png` and
+    `cargo test -p xtask fuzz`: 31 failed a test at first, 4 survived and
+    1 did not build. Tests were added for the survivors (an ancillary CRC,
+    image data compressed over 900:1, a bad code at the end of the input,
+    the repair finding its place) and the plant was fixed: then all 36
+    failed. Of 15 more in the reworked repair, 13 failed a test at once.
+    One of the two that survived was in a step the walk made redundant,
+    which was dropped; the other's step got a test. A fix check of the
+    review's findings then found two more repairs no test caught (the
+    walk's backward shift, and cutting a chunk short), and the IHDR guard
+    applying to later chunks: fixed, with tests that fail without them.
+  - Note: the evidence, from scratch tools not committed:
+    - Inflate against zlib 1.3 (Python's), a stream accepted when zlib
+      reaches its end with no input left: 100,000 streams (valid ones at
+      every level, strategy, window and memory level; mutated ones; and
+      hand-assembled dynamic and fixed blocks), and 30,000 more after the
+      review's fix, with 0 mismatches. zlib also decodes all 6,000 streams
+      of the property tests' encoder to the expected bytes.
+    - The 109 vectors: libpng 1.6.43 (GdkPixbuf 2.42.10) gives the same
+      pixels, exactly with the generator switched to truncation; Go 1.26.9's
+      image/png the same on 107, all but `g2n_trns_masked` and
+      `p2n_pal256`.
+    - Real files: of the 48 in Go's PngSuite copy and test data and the
+      4,033 PNGs under `/usr/share`, `/usr/lib` and `/usr/local/go`, every
+      file that both Go and the decoder accept gives the same pixels. Each
+      that either rejects is broken on purpose; the decoder alone rejects
+      Go's `invalid-palette.png`, for its palette index.
+    - Each documented difference from libpng was measured with a file made
+      for it.
+    - Of 20,000 inputs mutated from the seeds, 2 reach the image data as
+      they are; repaired as the `png` target does, 9,370 (47%) do, and
+      4,141 (21%) reach the filters.
+  - Note: verified on 2026-10-31, on the final code:
+    - `cargo test -p nadir-codec --features png`: 130 unit, 4 inflate,
+      16 JSON, 6 PNG, 3 QOI and 4 doc tests. `cargo test -p xtask`: 172.
+    - `cargo xtask fuzz-smoke --secs 600 --target png`: 3,768,583 inputs,
+      clean. `--target inflate` for 600 s too: 9,498,312 inputs, clean.
+      (Earlier runs, on the code before the review's fixes and before the
+      fix check's: 8.0 and 7.4 million, then 3.9 and 9.2 million, clean.)
+    - `cargo xtask ci`: ok. `cargo doc --workspace --no-deps
+      --all-features` with warnings as errors: clean.
 
 - [ ] **M5.2 — codec: KLZ, KBJ, BMFont, WAV**
+  - Note (from M5.1): CI fuzzes every target for 120 s on each push, in
+    the Linux job of 30 minutes at most: 8 minutes with M5.1's `inflate`
+    and `png`. M5.2's four targets would make 16. Set a total budget, or add
+    the nightly job `docs/04-quality.md` describes, and run less on each
+    push. The user chose on 2026-10-30 to leave CI as it is until then
+    (ADR-0027). `cargo xtask` builds the fuzzer in the dev profile: a
+    review measured `png` at 1/13 and `inflate` at 1/8 of their release
+    speed, so a profile with optimization and overflow checks would buy
+    more inputs in the same time.
   - Depends: M0.5
   - Do: per the spec, with test vectors and fuzz targets.
   - Accept: round-trips pass; malformed input is rejected.
@@ -2267,6 +2380,17 @@ by the batched sprite renderer.
     and pivot that `nadir::animate` writes. Then a flip must mirror about
     the pivot: render's flip mirrors about the quad's centre, for every
     sprite.
+  - Note (from M5.1): `png::decode` logs nothing. It names the color and
+    text chunks it ignored in `Image::ignored`, and the cook warns once for
+    a file that names any, with the file's path (ADR-0027). Of the 4,033
+    PNGs on the development machine, 3,109 have none of these chunks, 739
+    only text chunks, 25 only `sRGB` (with text or not), and 160 another
+    color chunk: decide whether text alone, or `sRGB` alone, deserves the
+    warning.
+  - Note (from M5.1): pass `png::decode` limits with a raised
+    `max_texture_dimension`. A source sheet is sliced and packed, so it may
+    be wider than any texture: one row of 129 frames of 64 px is wider than
+    8,192 px. `max_decoded_bytes` still bounds it.
   - Depends: M5.1, M5.2, M2.4
   - Do: the `nadir-cook` library and CLI; the incremental cache; the
     PNG → trim → MaxRects atlas (padding + extrusion) → QOI pipeline;
@@ -2912,4 +3036,5 @@ three OSes from a tag, and the release checklist is complete.
 | Localization pipeline (string tables, plurals) | Before the first non-English release |
 | Per-cell tile shapes in `TileGrid` (half cells, corner triangles; M4.3 has full cells) | A level needs half-height ledges or diagonal walls |
 | `CollisionWorld::candidates` widens a query only by the drift, so a query can miss a collider by a rounding step. A moved collider whose center rounds a step further than its move is missed by a step anywhere: `nearest((9, 576.00006103515625), 0.0, ALL, None)` misses a box of half (4, 64 - 2^-13 - 2^-14), offset (0, 2^-15), rebuilt at (9, 512 + 2^-13) and moved to (9, 512 + 3 × 2^-14), and finds it after a rebuild. Past about 2^17 px the miss exceeds `EPSILON`, which `move_and_slide`'s sweeps add: `nearest((9, 268553.40625), 0.0, ALL, None)` misses a box of half (2, 2.03125), offset (0, 0.015625), rebuilt at (9, 268541.9375) and moved to (9, 268551.34375). Unmoved, a hashed solid whose half extent is 2^18 px or more is missed in cells over 512 px. `move_and_slide`'s gather finds the last two (ADR-0026) | A query at an exact edge that must not miss, such as picking; a level past 2^17 px from the origin; or solids that wide. The fix widens queries by a few f32 steps of the moved collider's coordinates and of the widest collider in the hash |
+| Two benchmarks `docs/04-quality.md` requires have no task: QOI decode 2048² (from M2.4) and inflate 10 MB (from M5.1). `nadir-bench` already depends on `nadir-codec` | Before M5.3 moves decoding onto workers, or when cook times matter |
 | A determinism lint (clippy `disallowed-methods` or `xtask`): std `HashMap::new`/`HashSet::new`, `Instant::now`, `sin`/`cos`/`atan2` in tick systems; and `FxLikeHasher`'s rustdoc saying its order holds on one target only (ADR-0025) | A determinism regression that slipped past review, or CI disagreeing with the stored hashes |

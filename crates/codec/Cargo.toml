@@ -4,8 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[dev-dependencies]
+[features]
+# The PNG decoder, which only the cook tool needs.
+png = []
+
+[dependencies]
 nadir-core = { path = "../core" }
+
+[[test]]
+name = "png"
+required-features = ["png"]
 
 [lints]
 workspace = true

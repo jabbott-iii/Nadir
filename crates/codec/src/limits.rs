@@ -21,6 +21,11 @@ pub struct Limits {
     pub max_texture_dimension: u32,
     /// The most bytes a decoder may produce for one file. An image takes 4
     /// bytes a pixel.
+    ///
+    /// It bounds the output. A decoder may hold more while it works: the
+    /// PNG decoder keeps the inflated image data beside the pixels, up to
+    /// 2.25 times their size, and a copy of the compressed image data when
+    /// it is split over several chunks.
     pub max_decoded_bytes: usize,
 }
 

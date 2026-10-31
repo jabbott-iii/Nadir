@@ -12,12 +12,14 @@ use std::env::{self, VarError};
 use std::fmt::Display;
 use std::fs;
 use std::io::Write;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use nadir_codec::{Limits, json, qoi};
+use nadir_codec::inflate::ErrorKind as InflateError;
+use nadir_codec::{CodecError, Limits, adler32, inflate, json, png, qoi};
 use nadir_core::cli::Args;
-use nadir_core::hash::fnv1a64;
+use nadir_core::hash::{crc32, fnv1a64};
 use nadir_core::testing::{DEFAULT_SEED, SEED_VAR};
 
 use self::engine::{Config, Finding, Kind, Outcome};
@@ -42,6 +44,14 @@ const TARGETS: &[Target] = &[
     Target {
         name: "qoi",
         run: decode_qoi,
+    },
+    Target {
+        name: "inflate",
+        run: inflate_streams,
+    },
+    Target {
+        name: "png",
+        run: decode_png,
     },
 ];
 
@@ -75,6 +85,363 @@ fn parse_json(input: &[u8]) {
 /// uses.
 fn decode_qoi(input: &[u8]) {
     let _ = qoi::decode(input, Limits::default());
+}
+
+/// The most bytes the `inflate` target lets a stream decompress to. A 64 KiB
+/// input can give about 67 MB, so with the default limit `TooMuchOutput`
+/// could never happen; with this one it often does, and runs stay fast.
+const INFLATE_LIMIT: usize = 1 << 20;
+
+/// The `inflate` target: `nadir_codec::inflate`, reading the input as a
+/// zlib stream and, after its two header bytes, as a bare DEFLATE stream.
+///
+/// It also checks the answers, so that a wrong one is a finding: a zlib
+/// stream that decodes holds a bare stream that decodes to the same bytes,
+/// and decodes again with a limit of exactly its length, but not one less.
+/// The messages give lengths, not the bytes, which could be megabytes.
+fn inflate_streams(input: &[u8]) {
+    let limits = |max_decoded_bytes| Limits {
+        max_decoded_bytes,
+        ..Limits::default()
+    };
+    let _ = inflate::raw(input.get(2..).unwrap_or_default(), limits(INFLATE_LIMIT));
+    let Ok(out) = inflate::zlib(input, limits(INFLATE_LIMIT)) else {
+        return;
+    };
+    let inside = input
+        .get(2..input.len().saturating_sub(4))
+        .unwrap_or_default();
+    let bare = inflate::raw(inside, limits(INFLATE_LIMIT));
+    assert!(
+        bare.as_ref() == Ok(&out),
+        "the bare stream inside a zlib stream of {} bytes decodes to {:?}",
+        out.len(),
+        bare.as_ref().map(Vec::len)
+    );
+    let exact = inflate::zlib(input, limits(out.len()));
+    assert!(
+        exact.as_ref() == Ok(&out),
+        "a limit of exactly the output's {} bytes gives {:?}",
+        out.len(),
+        exact.as_ref().map(Vec::len)
+    );
+    if let Some(less) = out.len().checked_sub(1) {
+        assert!(
+            matches!(
+                inflate::zlib(input, limits(less)),
+                Err(CodecError::Inflate {
+                    kind: InflateError::TooMuchOutput { .. },
+                    ..
+                })
+            ),
+            "a limit one byte short of the output's {} bytes is not enforced",
+            out.len()
+        );
+    }
+}
+
+/// The `png` target: `nadir_codec::png::decode`, with the limits the game
+/// uses, on the input and on repaired copies of it.
+fn decode_png(input: &[u8]) {
+    let _ = png::decode(input, Limits::default());
+    let _ = repaired_pngs(input);
+}
+
+/// Decodes repaired copies of a PNG file, so that more mutations reach the
+/// decoder's later stages: one with its structure and checksums repaired,
+/// and, if that one's image data is the wrong size for its header or is
+/// followed by more, one with the image data mended too. Returns each copy
+/// and what it decoded to.
+fn repaired_pngs(input: &[u8]) -> Vec<(Vec<u8>, Result<png::Image, CodecError>)> {
+    let mut decoded = Vec::new();
+    let Some(mut repaired) = Repaired::new(input) else {
+        return decoded;
+    };
+    repaired.fix_adler32();
+    let bytes = repaired.to_bytes();
+    let result = png::decode(&bytes, Limits::default());
+    let mended = match &result {
+        Err(CodecError::Png {
+            kind:
+                png::ErrorKind::TooLittleImageData { needed }
+                | png::ErrorKind::TooMuchImageData { needed },
+            ..
+        }) => *needed <= REPAIR_LIMIT && repaired.repack(*needed),
+        Err(CodecError::Png {
+            kind: png::ErrorKind::TrailingImageData,
+            ..
+        }) => repaired.trim_image_data(),
+        _ => false,
+    };
+    decoded.push((bytes, result));
+    if mended {
+        let bytes = repaired.to_bytes();
+        let result = png::decode(&bytes, Limits::default());
+        decoded.push((bytes, result));
+    }
+    decoded
+}
+
+/// The most bytes a repair inflates image data to. The decoder itself stops
+/// at what the header needs; without this, one high-ratio stream would cost
+/// the repair seconds in a debug build.
+const REPAIR_LIMIT: usize = 1 << 20;
+
+/// The chunk types a repair looks for when it has lost its place: every
+/// chunk the PNG Third Edition defines.
+const KNOWN_CHUNKS: [&[u8; 4]; 25] = [
+    b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"cHRM", b"gAMA", b"iCCP", b"sBIT", b"sRGB",
+    b"cICP", b"mDCV", b"cLLI", b"tEXt", b"zTXt", b"iTXt", b"bKGD", b"hIST", b"pHYs", b"sPLT",
+    b"eXIf", b"tIME", b"acTL", b"fcTL", b"fdAT",
+];
+
+/// Whether `input` holds a known chunk type at `at`.
+fn known_type_at(input: &[u8], at: usize) -> bool {
+    input
+        .get(at..)
+        .and_then(<[u8]>::first_chunk::<4>)
+        .is_some_and(|kind| KNOWN_CHUNKS.contains(&kind))
+}
+
+/// Where the first known chunk type at `from` or later is.
+fn next_known_type(input: &[u8], from: usize) -> Option<usize> {
+    let rest = input.get(from..)?;
+    let position = rest
+        .windows(4)
+        .position(|window| KNOWN_CHUNKS.iter().any(|known| known.as_slice() == window))?;
+    Some(from + position)
+}
+
+/// A PNG file read leniently, to be written back with the PNG signature, a
+/// right CRC for every chunk, and an `IEND` at the end.
+///
+/// Without this, almost every mutation would stop at the signature or a
+/// CRC, and the decoder's later stages would see little but the seeds.
+/// The walk starts at `IHDR`, wherever the first few bytes put it, takes
+/// the first chunk as `IHDR` of 13 bytes, and ends at the first `IEND`. An insertion or deletion moves the chunks after it:
+/// where the next chunk's type is not letters, or is unknown with a known
+/// type a few bytes away, the walk finds the next known type and gives the
+/// bytes before it to the chunk before. A chunk whose length runs past the
+/// end of the input ends at the next known type, or else takes the rest.
+struct Repaired {
+    chunks: Vec<([u8; 4], Vec<u8>)>,
+}
+
+impl Repaired {
+    /// `None` if the input has no chunk after the signature.
+    fn new(input: &[u8]) -> Option<Self> {
+        // Each chunk's type and where its data is. Ranges, not copies, so
+        // that a chunk cut short when the walk finds its place again costs
+        // nothing to cut.
+        let mut chunks: Vec<([u8; 4], Range<usize>)> = Vec::new();
+        // Where the last chunk read starts, and where its data starts.
+        let mut last_chunk = 0;
+        let mut last_data = 0;
+        // IHDR's type belongs at 12; a damaged signature may have moved it.
+        let start = (4..=20)
+            .find(|&at| input.get(at..at + 4) == Some(b"IHDR"))
+            .map_or(8, |kind| kind - 4);
+        let mut at = start;
+        while let Some(&[l0, l1, l2, l3, t0, t1, t2, t3]) =
+            input.get(at..).and_then(<[u8]>::first_chunk::<8>)
+        {
+            // The first chunk is IHDR, of 13 bytes, whatever its type and
+            // length say: unit tests cover the checks those would fail.
+            let header = at == start;
+            let kind = if header { *b"IHDR" } else { [t0, t1, t2, t3] };
+            let letters = kind.iter().all(u8::is_ascii_alphabetic);
+            // A known type up to 3 bytes either side of an unknown one:
+            // up to 3 bytes were inserted or deleted before it.
+            let shifted = if letters && !KNOWN_CHUNKS.contains(&&kind) {
+                (1..=3)
+                    .flat_map(|by| [at.checked_sub(by), Some(at + by)])
+                    .flatten()
+                    .find(|&start| start > last_chunk && known_type_at(input, start + 4))
+            } else {
+                None
+            };
+            let lost = if letters {
+                shifted
+            } else {
+                // After a deletion the next chunk starts before `at`, so
+                // look from the last chunk's data on.
+                let from = if chunks.is_empty() { at + 5 } else { last_data };
+                next_known_type(input, from).map(|kind| kind - 4)
+            };
+            if let Some(next) = lost {
+                // The bytes up to the next chunk, but its length and the
+                // CRC before it, are the last chunk's (the first, IHDR,
+                // keeps its 13): none if the next starts inside it. A chunk
+                // found there starts after the last one, so the walk always
+                // moves on.
+                if chunks.len() > 1
+                    && let Some((_, data)) = chunks.last_mut()
+                {
+                    data.end = next.saturating_sub(4).max(last_data);
+                }
+                at = next;
+                continue;
+            }
+            if !letters {
+                break;
+            }
+            let data_at = at + 8;
+            let rest = input.get(data_at..).unwrap_or_default();
+            let claimed = if header {
+                13
+            } else {
+                u32::from_be_bytes([l0, l1, l2, l3]) as usize
+            };
+            let length = if claimed.saturating_add(4) <= rest.len() {
+                claimed
+            } else {
+                // Past the end: up to the next known type, or all of it.
+                next_known_type(input, data_at)
+                    .map_or(rest.len(), |kind| (kind - 4).saturating_sub(4 + data_at))
+            };
+            chunks.push((kind, data_at..data_at + length));
+            if &kind == b"IEND" {
+                break;
+            }
+            last_chunk = at;
+            last_data = data_at;
+            at = data_at + length + 4;
+        }
+        if chunks.is_empty() {
+            return None;
+        }
+        let mut chunks: Vec<([u8; 4], Vec<u8>)> = chunks
+            .into_iter()
+            .map(|(kind, data)| (kind, input.get(data).unwrap_or_default().to_vec()))
+            .collect();
+        if chunks.last().is_none_or(|(kind, _)| kind != b"IEND") {
+            chunks.push((*b"IEND", Vec::new()));
+        }
+        // IEND, last, takes the rest of the input when its length is
+        // mutated.
+        if let Some((_, data)) = chunks.last_mut() {
+            data.clear();
+        }
+        Some(Self { chunks })
+    }
+
+    /// The image data, all `IDAT` chunks' data in order.
+    fn image_data(&self) -> Vec<u8> {
+        self.idats()
+            .flat_map(|(_, data)| data.iter().copied())
+            .collect()
+    }
+
+    fn idats(&self) -> impl Iterator<Item = &([u8; 4], Vec<u8>)> {
+        self.chunks.iter().filter(|(kind, _)| kind == b"IDAT")
+    }
+
+    /// The image data's zlib stream inflated, if it inflates to at most
+    /// [`REPAIR_LIMIT`] bytes.
+    fn inflate(&self) -> Result<Vec<u8>, CodecError> {
+        let limits = Limits {
+            max_decoded_bytes: REPAIR_LIMIT,
+            ..Limits::default()
+        };
+        inflate::zlib(&self.image_data(), limits)
+    }
+
+    /// Writes `bytes` over the image data from `offset`, across the `IDAT`
+    /// chunks they fall in.
+    fn write_image_data(&mut self, offset: usize, bytes: &[u8]) {
+        let mut start = 0;
+        for (kind, data) in &mut self.chunks {
+            if kind != b"IDAT" {
+                continue;
+            }
+            for (i, byte) in data.iter_mut().enumerate() {
+                if let Some(&new) = (start + i).checked_sub(offset).and_then(|j| bytes.get(j)) {
+                    *byte = new;
+                }
+            }
+            start += data.len();
+        }
+    }
+
+    /// Rewrites the image data's Adler-32 when it is the only thing wrong
+    /// with its zlib stream.
+    fn fix_adler32(&mut self) {
+        if let Err(CodecError::Inflate {
+            offset,
+            kind: InflateError::BadChecksum { computed, .. },
+        }) = self.inflate()
+        {
+            self.write_image_data(offset, &computed.to_be_bytes());
+        }
+    }
+
+    /// Cuts the image data where its zlib stream ends, when bytes follow it.
+    /// False if they do not.
+    fn trim_image_data(&mut self) -> bool {
+        let Err(CodecError::Inflate {
+            offset,
+            kind: InflateError::TrailingBytes,
+        }) = self.inflate()
+        else {
+            return false;
+        };
+        let mut start = 0;
+        for (kind, data) in &mut self.chunks {
+            if kind == b"IDAT" {
+                let len = data.len();
+                data.truncate(offset.saturating_sub(start));
+                start += len;
+            }
+        }
+        true
+    }
+
+    /// Replaces the image data with what it inflates to, cut or padded with
+    /// zeros to `needed` bytes, as a zlib stream of stored blocks split
+    /// over the same `IDAT` chunks. False if the image data does not
+    /// inflate.
+    fn repack(&mut self, needed: usize) -> bool {
+        let Ok(mut raw) = self.inflate() else {
+            return false;
+        };
+        raw.resize(needed, 0);
+        let mut stream = vec![0x78, 0x01];
+        let blocks: Vec<&[u8]> = if raw.is_empty() {
+            vec![&[]]
+        } else {
+            raw.chunks(0xffff).collect()
+        };
+        for (i, block) in blocks.iter().enumerate() {
+            stream.push(u8::from(i + 1 == blocks.len()));
+            let len = block.len() as u16;
+            stream.extend_from_slice(&len.to_le_bytes());
+            stream.extend_from_slice(&(!len).to_le_bytes());
+            stream.extend_from_slice(block);
+        }
+        stream.extend_from_slice(&adler32::checksum(&raw).to_be_bytes());
+        let count = self.idats().count().max(1);
+        let share = stream.len().div_ceil(count);
+        let mut pieces = stream.chunks(share.max(1));
+        for (kind, data) in &mut self.chunks {
+            if kind == b"IDAT" {
+                *data = pieces.next().unwrap_or_default().to_vec();
+            }
+        }
+        true
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+        for (kind, data) in &self.chunks {
+            let start = out.len();
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            out.extend_from_slice(kind);
+            out.extend_from_slice(data);
+            let crc = crc32(out.get(start + 4..).unwrap_or_default());
+            out.extend_from_slice(&crc.to_be_bytes());
+        }
+        out
+    }
 }
 
 /// Runs `fuzz-smoke` with the arguments that follow the command name.
@@ -487,6 +854,300 @@ mod tests {
         huge.extend_from_slice(&[0xfd; 100]);
         for input in [&b""[..], b"qoif", &huge, &[0xc0; 5000]] {
             decode_qoi(input);
+        }
+    }
+
+    #[test]
+    fn the_inflate_target_takes_any_bytes() {
+        // After a zlib header, which the target skips for its bare stream:
+        // a stored block that claims more than there is, and a dynamic
+        // header with every count at its most.
+        for input in [
+            &b""[..],
+            &[0x78, 0x9c],
+            &[0x78, 0x01, 0x01, 0xff, 0xff, 0x00, 0x00, 0x01],
+            &[0x78, 0x01, 0xfd, 0xff, 0xff, 0xff],
+            &[0x02; 3000],
+        ] {
+            inflate_streams(input);
+        }
+        // Streams that decode, so that the target's checks run: "hello",
+        // and 2,400 empty fixed blocks (four to 5 bytes) before an empty
+        // final one.
+        let hello = [
+            0x78, 0x9c, 0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00, 0x06, 0x2c, 0x02, 0x15,
+        ];
+        let mut empty_blocks = vec![0x78, 0x01];
+        for _ in 0..600 {
+            empty_blocks.extend_from_slice(&[0x02, 0x08, 0x20, 0x80, 0x00]);
+        }
+        empty_blocks.extend_from_slice(&[0x03, 0x00, 0x00, 0x00, 0x00, 0x01]);
+        for input in [&hello[..], &empty_blocks] {
+            assert!(inflate::zlib(input, Limits::default()).is_ok());
+            inflate_streams(input);
+        }
+    }
+
+    #[test]
+    fn the_png_target_takes_any_bytes() {
+        let mut huge = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR".to_vec();
+        huge.extend_from_slice(&[0xff; 100]);
+        // An 8192 × 8192 header with 20 bytes of image data.
+        let mut big = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x20\x00\x00\x00\x20\x00\x08\x06\x00\x00\x00\x00\x00\x00\x00".to_vec();
+        big.extend_from_slice(b"\x00\x00\x00\x14IDAT");
+        big.extend_from_slice(&[0x78, 0x01, 0x01, 0x0f, 0x00, 0xf0, 0xff]);
+        big.extend_from_slice(&[0; 13]);
+        // Chunk types to find again among bytes that are not letters.
+        let mut junk = big[..33].to_vec();
+        for _ in 0..400 {
+            junk.extend_from_slice(b"\xff\xff\xff\xffIDAT");
+        }
+        // Thousands of chunks whose lengths reach 8 bytes short of the end,
+        // where the walk loses its place, and each of which it must cut
+        // short when it finds the next: the repaired copy stays as small
+        // as the input. The same with IHDR, which only the first chunk is.
+        let overlap = |kind: &[u8; 4]| {
+            let mut input = big[..33].to_vec();
+            while input.len() < 60_000 {
+                let length = (61_000 - input.len()) as u32;
+                input.extend_from_slice(&length.to_be_bytes());
+                input.extend_from_slice(kind);
+            }
+            input.resize(61_020, 0);
+            input
+        };
+        let (overlapping, overlapping_headers) = (overlap(b"IDAT"), overlap(b"IHDR"));
+        for input in [
+            &b""[..],
+            b"\x89PNG\r\n\x1a\n",
+            &huge,
+            &big,
+            &junk,
+            &overlapping,
+            &overlapping_headers,
+            &[0x49; 5000],
+        ] {
+            decode_png(input);
+        }
+        for input in [&overlapping, &overlapping_headers] {
+            assert!(kinds(input).len() > 5000);
+            for (bytes, _) in repaired_pngs(input) {
+                assert!(bytes.len() < 2 * input.len(), "{}", bytes.len());
+            }
+        }
+    }
+
+    fn png_seeds() -> Vec<Vec<u8>> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(CORPUS)
+            .join("png");
+        load_corpus(&dir).unwrap()
+    }
+
+    fn decoded(input: &[u8]) -> png::Image {
+        png::decode(input, Limits::default()).unwrap()
+    }
+
+    /// What the first repaired copy of `input` decodes to.
+    fn first_repair(input: &[u8]) -> Result<png::Image, CodecError> {
+        repaired_pngs(input).swap_remove(0).1
+    }
+
+    fn kinds(input: &[u8]) -> Vec<[u8; 4]> {
+        let repaired = Repaired::new(input).unwrap();
+        repaired.chunks.iter().map(|(kind, _)| *kind).collect()
+    }
+
+    /// Where the first IDAT chunk's data starts, and its length.
+    fn first_idat(png: &[u8]) -> (usize, usize) {
+        let kind = png.windows(4).position(|w| w == b"IDAT").unwrap();
+        let length = u32::from_be_bytes(png[kind - 4..kind].try_into().unwrap());
+        (kind + 4, length as usize)
+    }
+
+    #[test]
+    fn a_repair_mends_the_checksums_and_the_signature() {
+        for seed in png_seeds() {
+            let image = decoded(&seed);
+            assert_eq!(Repaired::new(&seed).unwrap().to_bytes(), seed);
+            // IHDR's CRC broken, and the signature changed: both mended.
+            let mut damaged = seed.clone();
+            damaged[29] ^= 0x01;
+            damaged[1] = b'X';
+            assert_eq!(first_repair(&damaged).unwrap(), image);
+            // A byte of the signature lost: IHDR is found where it is.
+            let mut damaged = seed.clone();
+            damaged.remove(3);
+            assert_eq!(first_repair(&damaged).unwrap(), image);
+            // Only the Adler-32 wrong: mended.
+            let mut repaired = Repaired::new(&seed).unwrap();
+            let end = repaired.image_data().len();
+            let last = repaired.image_data()[end - 1];
+            repaired.write_image_data(end - 1, &[last ^ 1]);
+            assert_eq!(first_repair(&repaired.to_bytes()).unwrap(), image);
+        }
+        assert!(Repaired::new(b"\x89PNG\r\n\x1a\n").is_none());
+    }
+
+    #[test]
+    fn a_repair_finds_its_place_after_a_byte_is_inserted_or_lost() {
+        for seed in png_seeds() {
+            let (data, length) = first_idat(&seed);
+            if length < 4 {
+                continue;
+            }
+            // A byte lost in the chunk before the image data, if it is
+            // not IHDR: the walk finds the next chunk a byte early, where
+            // its type is shifted, not damaged.
+            let second = 8 + 25;
+            if &seed[second + 4..second + 8] != b"IDAT" {
+                let mut damaged = seed.clone();
+                damaged.remove(second + 8);
+                assert_eq!(kinds(&damaged), kinds(&seed));
+            }
+            let image_data = Repaired::new(&seed).unwrap().image_data().len();
+            for (edit, change) in [(0, 1), (1, -1)] {
+                let mut damaged = seed.clone();
+                if edit == 0 {
+                    damaged.insert(data + 2, 0xa5);
+                } else {
+                    damaged.remove(data + 2);
+                }
+                // The chunks after the damaged one are found again, and the
+                // image data has the byte more or less.
+                assert_eq!(kinds(&damaged), kinds(&seed), "edit {edit}");
+                let repaired = Repaired::new(&damaged).unwrap();
+                assert_eq!(
+                    repaired.image_data().len() as isize,
+                    image_data as isize + change,
+                    "edit {edit}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_repair_mends_lengths_that_lose_chunks() {
+        for seed in png_seeds() {
+            let image = decoded(&seed);
+            // IHDR claims 141 bytes, or another type: it is IHDR, with 13
+            // bytes, and the chunks after it are kept.
+            let mut damaged = seed.clone();
+            damaged[11] = 141;
+            damaged[14] = b'Q';
+            assert_eq!(first_repair(&damaged).unwrap(), image);
+            // A byte inserted in IHDR's CRC: the chunks after it are found
+            // a byte later, and IHDR keeps its 13 bytes.
+            let mut damaged = seed.clone();
+            damaged.insert(30, 0x00);
+            assert_eq!(first_repair(&damaged).unwrap(), image);
+            // A chunk before the image data claims more than the file has:
+            // it ends at the next chunk, and the image data is kept.
+            let second = 8 + 25;
+            let mut damaged = seed.clone();
+            damaged[second..second + 4].copy_from_slice(&0x00ff_ffffu32.to_be_bytes());
+            assert_eq!(kinds(&damaged), kinds(&seed));
+            // Chunks after IEND are dropped.
+            let mut damaged = seed.clone();
+            damaged.extend_from_slice(&seed[8..33]);
+            assert_eq!(first_repair(&damaged).unwrap(), image);
+            // IEND claims 4 bytes: it takes what follows it, and is
+            // emptied.
+            let mut damaged = seed.clone();
+            let iend = damaged.len() - 12;
+            damaged[iend + 3] = 4;
+            assert_eq!(first_repair(&damaged).unwrap(), image);
+        }
+    }
+
+    #[test]
+    fn a_repair_mends_image_data_of_the_wrong_size() {
+        for seed in png_seeds() {
+            let image = decoded(&seed);
+            // Twice as tall: the image data is too short until it is
+            // repacked, padded with rows of filter 0. Without interlacing
+            // the new rows follow the old ones; with it the passes move,
+            // so the old bytes may not be rows any more.
+            let mut taller = seed.clone();
+            let height = u32::from_be_bytes(taller[20..24].try_into().unwrap());
+            taller[20..24].copy_from_slice(&(height * 2).to_be_bytes());
+            let tries = repaired_pngs(&taller);
+            assert!(
+                matches!(
+                    tries[0].1,
+                    Err(CodecError::Png {
+                        kind: png::ErrorKind::TooLittleImageData { .. },
+                        ..
+                    })
+                ),
+                "{:?}",
+                tries[0].1
+            );
+            match &tries[1].1 {
+                Ok(repacked) => assert_eq!(repacked.height, height * 2),
+                Err(CodecError::Png {
+                    kind: png::ErrorKind::BadFilter { .. } | png::ErrorKind::BadPaletteIndex { .. },
+                    ..
+                }) if seed[28] == 1 => {}
+                other => panic!("{other:?}"),
+            }
+            // As many IDAT chunks as before.
+            let mut repaired = Repaired::new(&taller).unwrap();
+            repaired.fix_adler32();
+            let needed = 2 * repaired.inflate().unwrap().len();
+            assert!(repaired.repack(needed));
+            assert_eq!(
+                repaired.idats().count(),
+                Repaired::new(&seed).unwrap().idats().count()
+            );
+            // Bytes after the zlib stream, in the last IDAT chunk: cut.
+            let mut repaired = Repaired::new(&seed).unwrap();
+            let last = repaired
+                .chunks
+                .iter_mut()
+                .rev()
+                .find(|(kind, data)| kind == b"IDAT" && !data.is_empty())
+                .unwrap();
+            last.1.extend_from_slice(b"junk");
+            let tries = repaired_pngs(&repaired.to_bytes());
+            assert!(
+                matches!(
+                    tries[0].1,
+                    Err(CodecError::Png {
+                        kind: png::ErrorKind::TrailingImageData,
+                        ..
+                    })
+                ),
+                "{:?}",
+                tries[0].1
+            );
+            assert_eq!(tries[1].1.as_ref().unwrap(), &image);
+        }
+    }
+
+    #[test]
+    fn the_inflate_seeds_are_streams_the_codec_accepts() {
+        // zlib made some, the property tests' encoder others, and one is
+        // by hand: a match from 32,768 bytes back, which zlib does not
+        // write.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(CORPUS)
+            .join("inflate");
+        for seed in load_corpus(&dir).unwrap() {
+            inflate::zlib(&seed, Limits::default()).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_png_seeds_are_images_the_codec_accepts() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(CORPUS)
+            .join("png");
+        for seed in load_corpus(&dir).unwrap() {
+            png::decode(&seed, Limits::default()).unwrap();
         }
     }
 

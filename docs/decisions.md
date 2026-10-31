@@ -1489,3 +1489,97 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   per-sweep queries (more than 32 solids near, or more than 16 stopping a
   sweep); or the backlog fix to `candidates` lands, which ends the second
   exception.
+
+## ADR-0027 — The PNG decoder reads every color type and depth, rejects damage libpng loads, rounds 16-bit samples, and reports the color chunks it ignores
+
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  - M5.1 adds the cook tool's PNG decoder. The spec's subset left out
+    grayscale at bit depths 1, 2 and 4. That is valid PNG, which every
+    decoder must read, and optimizers (optipng, oxipng, pngcrush) write it
+    for masks and two-tone art.
+  - libpng 1.6, behind most tools artists use, loads several kinds of
+    damage with a warning at most. Measured through GdkPixbuf 2.42.10 with
+    libpng 1.6.43:
+    - a bad CRC in an ancillary chunk
+    - bytes after `IEND`, or after the image data's zlib stream
+    - image data that inflates to more than the image needs, or an `IDAT`
+      after another chunk once it has ended
+    - a palette index past the palette, drawn black
+    - `PLTE` in a grayscale image, after `IDAT` or after `tRNS`, or of a
+      bad length as an RGB image's suggestion
+    - `tRNS` in an image with alpha, after `IDAT`, twice, before the
+      palette, of a bad length, or with more alphas than the palette can
+      use
+  - The spec said "ignored, with a single warning" for the color and text
+    chunks, but the codec logs nothing and never knows a file's path.
+  - The spec did not say how 16-bit samples become 8-bit.
+  - `CodecError` gains a `Png` variant that exists only with the `png`
+    feature. Cargo turns a feature on for every crate in a build that wants
+    it, so an exhaustive `match` elsewhere could compile in one build and
+    not another.
+- **Decision** (the user chose the first three on 2026-10-30):
+  - Read every PNG color type and bit depth, grayscale at 1, 2 and 4 bits
+    among them.
+  - Reject each kind of damage above with an error that names its byte.
+    The module doc of `png.rs` and the PNG subset in
+    `docs/subsystems/assets-and-codecs.md` list each difference from libpng
+    that was measured. Accept what libpng accepts and is harmless: a
+    palette longer than the bit depth can index, a palette `tRNS` with no
+    alphas, and a `tRNS` value past the bit depth, read in the depth's bits
+    (libpng warns about the last two). One case goes the other way: image data
+    that reaches further back than its zlib header's window decodes as
+    written, as zlib does given its largest window, where libpng rejects
+    it.
+  - Round a 16-bit sample to the nearest 8-bit value, `round(v / 257)`.
+    libpng's `png_set_strip_16` truncates; Go's image/png gives the exact
+    16-bit values, which round the same way.
+  - `png::decode` names the ignored color and text chunks in
+    `Image::ignored`, and the cook tool (M5.4) warns once for a file that
+    has any. `cICP`, `mDCV` and `cLLI`, from the PNG Third Edition, join
+    the list: they say the colors are not sRGB.
+  - Mark `CodecError` `#[non_exhaustive]`. Nothing outside the codec
+    matched it exhaustively.
+  - Commit the generator of the test vectors,
+    `crates/codec/tests/png/make_vectors.py`. It is the repo's first
+    Python file: it uses only the standard library, and nothing runs it
+    but a person adding a vector.
+  - Keep CI's fuzzing at 120 s a target. M5.2 sets a total budget, or adds
+    the nightly job that `docs/04-quality.md` describes.
+- **Consequences:**
+  - Optimized art cooks. A damaged export fails with the byte at fault, and
+    is exported again rather than cooked as libpng would show it.
+  - A file that every viewer opens can still be refused, for one of the
+    reasons listed.
+  - 16-bit art differs from libpng's reading by at most 1 in a channel.
+  - Of the 4,033 PNGs on the development machine and the 48 of Go's
+    PngSuite copy and test data, the decoder and Go's image/png decode
+    every file both accept to the same pixels. Each file one of them rejects is broken on
+    purpose; the only one the decoder alone rejects is Go's
+    `invalid-palette.png`, for its palette index.
+  - A `match` on `CodecError` outside the crate needs a wildcard arm.
+  - Decoding holds the inflated image data beside the pixels, up to 2.25
+    times their size (16-bit RGBA one pixel wide), so up to 3.25 times
+    `max_decoded_bytes` in all; and a copy of the compressed image data
+    when it is split over several chunks, as libpng's exporters split it.
+    The field's doc says so.
+- **Alternatives considered:**
+  - Rejecting grayscale below 8 bits, as the spec had it: the cook would
+    refuse optimized art.
+  - libpng's leniency: damaged art would be cooked as libpng happens to
+    show it, without a word.
+  - Truncating 16-bit samples as libpng does: rounding is nearer, and
+    matches Go's exact values.
+  - Logging the warning in the codec: it could not name the file, and
+    could not be tested by value.
+  - Defining `Png` and `png::ErrorKind` without the feature: the `png`
+    module would exist half-way without it.
+  - A README of recipes in place of the generator: nobody could add a
+    vector, or check one, without writing a generator again.
+  - Converting 16-bit RGBA in place to keep the peak near the image data's
+    size: more code, for a cook tool that runs on development machines.
+- **Revisit when:** an export from the team's own tools (Aseprite first) is
+  refused by one of these rules; the cook needs color management, so that
+  a non-sRGB `iCCP` or `cICP` must be honored; or decoding a source image
+  runs a development machine out of memory.
