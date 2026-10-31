@@ -1,0 +1,194 @@
+# Builds the demo page and publishes it at https://jabbott.dev/Nadir/
+# through GitHub Pages, each time CI passes on a push to main (ADR-0029).
+# It is specified in docs/04-quality.md, under "Demo page".
+#
+# Rules for this file, as for ci.yml, with the exceptions ADR-0029 makes:
+# - Pin every action by its full commit SHA, with the tag in a comment.
+# - Use no actions other than actions/checkout and actions/cache, and
+#   GitHub's two Pages actions, actions/upload-pages-artifact and
+#   actions/deploy-pages.
+# - Install the toolchain with rustup, not with an action.
+# - Only the deploy job may write, and only to Pages.
+#
+# The repository's Pages source must be "GitHub Actions" (Settings, Pages).
+
+name: Pages
+
+on:
+  # After CI. This runs the file as main has it; the gate takes only a
+  # successful run of a push to this repository's main.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # By hand, from main: to publish main again after a run of this workflow
+  # failed for a reason of its own. The gate still asks for a successful CI
+  # run of main's commit.
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Decides whether this run publishes, before it waits for any other: a run
+  # that does not publish never holds a place in the queues below, and so
+  # never displaces one that does.
+  gate:
+    name: Decide
+    if: >-
+      github.repository == 'jabbott-iii/Nadir' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # To find CI's runs of the commit, for a run by hand.
+      actions: read
+    outputs:
+      commit: ${{ steps.current.outputs.commit }}
+      current: ${{ steps.current.outputs.current }}
+      # The attempt that decided. A re-run of only the failed jobs reuses
+      # the outputs of the jobs that passed, so the jobs below run only in
+      # the attempt whose gate let them through: "Re-run all jobs", which
+      # decides again, or a run by hand, is how to retry.
+      attempt: ${{ github.run_attempt }}
+    steps:
+      # When main has moved on, the run for the newer commit publishes the
+      # page, so this one does not put an older page over it. A run by hand
+      # publishes only a commit that CI passed, as the page says.
+      - name: Check that the commit is still main's, and passed CI
+        id: current
+        env:
+          COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          passed=1
+          if [ "$EVENT" = workflow_dispatch ]; then
+            passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$COMMIT&event=push&status=success&branch=main" --jq .total_count)
+          fi
+          if [ "$main" != "$COMMIT" ]; then
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main is at $main, past $COMMIT: its own run publishes the page."
+          elif [ "$passed" = 0 ]; then
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CI has not passed on main's $COMMIT, so the page stays as it is."
+          else
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build the page
+    needs: gate
+    if: needs.gate.outputs.current == 'true' && needs.gate.outputs.attempt == github.run_attempt
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    # One build at a time, in the order the gate let them through. A build
+    # that waits is replaced by the next one let through, a newer commit's.
+    concurrency:
+      group: pages-build
+      cancel-in-progress: false
+    outputs:
+      current: ${{ steps.current.outputs.current }}
+      attempt: ${{ github.run_attempt }}
+    steps:
+      # It may have waited: check again.
+      - name: Check that the commit is still main's
+        id: current
+        env:
+          COMMIT: ${{ needs.gate.outputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$main" = "$COMMIT" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main is at $main, past $COMMIT: its own run publishes the page."
+          fi
+
+      # The commit CI passed, not whatever main is by now.
+      - name: Check out
+        if: steps.current.outputs.current == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.commit }}
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        if: steps.current.outputs.current == 'true'
+        run: rustup toolchain install --profile minimal --no-self-update
+
+      - name: Restore the build cache
+        if: steps.current.outputs.current == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target/release
+            target/xtask
+          key: pages-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+
+      # EGL and Mesa's software renderer draw the frames offscreen, as for
+      # the goldens. GStreamer encodes them: rawvideoparse, videoscale and
+      # videoconvert are in -base; vp9enc, webmmux and pngenc in -good.
+      - name: Install EGL, Mesa and GStreamer
+        if: steps.current.outputs.current == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libegl1 libgl1-mesa-dri \
+            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+
+      - name: Build the page
+        if: steps.current.outputs.current == 'true'
+        run: cargo xtask site
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+
+      # Named for the attempt: an artifact belongs to the whole run, and
+      # deploy-pages refuses two of one name.
+      - name: Upload the page
+        if: steps.current.outputs.current == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: target/site
+          name: github-pages-${{ github.run_attempt }}
+
+  deploy:
+    name: Publish the page
+    needs: build
+    if: needs.build.outputs.current == 'true' && needs.build.outputs.attempt == github.run_attempt
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    # Its own queue, so that a deploy that waits never displaces a build.
+    # Deploys queue in the order the builds ran, which is the order of
+    # main's commits; one that waits is replaced by the next, a newer
+    # commit's.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Publish
+        id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}

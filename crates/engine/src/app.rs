@@ -13,7 +13,7 @@ use nadir_core::log::{debug, error};
 use nadir_core::profile::{self, ScopeRecord};
 use nadir_core::time::{FixedClock, Stopwatch};
 use nadir_ecs::{Component, FixedStage, FixedSystem, FrameStage, FrameSystem, Schedule, World};
-use nadir_gfx::{Device, PassTarget};
+use nadir_gfx::{Device, PassTarget, RenderTargetId, TextureFormat};
 use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Input, InputPlayer};
 use nadir_platform::{
     Event, GpuSurface, ModalFrame, Platform, WindowConfig, precise_sleep, show_error_dialog,
@@ -223,26 +223,50 @@ impl Graphics {
     /// assets loaded since the last frame.
     fn draw(&mut self, world: &World, surface: GpuSurface<'_>, size: UVec2) -> Result<(), Error> {
         self.device.begin_frame(surface)?;
+        self.render(world, PassTarget::Surface, size)?;
+        self.device.end_frame(surface)?;
+        self.finish_loads(world);
+        Ok(())
+    }
+
+    /// Draws the frame the frame systems made into `target`, of `size`, on
+    /// the device's offscreen context, as [`Graphics::draw`] does on the
+    /// window, and reads it back.
+    fn draw_offscreen(
+        &mut self,
+        world: &World,
+        target: RenderTargetId,
+        size: UVec2,
+    ) -> Result<Vec<u8>, Error> {
+        self.device.begin_offscreen_frame()?;
+        self.render(world, PassTarget::RenderTarget(target), size)?;
+        self.device.end_offscreen_frame()?;
+        self.finish_loads(world);
+        Ok(self.device.read_pixels(target)?)
+    }
+
+    /// Renders the frame into `target`, and sets [`FrameStats`].
+    fn render(&mut self, world: &World, target: PassTarget, size: UVec2) -> Result<(), Error> {
         let stats = {
             let assets = world.resource::<AssetServer>();
             let tiles = world.resource::<TileLayers>();
             let frame = world.resource::<RenderFrame>();
-            let output = Output {
-                target: PassTarget::Surface,
-                size,
-            };
+            let output = Output { target, size };
             self.renderer
                 .render(&mut self.device, &assets, &tiles, &frame, output)?
         };
         *world.resource_mut::<FrameStats>() = stats;
-        self.device.end_frame(surface)?;
+        Ok(())
+    }
+
+    /// Makes the assets loaded since the last frame.
+    fn finish_loads(&mut self, world: &World) {
         let pending = world.resource::<AssetServer>().has_pending();
         if pending {
             world
                 .resource_mut::<AssetServer>()
                 .finish_completed_loads(&mut FinalizeCtx::new().with(&mut self.device));
         }
-        Ok(())
     }
 }
 
@@ -773,6 +797,80 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Draws the game offscreen, with no window, in frames of `size`
+    /// pixels: [`Offscreen::frame`] runs a frame, draws it as a window of
+    /// that size would show it, and returns its pixels. For recordings of
+    /// the game, such as the demo page's (ADR-0029). It opens no log file.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Render`] where there is no offscreen OpenGL context
+    /// ([`GfxError::NoOffscreenContext`](nadir_gfx::GfxError) on Windows
+    /// and macOS, until roadmap M2.6 and M2.7) or it cannot be made, or the
+    /// renderer or a target of `size` cannot be.
+    pub fn offscreen(self, size: UVec2) -> Result<Offscreen, Error> {
+        let mut device = Device::new_headless()?;
+        let config = RenderConfig {
+            virtual_resolution: self.config.virtual_resolution,
+        };
+        let renderer = Renderer::new(&mut device, &config)?;
+        let target = device.create_render_target(size, TextureFormat::Rgba8Srgb)?;
+        Ok(Offscreen {
+            app: self,
+            graphics: Graphics { renderer, device },
+            target,
+            size,
+        })
+    }
+}
+
+/// A game drawn offscreen, a frame at a time, with no window. Made by
+/// [`App::offscreen`].
+pub struct Offscreen {
+    // The app goes first, as in the main loop: its assets are the device's.
+    app: App,
+    graphics: Graphics,
+    /// What each frame is drawn into.
+    target: RenderTargetId,
+    size: UVec2,
+}
+
+impl Offscreen {
+    /// Runs one frame that comes `elapsed` after the last, with the events
+    /// that came before it, as [`App::update`] does. Then draws it, makes
+    /// the assets loaded since the last frame, as [`App::run`] does, and
+    /// returns its pixels: RGBA8, sRGB-encoded, from the top row, 4 bytes a
+    /// pixel.
+    ///
+    /// The assets loaded before the first frame are made after it is
+    /// drawn, so it shows none of them. A first frame of
+    /// [`Duration::ZERO`] makes them without a tick.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Render`] if the frame cannot be drawn or read back.
+    pub fn frame(&mut self, elapsed: Duration, events: &[Event]) -> Result<Vec<u8>, Error> {
+        self.app.update(elapsed, events);
+        self.graphics
+            .draw_offscreen(&self.app.world, self.target, self.size)
+    }
+
+    /// The game.
+    pub fn app(&self) -> &App {
+        &self.app
+    }
+
+    /// The size of each frame, in pixels.
+    pub fn size(&self) -> UVec2 {
+        self.size
+    }
+
+    /// The renderer that draws the frames, as the driver names it: for
+    /// instance `llvmpipe (LLVM 20.1.2, 256 bits)`.
+    pub fn renderer(&self) -> &str {
+        &self.graphics.device.caps().renderer
     }
 }
 
@@ -1910,6 +2008,154 @@ mod tests {
         let allocated = nadir_platform::thread_alloc_counts().since(start);
         assert_eq!(app.world().resource::<TickStats>().ticks, 15);
         assert_eq!(allocated, nadir_platform::AllocCounts::default());
+    }
+
+    /// [`App::offscreen`]: frames drawn with no window, for recordings
+    /// (ADR-0029). Behind `dev`, as `steady_frames` is, since they need an
+    /// offscreen context.
+    #[cfg(feature = "dev")]
+    mod offscreen_frames {
+        use std::{env, fs, process};
+
+        use nadir_codec::qoi::{self, Channels, ColorSpace, Header};
+        use nadir_core::{Color, Vec2};
+        use nadir_gfx::GfxError;
+        use nadir_render::RenderError;
+
+        use super::*;
+
+        /// The frames' size: the virtual resolution, so a pixel of the game
+        /// is a pixel of the frame.
+        const SIZE: UVec2 = UVec2::new(32, 18);
+        const CLEAR: [u8; 4] = [0, 0, 255, 255];
+        const RED: [u8; 4] = [255, 0, 0, 255];
+
+        /// An app of one red sprite, 8 pixels square, its feet 4 pixels
+        /// right of the view's centre, on blue, whose systems count the ticks
+        /// into `log`. It is off the centre so that a frame upside down or
+        /// mirrored shows it elsewhere.
+        fn app(test: &str, log: &Shared) -> App {
+            let assets = env::temp_dir().join(format!("nadir-engine-{test}-{}", process::id()));
+            fs::create_dir_all(&assets).expect("make the asset folder");
+            let header = Header {
+                width: 8,
+                height: 8,
+                channels: Channels::Rgba,
+                color_space: ColorSpace::Srgb,
+            };
+            let bytes = qoi::encode(&header, &RED.repeat(64)).expect("a valid image");
+            fs::write(assets.join("red.qoi"), bytes).expect("write the texture");
+            let mut app = App::new(Config {
+                virtual_resolution: SIZE,
+                assets,
+                ..Config::default()
+            })
+            .insert_resource(Rc::clone(log))
+            .add_fixed_system(FixedStage::Gameplay, "count_ticks", count_ticks)
+            .add_frame_system(FrameStage::Camera, "look", |world, _| {
+                let mut frame = world.resource_mut::<RenderFrame>();
+                frame.clear = Color::rgb(CLEAR[0], CLEAR[1], CLEAR[2]);
+                frame.camera.position = Vec2::ZERO;
+            });
+            let red = app
+                .world()
+                .resource_mut::<AssetServer>()
+                .load::<nadir_render::Texture>("red.qoi");
+            app.world_mut()
+                .spawn()
+                .with(Transform::at(Vec2::new(4.0, 0.0)))
+                .with(Sprite::new(red, Vec2::splat(8.0)));
+            // The texture is read and decoded on `load`, and only made later.
+            let assets = app.config.assets.clone();
+            fs::remove_dir_all(&assets).expect("remove the asset folder");
+            app
+        }
+
+        /// `app` drawn offscreen, or `None` where this system has no
+        /// offscreen context yet (Windows and macOS, until M2.6 and M2.7)
+        /// and `NADIR_EXPECT_GL_RENDERER` asks for none.
+        fn offscreen(app: App, size: UVec2) -> Option<Offscreen> {
+            let expected = env::var("NADIR_EXPECT_GL_RENDERER").unwrap_or_default();
+            match app.offscreen(size) {
+                Ok(offscreen) => {
+                    let renderer = offscreen.renderer();
+                    assert!(renderer.contains(&expected), "{renderer} is not {expected}");
+                    Some(offscreen)
+                }
+                Err(Error::Render(RenderError::Gfx(GfxError::NoOffscreenContext)))
+                    if expected.is_empty() =>
+                {
+                    None
+                }
+                Err(error) => panic!("no offscreen OpenGL context: {error}"),
+            }
+        }
+
+        fn pixel(frame: &[u8], x: u32, y: u32) -> [u8; 4] {
+            let at = ((y * SIZE.x + x) * 4) as usize;
+            frame[at..at + 4].try_into().expect("4 bytes")
+        }
+
+        #[test]
+        fn each_frame_runs_its_ticks_and_draws_what_a_window_would_show() {
+            let log = shared();
+            let Some(mut offscreen) = offscreen(app("offscreen-frames", &log), SIZE) else {
+                return;
+            };
+            assert_eq!(offscreen.size(), SIZE);
+
+            // The texture is made after the first frame is drawn, so that
+            // frame shows only the clear color, and a frame of no time runs
+            // no tick.
+            let first = offscreen.frame(Duration::ZERO, &[]).expect("a frame");
+            assert_eq!(first.len(), (SIZE.x * SIZE.y * 4) as usize);
+            assert!(first.as_chunks::<4>().0.iter().all(|&p| p == CLEAR));
+            assert_eq!(log.ticks.get(), 0);
+            let stats = *offscreen.app().world().resource::<FrameStats>();
+            assert_eq!((stats.sprites, stats.skipped), (0, 1));
+
+            // Then the sprite: 8 pixels square, its feet at the centre,
+            // (16, 9), 4 pixels right, so rows 1 to 8 and columns 16 to 23.
+            let second = offscreen.frame(TICK, &[]).expect("a frame");
+            assert_eq!(log.ticks.get(), 1);
+            assert_eq!(offscreen.app().world().resource::<FrameStats>().sprites, 1);
+            for (x, y, expected) in [
+                (16, 1, RED),
+                (23, 8, RED),
+                (20, 4, RED),
+                (15, 4, CLEAR),
+                (24, 4, CLEAR),
+                (20, 0, CLEAR),
+                (20, 9, CLEAR),
+                (0, 0, CLEAR),
+            ] {
+                assert_eq!(pixel(&second, x, y), expected, "({x}, {y})");
+            }
+            offscreen.frame(TICK * 3, &[]).expect("a frame");
+            assert_eq!(log.ticks.get(), 4);
+        }
+
+        #[test]
+        fn frames_bigger_than_the_view_are_scaled_up_by_whole_numbers() {
+            let log = shared();
+            let Some(mut offscreen) = offscreen(app("offscreen-scaled", &log), SIZE * 2) else {
+                return;
+            };
+            offscreen.frame(Duration::ZERO, &[]).expect("a frame");
+            let frame = offscreen.frame(TICK, &[]).expect("a frame");
+            let width = SIZE.x * 2;
+            let at = |x: u32, y: u32| {
+                let i = ((y * width + x) * 4) as usize;
+                <[u8; 4]>::try_from(&frame[i..i + 4]).expect("4 bytes")
+            };
+            assert_eq!(frame.len(), (width * SIZE.y * 2 * 4) as usize);
+            assert_eq!(at(32, 2), RED);
+            assert_eq!(at(47, 17), RED);
+            assert_eq!(at(31, 2), CLEAR);
+            assert_eq!(at(32, 1), CLEAR);
+            assert_eq!(at(48, 17), CLEAR);
+            assert_eq!(at(47, 18), CLEAR);
+        }
     }
 
     /// A steady frame of 10,000 sprites allocates nothing (roadmap M3.5),

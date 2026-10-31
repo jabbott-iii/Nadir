@@ -1696,3 +1696,138 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   missed, or the hang limit fires on an input that is correct; a save
   needs a NaN payload; a tool the team uses can export only a WAV format
   or font this refuses; or the game wants distance-field text.
+
+## ADR-0029 — CI records the sandbox and publishes a demo page at jabbott.dev/Nadir/; a features file covers the roadmap
+
+- **Status:** Accepted
+- **Date:** 2026-10-31
+- **Context:**
+  - The user asked for a CI/CD workflow that deploys a working demo of
+    the engine showing its features. The page should match jabbott.dev's
+    style and list the features, each with a description, below the demo,
+    and it should update by itself with each build and its features.
+  - The engine is desktop-only, with no web or WASM build (ADR-0001), and
+    so far runs only on Linux: M1.5 and M1.6 are open.
+  - GitHub Pages already served `https://jabbott.dev/Nadir/`: Jekyll
+    rendered `main`'s README there, and jabbott.dev's Deployments menu
+    links to it.
+  - `docs/04-quality.md` allowed only `actions/checkout`, `actions/cache`
+    and the artifact actions, with `contents: read` outside release jobs.
+    A Pages deployment needs GitHub's Pages actions, with `pages: write`
+    and `id-token: write`.
+  - CI already draws offscreen on Mesa's llvmpipe, for the goldens.
+- **Decision** (the user chose on 2026-10-31: the demo recorded in CI,
+  replacing the page at `/Nadir/`, a features file with a check, and
+  jabbott.dev's live stylesheet):
+  - **A recording, not a web build:** ADR-0001 stands.
+    - `App::offscreen(size)` runs a game with no window. Each
+      `Offscreen::frame(elapsed, events)` updates, draws into a render
+      target on an offscreen context, and returns the pixels.
+    - The sandbox's `--capture DIR` draws 600 frames, one tick each (10 s),
+      at the virtual resolution, 480 × 270. It writes them raw, with a
+      `capture.json` of the run's numbers.
+    - In the field, a fixed list of key presses in the code walks the
+      person. A committed replay would need recording again whenever the
+      action map changed; `--replay` still plays one in its place.
+  - **`cargo xtask site [--out DIR]`** builds the page into
+    `target/site`, running external tools but making no network calls.
+    `DIR` must be new, empty, or one an earlier run made and marked, and a
+    run removes only what an earlier one wrote. It:
+    - it checks the features, and builds the sandbox in release;
+    - captures `field`, `stress-sprites` and `stress-entities`;
+    - encodes each with GStreamer (`gst-launch-1.0`) into a VP9 WebM, at
+      twice the size with nearest-neighbour scaling, and a PNG poster;
+    - packs the sandbox with `assets/` into a Linux x86_64 `.tar.gz` with
+      `tar`, with its SHA-256 from `sha256sum` and the oldest glibc it runs
+      on, read from the version names in the executable;
+    - and fills `site/index.html` from `git`, `cargo metadata`, the
+      roadmap, the features and the captures, beside `site/nadir.css` and
+      `site/nadir.js`.
+  - **`.github/workflows/pages.yml`:**
+    - It runs after CI succeeds on a push to `jabbott-iii/Nadir`'s `main`
+      (`workflow_run`), or by hand from `main`.
+    - A gate job, which waits in no queue, skips a commit `main` has moved
+      past. The build and the deploy then each wait in a queue of their
+      own, so a run that will not publish never displaces one that will.
+    - A run by hand publishes only a commit whose push to `main` CI passed,
+      as the page says; its gate has `actions: read` to find that run.
+    - It builds the commit CI passed on `ubuntu-latest` with `contents:
+      read`, checking `main` again when the build starts. The build and the
+      deploy run only in the attempt whose gate let them through: "Re-run
+      failed jobs" keeps the gate's old answer and skips them, and "Re-run
+      all jobs", which asks the gate again, or a run by hand is how to
+      retry. Each attempt uploads its own artifact, `github-pages-<attempt>`,
+      since a run's artifacts include every attempt's and
+      `actions/deploy-pages` refuses two of one name.
+    - Only its deploy job has `pages: write` and `id-token: write`.
+    - It may use `actions/upload-pages-artifact` and `actions/deploy-pages`,
+      pinned by SHA, besides the actions `ci.yml` may use.
+    - The repository's Pages source becomes "GitHub Actions".
+  - **`docs/features.jsonc`** lists the features, each with an area, a
+    description and the roadmap tasks it needs. The page marks each one
+    shipped, in progress or planned from the roadmap's ticks.
+    Each feature also lists, as `ticked`, the tasks that were ticked when
+    its summary was written. `cargo xtask features`, part of `ci`, fails
+    when a ticked task belongs to no feature, a feature names a task the
+    roadmap lacks, or a feature's `ticked` is not what the roadmap ticks:
+    ticking a task means bringing its feature's summary up to date.
+  - **The page loads jabbott.dev's own stylesheet and script**, and its
+    header and footer repeat that site's. `site/nadir.css` adds the page's
+    own components with that site's tokens.
+  - **The download:** the sandbox looks for `assets` beside its executable
+    first, as the download has it, then the workspace's.
+- **Consequences:**
+  - Good:
+    - The page shows what the commit draws, with numbers from that run:
+      the field's 600 frames were the same bytes on llvmpipe and on an
+      RTX 3070.
+    - The features move with the roadmap's ticks, and the check makes each
+      task describe what it ships.
+    - No crate is added, and nothing in the engine is web-specific.
+  - Bad:
+    - A publishing job holds write tokens, through two more actions.
+    - Publishing depends on Ubuntu's Mesa and GStreamer packages.
+    - The page depends on jabbott.dev's markup and class names.
+    - The videos are VP9 WebM only:
+      - Ubuntu's `openh264enc` ignored its bitrate and wrote the crowd at
+        14 Mbps, so there is no H.264 copy. A browser without VP9 WebM
+        shows the poster.
+      - Chromium decoded `colorimetry=bt709` 10 levels too green, so the
+        frames are converted with GStreamer's default, BT.601, which comes
+        back within 2 levels: about 43 dB for the field.
+      - The 10,000-sprite crowd does not compress well: about 6.5 MB, at
+        about 20 dB.
+    - Building the page took 54 to 63 s on the development machine, on
+      llvmpipe. It is a workflow of its own after CI for each push to
+      `main`.
+    - When the newest commit fails CI, the page waits for the next one
+      that passes.
+    - The download needs Linux x86_64 with X11, EGL and the glibc its
+      executable names (2.34 on 2026-10-31). It is not the release package
+      (`docs/05-release.md`).
+- **Alternatives considered:**
+  - A WASM build that plays in the browser: it reverses ADR-0001, and
+    needs a web platform layer, WebGL and the browser's event loop.
+  - Run the windowed sandbox under Xvfb and record the screen with ffmpeg:
+    the frames would follow the wall clock on llvmpipe, and differ from
+    run to run.
+  - QOI frames played on a canvas by the page: pixel-exact, but 10 to
+    100 KB a frame, tens of MB a scene.
+  - ffmpeg in place of GStreamer: it is not installed on the development
+    machine, so the pipeline could not be run before CI. GStreamer's ran
+    here exactly as CI runs it.
+  - Keep the README at `/Nadir/` and the demo at `/Nadir/demo/`: the
+    workflow would have to render Markdown too.
+  - Features generated from the roadmap's task titles: they read as a
+    task list.
+  - A copy of jabbott.dev's styles in the repository: it would not follow
+    that site's changes.
+  - Push the page to a `gh-pages` branch with `contents: write`: that token
+    could write any branch, where the Pages deployment's token can write
+    only Pages.
+- **Revisit when:** a build that plays in the browser becomes a goal
+  (ADR-0001); Windows or macOS draws (M1.5 and M2.6, M1.6 and M2.7) and
+  the page can offer their downloads, built on those runners, or M11.1's
+  packages; jabbott.dev changes its markup or class
+  names; an H.264 encoder on the runner honors its bitrate, or visitors
+  without VP9 matter; or the page's job takes more than 10 minutes.

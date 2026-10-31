@@ -34,6 +34,7 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | `crates/collision` | `docs/subsystems/collision.md` |
 | `crates/debug` | `docs/subsystems/debug-tools.md` |
 | Tests, CI, `xtask` | `docs/04-quality.md` |
+| The demo page: `site/`, `docs/features.jsonc`, `.github/workflows/pages.yml` | `docs/04-quality.md` ("Demo page"), ADR-0029 |
 | Packaging, signing, crash reports | `docs/05-release.md` |
 | Why something is the way it is | `docs/decisions.md` |
 
@@ -100,18 +101,21 @@ exist until the roadmap task that creates it is done. Check before assuming.
 
 | Command | What it does |
 | :- | :- |
-| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), tests, `deps`, `layers`, `unsafe-audit`: the full PR gate |
+| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), tests, `deps`, `layers`, `unsafe-audit`, `release-no-dev`, `features`: the full PR gate |
 | `cargo xtask deps` | Fails if `Cargo.lock` contains any non-workspace package not approved in the policy |
 | `cargo xtask layers` | Fails if a crate depends on a crate the dependency matrix forbids |
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the allowed crates or lacks a `SAFETY:` comment |
+| `cargo xtask features` | Fails if a ticked roadmap task belongs to no feature in `docs/features.jsonc`, or a feature's `ticked` is not what the roadmap ticks |
 | `cargo xtask golden [--bless] [--backend gl\|metal]` | Renders golden scenes offscreen and compares them to references |
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the dependency-free mutation fuzzer over every parser, or over one |
 | `cargo xtask cook` | Cooks `assets/` into `target/cooked/` |
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
+| `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |
 | `cargo run -p sandbox` | Runs the sandbox game (opens a window) |
 
 `xtask` never uploads, publishes or signs with real credentials. Publishing
-happens only in CI release jobs.
+happens only in CI: the release jobs, and the demo page's workflow
+(`.github/workflows/pages.yml`, ADR-0029).
 
 ## Conventions
 
@@ -148,7 +152,10 @@ happens only in CI release jobs.
    real result.
 3. The checkbox is ticked only after steps 1 and 2.
 4. Docs are updated if behavior or design changed. If a decision changed,
-   add an ADR in `docs/decisions.md`.
+   add an ADR in `docs/decisions.md`. A ticked task belongs to a feature in
+   `docs/features.jsonc`, which the demo page lists: add it to one, or
+   describe a new one, and rewrite the feature's summary for what is built
+   now and update its `ticked` (`cargo xtask features` checks).
 5. The final message summarizes:
    - changes and files affected
    - validation performed

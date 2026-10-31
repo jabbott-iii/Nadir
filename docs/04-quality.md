@@ -50,11 +50,12 @@ pub fn check_sized<T: std::fmt::Debug>(
   facade fail unless the renderer's name contains it (`llvmpipe` in CI).
   Otherwise they log the renderer and take any. Where `nadir-platform` has
   no offscreen context yet (Windows and macOS, until M2.6 and M2.7), the
-  gfx and render tests skip, and the facade's steady-frame test runs
-  without drawing, but only while the variable is unset.
-  - The facade's test is behind its `dev` feature, not `headless-test`, so
-    `cargo test -p nadir --features dev` on Linux needs EGL and an OpenGL
-    3.3 driver.
+  gfx and render tests skip, the facade's steady-frame test runs without
+  drawing, and its offscreen-frame tests (`App::offscreen`, ADR-0029)
+  return early, but only while the variable is unset.
+  - The facade's tests are behind its `dev` feature, not `headless-test`,
+    so `cargo test -p nadir --features dev` on Linux needs EGL and an
+    OpenGL 3.3 driver.
 - A nightly job runs with random seeds and prints the seeds it used.
 - Shrinking is deliberately minimal, and only `check_sized` does it: the
   harness retries a failing case at every smaller size and reports the
@@ -340,6 +341,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 | `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |
 | `unsafe-audit` | Scans `*.rs`, ignoring comments and string literals: no `unsafe` outside `sys`/`platform`/`gfx`; `allow`, `expect` or `warn(unsafe_code)` only in those three crate roots; every `unsafe {` / `unsafe impl` preceded by a `// SAFETY:` comment that ends at most 3 lines above it; prints a per-crate `unsafe` count (reviewed if it grows) |
 | `release-no-dev` | Runs `cargo tree -p sandbox -e normal --prefix none` without the `dev` feature and fails if `nadir-debug` appears |
+| `features` | Reads `docs/features.jsonc` with `nadir-codec::json` and the roadmap's task lines (`- [x] **M3.3 — …**`, or `[X]`). Fails when a line looks like a task's (a list item, indented, quoted or numbered or not, with a checkbox of one character and, anywhere after it, the start of a task ID such as `M5.3` or `m5.3`, bold or not, outside a longer word) but cannot be read as one, two tasks share an ID, a ticked task belongs to no feature, a feature's `ticked` (the tasks ticked when its summary was written) is not what the roadmap ticks or names a task the feature does not need, a feature names a task the roadmap lacks or names one twice, two features share a name, or an entry is not an object of `name`, `area`, `summary` (none blank) and `tasks` (at least one ID). Notes how many features are shipped, in progress and planned (ADR-0029) |
 | `ci` | All of the above in order; stops at the first failure and prints a summary table |
 
 Each check is also a subcommand (`cargo xtask deps`). The exit status is 0
@@ -385,13 +387,73 @@ understood.
   - property tests with random seeds
   - a full asset cook of `assets/`
 - **Release (tag `v*`):** see `docs/05-release.md`.
+- **Demo page** (`.github/workflows/pages.yml`, ADR-0029): publishes
+  <https://jabbott.dev/Nadir/> through GitHub Pages, whose source must be
+  "GitHub Actions" in the repository's settings.
+  1. It runs after CI succeeds on a push to `jabbott-iii/Nadir`'s `main`
+     (`workflow_run`), or by hand from `main`. A first job, `gate`, which
+     waits for nothing, stops there if `main` has moved past the commit:
+     that commit's own run publishes, so the page never goes back to an
+     older commit. A run by hand also stops there unless CI has a
+     successful run of a push of that commit to `main` (`actions: read`).
+     Only then does a run join the queues below, so a run that will not
+     publish never displaces one that will.
+     - The build and the deploy each have a queue of their own
+       (`pages-build`, `pages-deploy`): one runs at a time, and one that
+       waits is replaced by the next one let through, a newer commit's.
+     - The build checks `main` again when it starts, since it may have
+       waited. The deploys then run in the order the builds did, which is
+       the order of `main`'s commits.
+     - The build and the deploy run only in the attempt whose gate let
+       them through: a re-run of only the failed jobs, which keeps the
+       gate's old answer, skips them. "Re-run all jobs", which asks the
+       gate again, or a run by hand is how to retry. Each attempt uploads
+       its own artifact, `github-pages-<attempt>`, since an artifact
+       belongs to the whole run and `actions/deploy-pages` refuses two of
+       one name.
+     - When the newest commit fails CI, the page waits for the next one
+       that passes.
+  2. On `ubuntu-latest`, with `contents: read`, the build checks out the
+     commit CI passed, installs EGL, Mesa and GStreamer
+     (`gstreamer1.0-tools`, `-plugins-base`, `-plugins-good`) and runs
+     `cargo xtask site` with `LIBGL_ALWAYS_SOFTWARE=1`:
+     - it checks `docs/features.jsonc` as `cargo xtask features` does;
+     - builds the sandbox in release, and captures each scene with
+       `--capture`: 600 frames of 480 × 270, a tick each, drawn by
+       llvmpipe;
+     - encodes each into a VP9 WebM at twice the size (each pixel a square
+       of four, which 4:2:0 chroma keeps whole) and a PNG poster;
+     - packs the sandbox and `assets/` into
+       `downloads/nadir-sandbox-linux-x86_64.tar.gz`, with its SHA-256 and
+       the oldest glibc it runs on, read from the version names in the
+       executable;
+     - and fills `site/index.html` from the commit, the workspace, the
+       roadmap, the features and the captures' `capture.json`, beside
+       `site/nadir.css` and `site/nadir.js`.
+  3. `actions/upload-pages-artifact` uploads `target/site`, and the deploy
+     job, the only one with `pages: write` and `id-token: write`, publishes
+     it with `actions/deploy-pages`.
+
+  The page loads jabbott.dev's own stylesheet and script as that site
+  serves them, and its header and footer repeat that site's: a change to
+  that site's markup may need `site/index.html` to follow. The page's own
+  files, `nadir.css`, `nadir.js`, the media and the download, carry the
+  commit in their addresses (`?v=`), so a page and the files it names stay
+  together through browsers' caches. A page built on a developer's machine
+  (`cargo xtask site`, about a minute) needs the same packages. `--out DIR` must be new, empty, or made by an earlier
+  run, which leaves the mark `.nadir-site`; a run removes only what an
+  earlier one wrote.
 - **Supply-chain hygiene for CI itself:**
   - Pin every action by full commit SHA, with the tag as a comment.
   - Grant `permissions: contents: read` by default, and elevate only in
-    release jobs.
-  - Use no third-party actions beyond `actions/checkout` and
-    `actions/upload-artifact`/`download-artifact`. Install the toolchain with
-    `rustup` commands directly.
+    release jobs and the demo page's workflow: `actions: read` for its gate,
+    to find CI's runs of a commit, and `pages: write` and `id-token: write`
+    for its deploy job.
+  - Use no third-party actions beyond `actions/checkout`,
+    `actions/cache` and `actions/upload-artifact`/`download-artifact`, and,
+    in the demo page's workflow only, `actions/upload-pages-artifact` and
+    `actions/deploy-pages` (ADR-0029). Install the toolchain with `rustup`
+    commands directly.
 - **Caching:** cache `~/.cargo/registry` and `target/` keyed on the
   `Cargo.lock` + `rust-toolchain.toml` hash using `actions/cache`
   (SHA-pinned).

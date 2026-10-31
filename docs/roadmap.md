@@ -937,6 +937,9 @@ testing in CI.
     drawing where there is no offscreen context. Once this one exists, it
     draws, and it fails rather than skips on a context that fails another
     way, as the gfx and render tests do.
+  - Note (from ADR-0029): so do the facade's `offscreen_frames` tests, and
+    the sandbox's `--capture`, which the demo page's workflow runs on
+    Linux only.
   - Depends: M2.3, M1.5
   - Do: the dummy-window dance, `wglChoosePixelFormatARB`, a 3.3 core
     context, `wglSwapIntervalEXT`, GL 1.1 symbols from `opengl32.dll`.
@@ -972,6 +975,9 @@ testing in CI.
     drawing where there is no offscreen context. Once this one exists, it
     draws, and it fails rather than skips on a context that fails another
     way, as the gfx and render tests do.
+  - Note (from ADR-0029): so do the facade's `offscreen_frames` tests, and
+    the sandbox's `--capture`, which the demo page's workflow runs on
+    Linux only.
   - Depends: M2.3, M1.6
   - Do: the pixel format, a 3.2-core-profile (4.1) context, Retina backing,
     swap interval, `dlopen` of the OpenGL framework.

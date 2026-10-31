@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::error::Error;
-use crate::{cargo, deps, layers, release_no_dev, unsafe_audit};
+use crate::{cargo, deps, features, layers, release_no_dev, unsafe_audit};
 
 /// What a check found.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -64,6 +64,11 @@ pub(crate) const CHECKS: &[Check] = &[
         name: "release-no-dev",
         about: "nadir-debug is not in the sandbox's dependency tree without `dev`",
         run: release_no_dev::run,
+    },
+    Check {
+        name: "features",
+        about: "Every ticked roadmap task belongs to a feature in docs/features.jsonc",
+        run: features::run,
     },
 ];
 
@@ -368,7 +373,8 @@ mod tests {
                 "deps",
                 "layers",
                 "unsafe-audit",
-                "release-no-dev"
+                "release-no-dev",
+                "features"
             ]
         );
     }

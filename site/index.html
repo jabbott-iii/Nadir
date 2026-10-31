@@ -1,0 +1,206 @@
+<!doctype html>
+<!--
+  The demo page's template (ADR-0029). `cargo xtask site` fills each
+  placeholder in double braces and writes the page into target/site,
+  beside nadir.css, nadir.js and the recordings. The header and footer
+  repeat jabbott.dev's, whose stylesheet and script the page loads: keep
+  them in step with that site's.
+-->
+<html lang="en-US" data-site-url="https://jabbott.dev" data-github="jabbott-iii">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0c0d">
+<script>document.documentElement.classList.add('js')</script>
+<title>Nadir engine demo | Joseph Abbott III</title>
+<meta name="description" content="{{description}}">
+<meta name="author" content="Joseph Abbott III">
+<link rel="canonical" href="https://jabbott.dev/Nadir/">
+<link rel="author" href="https://jabbott.dev/resume/">
+<meta property="og:site_name" content="Joseph Abbott III">
+<meta property="og:locale" content="en_US">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Nadir engine demo">
+<meta property="og:description" content="{{description}}">
+<meta property="og:url" content="https://jabbott.dev/Nadir/">
+<meta property="og:image" content="https://jabbott.dev/Nadir/{{poster}}">
+<meta property="og:image:alt" content="A frame of the Nadir sandbox, drawn by the engine">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@jabbottiii">
+<link rel="icon" href="https://jabbott.dev/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Saira:wght@300;400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://jabbott.dev/assets/css/style.css">
+<link rel="stylesheet" href="nadir.css?v={{commit_short}}">
+<script src="https://jabbott.dev/assets/js/site.js" defer></script>
+<script src="nadir.js?v={{commit_short}}" defer></script>
+</head>
+<body class="page--default">
+<div class="space" aria-hidden="true">
+  <div class="space__planet"></div>
+  <div class="space__stars"></div>
+  <div class="space__stars space__stars--far"></div>
+  <div class="space__grid"></div>
+</div>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="https://jabbott.dev/" aria-label="Joseph Abbott III, engineering log home">
+      <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32 4 56 18v28L32 60 8 46V18Z" fill="none" stroke="currentColor" stroke-width="2.5" class="mark__hex"/><path d="M32 12 50 22.5v19L32 52 14 41.5v-19Z" fill="currentColor" opacity=".08"/><path d="M32 17 45 42h-7.2L32 30.6 26.2 42H19Z" fill="#eef2f3"/><path d="M28.6 46h6.8L32 52Z" fill="#f2c200"/></svg>
+      <span class="brand__text">
+        <span class="brand__name">JABBOTT<span class="brand__tld">.DEV</span></span>
+        <span class="brand__sub">Engineering Log</span>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" data-nav-toggle>
+      <span class="sr-only">Menu</span>
+      <span class="nav-toggle__bars" aria-hidden="true"></span>
+    </button>
+    <nav class="site-nav" id="site-nav" aria-label="Primary">
+      <a class="btn btn--amber" href="https://jabbott.dev/">
+        <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M4 6h2M9 6h11M4 12h2M9 12h11M4 18h2M9 18h7"/></svg>
+        <span>Log</span>
+      </a>
+      <div class="deploy" data-deploy>
+        <a class="btn btn--ghost deploy__toggle is-current" href="https://jabbott.dev/deployments/" aria-controls="deploy-panel" data-deploy-toggle>
+          <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><circle cx="12" cy="12" r="2"/><path d="M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14M8 16a5.5 5.5 0 0 1 0-8M16 8a5.5 5.5 0 0 1 0 8"/></svg>
+          <span>Deployments</span>
+          <svg class="icon deploy__chevron" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M6 9l6 6 6-6"/></svg>
+        </a>
+        <div class="deploy__panel panel panel--brackets" id="deploy-panel" data-deploy-panel hidden>
+          <p class="deploy__heading">Deployed from repositories</p>
+          <ul class="deploy-list" data-deploy-list>
+            <li class="deploy-item" data-deploy-repo="jabbott-iii/nadir">
+              <a class="deploy-item__link" href="https://jabbott.dev/Nadir/">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span class="deploy-item__name">Nadir</span>
+                <span class="deploy-item__host">jabbott.dev/Nadir/</span>
+              </a>
+              <a class="deploy-item__repo" href="{{repository_url}}" target="_blank" rel="noopener" aria-label="Nadir repository on GitHub"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></a>
+            </li>
+          </ul>
+          <p class="deploy__status" data-deploy-status hidden></p>
+          <a class="link-arrow link-arrow--sm" href="https://jabbott.dev/deployments/">All deployments <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 12h16M13 6l6 6-6 6"/></svg></a>
+        </div>
+      </div>
+      <a class="btn btn--amber" href="https://jabbott.dev/resume/">
+        <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 5h18v14H3z"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.6-1.3 1.6-2 3-2s2.4.7 3 2M14 10h4M14 13.5h4"/></svg>
+        <span>Resume</span>
+      </a>
+      <a class="btn btn--teal" href="https://github.com/jabbott-iii" rel="me noopener" target="_blank">
+        <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        <span>GitHub</span>
+        <span class="sr-only">(opens in a new tab)</span>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="site-main">
+  <div class="container">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="https://jabbott.dev/">Log</a></li>
+        <li><a href="https://jabbott.dev/deployments/">Deployments</a></li>
+        <li aria-current="page">Nadir</li>
+      </ol>
+    </nav>
+
+    <header class="page-head">
+      <div>
+        <p class="eyebrow">Engine demo <span class="nadir-sep">//</span> Rust</p>
+        <h1 class="section-title section-title--xl">Nadir</h1>
+      </div>
+      <p class="page-head__lede">{{lede}}</p>
+    </header>
+
+    <div class="nadir-demo">
+      <section class="nadir-player panel panel--brackets" aria-labelledby="demo-title">
+        <div class="nadir-player__head">
+          <p class="kicker" id="demo-title"><span class="status-dot" aria-hidden="true"></span> Live build <span class="kicker__sep">//</span> <a class="nadir-mono" href="{{commit_url}}">{{commit_short}}</a></p>
+          <div class="chips nadir-tabs" role="tablist" aria-label="Choose a scene" data-scene-tabs hidden>
+{{scene_tabs}}
+          </div>
+        </div>
+{{scenes}}
+      </section>
+
+      <aside class="nadir-build panel panel--brackets" aria-labelledby="build-title">
+        <h2 class="side-panel__title" id="build-title">This build</h2>
+        <dl class="spec nadir-spec">
+          <div><dt>Commit</dt><dd><a class="nadir-mono" href="{{commit_url}}">{{commit_short}}</a></dd></div>
+          <div><dt>Date</dt><dd>{{commit_date}}</dd></div>
+          <div><dt>Rust</dt><dd>{{toolchain}}</dd></div>
+          <div><dt>Crates</dt><dd>{{crates}} in the workspace</dd></div>
+          <div><dt>Third-party</dt><dd>{{third_party}}</dd></div>
+          <div><dt>Roadmap</dt><dd>{{tasks_done}} of {{tasks_total}} tasks</dd></div>
+        </dl>
+        <p class="side-panel__text nadir-subject">Latest change: <span class="nadir-mono">{{commit_subject}}</span></p>
+        <ol class="nadir-milestones" aria-label="Roadmap milestones">
+{{milestones}}
+        </ol>
+{{download}}
+        <div class="btn-row">
+          <a class="btn btn--ghost btn--sm" href="{{repository_url}}" target="_blank" rel="noopener"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span>Repository</span></a>
+          <a class="btn btn--ghost btn--sm" href="{{repository_url}}/blob/{{commit}}/docs/roadmap.md" target="_blank" rel="noopener"><svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M4 6h2M9 6h11M4 12h2M9 12h11M4 18h2M9 18h7"/></svg><span>Roadmap</span></a>
+        </div>
+      </aside>
+    </div>
+
+    <section class="nadir-features" aria-labelledby="features-title">
+      <div class="section-head">
+        <h2 class="section-title" id="features-title">Features</h2>
+        <div class="chips" role="group" aria-label="Show features by status" data-feature-filters hidden>
+{{feature_filters}}
+        </div>
+      </div>
+      <p class="nadir-features__lede">{{features_lede}}</p>
+      <div class="nadir-feature-grid" data-features>
+{{features}}
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="https://jabbott.dev/">
+          <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32 4 56 18v28L32 60 8 46V18Z" fill="none" stroke="currentColor" stroke-width="2.5" class="mark__hex"/><path d="M32 12 50 22.5v19L32 52 14 41.5v-19Z" fill="currentColor" opacity=".08"/><path d="M32 17 45 42h-7.2L32 30.6 26.2 42H19Z" fill="#eef2f3"/><path d="M28.6 46h6.8L32 52Z" fill="#f2c200"/></svg>
+          <span class="brand__text">
+            <span class="brand__name">JABBOTT<span class="brand__tld">.DEV</span></span>
+            <span class="brand__sub">Engineering Log</span>
+          </span>
+        </a>
+        <p>Engineering log of Joseph Abbott III, software engineer and U.S. Marine Corps veteran: release notes and project updates.</p>
+      </div>
+      <div>
+        <p class="footer-title">Navigate</p>
+        <ul class="footer-links">
+          <li><a href="https://jabbott.dev/">Engineering log</a></li>
+          <li><a href="https://jabbott.dev/resume/">Resume</a></li>
+          <li><a href="https://jabbott.dev/deployments/">Deployments</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="footer-title">Elsewhere</p>
+        <ul class="footer-links">
+          <li><a href="https://github.com/jabbott-iii" rel="me noopener">GitHub</a></li>
+          <li><a href="https://www.linkedin.com/in/josephabbottiii/" rel="me noopener">LinkedIn</a></li>
+          <li><a href="https://x.com/jabbottiii" rel="me noopener">X</a></li>
+          <li><a href="https://jabbott.dev/llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>&copy; 2026 Joseph Abbott III</span>
+      <span>Built from <a class="nadir-mono" href="{{commit_url}}">{{commit_short}}</a> by Nadir's own CI</span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,307 @@
+// The engine's features, as the demo page at https://jabbott.dev/Nadir/
+// lists them below the demo (ADR-0029).
+//
+// Each feature names the roadmap tasks it needs (`docs/roadmap.md`). The
+// page marks it shipped when all of them are ticked, in progress when some
+// are, and planned when none are. `cargo xtask features`, part of
+// `cargo xtask ci`, fails when a ticked task belongs to no feature, or when a
+// feature's `ticked` is not what the roadmap ticks: the task that ships
+// something adds it to a feature here, or describes a new one, and brings
+// its feature's summary up to date.
+//
+// - `name`: a few words.
+// - `area`: Core, Platform, Graphics, Simulation, Content, Audio, Tools,
+//   Quality or Release.
+// - `summary`: what it does, for a reader who has not seen the code, in a
+//   sentence or three. What the ticked tasks built is in the present tense,
+//   and what is still to come in the future tense, so a planned feature's
+//   summary says what it will do. A task that is ticked rewrites its
+//   feature's summary to match. Speak of future work only from the
+//   feature's own `tasks`, and give no count that another feature's tasks
+//   will change: the check cannot tell a summary that another feature's
+//   task was ticked.
+// - `tasks`: the roadmap task IDs.
+// - `ticked`: those of `tasks` that were ticked when `summary` was written;
+//   left out when none were. The check fails when it is not what the
+//   roadmap ticks, so ticking a task means rewriting its feature's summary.
+{
+  "features": [
+    {
+      "name": "No third-party crates",
+      "area": "Quality",
+      "summary": "The game is built from this workspace's crates alone: its OS bindings, OpenGL backend, math, ECS, codecs and tools are written here, and beyond Rust's standard library it calls only the system's own libraries, such as Xlib, EGL and OpenGL. The build fails if the lock file gains a package from outside the workspace, and each crate may use only the crates the architecture's dependency matrix allows.",
+      "tasks": ["M0.1", "M0.6"],
+      "ticked": ["M0.1", "M0.6"]
+    },
+    {
+      "name": "Guardrails on every push",
+      "area": "Quality",
+      "summary": "Each push is formatted, linted with warnings as errors, tested, and checked for dependencies, layering and unsafe code on Windows, macOS and Linux. Unsafe code is allowed in three crates only, and the audit fails any unsafe block without a SAFETY comment.",
+      "tasks": ["M0.6", "M0.8"],
+      "ticked": ["M0.6", "M0.8"]
+    },
+    {
+      "name": "Fuzzing and benchmarks",
+      "area": "Quality",
+      "summary": "A mutation fuzzer of our own runs each parser of the codec crate in CI, with a hang watchdog, and saves an input that panics or hangs one. A benchmark harness reports medians and 95th percentiles against a recorded baseline.",
+      "tasks": ["M0.7"],
+      "ticked": ["M0.7"]
+    },
+    {
+      "name": "Math, color and geometry",
+      "area": "Core",
+      "summary": "Vectors, 3 × 3 matrices, 2D affine transforms, rectangles, and colors with sRGB conversions, checked by property tests such as inverse round trips and symmetric intersections.",
+      "tasks": ["M0.2"],
+      "ticked": ["M0.2"]
+    },
+    {
+      "name": "Handles, hashing and random numbers",
+      "area": "Core",
+      "summary": "Generational arenas and typed handles that catch a stale reference, FNV-1a, a fast hasher for maps, CRC-32 and the PCG32 generator, each checked against reference values.",
+      "tasks": ["M0.3"],
+      "ticked": ["M0.3"]
+    },
+    {
+      "name": "Logging, time and test tools",
+      "area": "Core",
+      "summary": "Log macros with rotating files and an in-memory ring, calendar time without the OS, a command-line parser, profile scopes, and a property-test helper that prints the seed of a failure so that it can be run again.",
+      "tasks": ["M0.4"],
+      "ticked": ["M0.4"]
+    },
+    {
+      "name": "JSON and JSONC",
+      "area": "Content",
+      "summary": "A parser and writer for JSON, with comments and trailing commas allowed in JSONC. Bad input gets an error with its line and column, never a panic, and limits on depth, sizes and counts keep a hostile file from exhausting memory.",
+      "tasks": ["M0.5"],
+      "ticked": ["M0.5"]
+    },
+    {
+      "name": "Native windows on every desktop",
+      "area": "Platform",
+      "summary": "Windows, keys, mouse, focus, resizing, DPI scaling and borderless fullscreen through each system's own API, declared by hand. Linux, through X11 loaded at run time, is done. The Win32 and Cocoa versions build and pass CI, and will be done once they are checked by hand on Windows and macOS.",
+      "tasks": ["M1.1", "M1.2", "M1.5", "M1.6"],
+      "ticked": ["M1.1", "M1.2"]
+    },
+    {
+      "name": "Fixed-tick main loop",
+      "area": "Simulation",
+      "summary": "The simulation steps exactly 60 times a second whatever the frame rate, and each frame draws between the last two ticks, so motion is smooth at 60, 144 or uncapped frames a second. A tap between two ticks still counts, and a long stall is clamped instead of spiraling into catch-up ticks.",
+      "tasks": ["M1.3", "M3.4"],
+      "ticked": ["M1.3", "M3.4"]
+    },
+    {
+      "name": "Log files and fatal errors",
+      "area": "Platform",
+      "summary": "On Linux the game finds its folders where the system expects them, writes each run's log there and keeps the last three, and logs and reports an error that ends the game before it exits. Windows and macOS will follow, with their windows.",
+      "tasks": ["M1.4", "M1.5", "M1.6"],
+      "ticked": ["M1.4"]
+    },
+    {
+      "name": "OpenGL 3.3 on every desktop",
+      "area": "Graphics",
+      "summary": "An OpenGL 3.3 core context with vsync through EGL on Linux, and an offscreen context that the tests and these recordings draw with. WGL on Windows and NSOpenGL on macOS will follow.",
+      "tasks": ["M2.1", "M2.2", "M2.6", "M2.7"],
+      "ticked": ["M2.1", "M2.2"]
+    },
+    {
+      "name": "A small graphics interface",
+      "area": "Graphics",
+      "summary": "A thin layer over OpenGL 3.3 core: textures, buffers, render targets, pipelines, instanced draws, scissor and readback, with a state cache. Using a destroyed resource is an error rather than a wrong frame, and a shader that fails to compile reports the driver's log.",
+      "tasks": ["M2.3"],
+      "ticked": ["M2.3"]
+    },
+    {
+      "name": "Golden-image tests",
+      "area": "Quality",
+      "summary": "Scenes of the renderer are drawn offscreen on Mesa's software renderer in CI and compared with committed reference images within a small tolerance. A scene that differs uploads what it drew and an image of where.",
+      "tasks": ["M2.4", "M2.5"],
+      "ticked": ["M2.4", "M2.5"]
+    },
+    {
+      "name": "Sprites, y-sorting and a pixel-perfect camera",
+      "area": "Graphics",
+      "summary": "Sprites are sorted by layer and by where their feet are, so what stands lower on screen is drawn in front, then packed into instanced batches. A 2D camera draws at a fixed virtual resolution and scales it up by whole numbers, letterboxed, so every pixel stays square.",
+      "tasks": ["M3.3"],
+      "ticked": ["M3.3"]
+    },
+    {
+      "name": "10,000 sprites with no allocation",
+      "area": "Graphics",
+      "summary": "The stress scene draws 10,203 sprites in 2 batches. A test counts every allocation the engine makes through Rust's allocator in the real loop and finds none in 100 steady frames, and sorting and batching such a frame takes about 0.74 ms on an i7-11800H.",
+      "tasks": ["M3.5"],
+      "ticked": ["M3.5"]
+    },
+    {
+      "name": "Input actions",
+      "area": "Simulation",
+      "summary": "Keys and mouse buttons map to named actions, buttons or 2D axes such as WASD, latched once a tick so that nothing pressed between ticks is lost. A text mode mutes the game's bindings while a text field has the keyboard, and the actions can be recorded for replays.",
+      "tasks": ["M3.1"],
+      "ticked": ["M3.1"]
+    },
+    {
+      "name": "Asset loading",
+      "area": "Content",
+      "summary": "Typed handles to assets loaded from files: the same path gives the same handle, and a development build shows a placeholder for anything missing. Loading on worker threads, in scopes that unload together, will follow.",
+      "tasks": ["M3.2", "M5.3"],
+      "ticked": ["M3.2"]
+    },
+    {
+      "name": "Entity component system",
+      "area": "Simulation",
+      "summary": "Generational entities with sparse-set storage, resources, events, deferred commands and a schedule of stages with run conditions; a borrow conflict names the system that caused it. The engine's own systems move, collide, animate and draw entities.",
+      "tasks": ["M4.1", "M4.4"],
+      "ticked": ["M4.1", "M4.4"]
+    },
+    {
+      "name": "Reflection",
+      "area": "Simulation",
+      "summary": "Macros describe structs and enums as dynamic values and back, with a registry of types and warnings for unknown fields. The determinism tests hash worlds through it.",
+      "tasks": ["M4.2"],
+      "ticked": ["M4.2"]
+    },
+    {
+      "name": "Collision and sliding movement",
+      "area": "Simulation",
+      "summary": "Boxes and circles, tile grids and a spatial hash, with move-and-slide in up to 16 substeps so that movers follow their path and slide along walls without snagging, plus sweeps, triggers and queries. 5,000 colliding entities tick in about 2.4 ms on an i7-11800H.",
+      "tasks": ["M4.3", "M4.8"],
+      "ticked": ["M4.3", "M4.8"]
+    },
+    {
+      "name": "Tilemaps",
+      "area": "Graphics",
+      "summary": "Tile layers drawn a chunk at a time from a cache, culled to the view, with animated tiles. Tall tiles become y-sorted sprites, and the same map gives the collision grid: the field in the demo is one.",
+      "tasks": ["M4.5"],
+      "ticked": ["M4.5"]
+    },
+    {
+      "name": "Sprite animation",
+      "area": "Graphics",
+      "summary": "Clips of frames that loop, or play once and send an event at the end, played by an Animator component and mirrored by the way the entity faces.",
+      "tasks": ["M4.6"],
+      "ticked": ["M4.6"]
+    },
+    {
+      "name": "Deterministic replays",
+      "area": "Quality",
+      "summary": "The input is recorded tick by tick and played back with no window. A test replays a stored recording and compares a hash of the reflected world with the stored sequence, so a change that makes the simulation nondeterministic fails it.",
+      "tasks": ["M4.7"],
+      "ticked": ["M4.7"]
+    },
+    {
+      "name": "QOI and PNG images",
+      "area": "Content",
+      "summary": "QOI encoding and decoding for the game's textures, and a PNG decoder, with an inflate and Adler-32 of its own, for the asset cooker. Each has hand-made test vectors and a fuzz target.",
+      "tasks": ["M2.4", "M5.1"],
+      "ticked": ["M2.4", "M5.1"]
+    },
+    {
+      "name": "Compression, binary JSON, fonts and WAV",
+      "area": "Content",
+      "summary": "KLZ, an LZ4-style block compression, and KBJ, a binary JSON with one encoding per value, both of which round-trip; and readers for BMFont's text format, as AngelCode, Hiero and other tools write it, and for WAV. All four reject malformed input and run under the fuzzer.",
+      "tasks": ["M5.2"],
+      "ticked": ["M5.2"]
+    },
+    {
+      "name": "Asset cooking",
+      "area": "Tools",
+      "summary": "An offline pipeline with an incremental cache will pack textures into atlases, import Aseprite animations, turn data files into KBJ, and prepare bitmap fonts.",
+      "tasks": ["M5.4", "M5.5"]
+    },
+    {
+      "name": "Levels and prefabs",
+      "area": "Content",
+      "summary": "Levels will be authored in LDtk, and prefabs will inherit from one another, both cooked and loaded into the world.",
+      "tasks": ["M5.6"]
+    },
+    {
+      "name": "Pack files",
+      "area": "Content",
+      "summary": "Cooked assets will ship in pack files, deduplicated and aligned, read through the same virtual file system as loose files, with a damaged entry detected and reported.",
+      "tasks": ["M5.7"]
+    },
+    {
+      "name": "Hot reload",
+      "area": "Tools",
+      "summary": "An edited asset will be cooked again and show in the running game within a second.",
+      "tasks": ["M5.8"]
+    },
+    {
+      "name": "Audio mixer",
+      "area": "Audio",
+      "summary": "A mixer of our own will play WAV and QOA-compressed sound through voices and buses, with constant-power panning, positional attenuation, fades and streaming, and a soak test will count underruns.",
+      "tasks": ["M6.1", "M6.2", "M6.6", "M6.7"]
+    },
+    {
+      "name": "Audio output on every desktop",
+      "area": "Platform",
+      "summary": "Sound will go out through ALSA on Linux, WASAPI on Windows and AudioUnit on macOS, and recover when a device is unplugged or plugged back in.",
+      "tasks": ["M6.3", "M6.4", "M6.5"]
+    },
+    {
+      "name": "Bitmap text",
+      "area": "Graphics",
+      "summary": "Text will be drawn from bitmap fonts, with wrapping, alignment, kerning and color markup.",
+      "tasks": ["M7.1"]
+    },
+    {
+      "name": "Developer tools",
+      "area": "Tools",
+      "summary": "An immediate-mode debug UI will carry a stats overlay, a profiler that exports traces, an entity inspector, a console, debug drawing and time controls, all left out of release builds.",
+      "tasks": ["M7.2", "M7.3", "M7.4", "M7.5", "M7.6"]
+    },
+    {
+      "name": "Gamepads",
+      "area": "Platform",
+      "summary": "Gamepads will work through evdev, XInput and GameController.framework, with hotplugging, deadzones, bindings, and button prompts that follow the device in use.",
+      "tasks": ["M8.1", "M8.2", "M8.3", "M8.4"]
+    },
+    {
+      "name": "Game states, menus and settings",
+      "area": "Simulation",
+      "summary": "A state machine will run the game's screens and level transitions, menus will work with keys, mouse or gamepad, and a settings file will keep what it does not understand.",
+      "tasks": ["M9.1", "M9.2", "M9.3"]
+    },
+    {
+      "name": "Saves",
+      "area": "Content",
+      "summary": "Saves will be written atomically with a backup and a checksum, and migrated from older versions.",
+      "tasks": ["M9.4"]
+    },
+    {
+      "name": "Pathfinding and enemy AI",
+      "area": "Simulation",
+      "summary": "A* with a budget and path smoothing, and flow fields, will steer the sandbox's enemies.",
+      "tasks": ["M9.5"]
+    },
+    {
+      "name": "Crash reports",
+      "area": "Release",
+      "summary": "Every panic will leave a report, and on Windows a native crash will leave a minidump, with symbols archived to read them.",
+      "tasks": ["M9.6", "M11.3"]
+    },
+    {
+      "name": "A complete level",
+      "area": "Release",
+      "summary": "One finished level of the real game will be built with the content pipeline, and played through by someone outside the team on each system.",
+      "tasks": ["M9.7"]
+    },
+    {
+      "name": "Metal on macOS",
+      "area": "Graphics",
+      "summary": "A Metal backend will sit behind the same graphics interface, with every shader in MSL, match the OpenGL golden images, and become the default on macOS.",
+      "tasks": ["M10.1", "M10.2", "M10.3", "M10.4"]
+    },
+    {
+      "name": "Signed packages for every desktop",
+      "area": "Release",
+      "summary": "Packages for Windows, macOS and Linux will be signed and notarized in CI, and smoke-tested from the package before each release.",
+      "tasks": ["M11.1", "M11.2", "M11.4"]
+    },
+    {
+      "name": "Release readiness",
+      "area": "Release",
+      "summary": "Every performance budget will be measured on a min-spec machine, the parsers will get a security pass, players will get documentation, and a release-candidate dry run will walk the release checklist.",
+      "tasks": ["M11.5", "M11.6", "M11.7", "M11.8"]
+    }
+  ]
+}

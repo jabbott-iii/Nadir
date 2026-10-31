@@ -12,7 +12,9 @@
 //! from [`Clips`] on its entity's sprite, and [`Facing`] mirrors it
 //! (ADR-0024). [`App::play_replay`] plays recorded actions in place of the
 //! live input, and [`App::world_hash`] hashes the reflected world, for
-//! determinism tests (ADR-0025). The game's tile layers are the
+//! determinism tests (ADR-0025). [`App::offscreen`] draws the game with
+//! no window, a frame at a time, for recordings such as the demo page's
+//! (ADR-0029). The game's tile layers are the
 //! resource [`TileLayers`](nadir_render::TileLayers), which the renderer
 //! draws from (ADR-0023). With the `dev` feature, the global
 //! allocator counts allocations, and the resource `FrameAllocs` holds the
@@ -55,7 +57,7 @@ pub use {
 };
 
 pub use animation::{AnimationFinished, Animator, Clip, ClipFrame, Clips, Playback};
-pub use app::{App, Config, TICK_HZ};
+pub use app::{App, Config, Offscreen, TICK_HZ};
 pub use collisions::{Collisions, TriggerEnter, TriggerExit};
 pub use components::{
     Collider, Facing, Parent, Player, PrevTransform, SaveId, Sprite, Transform, Velocity,

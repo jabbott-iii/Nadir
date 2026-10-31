@@ -106,6 +106,14 @@ opt-level = 3                  # the fuzzer tries more inputs; overflow checks a
 5. Steam: build against the Steam Linux Runtime and test inside it.
 6. Archive the `.dwp` / debug file.
 
+The demo page's download (ADR-0029) is not this package. It is the
+sandbox in the `release` profile with its loose `assets/`, built on
+`ubuntu-latest` for each push to `main` that passes CI, and unsigned. It
+needs the glibc that its executable's symbol versions name, which the page
+and its README state (2.34 on 2026-10-31), not the container's floor above.
+Once `xtask package` exists (M11.1), the page can offer the package above
+instead.
+
 `LICENSES.txt` lists our own license and the licenses of any approved
 dependencies. With zero dependencies, that's just ours. Fonts and other
 content have their own entries.

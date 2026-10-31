@@ -22,20 +22,28 @@
 //!   take over; pass the scene it was recorded in
 //! - `--headless`, with `--replay`: plays it with no window, as fast as it
 //!   runs, then quits
+//! - `--capture DIR`: draws 10 seconds of the scene offscreen, with no
+//!   window, and writes the frames into `DIR`, for the demo page
+//!   (`capture.rs`). In the field the person walks a tour, unless
+//!   `--replay` plays a replay.
+//!
+//! The assets are in `assets` beside the executable, as in the demo
+//! page's download, or else in the workspace's `assets`.
 //!
 //! A recording, when its window is closed, and its replay each log their
 //! ticks and the world's hash after them (`replay.rs`); a recording whose
 //! file failed logs how many ticks reached it.
 
+mod capture;
 mod map;
 mod replay;
 mod stress;
 mod stress_entities;
 
 use std::error::Error;
-use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::{env, fmt};
 
 use nadir::cli::Args;
 use nadir::log::info;
@@ -48,7 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         game: "Sandbox".into(),
         frame_rate_limit: Some(options.fps.unwrap_or(60)),
         vsync: options.vsync,
-        assets: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into(),
+        assets: assets(),
         ..Config::default()
     };
     if options.headless {
@@ -77,7 +85,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(path) = &options.replay {
         app = replay::play(app, path)?;
     }
-    let result = if options.headless {
+    let result = if let Some(dir) = &options.capture {
+        capture::capture(app, options.scene, dir, options.replay.is_none())
+    } else if options.headless {
         replay::headless(app).map(|_| ())
     } else {
         app.run().map_err(Into::into)
@@ -86,6 +96,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         recording.report();
     }
     result
+}
+
+/// The assets: `assets` beside the executable, where the demo page's
+/// download has them (ADR-0029), or else the workspace's.
+fn assets() -> PathBuf {
+    let beside = env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join("assets")));
+    match beside {
+        Some(dir) if dir.is_dir() => dir,
+        _ => concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into(),
+    }
 }
 
 /// What the command line asks for.
@@ -97,6 +119,7 @@ struct Options {
     record: Option<PathBuf>,
     replay: Option<PathBuf>,
     headless: bool,
+    capture: Option<PathBuf>,
 }
 
 impl Options {
@@ -120,6 +143,7 @@ impl Options {
         let record = args.value("--record")?.map(PathBuf::from);
         let replay = args.value("--replay")?.map(PathBuf::from);
         let headless = args.flag("--headless");
+        let capture = args.value("--capture")?.map(PathBuf::from);
         // `cargo dev` ends in `--` already, so `cargo dev -- --fps 144` would
         // pass the options as positionals: refuse them rather than ignore them.
         if let Some(extra) = args.finish()?.first() {
@@ -134,6 +158,16 @@ impl Options {
         if headless && (fps.is_some() || !vsync) {
             return Err("`--headless` draws no frames: leave out `--fps` and `--no-vsync`".into());
         }
+        if capture.is_some() && (headless || record.is_some()) {
+            return Err(
+                "`--capture` draws with no window: leave out `--headless` and `--record`".into(),
+            );
+        }
+        if capture.is_some() && (fps.is_some() || !vsync) {
+            return Err(
+                "`--capture` draws a frame a tick: leave out `--fps` and `--no-vsync`".into(),
+            );
+        }
         Ok(Self {
             fps,
             vsync,
@@ -141,6 +175,7 @@ impl Options {
             record,
             replay,
             headless,
+            capture,
         })
     }
 }
@@ -736,6 +771,7 @@ mod tests {
             record: None,
             replay: None,
             headless: false,
+            capture: None,
         };
         assert_eq!(options(&[]), Ok(Options { ..plain }));
         let recording = options(&["--record", "a.nrpl", "--scene", "stress-sprites"]);
@@ -748,6 +784,7 @@ mod tests {
                 vsync: true,
                 replay: None,
                 headless: false,
+                capture: None,
             })
         );
         let headless = options(&["--replay", "a.nrpl", "--headless"]).expect("valid");
@@ -755,8 +792,21 @@ mod tests {
             (headless.replay, headless.headless),
             (Some("a.nrpl".into()), true)
         );
+        let capture = options(&["--capture", "out", "--replay", "a.nrpl"]).expect("valid");
+        assert_eq!(
+            (capture.capture, capture.replay),
+            (Some("out".into()), Some("a.nrpl".into()))
+        );
         let refused = [
             (&["--headless"][..], "give one with `--replay FILE`"),
+            (
+                &["--capture", "out", "--replay", "a", "--headless"],
+                "with no window",
+            ),
+            (&["--capture", "out", "--record", "a"], "with no window"),
+            (&["--capture", "out", "--fps", "30"], "a frame a tick"),
+            (&["--capture", "out", "--no-vsync"], "a frame a tick"),
+            (&["--capture"], "--capture"),
             (&["--record", "a", "--replay", "b"], "do not go together"),
             (
                 &["--replay", "a", "--headless", "--fps", "30"],

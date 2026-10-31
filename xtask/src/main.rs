@@ -1,5 +1,5 @@
-//! Build automation for the Nadir workspace: CI checks, goldens and
-//! packaging.
+//! Build automation for the Nadir workspace: CI checks, goldens,
+//! packaging and the demo page.
 //!
 //! Run it as `cargo xtask <command>`; `cargo xtask --help` lists the
 //! commands. The checks, the fuzzer and the benchmarks are specified in
@@ -12,11 +12,13 @@ mod cargo;
 mod check;
 mod deps;
 mod error;
+mod features;
 mod fuzz;
 mod golden;
 mod layers;
 mod metadata;
 mod release_no_dev;
+mod site;
 mod unsafe_audit;
 
 use std::fmt::Write as _;
@@ -65,6 +67,7 @@ fn run(mut args: Args, root: &Path, out: &mut dyn Write) -> Result<bool, Error> 
     match command.as_str() {
         "fuzz-smoke" => return fuzz::command(args, root, out),
         "golden" => return golden::command(args, root, out),
+        "site" => return site::command(args, root, out),
         "bench" => {
             let filter = args.finish().map_err(usage)?;
             cargo::run(root, &bench_command(&filter))?;
@@ -123,6 +126,10 @@ fn usage() -> String {
             "bench",
             "Run the benchmarks in release mode: [FILTER] for those whose name contains it",
         ),
+        (
+            "site",
+            "Build the demo page into target/site, or [--out DIR]: captures, videos, download",
+        ),
     ]);
     for (name, about) in commands {
         // Writing to a `String` cannot fail.
@@ -162,10 +169,12 @@ mod tests {
             "layers",
             "unsafe-audit",
             "release-no-dev",
+            "features",
             "ci",
             "fuzz-smoke",
             "golden",
             "bench",
+            "site",
         ] {
             assert!(
                 text.lines()

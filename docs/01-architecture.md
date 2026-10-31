@@ -160,6 +160,10 @@ As built (ADR-0022), `App::update(elapsed, events)` is everything from
 feeding the events to the frame stages, and `App::run` calls it once a
 frame before drawing. The snapshot and the extract are the engine's own
 systems, `nadir::snapshot` and `nadir::extract_sprites` (see "Stages").
+`App::offscreen(size)` runs the same frames with no window: each
+`Offscreen::frame` updates, draws into a render target on an offscreen
+context, makes the loaded assets, and returns the pixels. The sandbox's
+`--capture` records the demo page's scenes with it (ADR-0029).
 
 Rules:
 

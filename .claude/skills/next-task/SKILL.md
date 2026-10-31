@@ -72,6 +72,11 @@ Requested task: `$ARGUMENTS` (empty means "pick the next unblocked task").
 - Add brief indented notes under the task where useful: the pinned
   toolchain version, measured numbers, recorded findings.
 - Update docs only where behavior or design actually changed.
+- Once the box is checked, bring `docs/features.jsonc` up to date: the
+  demo page lists it (ADR-0029). Add the task to a feature, or describe a
+  new one; rewrite that feature's summary for what is built now; add the
+  task to its `ticked`. Then run `cargo xtask features` again, since the
+  `cargo xtask ci` of step 4 ran before the tick.
 
 ## 6. Do not commit
 
