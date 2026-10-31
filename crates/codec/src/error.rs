@@ -4,7 +4,7 @@ use std::fmt;
 
 #[cfg(feature = "png")]
 use crate::png;
-use crate::{inflate, json, qoi};
+use crate::{bmfont, inflate, json, kbj, klz, qoi, wav};
 
 /// Errors produced by `nadir-codec`.
 ///
@@ -43,6 +43,45 @@ pub enum CodecError {
         /// What is wrong.
         kind: inflate::ErrorKind,
     },
+    /// A KLZ stream is malformed, does not hold the length given, or
+    /// exceeds a limit.
+    Klz {
+        /// The byte offset of the problem in the stream.
+        offset: usize,
+        /// What is wrong.
+        kind: klz::ErrorKind,
+    },
+    /// A KBJ file is malformed or exceeds a limit.
+    Kbj {
+        /// The byte offset of the problem in the file.
+        offset: usize,
+        /// What is wrong.
+        kind: kbj::ErrorKind,
+    },
+    /// A BMFont file is malformed, misses what the font asset needs, or
+    /// exceeds a limit.
+    BmFont {
+        /// The line of the problem, starting at 1.
+        line: u32,
+        /// The column of the problem, starting at 1 and counted in
+        /// characters.
+        column: u32,
+        /// What is wrong.
+        kind: bmfont::ErrorKind,
+    },
+    /// A value cannot be encoded as KBJ.
+    KbjEncode {
+        /// Why not.
+        kind: kbj::EncodeErrorKind,
+    },
+    /// A WAV file is malformed, outside the supported subset, or exceeds a
+    /// limit.
+    Wav {
+        /// The byte offset of the problem in the file.
+        offset: usize,
+        /// What is wrong.
+        kind: wav::ErrorKind,
+    },
     /// A PNG file is malformed, outside the supported subset, or exceeds a
     /// limit.
     #[cfg(feature = "png")]
@@ -63,6 +102,13 @@ impl fmt::Display for CodecError {
             Self::Qoi { offset, kind } => write!(f, "QOI error at byte {offset}: {kind}"),
             Self::QoiEncode { kind } => write!(f, "cannot encode as QOI: {kind}"),
             Self::Inflate { offset, kind } => write!(f, "inflate error at byte {offset}: {kind}"),
+            Self::Klz { offset, kind } => write!(f, "KLZ error at byte {offset}: {kind}"),
+            Self::Kbj { offset, kind } => write!(f, "KBJ error at byte {offset}: {kind}"),
+            Self::KbjEncode { kind } => write!(f, "cannot encode as KBJ: {kind}"),
+            Self::Wav { offset, kind } => write!(f, "WAV error at byte {offset}: {kind}"),
+            Self::BmFont { line, column, kind } => {
+                write!(f, "BMFont error at line {line}, column {column}: {kind}")
+            }
             #[cfg(feature = "png")]
             Self::Png { offset, kind } => write!(f, "PNG error at byte {offset}: {kind}"),
         }

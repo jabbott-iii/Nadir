@@ -1,0 +1,9 @@
+info face="Garamond" size=-20 bold=0 italic=0 charset="ANSI" unicode=0 stretchH=100 smooth=1 aa=1 padding=0,0,0,0 spacing=1,1 outline=0
+common lineHeight=24 base=19 scaleW=64 scaleH=64 pages=1 packed=0 alphaChnl=0 redChnl=4 greenChnl=4 blueChnl=4
+page id=0   file="garamond_0.png"
+chars count=3
+char id=-1   x=0     y=0     width=6     height=12    xoffset=1     yoffset=6     xadvance=8     page=0  chnl=15
+char id=97   x=8     y=0     width=9     height=10    xoffset=0     yoffset=9     xadvance=9     page=0  chnl=15
+char id=145  x=20    y=0     width=4     height=6     xoffset=1     yoffset=4     xadvance=5     page=0  chnl=15
+kernings count=1
+kerning first=145 second=97  amount=-1  

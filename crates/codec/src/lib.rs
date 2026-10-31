@@ -6,13 +6,17 @@
 //! panics.
 
 pub mod adler32;
+pub mod bmfont;
 mod error;
 pub mod inflate;
 pub mod json;
+pub mod kbj;
+pub mod klz;
 mod limits;
 #[cfg(feature = "png")]
 pub mod png;
 pub mod qoi;
+pub mod wav;
 
 pub use error::CodecError;
 pub use limits::Limits;

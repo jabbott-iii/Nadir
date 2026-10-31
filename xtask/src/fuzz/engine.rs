@@ -80,6 +80,10 @@ pub(crate) struct Outcome {
     /// Whether the run ended early because the target hung. The thread that
     /// ran it is then still stuck, and stays so until the process exits.
     pub(crate) hung: bool,
+    /// How long the slowest input that finished took, and its length in
+    /// bytes. A target far slower on some input than on the rest has a
+    /// path that grows faster than its input, short of a hang.
+    pub(crate) slowest: Option<(Duration, usize)>,
 }
 
 /// What the fuzzing thread and the watchdog share.
@@ -91,6 +95,7 @@ struct Shared {
     started: Option<Instant>,
     inputs: u64,
     findings: Vec<Finding>,
+    slowest: Option<(Duration, usize)>,
 }
 
 /// Fuzzes `target` with `seeds` as `config` says.
@@ -166,6 +171,7 @@ pub(crate) fn run(
         elapsed: start.elapsed(),
         findings: mem::take(&mut guard.findings),
         hung,
+        slowest: guard.slowest,
     })
 }
 
@@ -209,9 +215,13 @@ fn fuzz(
             guard.started = Some(now);
         }
         let panicked = run_target(target, &input);
+        let took = now.elapsed();
         let mut guard = lock(shared);
         guard.started = None;
         guard.inputs += 1;
+        if guard.slowest.is_none_or(|(slowest, _)| took > slowest) {
+            guard.slowest = Some((took, input.len()));
+        }
 
         let Some(panicked) = panicked else {
             continue;
@@ -614,6 +624,21 @@ mod tests {
         assert_eq!(outcome.inputs, 4);
         assert!(!outcome.hung && outcome.findings.is_empty());
         assert!(outcome.elapsed >= Duration::from_millis(120));
+    }
+
+    #[test]
+    fn the_slowest_input_is_reported_with_its_length() {
+        fn slow_on_long(input: &[u8]) {
+            if input.len() > 5 {
+                thread::sleep(Duration::from_millis(40));
+            }
+        }
+        let mut config = config("slowest", u64::MAX);
+        config.duration = Duration::ZERO;
+        let outcome = run(slow_on_long, seeds(&["a", "slowest", "b"]), config).unwrap();
+        let (took, len) = outcome.slowest.expect("inputs finished");
+        assert_eq!(len, 7);
+        assert!(took >= Duration::from_millis(40), "{took:?}");
     }
 
     #[test]

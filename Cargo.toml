@@ -21,6 +21,13 @@ members = [
     "bench",
 ]
 
+# `cargo xtask` runs xtask, and so the parsers it fuzzes, built with this:
+# optimized, so that a fuzz run tries more inputs in its time, with the dev
+# profile's overflow checks and debug assertions still on (ADR-0028).
+[profile.xtask]
+inherits = "dev"
+opt-level = 3
+
 [workspace.package]
 edition = "2024"
 version = "0.1.0"

@@ -197,12 +197,23 @@ pub fn check_sized<T: std::fmt::Debug>(
     input is a random seed with 1 to 16 random mutations.
 - Mutations: bit flips, byte insert/delete, splice, length-field tweaks,
   "interesting" integers (0, 1, 255, 65535, `u32::MAX`).
+- The fuzzer runs in the `xtask` profile, which `cargo xtask` builds with:
+  the dev profile at `opt-level = 3`, so debug assertions and overflow
+  checks stay on. It makes 3 to 15 times as many inputs a second as the
+  dev build, depending on the target: `klz` about 3, which compresses
+  each input; `png` about 15 (94,798 against 6,453; ADR-0028).
 - Each mutated input goes to the parser inside `catch_unwind`, with a
   watchdog for hangs and the allocation counter for blow-ups.
   - A panic does not stop the run. Panics raised at the same source
     location count as one finding.
-  - A hang is an input the target does not finish within 10 s. It ends the
-    whole run, because the stuck thread cannot be stopped.
+  - A hang is an input the target does not finish within 2 s. In M5.2's
+    run of 300 s a target, on a machine busy with other work, the slowest
+    input of any target took 61 ms. The slowest valid input there can be,
+    a PNG at the 64 KiB input cap that inflates to the `png` target's
+    16 MiB of pixels, takes about 325 ms. A hang ends the whole run,
+    because the stuck thread cannot be stopped.
+  - Each target's report gives its slowest input, its time and its length,
+    so that an input heading for a hang shows before it is one.
   - The allocation counter is not wired in. It lives in `nadir-platform`
     (M3.5), which `xtask` may not depend on (the dependency matrix).
     Wiring it needs a decision: run the targets in a test binary that links
@@ -224,7 +235,7 @@ pub fn check_sized<T: std::fmt::Debug>(
   - A target may do more than call its parser. One whose format carries
     checksums repairs a copy of each input, so that mutations get past
     them (`png`). One that can check its own answers asserts them, so that
-    a wrong answer is a finding too (`inflate`). See
+    a wrong answer is a finding too (`inflate`, `klz`, `kbj`). See
     `docs/subsystems/assets-and-codecs.md`.
 - The optional coverage-guided fuzzing (`cargo fuzz`) is a separate,
   **unapproved** proposal (policy item 29).
@@ -355,7 +366,11 @@ understood.
      - An `actual` image holds the bytes `--bless` would write on the
        runner's llvmpipe. Once a human has looked at it, it can become the
        reference.
-  5. Linux only: `cargo xtask fuzz-smoke --secs 120`.
+  5. Linux only: `cargo xtask fuzz-smoke --secs 30`, 30 s for each
+     target in the optimized `xtask` profile: in a quarter of the time,
+     more inputs than 120 s each in the dev build, for every target but
+     `klz`, which compresses each input and runs about 3.4 times as fast
+     (ADR-0028).
 
   The images already have `libx11-6`, through `xvfb`, which their
   software lists include. ALSA (`libasound2t64` on Ubuntu 24.04) waits

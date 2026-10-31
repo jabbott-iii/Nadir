@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use nadir_codec::inflate::ErrorKind as InflateError;
-use nadir_codec::{CodecError, Limits, adler32, inflate, json, png, qoi};
+use nadir_codec::{CodecError, Limits, adler32, bmfont, inflate, json, kbj, klz, png, qoi, wav};
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
 use nadir_core::testing::{DEFAULT_SEED, SEED_VAR};
@@ -53,15 +53,36 @@ const TARGETS: &[Target] = &[
         name: "png",
         run: decode_png,
     },
+    Target {
+        name: "klz",
+        run: klz_streams,
+    },
+    Target {
+        name: "kbj",
+        run: decode_kbj,
+    },
+    Target {
+        name: "bmfont",
+        run: parse_bmfont,
+    },
+    Target {
+        name: "wav",
+        run: decode_wav,
+    },
 ];
 
 /// How long each target is fuzzed when `--secs` is not given.
 const DEFAULT_SECS: u64 = 60;
 
 /// How long a target may spend on one input before that counts as a hang.
-/// Parsing a small input takes microseconds, so this is far out of reach
-/// of a busy machine, and still short next to a whole run.
-const HANG_LIMIT: Duration = Duration::from_secs(10);
+/// `cargo xtask` builds optimized (the `xtask` profile), where inputs
+/// mutated from the seeds take a few milliseconds at most. The slowest
+/// valid inputs are PNGs at the 64 KiB input cap that inflate to a large
+/// image: [`PNG_LIMIT`] keeps those to about a third of a second on a
+/// development machine (16-bit RGBA, 2048 × 2048, interlaced: 325 ms,
+/// decoded twice), a sixth of this. A slow path short of the limit shows in
+/// the run's slowest input, which each target's line reports.
+const HANG_LIMIT: Duration = Duration::from_secs(2);
 
 /// The longest input a mutation may produce.
 const MAX_INPUT_LEN: usize = 64 * 1024;
@@ -140,10 +161,92 @@ fn inflate_streams(input: &[u8]) {
     }
 }
 
-/// The `png` target: `nadir_codec::png::decode`, with the limits the game
-/// uses, on the input and on repaired copies of it.
+/// The most bytes the `klz` target lets a stream claim, so that a claimed
+/// size it has no room for is the common case, and runs stay fast.
+const KLZ_LIMIT: usize = 1 << 20;
+
+/// The `klz` target: `nadir_codec::klz`. The input's first 4 bytes,
+/// little-endian and up to [`KLZ_LIMIT`], are the size the stream must
+/// give, as a pack's table of contents gives it; the rest is the stream.
+///
+/// It also checks the answers, so that a wrong one is a finding: a stream
+/// that ends short of its size decodes at the size it reached, and the
+/// input compressed decompresses to the input.
+fn klz_streams(input: &[u8]) {
+    let limits = Limits {
+        max_decoded_bytes: KLZ_LIMIT,
+        ..Limits::default()
+    };
+    if let Some((&size, stream)) = input.split_first_chunk::<4>() {
+        let raw_size = u32::from_le_bytes(size) as usize % (KLZ_LIMIT + 1);
+        if let Err(CodecError::Klz {
+            kind: klz::ErrorKind::TooShort { found, .. },
+            ..
+        }) = klz::decompress(stream, raw_size, limits)
+        {
+            let again = klz::decompress(stream, found, limits);
+            assert!(
+                again.as_ref().map(Vec::len) == Ok(found),
+                "a stream that ends after {found} bytes gives {:?} at that size",
+                again.as_ref().map(Vec::len)
+            );
+        }
+    }
+    let stream = klz::compress(input);
+    let back = klz::decompress(&stream, input.len(), Limits::default());
+    assert!(
+        back.as_deref() == Ok(input),
+        "{} bytes compress to a stream that decompresses to {:?}",
+        input.len(),
+        back.as_ref().map(Vec::len)
+    );
+}
+
+/// The `kbj` target: `nadir_codec::kbj::decode`, with the limits the game
+/// uses. It also checks that whatever decodes encodes back to the same
+/// bytes, the one encoding of its value.
+fn decode_kbj(input: &[u8]) {
+    if let Ok(value) = kbj::decode(input, Limits::default()) {
+        assert!(
+            kbj::encode(&value, Limits::default()).as_deref() == Ok(input),
+            "a file of {} bytes decodes to a value that encodes otherwise",
+            input.len()
+        );
+    }
+}
+
+/// The `bmfont` target: `nadir_codec::bmfont::parse`, with the default
+/// limits.
+fn parse_bmfont(input: &[u8]) {
+    // The parser takes text. Bytes that are not UTF-8 become U+FFFD, so
+    // that every input reaches it.
+    let text = String::from_utf8_lossy(input);
+    let _ = bmfont::parse(&text, Limits::default());
+}
+
+/// The `wav` target: `nadir_codec::wav::decode`, with the default limits.
+fn decode_wav(input: &[u8]) {
+    let _ = wav::decode(input, Limits::default());
+}
+
+/// The most bytes of pixels the `png` target decodes to: a 2048 × 2048
+/// RGBA image, a sixteenth of the game's limit, so that an image of 64 KiB
+/// that inflates a thousand to one stays far from [`HANG_LIMIT`].
+const PNG_LIMIT: usize = 16 << 20;
+
+/// The limits the `png` target decodes with: the game's, with
+/// [`PNG_LIMIT`].
+fn png_limits() -> Limits {
+    Limits {
+        max_decoded_bytes: PNG_LIMIT,
+        ..Limits::default()
+    }
+}
+
+/// The `png` target: `nadir_codec::png::decode`, with [`png_limits`], on
+/// the input and on repaired copies of it.
 fn decode_png(input: &[u8]) {
-    let _ = png::decode(input, Limits::default());
+    let _ = png::decode(input, png_limits());
     let _ = repaired_pngs(input);
 }
 
@@ -159,7 +262,7 @@ fn repaired_pngs(input: &[u8]) -> Vec<(Vec<u8>, Result<png::Image, CodecError>)>
     };
     repaired.fix_adler32();
     let bytes = repaired.to_bytes();
-    let result = png::decode(&bytes, Limits::default());
+    let result = png::decode(&bytes, png_limits());
     let mended = match &result {
         Err(CodecError::Png {
             kind:
@@ -176,7 +279,7 @@ fn repaired_pngs(input: &[u8]) -> Vec<(Vec<u8>, Result<png::Image, CodecError>)>
     decoded.push((bytes, result));
     if mended {
         let bytes = repaired.to_bytes();
-        let result = png::decode(&bytes, Limits::default());
+        let result = png::decode(&bytes, png_limits());
         decoded.push((bytes, result));
     }
     decoded
@@ -598,10 +701,18 @@ fn describe(name: &str, seeds: usize, outcome: &Outcome, root: &Path) -> String 
         0.0
     };
     let mut text = format!(
-        "{name}: {}, {} in {seconds:.1} s ({rate:.0} per second)\n",
+        "{name}: {}, {} in {seconds:.1} s ({rate:.0} per second)",
         plural(seeds, "seed"),
         plural(outcome.inputs, "input"),
     );
+    if let Some((took, len)) = outcome.slowest {
+        text.push_str(&format!(
+            ", the slowest {:.1} ms ({})",
+            took.as_secs_f64() * 1000.0,
+            plural(len, "byte")
+        ));
+    }
+    text.push('\n');
     for finding in &outcome.findings {
         text.push_str(&describe_finding(name, finding, root));
     }
@@ -735,8 +846,15 @@ mod tests {
         let lines: Vec<String> = text
             .lines()
             .map(|line| match line.split_once(" in ") {
-                Some((counts, _)) if line.ends_with("per second)") => {
-                    format!("{counts} in ? s (? per second)")
+                // The times vary from run to run, and so does which input
+                // is the slowest.
+                Some((counts, rest)) if rest.contains("per second)") => {
+                    let slowest = if rest.contains(", the slowest ") {
+                        ", the slowest ? ms (? bytes)"
+                    } else {
+                        ""
+                    };
+                    format!("{counts} in ? s (? per second){slowest}")
                 }
                 _ => line.to_string(),
             })
@@ -886,6 +1004,83 @@ mod tests {
             assert!(inflate::zlib(input, Limits::default()).is_ok());
             inflate_streams(input);
         }
+    }
+
+    #[test]
+    fn the_klz_target_takes_any_bytes() {
+        // Each a size, then a stream: "abc" claimed as 10 bytes, so that the
+        // target decodes it again at 3; claimed as 2; a match before the
+        // start; a size past what the stream could give; no stream; no
+        // size.
+        for input in [
+            &b"\x0a\x00\x00\x00\x30abc"[..],
+            b"\x02\x00\x00\x00\x30abc",
+            b"\x1e\x00\x00\x00\x0f\x05\x00\x00",
+            b"\xff\xff\x0f\x00\x0f\x05\x00\xff",
+            b"\x00\x00\x00\x00",
+            b"",
+            &[0xff; 3000],
+        ] {
+            klz_streams(input);
+        }
+        assert!(matches!(
+            klz::decompress(b"\x30abc", 10, Limits::default()),
+            Err(CodecError::Klz {
+                kind: klz::ErrorKind::TooShort { found: 3, .. },
+                ..
+            })
+        ));
+        assert!(matches!(
+            klz::decompress(b"\x0f\x05\x00\x00", 30, Limits::default()),
+            Err(CodecError::Klz {
+                kind: klz::ErrorKind::OffsetTooFar { offset: 5, .. },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn the_kbj_target_takes_any_bytes() {
+        for input in [
+            &b""[..],
+            b"KBJ1",
+            b"KBJ1\x06\x02\x00\x03\x01",
+            b"KBJ1\x07\xff",
+        ] {
+            decode_kbj(input);
+        }
+    }
+
+    #[test]
+    fn the_png_target_decodes_to_16_mib_at_most() {
+        // A PNG of an RGBA8 header and no image data.
+        let header = |width: u32, height: u32| {
+            let mut ihdr = b"IHDR".to_vec();
+            ihdr.extend_from_slice(&width.to_be_bytes());
+            ihdr.extend_from_slice(&height.to_be_bytes());
+            ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+            let mut png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0d".to_vec();
+            png.extend_from_slice(&ihdr);
+            png.extend_from_slice(&crc32(&ihdr).to_be_bytes());
+            png.extend_from_slice(b"\x00\x00\x00\x00IEND\xae\x42\x60\x82");
+            png
+        };
+        let too_many = |result: Result<png::Image, CodecError>| {
+            matches!(
+                result,
+                Err(CodecError::Png {
+                    kind: png::ErrorKind::TooManyBytes { .. },
+                    ..
+                })
+            )
+        };
+        assert!(too_many(png::decode(&header(2049, 2048), png_limits())));
+        assert!(!too_many(png::decode(&header(2048, 2048), png_limits())));
+        // The game's limits take the larger image.
+        assert!(!too_many(png::decode(
+            &header(2049, 2048),
+            Limits::default()
+        )));
     }
 
     #[test]
@@ -1195,6 +1390,81 @@ mod tests {
         }
     }
 
+    /// The seeds of one target.
+    fn seeds_of(target: &str) -> Vec<Vec<u8>> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(CORPUS)
+            .join(target);
+        load_corpus(&dir).unwrap()
+    }
+
+    #[test]
+    fn the_klz_seeds_are_streams_of_their_size() {
+        for seed in seeds_of("klz") {
+            let (size, stream) = seed.split_first_chunk::<4>().unwrap();
+            let size = u32::from_le_bytes(*size) as usize;
+            assert_eq!(
+                klz::decompress(stream, size, Limits::default())
+                    .unwrap()
+                    .len(),
+                size
+            );
+        }
+    }
+
+    #[test]
+    fn the_kbj_seeds_are_files_the_codec_writes_back_byte_for_byte() {
+        let seeds = seeds_of("kbj");
+        // One holds objects of more than 16 members, whose repeated keys
+        // the decoder finds by sorting.
+        let large = |seed: &[u8]| {
+            fn largest(value: &json::Value) -> usize {
+                match value {
+                    json::Value::Array(items) => items.iter().map(largest).max().unwrap_or(0),
+                    json::Value::Object(members) => members
+                        .iter()
+                        .map(|(_, value)| largest(value))
+                        .max()
+                        .unwrap_or(0)
+                        .max(members.len()),
+                    _ => 0,
+                }
+            }
+            largest(&kbj::decode(seed, Limits::default()).unwrap()) > 16
+        };
+        assert!(seeds.iter().any(|seed| large(seed)));
+        for seed in seeds {
+            let value = kbj::decode(&seed, Limits::default()).unwrap();
+            assert_eq!(kbj::encode(&value, Limits::default()).unwrap(), seed);
+        }
+    }
+
+    #[test]
+    fn the_bmfont_seeds_are_fonts_the_parser_accepts() {
+        let fonts: Vec<bmfont::Font> = seeds_of("bmfont")
+            .iter()
+            .map(|seed| bmfont::parse(std::str::from_utf8(seed).unwrap(), Limits::default()))
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // Among them, a font of Windows-1252 ids with a fallback glyph:
+        // its `char id=145` is U+2018.
+        let ansi = fonts
+            .iter()
+            .find(|font| font.face == "Garamond")
+            .expect("the ANSI seed");
+        assert!(ansi.fallback.is_some());
+        assert!(ansi.glyphs.iter().any(|glyph| glyph.id == 0x2018));
+        assert!(ansi.glyphs.iter().all(|glyph| glyph.id != 145));
+    }
+
+    #[test]
+    fn the_wav_seeds_are_files_the_codec_accepts() {
+        for seed in seeds_of("wav") {
+            wav::decode(&seed, Limits::default()).unwrap();
+        }
+    }
+
     #[test]
     fn a_clean_run_reports_each_target_and_passes() {
         let root = root(
@@ -1209,7 +1479,7 @@ mod tests {
             (
                 true,
                 "fuzz-smoke: 1 target, 30 s each, seed 0x7\n\
-                 accept: 2 seeds, 200 inputs in ? s (? per second)\n\
+                 accept: 2 seeds, 200 inputs in ? s (? per second), the slowest ? ms (? bytes)\n\
                  fuzz-smoke: ok"
                     .to_string()
             )
@@ -1233,8 +1503,8 @@ mod tests {
             (
                 true,
                 "fuzz-smoke: 2 targets, 0 s each, seed 0x7\n\
-                 accept: 2 seeds, 2 inputs in ? s (? per second)\n\
-                 short: 1 seed, 1 input in ? s (? per second)\n\
+                 accept: 2 seeds, 2 inputs in ? s (? per second), the slowest ? ms (? bytes)\n\
+                 short: 1 seed, 1 input in ? s (? per second), the slowest ? ms (? bytes)\n\
                  fuzz-smoke: ok"
                     .to_string()
             )
@@ -1250,7 +1520,10 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 6, "{output}");
         assert_eq!(lines[0], "fuzz-smoke: 1 target, 60 s each, seed 0x7");
-        assert_eq!(lines[1], "short: 1 seed, 3000 inputs in ? s (? per second)");
+        assert_eq!(
+            lines[1],
+            "short: 1 seed, 3000 inputs in ? s (? per second), the slowest ? ms (? bytes)"
+        );
         // The panic site is the source path as the compiler was given it,
         // which has `\` between components on Windows.
         let finding = lines[2].replace('\\', "/");
@@ -1321,20 +1594,22 @@ mod tests {
             findings: vec![
                 finding(Kind::Panic, "a.rs:1:2", "index out of bounds", 7),
                 finding(Kind::Panic, "no place known", "no place known", 1),
-                finding(Kind::Hang, "", "did not finish within 10 s", 1),
+                finding(Kind::Hang, "", "did not finish within 2 s", 1),
             ],
             hung: true,
+            slowest: Some((Duration::from_micros(12_340), 512)),
         };
         let path = Path::new("fuzz/crashes/json/x.bin").display().to_string();
         assert_eq!(
             describe("json", 9, &outcome, root),
             format!(
-                "json: 9 seeds, 1500 inputs in 2.5 s (600 per second)\n\
+                "json: 9 seeds, 1500 inputs in 2.5 s (600 per second), the slowest 12.3 ms \
+                 (512 bytes)\n\
                  finding: json: panic at a.rs:1:2: index out of bounds\n         \
                  input saved to {path} (1 byte), which is 1 of 7 inputs that did this\n\
                  finding: json: panic: no place known\n         \
                  input saved to {path} (1 byte), which is 1 of 1 input that did this\n\
-                 finding: json: hang: did not finish within 10 s\n         \
+                 finding: json: hang: did not finish within 2 s\n         \
                  input saved to {path} (1 byte), which is 1 of 1 input that did this\n\
                  json: stopped early, because the target hung\n"
             )
@@ -1348,6 +1623,7 @@ mod tests {
             elapsed: Duration::ZERO,
             findings: Vec::new(),
             hung: false,
+            slowest: None,
         };
         assert_eq!(
             describe("json", 3, &outcome, Path::new(".")),

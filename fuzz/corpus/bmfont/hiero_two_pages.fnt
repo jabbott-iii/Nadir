@@ -1,0 +1,8 @@
+info face="Hack Regular" size=24 bold=0 italic=0 charset="" unicode=0 stretchH=100 smooth=1 aa=1 padding=1,1,1,1 spacing=-2,-2
+common lineHeight=29 base=22 scaleW=128 scaleH=64 pages=2 packed=0
+page id=0 file="hack1.png"
+page id=1 file="hack2.png"
+chars count=2
+char id=33      x=0    y=0    width=6    height=20   xoffset=0    yoffset=3    xadvance=13   page=0    chnl=0
+char id=8364    x=100  y=40   width=28   height=24   xoffset=-1   yoffset=1    xadvance=14   page=1    chnl=0
+kernings count=0

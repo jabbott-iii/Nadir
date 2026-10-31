@@ -7,20 +7,22 @@
 /// raise them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// How deeply arrays and objects may nest in JSON. A document that is
-    /// only scalars has depth 0; `[[1]]` has depth 2.
+    /// How deeply arrays and objects may nest in JSON and KBJ. A document
+    /// that is only scalars has depth 0; `[[1]]` has depth 2.
     ///
     /// Parsing uses one stack frame per level, so keep this modest.
     pub max_depth: u32,
     /// The longest string, in bytes of UTF-8 after escapes are decoded.
     /// Applies to object keys as well.
     pub max_string_bytes: usize,
-    /// The most elements one array, or members one object, may have.
+    /// The most elements one array, or members one object, may have; and
+    /// the most pages, glyphs or kerning pairs of a bitmap font.
     pub max_entries: usize,
     /// The widest, or tallest, image a decoder accepts, in pixels.
     pub max_texture_dimension: u32,
     /// The most bytes a decoder may produce for one file. An image takes 4
-    /// bytes a pixel.
+    /// bytes a pixel, a sound 4 bytes a sample (as `f32`), and a KLZ
+    /// stream the size it is decoded to.
     ///
     /// It bounds the output. A decoder may hold more while it works: the
     /// PNG decoder keeps the inflated image data beside the pixels, up to

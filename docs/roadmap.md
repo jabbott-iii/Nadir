@@ -2317,8 +2317,12 @@ by the batched sprite renderer.
       fix check's: 8.0 and 7.4 million, then 3.9 and 9.2 million, clean.)
     - `cargo xtask ci`: ok. `cargo doc --workspace --no-deps
       --all-features` with warnings as errors: clean.
+  - Note: CI run 25, for the M5.1 commit `467d86e`, passed on all three
+    systems; the session saw it on the public Actions page. It took 9 min
+    35 s, against 5 min 34 s for M4.8's run 24: the Linux job now fuzzes
+    four targets for 120 s each. CodeQL run 6 passed on the same commit.
 
-- [ ] **M5.2 — codec: KLZ, KBJ, BMFont, WAV**
+- [x] **M5.2 — codec: KLZ, KBJ, BMFont, WAV**
   - Note (from M5.1): CI fuzzes every target for 120 s on each push, in
     the Linux job of 30 minutes at most: 8 minutes with M5.1's `inflate`
     and `png`. M5.2's four targets would make 16. Set a total budget, or add
@@ -2333,6 +2337,75 @@ by the batched sprite renderer.
   - Accept: round-trips pass; malformed input is rejected.
   - Verify: `cargo test -p nadir-codec`;
     `cargo xtask fuzz-smoke --secs 300`
+  - Note: the user chose on 2026-10-31 (ADR-0028):
+    - CI fuzzes each target for 30 s, with `cargo xtask` built in a new
+      `xtask` profile (dev at `opt-level = 3`, so overflow checks and debug
+      assertions stay on). The hang limit is 2 s, not 10, and each target
+      reports its slowest input. The nightly job stays with M11.6.
+    - KBJ stores infinities exactly, and writes every NaN as the quiet NaN
+      `0x7ff8_0000_0000_0000`, the only one `decode` accepts.
+    - The WAV reader is strict, as the spec has it: 8-bit and 32-bit
+      integer PCM, and a block alignment other than the format's, are
+      rejected, with errors that say to export again.
+  - Note: built, in nadir-codec and xtask:
+    - `klz::decompress` and `klz::compress`; `kbj::encode`, which takes
+      `Limits` and refuses what `decode` would, and `kbj::decode`, which
+      accepts one encoding per value; `wav::decode` into a `Wave` of `f32`
+      samples; `bmfont::parse` into a `Font`. `CodecError` gains `Klz`,
+      `Kbj`, `KbjEncode`, `Wav` and `BmFont`.
+    - Each subset is in `docs/subsystems/assets-and-codecs.md`. KLZ's spec
+      now says how a stream ends: with a block of literals only, whose
+      token's match half is 0.
+    - Vectors: 30 KLZ streams and 21 WAV files, each set from a
+      standard-library Python generator committed beside it, which shares
+      no code with the codec; 6 hand-written BMFont files in the dialects
+      of AngelCode's BMFont and Hiero; KBJ bytes worked out by hand in its
+      unit tests. Round trips of random values for KLZ and KBJ.
+    - Fuzz targets `klz`, `kbj`, `bmfont` and `wav`, with 10, 10, 6 and 8
+      seeds. `klz` decodes a stream that ends short again at the size it
+      reached, and round-trips each input through `compress`; `kbj`
+      checks that every file that decodes encodes back to itself. The
+      `png` target now decodes to 16 MiB of pixels at most, so that no
+      valid input comes near the hang limit.
+  - Note: measured. libsndfile 1.2.2 reads the 21 WAV vectors to the same
+    samples. Of the 294 WAV files on the development machine, 288 decode to
+    libsndfile's samples bit for bit; the other 6 are rejected as ADR-0028
+    says (5 are 8-bit or 32-bit integer, 1 has a wrong block alignment).
+    The 5 BMFont files on the machine, game fonts with DDS pages, are
+    rejected: none has `page` lines. A BMFont line of 1 MiB parses in
+    0.01 s. Optimized, the fuzzer runs 3 to 15 times as fast as in the dev
+    build (`klz` 3.4, `png` 14.7).
+  - Note: a design critique (8 agents), a code review (10) and a review of
+    its fixes (6). Among what they found, and was fixed:
+    - KBJ reserved room for each open container's claimed count: 1.9 GB
+      for a file of 1 MB. It now reserves 1,024 entries ahead at most, and
+      a test counts what is reserved.
+    - BMFont ignored `charset` (Windows-1252 ids read as C1 controls),
+      `packed`, `xFpBits`, the fallback glyph of id -1 and Snowb's
+      `unicode=1`, and took time quadratic in a line's length (15.7 s for
+      1 MiB). It now splits each line as it reaches it, in linear time.
+    - WAV rejected files that leave out the pad byte after odd data, as
+      GStreamer writes them; its errors for extensible formats pointed at
+      the wrong field.
+    - KLZ accepted a stream that ends after a match.
+    - A valid PNG of 45 KB took the `png` target 1.3 to 2.1 s, as long as
+      the new hang limit; hence its 16 MiB cap.
+  - Note: 70 planted bugs, one at a time, in a copy of the tree through
+    `cargo test -p nadir-codec --all-features` and `cargo test -p xtask`:
+    69 fail a test on the final code. The first 53 left 5 survivors, and
+    tests were added for 4. The one left: taking out the `kbj` target's
+    encode-back assertion, which fires only when the codec is wrong.
+  - Note: not taken. A Python generator for KBJ (the bytes are worked out
+    by hand, and round trips cover the rest); repairing WAV inputs in the
+    fuzz target (12 % of mutated inputs decode as they are); BMFont
+    metamorphic checks in its target. The reservation count is a test of
+    KBJ alone: the fuzzer still counts no allocations (M11.6's note).
+  - Note: verified on 2026-10-31. `cargo test -p nadir-codec`: 195 tests
+    passed (232 with `--all-features`). `cargo xtask fuzz-smoke --secs
+    300`: no findings in any of the 8 targets, from 29.6 million inputs
+    (`png`) to 715 million (`wav`). `bmfont` and `png` changed after that
+    run, and ran clean again for 300 s each on the final code (107 and 28.9
+    million inputs). `cargo xtask ci`: ok. CI has not run this code yet.
 
 - [ ] **M5.3 — assets: async server, worker pool, scopes, LooseSource**
   - Note (from M4.7): asset loads finish only in a drawn frame, and a
@@ -2422,6 +2495,17 @@ by the batched sprite renderer.
       crowds start each walker at its own point with
       `Animator::starting_at`, from one walk clip.
   - Depends: M5.4, M4.6
+  - Note (from M5.2): `bmfont::parse` reads the text and nothing else.
+    The font cook still has to:
+    - resolve `Font::pages` beside the `.fnt` under the path rules of
+      `.claude/rules/parsers.md` (no `..`, no absolute paths);
+    - check that each page is a PNG of `scale_w × scale_h`;
+    - check that the alpha holds the glyphs: `Font::channels[0]` is 0
+      (the glyph) or 2 (glyph and outline), or `None`, as from Hiero;
+    - decide what draws a character the font lacks: `Font::fallback`
+      when BMFont wrote one, else `?`, else an error;
+    - sort glyphs by id and kerning pairs by their ids, since `Font`
+      keeps the file's order and cooked output must be deterministic.
   - Do: the Aseprite `json-array` + tags importer → clips; JSONC → KBJ;
     BMFont → font asset.
   - Accept: sandbox animations come from Aseprite exports.
@@ -2491,6 +2575,13 @@ by the batched sprite renderer.
   - Note (from M3.2): `AssetServer::new(root, ..)` reads loose files. If
     the `dev` feature compiles loose reading out of release builds, the
     facade's release path changes with it, as this task's Do says.
+  - Note (from M5.2): an entry of codec 1 is
+    `klz::decompress(stored, raw_size as usize, limits)`, which checks the
+    size against the limit and the stream before it allocates. Store an
+    entry with codec 0 when KLZ does not make it smaller: noise grows by up
+    to `n / 255 + 2` bytes. What `klz::compress` writes is not part of the
+    format (ADR-0028), so changing it changes the cook's output, not the
+    pack version.
   - Do: the `.kpak` writer (cook) with dedup and alignment; `PackSource`
     with TOC binary search and CRC verification; release builds use the
     pack.
@@ -2567,6 +2658,13 @@ by the batched sprite renderer.
 
 - [ ] **M6.6 — audio assets and facade integration**
   - Depends: M6.3, M5.4
+  - Note (from M5.2): `wav::decode` gives `f32` samples, with floats past
+    ±1 kept as they are: the cook clamps them to [−1, 1] and rounds to
+    `i16` for PCM16 and QOA. At 4 bytes a sample, the default
+    `max_decoded_bytes` (256 MiB) holds about 11.6 minutes of 48 kHz
+    stereo; the cook raises it for music, as M5.4 raises the PNG dimension
+    limit. jsfxr exports 8-bit WAV unless asked otherwise, which the reader
+    refuses (ADR-0028): say so where the asset docs list the formats.
   - Do: cook WAV → PCM16/QOA by sidecar; `Sound`/`Music` assets;
     `AudioEmitter`/`AudioListener` components; music crossfade; bus volumes
     from settings.
@@ -2991,6 +3089,12 @@ by the batched sprite renderer.
     is in `nadir-platform`, which `xtask` may not link. Decide where the
     targets run, or the matrix edge, with the user (`docs/04-quality.md`).
   - Depends: M9.4
+  - Note (from M5.2): CI fuzzes each target for 30 s in the optimized
+    `xtask` profile (ADR-0028). For the nightly job: one matrix job per
+    target, so a hang ends one target only, with a `timeout-minutes` past
+    30; `NADIR_SEED` from the run's id, so that each night tries new
+    inputs; `fuzz/crashes/` uploaded when a job fails. GitHub disables a
+    public repo's scheduled workflows after 60 days without activity.
   - Do: nightly 30-minute fuzz smoke per parser; review the limits in
     every loader; ask the user to decide dependency-policy item 29
     (coverage-guided fuzzing).

@@ -7,7 +7,7 @@
 //!   is written as a string of its digits, and read back from one;
 //! - floats are JSON numbers, and integers are read as floats too. A
 //!   non-finite float is a `Value::Float`, which JSON text writes as `null`,
-//!   so it does not survive text;
+//!   so it does not survive text; KBJ keeps it (ADR-0028);
 //! - `Vec2` and `IVec2` are `[x, y]`;
 //! - `Color` is `"#rrggbb"`, or `"#rrggbbaa"` when it is not opaque;
 //! - `Rect` is `{"min": [x, y], "max": [x, y]}`, and applying one sets only

@@ -1583,3 +1583,116 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   refused by one of these rules; the cook needs color management, so that
   a non-sRGB `iCCP` or `cICP` must be honored; or decoding a source image
   runs a development machine out of memory.
+
+## ADR-0028 — The fuzzer builds optimized and runs 30 s a target in CI; KBJ has one encoding per value and keeps every float; the WAV and BMFont readers are strict
+
+- **Status:** Accepted
+- **Date:** 2026-10-31
+- **Context:**
+  - M5.2 adds four parsers, KLZ, KBJ, WAV and BMFont, each with a fuzz
+    target. CI fuzzed each target for 120 s in the Linux job, whose limit
+    is 30 minutes: 8 targets would take 16 minutes. `cargo xtask` built the
+    fuzzer in the dev profile, where `png` ran 6,453 inputs a second; at
+    `opt-level = 3`, with the dev profile's overflow checks and debug
+    assertions, it runs 94,798. A nightly job of 30 minutes a parser is
+    M11.6's.
+  - The spec gave KBJ's grammar only. A grammar like it allows several
+    encodings of one value: LEB128 numbers padded with empty groups, and
+    NaNs with any payload. Reflection writes non-finite floats as
+    `Value::Float`, which JSON text writes as `null` (ADR-0020), and saves
+    (M9.4) and cooked data are KBJ.
+  - libsndfile, behind most tools that read WAV, also reads 8-bit and
+    32-bit integer PCM, takes a frame's size from the bit depth whatever the
+    block alignment says, and reads a file whose RIFF size is wrong, as a
+    file written to a pipe or cut short has. Of 294 WAV files on the
+    development machine, 5 are 8-bit or 32-bit integer and 1 has a wrong
+    block alignment; the other 288 decode to libsndfile's samples, bit for
+    bit. GStreamer writes odd 24-bit data without its pad byte.
+  - BMFont's text format has dialects. AngelCode's BMFont writes ids as
+    code points, or as bytes of a code page (`charset="ANSI"`), can pack
+    four glyph sets into a page's channels (`packed=1`), and writes its
+    fallback glyph as id −1. Hiero writes `unicode=0` with code points.
+    Snowb writes `unicode=1` beside a charset that lists the ids, and can
+    write fixed-point advances (`xFpBits`). Distance-field generators write
+    fractional numbers and a `distanceField` line. The text pipeline draws
+    glyphs as an alpha mask times a tint (`render.md`).
+- **Decision** (the user chose the fuzzing budget, KBJ's floats and the
+  WAV subset on 2026-10-31):
+  - `cargo xtask` builds with a new `[profile.xtask]`: the dev profile at
+    `opt-level = 3`. CI fuzzes each target for 30 s. A hang is an input
+    that takes more than 2 s, not 10, and each target reports its slowest
+    input. The nightly job stays with M11.6.
+  - Following from that, the `png` target decodes to 16 MiB of pixels at
+    most, so that no valid input comes near the hang limit.
+  - KBJ has one encoding per value, and `decode` accepts only that: no
+    LEB128 number with more bytes than it needs, and no NaN but the quiet
+    NaN `0x7ff8_0000_0000_0000`, which `encode` writes for every NaN.
+    Infinities, −0.0 and subnormals are stored exactly. `encode` takes the
+    `Limits` and refuses, with `CodecError::KbjEncode`, a value `decode`
+    would reject: the same key twice, or nesting, entries or a string past
+    a limit. Decoding reserves at most 1,024 entries ahead for each array
+    or object, since the containers open at once all claim the same bytes.
+  - The WAV reader is strict: 16- and 24-bit PCM and 32-bit float only,
+    each plain or extensible, mono or stereo; the block alignment must be
+    the format's; the RIFF size must be the file's, with or without the
+    pad byte of an odd form. It stops reading at `data`, so a missing pad
+    byte after odd data does not matter. Errors for a format it refuses say
+    to export again.
+  - The BMFont reader is strict: the text form only; ids are code points
+    when `unicode=1` or `charset` is empty, Windows-1252 bytes for
+    `charset="ANSI"`, and any other charset is refused; `packed=1`, a
+    non-zero `xFpBits`, fractional numbers and `distanceField` are refused;
+    every page needs a `page` line. Unknown keys are ignored, unknown tags
+    refused. Id −1 is kept as `Font::fallback`.
+  - A KLZ stream ends with a block of literals only, whose token's match
+    half is 0; a stream that ends after a match is refused. What the
+    encoder writes is not part of the format.
+  - Commit the generators of the KLZ and WAV vectors beside them, as
+    ADR-0027 did for PNG: standard-library Python, which nothing runs but
+    a person adding a vector.
+- **Consequences:**
+  - CI's fuzz step takes about 4 minutes for 8 targets and tries more
+    inputs than 16 minutes in the dev build would, but for `klz`, which
+    compresses each input and runs only about 3.4 times as fast optimized.
+    A first `cargo xtask` builds xtask, nadir-core and nadir-codec again,
+    optimized, in `target/xtask/`; the checks it runs (`cargo test`,
+    `cargo clippy`) keep their own profiles.
+  - An input that is slow only without optimization is less likely to
+    reach the hang limit. The lower limit and the slowest-input report
+    make up for some of that; the nightly runs (M11.6) for more.
+  - With the game's limits, a valid PNG at the 64 KiB input cap that
+    inflates to an 8192 × 8192 image took the `png` target 1.3 to 2.1 s, as
+    long as the hang limit. The target therefore decodes to 16 MiB of
+    pixels at most (2048 × 2048 RGBA), where its slowest valid input,
+    16-bit RGBA interlaced, takes 325 ms: a sixth of the limit.
+  - A KBJ file decoded and encoded again gives the same bytes, so two
+    files that hold one value are one file, as the pack's dedup by content
+    hash needs. A save keeps its floats, which JSON text does not: that
+    answers ADR-0020's trigger for non-finite floats in saves, and ADR-0020
+    stands for text. `kbj::encode` can fail, and callers handle it.
+  - Some WAV files that libsndfile reads are refused, among them jsfxr's
+    exports, which are 8-bit unless asked otherwise, and files written to a
+    pipe. They are exported again rather than cooked.
+  - Some fonts are refused: other code pages, packed and distance-field
+    fonts, and fonts without `page` lines (5 of 5 BMFont files on the
+    development machine, which are DDS-paged game fonts).
+  - The repo has three Python files, all vector generators.
+- **Alternatives considered:**
+  - A nightly job now: it is M11.6's, 8 targets of 30 minutes run one
+    after another take 4 hours, and with a fixed seed every night repeats
+    the last.
+  - Keeping 120 s in the dev build: 16 minutes of the job's 30.
+  - KBJ writing non-finite floats as `null`, as JSON text does: a save
+    would lose them. Accepting any NaN payload and padded numbers: two
+    files for one value, and decoding then encoding would not give the
+    bytes back.
+  - Reading 8-bit and 32-bit integer WAV, and taking the block alignment
+    from the bit depth, as libsndfile does: more paths for formats every
+    tool exports differently in seconds. Reading a wrong RIFF size to the
+    end of the file: a file cut short would cook without a word.
+  - Packed and distance-field fonts: the text pipeline would need a
+    channel select and an SDF shader, which no task asks for.
+- **Revisit when:** a fuzz run longer than CI's finds a bug that 30 s
+  missed, or the hang limit fires on an input that is correct; a save
+  needs a NaN payload; a tool the team uses can export only a WAV format
+  or font this refuses; or the game wants distance-field text.

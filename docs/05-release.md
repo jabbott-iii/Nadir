@@ -23,6 +23,11 @@ panic = "unwind"               # keep unwinding so the panic hook can write a re
 [profile.dist]
 inherits = "release"
 lto = "fat"
+
+[profile.xtask]                # what `cargo xtask` builds with (ADR-0028)
+inherits = "dev"
+opt-level = 3                  # the fuzzer tries more inputs; overflow checks and
+                               # debug assertions stay on
 ```
 
 > The common `[profile.dev.package."*"]` trick does nothing here. `"*"`

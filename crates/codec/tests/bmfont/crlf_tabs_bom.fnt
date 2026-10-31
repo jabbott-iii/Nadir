@@ -1,0 +1,5 @@
+﻿info	face="Pixel"	size=-8	bold=1
+common	lineHeight=9	base=7	scaleW=16	scaleH=16	pages=1
+
+page	id=0	file="pixel.png"   
+char	id=97	x=8	y=8	width=8	height=8	xoffset=0	yoffset=1	xadvance=6	page=0	letter="a"

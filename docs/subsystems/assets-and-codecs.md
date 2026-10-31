@@ -31,11 +31,11 @@ Every decoder:
 | `png` (feature `png`) | PNG 1.2 / ISO 15948 | — | ✓ | no | See subset below |
 | `qoi` | qoiformat.org spec | ✓ | ✓ | yes | Textures, golden references |
 | `qoa` | qoaformat.org spec | ✓ | ✓ | yes | Music and long SFX; LMS predictor, 20-sample slices |
-| `wav` | RIFF/WAVE | — | ✓ | no | PCM 16/24-bit int, 32-bit float; mono/stereo |
-| `klz` | Below | ✓ | ✓ | yes | Pack entry compression |
+| `wav` | RIFF/WAVE | — | ✓ | no | PCM 16/24-bit int, 32-bit float; mono/stereo. See subset below |
+| `klz` | Below | ✓ | ✓ | yes | Pack entry compression. See below |
 | `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (settings, dev data) | Order-preserving objects: `Vec<(String, Value)>` |
-| `kbj` | Below | ✓ | ✓ | yes | Binary form of the JSON value tree for cooked data |
-| `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines |
+| `kbj` | Below | ✓ | ✓ | yes | Binary form of the JSON value tree for cooked data. See below |
+| `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines. See subset below |
 
 ### Inflate (documented, tested)
 
@@ -164,8 +164,11 @@ of the chunks it ignored that the cook tool should warn about.
   unit tests of `crates/codec/src/png.rs`; property tests in
   `crates/codec/tests/png.rs`.
 - **Fuzz target:** `png`, with seeds in `fuzz/corpus/png/` (a selection of
-  the vectors). It decodes each input, then a repaired copy, so that
-  mutations get past the checksums: the signature restored; the first
+  the vectors). It decodes to 16 MiB of pixels at most (2048 × 2048 RGBA),
+  so that a valid input of the fuzzer's 64 KiB that inflates to a large
+  image takes a third of a second, not the seconds it would with the
+  game's limit (ADR-0028). It decodes each input, then a repaired copy, so
+  that mutations get past the checksums: the signature restored; the first
   chunk taken as `IHDR` of 13 bytes; the chunks after an insertion or a
   deletion found again by their types; a length past the end cut at the
   next chunk; the walk ended at the first `IEND`, which is emptied, or
@@ -177,7 +180,11 @@ of the chunks it ignored that the cook tool should warn about.
   2 reach the image data as they are; repaired, 9,370 do, and 4,141 reach
   the filters.
 
-### KLZ block format (our own, LZ77, byte-oriented)
+### KLZ block format (our own, LZ77, byte-oriented; documented, tested)
+
+`klz::decompress(&[u8], raw_size, Limits)` decodes a stream into exactly
+`raw_size` bytes, which the caller knows (a pack's table of contents holds
+it). `klz::compress(&[u8])` writes one.
 
 ```
 stream := block*            ; until input exhausted
@@ -190,13 +197,57 @@ lit_len   = (token >> 4) + extras
 match_len = (token & 15) + 4 + extras
 ```
 
-- The final block has literals only.
-- The decoder checks that `offset ≤ bytes produced so far` and that the
-  output doesn't exceed the declared raw size.
-- The encoder uses a greedy hash table of 4-byte sequences (2^16 entries).
-- The format is deliberately LZ4-like in spirit, but it is our own
-  specification. Its exact bytes are defined by this document and the test
-  vectors in `crates/codec/tests/klz/`.
+- **The last block** holds literals only, maybe none: the input ends right
+  after its literals, and its token's match half is 0. Every stream but the
+  empty one ends with one. The empty stream, no bytes at all, decodes to no
+  bytes.
+- **A match** copies `match_len` bytes from `offset` back, and may overlap
+  what it writes (offset 1 repeats the last byte).
+- **Rejected:** offset 0; an offset past the bytes produced so far; a
+  stream that ends after a match, or inside a block; a last block whose
+  token has a match half; output longer or shorter than `raw_size`; extra
+  length bytes that add up past what a `usize` counts.
+- **Limits:** `raw_size` at most `max_decoded_bytes`. Before it allocates,
+  the decoder also checks `raw_size` against the stream: a block with `k`
+  extra match length bytes gives at most `255k + 18` bytes from `k + 3`,
+  so no stream gives 255 bytes a byte, and `raw_size > 255 × len` is cut
+  short (`UnexpectedEnd` at the end of the stream).
+- **Errors:** `CodecError::Klz { offset, kind }`, with the byte offset of
+  the item at fault: the token for a last block with a match half, the
+  match's offset for a bad offset or a match past `raw_size`, the literals
+  for literals past it, and a length's first extra byte for one too large
+  to count. `TooShort` and `UnexpectedEnd` are placed at the end of the
+  stream (`UnexpectedEnd` says what should have come next), and
+  `TooManyBytes` at 0.
+- **The encoder** is greedy. A table of 2^16 positions is indexed by the
+  top 16 bits of the next 4 bytes, read as a little-endian `u32`, times
+  2,654,435,761 (mod 2^32). At each position it looks up the last position
+  with the same index and stores its own; it takes the candidate when it is
+  at most 65,535 bytes back and its 4 bytes are the same, extends the match
+  as far as the bytes agree, and goes on after it, storing no positions
+  inside it. It ends with a block of the literals left. Incompressible data
+  grows by at most `n / 255 + 2` bytes.
+- **Encoder output is not part of the format.** Any stream the grammar
+  allows is valid, whoever wrote it. Changing the encoder changes what the
+  cook writes, and the vectors' encoder streams, but not the format, so it
+  needs no format version.
+- **Vectors:** `crates/codec/tests/klz/`, made by `make_vectors.py` there,
+  which has its own decoder and its own port of the encoder: 30 streams
+  with the bytes they give. Hand-assembled ones cover literal and match
+  lengths at the edges of their 4-bit parts and extra bytes, runs at offset
+  1, the farthest offset, an empty last block, and the most 6 bytes can
+  give (274). The encoder's streams, which `klz::compress` must write byte
+  for byte, cover runs, text, noise, repeats too far apart to match, and a
+  repeat exactly 65,535 back, which it must use, beside one 65,536 back,
+  which it must not. Error cases are in the unit tests of
+  `crates/codec/src/klz.rs`; property tests in `crates/codec/tests/klz.rs`
+  (round trips, a 1 MiB run, the growth bound, every stream cut short,
+  wrong sizes, damage).
+- **Fuzz target:** `klz`, with seeds in `fuzz/corpus/klz/`, each a 4-byte
+  size and a stream (`.klzs`). The size, little-endian and modulo
+  1 MiB + 1, is the size the stream must give, with a limit of 1 MiB. A
+  stream that ends short of its size must then decode at the size it
+  reached, and the input itself, compressed, must decompress to itself.
 
 ### JSON and JSONC subset (documented, tested)
 
@@ -285,7 +336,10 @@ one, byte for byte as the reference encoder (`qoi.h`) does.
   separate port of the reference encoder. A test in `xtask` checks that
   `qoi::encode` writes each one back byte for byte.
 
-### KBJ (binary JSON value tree)
+### KBJ (binary JSON value tree; documented, tested)
+
+`kbj::encode(&Value, Limits)` writes a JSON `Value` (see above) as a KBJ
+file, and `kbj::decode(&[u8], Limits)` reads one back.
 
 ```
 value := tag:u8 payload
@@ -296,6 +350,164 @@ value := tag:u8 payload
   0x07 object: count:LEB128 (key:string-payload value)*
 file  := "KBJ1" value
 ```
+
+- **Numbers:** LEB128 is unsigned, 7 bits a byte, low bits first, at most
+  10 bytes for 64 bits; an `i64` is zigzag-encoded first (0, −1, 1, −2, …
+  as 0, 1, 2, 3, …). A float is its IEEE 754 bits, so −0.0, subnormals and
+  the infinities are kept exactly, unlike in JSON text, where they become
+  `null` (ADR-0028).
+- **One encoding per value** (ADR-0028): `decode` accepts only the bytes
+  `encode` writes. It rejects a LEB128 number with more bytes than it needs
+  (a last byte of 0 after the first, `OverlongNumber`, however long) or
+  past 64 bits (a 10th byte above 1, or bits in an 11th or later,
+  `NumberTooLarge`), any NaN but the quiet NaN
+  `0x7ff8_0000_0000_0000`, which `encode` writes for every NaN, the same
+  key twice in one object (as the JSON parser does), strings that are not
+  UTF-8, unknown tags, and bytes after the value. A magic other than `KBJ`
+  is `NotKbj`; a version other than `1` is `UnsupportedVersion`.
+- **Limits**, as for JSON: nesting depth (a file of one scalar has depth 0;
+  64 levels pass, 65 do not), string length in bytes (keys included), and
+  entries per array or object. Before it reserves room for a container,
+  the decoder checks the count against the bytes left (an item takes at
+  least 1, a member 2), and reserves at most 1,024 entries ahead: up to 64
+  containers are open at once, each claiming the same bytes, so reserving
+  every claim in full could reserve 64 times the input's worth of values.
+- **The encoder refuses** what the decoder would, with the same limits:
+  the same key twice, nesting, entries or a string past a limit. So every
+  file written can be read back, a value survives the round trip (NaN
+  payloads aside), and a file decoded and encoded again gives the same
+  bytes.
+- **Duplicate keys** are found as the JSON parser finds them: as each key
+  is read in objects of up to 16 members, by sorting in larger ones, so a
+  large object cannot make the check quadratic.
+- **Errors:** `CodecError::Kbj { offset, kind }`, with the byte offset of
+  the tag, number or string at fault; `UnexpectedEnd` at the end of the
+  input, saying what should have come next. The encoder's errors are
+  `CodecError::KbjEncode { kind }`.
+- **Vectors:** byte strings worked out by hand in the unit tests of
+  `crates/codec/src/kbj.rs`, for every tag, LEB128 from one byte to two
+  and at ten, zigzag at both ends of `i64`, and each error; property tests
+  in `crates/codec/tests/kbj.rs`: random values, compared bit for bit, and
+  the JSON test documents survive a round trip; files cut short and damaged
+  files.
+- **Fuzz target:** `kbj`, with seeds in `fuzz/corpus/kbj/`: the JSON seed
+  corpus encoded, and `large_objects.kbj`, whose objects of more than 16
+  members let mutations reach the sorted duplicate-key check. Every file
+  that decodes must encode back to its own bytes.
+
+### WAV subset (documented, tested)
+
+`wav::decode(&[u8], Limits)` reads a WAV file into a `Wave`: its sample
+rate, its channels, how it stored its samples, and the samples as `f32`,
+interleaved. The cook tool turns them into PCM16 or QOA (M6.6).
+
+- **Supported:** `WAVE_FORMAT_PCM` at 16 and 24 bits,
+  `WAVE_FORMAT_IEEE_FLOAT` at 32 bits, and `WAVE_FORMAT_EXTENSIBLE` with
+  either as its subformat, whose valid bits may be anywhere from 1 to all
+  the bits its samples hold; mono and stereo. Integer samples are scaled
+  to [−1, 1) as libsndfile scales them, by 1/32768 and 1/8388608; float
+  samples are kept as they are, past ±1 too.
+- **Ignored:** every chunk other than `fmt ` and `data`, the byte rate, the
+  extensible format's channel mask, and everything after `data`: so a
+  missing pad byte after odd data, as GStreamer and Python's `wave` module
+  write it, does not matter. A RIFF size of odd length may be followed by
+  its pad byte or not.
+- **Rejected:** other sample formats (8-bit, 32-bit integer, 64-bit float,
+  compressed ones), with an error that says to export again as one of the
+  supported ones; more than two channels, or none; a sample rate of 0; RF64
+  and BW64; a NaN or infinite float sample; a RIFF size that is not the
+  file's; a chunk past the end of the form; a missing `fmt ` or `data`, a
+  second `fmt `, or `data` before `fmt `; a `fmt ` too short for its
+  format; an extensible subformat that is not PCM or float, or valid bits
+  of 0 or more than the samples hold; data that ends inside a frame.
+- **Rejected, although libsndfile reads it** (ADR-0028): 8-bit and 32-bit
+  integer PCM, PCM of 12 or 20 bits in larger samples, 64-bit float, and
+  compressed formats (A-law, µ-law, ADPCM); more than two channels; RF64
+  and BW64; a block
+  alignment other than the channels times the bytes a sample, which
+  libsndfile replaces with its own; a RIFF size that does not match the
+  file, as a file written to a pipe or cut short has (the error says so),
+  and a chunk past the end; NaN and infinite samples; valid bits of 0, or
+  more than the samples hold; data that ends inside a frame. Each is better
+  exported again than cooked.
+- **Limits:** the samples, at 4 bytes each as `f32`, at most
+  `max_decoded_bytes`: with the default, about 11.6 minutes of stereo at
+  48 kHz. The cook raises it for music (M6.6).
+- **Errors:** `CodecError::Wav { offset, kind }`, with the byte offset of
+  the chunk or field at fault (for an extensible format, the subformat's
+  tag or its valid bits), or of the sample for a NaN.
+- **Vectors:** `crates/codec/tests/wav/`: 21 files with the samples each
+  decodes to (`.f32`), made by `make_vectors.py` there, which writes RIFF
+  itself and computes the samples from the ones it wrote. They cover each
+  format in mono and stereo, plain and extensible, odd data with and
+  without its pad byte, chunks to skip before and after the data, no
+  frames, one frame, 8 kHz and 96 kHz, a float `fmt ` of 16 bytes as
+  arecord writes it, and 20 valid bits of 24. libsndfile decodes every one
+  to the same samples. Of 294 WAV files on the development machine, 288
+  decode to the samples libsndfile gives, bit for bit; 5 are 8-bit or
+  32-bit integer, and 1 has a wrong block alignment. Error cases are in the
+  unit tests of `crates/codec/src/wav.rs`.
+- **Fuzz target:** `wav`, with seeds in `fuzz/corpus/wav/` (a selection of
+  the vectors).
+
+### BMFont subset (documented, tested)
+
+`bmfont::parse(&str, Limits)` reads a font in BMFont's text format into a
+`Font`: its face, size, line height and base, its pages' size and files,
+its glyphs, its kerning pairs, what each channel of the pages holds, and
+its fallback glyph, if it has one. The cook tool turns it into the game's
+font asset (M5.5).
+
+- **Lines:** a tag, then `key=value` pairs, separated by spaces or tabs. A
+  value is an integer, a list of integers with commas, or a string in
+  double quotes, with no escapes: it ends at the first quote that a space,
+  a tab or the end of the line follows, so `letter="""`, as exporters
+  write the quote character, is a quote. LF or CRLF; blank lines,
+  trailing spaces and a leading byte-order mark are skipped.
+- **Tags:** `info` first and `common` second, each once; then `page`,
+  `chars`, `char`, `kernings` and `kerning`, in any order. Any other tag is
+  rejected, which also catches the XML and binary forms given by mistake.
+  The keys the font asset needs must be there, each once a line; others,
+  which generators add of their own, are ignored. `chnl` is 0 to 15 (the
+  channels 1, 2, 4 and 8, together), and may be left out, meaning all
+  four.
+- **Ids:** code points when `info` says `unicode=1` (Snowb lists the ids in
+  `charset` beside it) or has an empty `charset` (AngelCode's BMFont in
+  Unicode, and Hiero, which writes `unicode=0` with code points);
+  Windows-1252 bytes, mapped to code points, for `charset="ANSI"`. Any
+  other charset is rejected, saying to export as Unicode. A `char` of id −1
+  is the fallback glyph that BMFont writes when asked to.
+- **Checked:** a `page` line for every page, each once; each glyph's page
+  exists, and its rectangle lies inside the page; the ids of glyphs and
+  kerning pairs are characters (no surrogates); each glyph and each
+  kerning pair once; `chars count` and `kernings count`, where given, are
+  the numbers of `char` and `kerning` lines in the file.
+- **Rejected, for what the text pipeline cannot draw:** `packed=1` (glyphs
+  in each channel; other values than 0 and 1 are out of range), `xFpBits`
+  other than 0 (Snowb's fixed-point advances),
+  a number with a fraction, and a `distanceField` line (both from
+  distance-field generators).
+- **Not checked here:** that the page files exist, are PNG, are
+  `scaleW × scaleH`, and have safe paths; the cook does that (M5.5).
+- **Limits:** `max_string_bytes` for each string the font keeps (the face
+  and the page files; the strings of keys it ignores are not copied),
+  `max_entries` for the pages, the glyphs and the kerning pairs. Each line
+  is split into its pairs as it is reached, so a limit or an error stops
+  the parse there.
+  Repeated keys on a line of more than 16 pairs are found at the line's
+  end, and repeated pages, glyphs and kerning pairs at the file's, by
+  sorting, so that no check is quadratic.
+- **Errors:** `CodecError::BmFont { line, column, kind }`, with the line
+  and column of the tag or pair at fault. Lines and columns start at 1,
+  and columns count characters.
+- **Vectors:** `crates/codec/tests/bmfont/`: hand-written files in the
+  dialects of AngelCode's BMFont (Unicode, and ANSI with a fallback glyph),
+  Hiero (two pages, and `unicode=0` with code points), a tool that writes
+  tabs, CRLF and a byte-order mark, and the least a file can be. Error
+  cases are in the unit tests of `crates/codec/src/bmfont.rs`.
+- **Fuzz target:** `bmfont`, with seeds in `fuzz/corpus/bmfont/`. Bytes
+  that are not UTF-8 become U+FFFD, so that every input reaches the
+  parser.
 
 ## `nadir-assets`
 
@@ -452,7 +664,7 @@ string table (optional, dev builds and debugging): path strings in TOC order
 | :- | :- |
 | Max texture dimension (`max_texture_dimension`) | 8192 |
 | Max decoded bytes per asset (`max_decoded_bytes`) | 256 MiB |
-| Max JSON/KBJ nesting depth | 64 |
+| Max JSON/KBJ nesting depth (`max_depth`) | 64 |
 | Max string length | 1 MiB |
 | Max array or object entries | 1,000,000 |
 | Max pack entries | 1,000,000 |
@@ -467,8 +679,15 @@ string table (optional, dev builds and debugging): path strings in TOC order
     that made them
   - QOI and QOA: round-trip; QOA SNR threshold; QOI byte-exact against
     hand-computed small images
-  - KLZ: round-trip on random and repetitive data; malformed offsets
-    rejected
+  - KLZ: hand-assembled streams and the encoder's own, in
+    `crates/codec/tests/klz/`; round-trip on random and repetitive data;
+    malformed offsets rejected
+  - KBJ: hand-computed bytes for every tag and number edge; round-trip of
+    random values and the JSON documents
+  - WAV: 21 files from a separate RIFF writer, which libsndfile decodes to
+    the same samples, in `crates/codec/tests/wav/`
+  - BMFont: hand-written files in each generator's dialect, in
+    `crates/codec/tests/bmfont/`
   - JSON: RFC 8259 examples plus the JSONC extensions; deep nesting hits the
     limit and errors, it doesn't overflow the stack
 - **Fuzz targets** (fuzz smoke): every decoder above, the pack TOC reader,

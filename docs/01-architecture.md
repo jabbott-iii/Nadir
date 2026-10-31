@@ -84,7 +84,7 @@ approves it.
 
 ```toml
 [alias]
-xtask = "run --package xtask --"
+xtask = "run --profile xtask --package xtask --"
 dev   = "run --package sandbox --features dev --"
 ```
 

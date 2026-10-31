@@ -1,0 +1,3 @@
+info face="Minimal" size=10
+common lineHeight=10 base=8 scaleW=8 scaleH=8 pages=1
+page id=0 file="m.png"

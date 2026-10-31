@@ -103,7 +103,10 @@ jobs:
           name: golden-failures
           path: target/golden/*.qoi
 
-      # `--secs` is the time for each fuzz target.
+      # `--secs` is the time for each fuzz target. The fuzzer is built
+      # optimized, so 30 s tries more inputs than 120 s of a dev build did,
+      # for every target but `klz`, which compresses each input and gains
+      # about 3.4 times (ADR-0028).
       - name: Fuzz smoke
         if: runner.os == 'Linux'
-        run: cargo xtask fuzz-smoke --secs 120
+        run: cargo xtask fuzz-smoke --secs 30

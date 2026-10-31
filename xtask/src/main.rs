@@ -246,7 +246,7 @@ mod tests {
     fn fuzz_smoke_takes_its_own_options() {
         assert_eq!(
             usage_error(&["fuzz-smoke", "--target", "nope"]),
-            "unknown fuzz target `nope`; the targets are: json, qoi, inflate, png"
+            "unknown fuzz target `nope`; the targets are: json, qoi, inflate, png, klz, kbj, bmfont, wav"
         );
         assert_eq!(
             usage_error(&["fuzz-smoke", "--secs"]),
