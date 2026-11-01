@@ -71,7 +71,7 @@ pub struct Image {
     /// about the image, which the decoder ignored: the names of any of
     /// `gAMA`, `cHRM`, `sRGB`, `iCCP`, `cICP`, `mDCV`, `cLLI`, `tEXt`, `zTXt`
     /// and `iTXt`, each once, in the order first met. The cook tool warns
-    /// once for a file that has any.
+    /// once for a file that has a color chunk other than `sRGB` (ADR-0031).
     pub ignored: Vec<&'static str>,
 }
 

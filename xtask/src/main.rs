@@ -73,6 +73,16 @@ fn run(mut args: Args, root: &Path, out: &mut dyn Write) -> Result<bool, Error> 
             cargo::run(root, &bench_command(&filter))?;
             return Ok(true);
         }
+        "cook" => {
+            let force = args.flag("--force");
+            if let Some(argument) = args.finish().map_err(usage)?.first() {
+                return Err(Error::Usage(format!(
+                    "`cook` takes no arguments but `--force`, and got `{argument}`"
+                )));
+            }
+            cargo::run(root, &cook_command(force))?;
+            return Ok(true);
+        }
         _ => {}
     }
 
@@ -98,6 +108,18 @@ fn run(mut args: Args, root: &Path, out: &mut dyn Write) -> Result<bool, Error> 
 fn bench_command(filter: &[String]) -> Vec<&str> {
     let mut command = vec!["run", "--release", "--package", "nadir-bench", "--"];
     command.extend(filter.iter().map(String::as_str));
+    command
+}
+
+/// The cargo arguments behind `cargo xtask cook [--force]`: the cook tool,
+/// built in release mode, from `assets/` into `target/cooked/`, both below
+/// the workspace root, where cargo runs.
+fn cook_command(force: bool) -> Vec<&'static str> {
+    let mut command = vec!["run", "--release", "--package", "nadir-cook", "--"];
+    if force {
+        command.push("--force");
+    }
+    command.extend(["assets", "target/cooked"]);
     command
 }
 
@@ -129,6 +151,10 @@ fn usage() -> String {
         (
             "site",
             "Build the demo page into target/site, or [--out DIR]: captures, videos, download",
+        ),
+        (
+            "cook",
+            "Cook assets/ into target/cooked: [--force] cooks every group again",
         ),
     ]);
     for (name, about) in commands {
@@ -175,6 +201,7 @@ mod tests {
             "golden",
             "bench",
             "site",
+            "cook",
         ] {
             assert!(
                 text.lines()
@@ -288,6 +315,43 @@ mod tests {
         // Options are not passed on.
         assert_eq!(
             usage_error(&["bench", "--fast"]),
+            "unexpected argument `--fast`"
+        );
+    }
+
+    #[test]
+    fn cook_runs_the_cook_tool_on_the_workspace_s_assets() {
+        assert_eq!(
+            cook_command(false),
+            [
+                "run",
+                "--release",
+                "--package",
+                "nadir-cook",
+                "--",
+                "assets",
+                "target/cooked"
+            ]
+        );
+        assert_eq!(
+            cook_command(true),
+            [
+                "run",
+                "--release",
+                "--package",
+                "nadir-cook",
+                "--",
+                "--force",
+                "assets",
+                "target/cooked"
+            ]
+        );
+        assert_eq!(
+            usage_error(&["cook", "assets"]),
+            "`cook` takes no arguments but `--force`, and got `assets`"
+        );
+        assert_eq!(
+            usage_error(&["cook", "--fast"]),
             "unexpected argument `--fast`"
         );
     }

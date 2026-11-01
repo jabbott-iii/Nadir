@@ -106,8 +106,8 @@ of the chunks it ignored that the cook tool should warn about.
   colors are encoded, `gAMA`, `cHRM`, `sRGB`, `iCCP`, `cICP`, `mDCV` and
   `cLLI`, and the text chunks `tEXt`, `zTXt` and `iTXt`; each once, in the
   order first met. We assume sRGB. The decoder logs nothing: the cook tool
-  warns once for a file that names any (M5.4). Other ancillary chunks are
-  ignored without a word.
+  warns once for a file that names a color chunk other than `sRGB`
+  (ADR-0031). Other ancillary chunks are ignored without a word.
 - **Rejected with a clear error:** unknown critical chunks (Apple's `CgBI`
   among them: it comes before `IHDR`, so the error is that the first chunk
   is not `IHDR`), APNG animation chunks (`acTL`, `fcTL`, `fdAT`).
@@ -676,35 +676,165 @@ string table (optional, dev builds and debugging): path strings in TOC order
 
 ## `nadir-cook` (library + CLI)
 
+As built in M5.4 (ADR-0031): the atlas pipeline, the cache, and the CLI.
+The other pipelines below come with M5.5, M5.6 and M6.6.
+
 ### Pipelines
 
 | Source | Pipeline | Output |
 | :- | :- | :- |
-| `*.png` (+ optional `*.sprite.jsonc` sidecar: pivot, slicing) | Decode → trim → atlas pack → QOI | Atlas pages `atlas/<group>_<n>.qoi` + `atlas/<group>.kbj` (regions) |
+| `*.png` (+ optional `*.sprite.jsonc` sidecar: sheet frames, pivot, trim, tile set) | Decode → cut into frames → trim → atlas pack → QOI | Atlas pages `atlas/<group>_<n>.qoi`, tile sets' pages `atlas/<sprite>.tiles.qoi`, and `atlas/<group>.kbj` (where each frame went) |
 | Aseprite export (`aseprite -b in.aseprite --sheet out.png --data out.json --format json-array --list-tags`) | Parse frames and tags → animation clips → join the atlas group. Per clip: a name, loop or once, and frames of an atlas page path, a region and milliseconds; a tag's direction and repeat count expand to the frames Aseprite plays. The facade's loader turns them into `Clip`s with texture handles, in its `Clips` (ADR-0024) | Clips in `anim/<name>.kbj` |
 | `*.ldtk` (LDtk project, optionally with external level files) | Tile layers → chunked tile data; IntGrid → collision grid; entities → prefab references + field overrides; tall tiles → sprite list | `levels/<name>.klvl` (KBJ-based) |
 | `*.wav` | Resample policy from the sidecar; long or music → QOA, short SFX → PCM16 | `.qoa` / `.kpcm` |
 | `*.fnt` + pages (BMFont text) | Parse, pack pages into the atlas | `fonts/<name>.kbj` + atlas regions |
 | `*.jsonc` data (prefabs, items, input defaults) | Validate syntax → KBJ (semantic validation happens at game load via reflection) | `data/<name>.kbj` |
 
-- **Atlas packing:**
-  - MaxRects (best short-side fit), max page 4096², 2 px padding
-  - 1 px edge extrusion, which prevents bleeding under filtering and
-    sub-pixel camera offsets
-  - groups set by folder, with `atlas.jsonc` overrides
-- **Incremental cache:** `target/cooked/.cache.kbj` maps each source path to
-  (source content hash, cooker version, options hash, output hashes).
-  Unchanged entries are skipped.
-- **Determinism:**
-  - inputs are sorted
-  - there are no timestamps
-  - map iteration uses the deterministic hasher
-  - the same inputs always produce a byte-identical `game.kpak`, and CI
-    checks this by cooking twice
-- **LDtk version:**
-  - pin the LDtk version the team uses and record it in `assets/README.md`
-  - the importer checks the project's `jsonVersion`; an unknown major
-    version is an error with an upgrade note
+A file no pipeline cooks yet is listed once a run, with why, and left
+alone. So are, rather than failing the cook, such files' names that are
+not asset paths, differ from another only in case, are not UTF-8, or are
+symbolic links. Names starting with `.` are left out.
+
+### Sources and names
+
+- A file the cook reads (an image, a sidecar, an `atlas.jsonc`) must have
+  an asset path (`AssetPath`: lowercased, then checked) and a name that is
+  UTF-8, and not be a symbolic link. No other name in a folder above or
+  beside it may equal its own once folded: each character uppercased, then
+  lowercased, so that `Σ`, `σ` and `ς` are one, as Windows and macOS see
+  them. Each is an error naming the file.
+- An image's folder names its **atlas group**: `sprites/hero.png` is in
+  group `sprites`. An image directly in the source folder is an error.
+- A folder's `atlas.jsonc` can put its images, not its subfolders', in
+  another group: `{ "group": "characters" }`. The name must be lowercase
+  and make asset paths. Several folders may share a group.
+- Two groups' atlas files or tile sets' pages, or the folders they are
+  in, that fold alike are an error.
+- A group's sprites, its tile sets' pages, and the packing's ties go by
+  sprite name, never by the order or the case the files were found in.
+
+### Sidecar `<stem>.sprite.jsonc`
+
+```jsonc
+{
+  "frames": [12, 20], // a sheet: cells of 12 × 20, row by row; they must divide the image
+  "pivot": [6, 20],   // in a frame's untrimmed pixels (default: its bottom centre)
+  "trim": false       // keep each frame whole (default: true)
+}
+{ "tiles": [16, 16] } // a tile set instead: tiles that divide the image; its own page, as it is
+```
+
+Sizes are whole numbers of 1 or more. Unknown keys, wrong types, `frames`
+with `tiles`, and `trim` or `pivot` with `tiles`, are errors. A sheet has at
+most `max_entries` frames. Source PNGs decode with any width or height
+PNG allows: `max_decoded_bytes` bounds them.
+
+### Atlas groups
+
+- **Frames:** an image is one frame, or a sheet's cells row by row. Each
+  is trimmed to the box of its pixels whose alpha is above 0, unless its
+  sidecar says `"trim": false`. A frame with no such pixel is empty: it
+  takes no space.
+- **Packing:**
+  - MaxRects with the best short-side fit (ties: the shortest long side,
+    then the topmost, then the leftmost); of two equal free rectangles
+    one is kept. Frames are never rotated.
+  - Frames go in by height, then width (the largest first), then name and
+    index.
+  - 2 px padding between frames, and a 1 px edge extrusion around each
+    (corners too), which prevents bleeding under filtering and sub-pixel
+    camera offsets.
+  - Pages are squares of 64, 128, … 4096. If one page holds every frame,
+    the smallest that does is used. Otherwise each frame goes into the
+    first 4096 page it fits, opening pages as needed, and each page is
+    then packed again into the smallest side that holds its frames.
+  - A page is a bin 2 px wider than its side, so that a frame's padding
+    may fall off its edge: a frame fits if its width and height, with
+    their extrusion, are at most 4096. A larger one is an error naming it.
+  - A group with frames to pack, but all of them empty, gets one clear
+    page of 64.
+- **Tile sets:** a page of their own, the image as it is (its own size, at
+  most 4096 × 4096), at `atlas/<sprite>.tiles.qoi`, so that its name does
+  not move when the group's other pages change. They come after the packed
+  pages, by name.
+- **Pages** are QOI, RGBA, sRGB. Pixels no frame covers are (0, 0, 0, 0).
+- **PNG warning:** once per file that has a color chunk other than `sRGB`
+  (`gAMA`, `cHRM`, `iCCP`, `cICP`, `mDCV`, `cLLI`): the cook takes every
+  PNG as sRGB.
+
+### Atlas file `atlas/<group>.kbj` (version 1)
+
+KBJ, its members in this order:
+
+```
+{ "version": 1,
+  "pages": [ { "path": "atlas/sprites_0.qoi", "w": 128, "h": 128 }, … ],   // packed pages, then tile sets'
+  "sprites": [                                                         // by name
+    { "name": "sprites/person",          // the image's path without .png
+      "frames": [ { "page": 0, "x": 33, "y": 85, "w": 10, "h": 20,      // its pixels in the page
+                    "ox": 1, "oy": 0, "sw": 12, "sh": 20 }, … ],      // their offset in the untrimmed frame, its size
+      "pivot": [6.0, 20.0] },                                          // floats
+    { "name": "sprites/tiles",
+      "frames": [ { "page": 1, "x": 0, "y": 0, "w": 128, "h": 64, "ox": 0, "oy": 0, "sw": 128, "sh": 64 } ],
+      "tiles": [16, 16] } ] }                                          // a tile set: no pivot
+```
+
+- A frame's `uv` is its `x, y, w, h` over its page's `w, h`.
+- The pivot is in the untrimmed frame's pixels, from (0, 0) at its top-left
+  corner to (`sw`, `sh`) at its bottom-right; in the trimmed quad it is
+  ((px − ox) / w, (py − oy) / h).
+- An empty frame is page 0 at (0, 0), of size 0, with offset 0 and its
+  cell's `sw`, `sh`.
+- A tile set has one frame: its whole page.
+
+### Incremental cache `OUT/.cache.kbj` (version 1)
+
+```
+{ "version": 1, "cooker": "nadir-cook 0.1.0 <fnv1a64 of its executable>", "options": "",
+  "jobs": [ { "job": "atlas/sprites",                        // by name
+              "inputs": [["sprites/person.png", "<fnv1a64, 16 hex digits>"], …],  // its images, sidecars, atlas.jsonc
+              "outputs": [["atlas/sprites.kbj", "…"], …] } ] }                    // by path
+```
+
+- Each atlas group is a job. It is skipped when its files' hashes, the
+  cooker and the options are the cache's, and its outputs are there as
+  written; `--force` skips none. A cook built anew cooks everything once.
+  The options string holds the options that change output: none yet.
+- Each file is read once, so its hash and what is cooked come from the same
+  bytes.
+- A cache that cannot be read, has another version, or names a path the
+  cook would not write (not an asset path as written, or an output not a
+  `.qoi` or `.kbj` below `atlas/`) is not used, with a warning.
+- Each output is written through a `.tmp` and a rename, and the cache last.
+  The cook owns `OUT/atlas/`: every file there that no job wrote is
+  removed. The output folder and the source folder may not hold each
+  other.
+
+### CLI
+
+- `nadir-cook [--force] SOURCE OUT`: exit 0, 1 for a failed cook, 2 for a
+  command line not understood, or with an argument that is not valid
+  Unicode. It prints each job, cooked or up to date, and warns on standard
+  error.
+- `cargo xtask cook [--force]` runs it, built in release mode, on
+  `assets/` and `target/cooked/`.
+
+### Determinism
+
+- inputs are sorted
+- there are no timestamps
+- map iteration uses ordered maps or the deterministic hasher
+- the same inputs always produce byte-identical output, and so a
+  byte-identical `game.kpak` (M5.7). Checked by cooking into two folders,
+  and an incremental cook against a clean one, in `cargo test -p
+  nadir-cook`, and by `cargo xtask cook --force` against the cook before
+  it.
+
+### LDtk version
+
+- pin the LDtk version the team uses and record it in `assets/README.md`
+- the importer checks the project's `jsonVersion`; an unknown major
+  version is an error with an upgrade note
 
 ## Limits (runtime defaults, configurable for tools)
 
@@ -742,6 +872,15 @@ string table (optional, dev builds and debugging): path strings in TOC order
   the level reader and the save reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   load every cooked asset through `PackSource` and `LooseSource`.
+- **The cook** (`tools/cook`): the scan's rules on lists of names made by
+  hand, so that names differing only in case are tested on every system,
+  and on disk where the file system can hold both; MaxRects over random
+  sizes (inside the page, apart); trimming and extrusion pixel by pixel;
+  the sidecar's and the cache's errors; and on real folders, the atlas
+  file, a group's pages, a cook into two folders byte for byte, an
+  incremental cook against a clean one, what each change cooks again,
+  stale files removed, and the workspace's `assets/` cooked to its
+  hand-made QOIs' pixels.
 - **The asset server** (`crates/assets/tests`): loads that never wait for a
   source held shut, order, budgets and turns, panics, scopes. The load
   storm (`storm.rs`) asks for 1,000 images in one frame, and holds every

@@ -1,0 +1,2 @@
+// The field's tile set: 8 × 4 tiles of 16 pixels (games/sandbox/src/map.rs).
+{ "tiles": [16, 16] }

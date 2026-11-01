@@ -59,6 +59,11 @@ dependencies = [
 [[package]]
 name = "nadir-cook"
 version = "0.1.0"
+dependencies = [
+ "nadir-assets",
+ "nadir-codec",
+ "nadir-core",
+]
 
 [[package]]
 name = "nadir-core"

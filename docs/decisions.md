@@ -1492,7 +1492,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0027 — The PNG decoder reads every color type and depth, rejects damage libpng loads, rounds 16-bit samples, and reports the color chunks it ignores
 
-- **Status:** Accepted
+- **Status:** Accepted; its rule that the cook warns for any chunk in `Image::ignored` is superseded by ADR-0031
 - **Date:** 2026-10-30
 - **Context:**
   - M5.1 adds the cook tool's PNG decoder. The spec's subset left out
@@ -1976,3 +1976,145 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   (M6.6) or the re-cook (M5.8) needs workers of its own; the platform layer
   can lower a thread's priority, which could give back the spare core; or
   a game needs the dev build's `load` to cost less.
+
+## ADR-0031 — The cook packs each folder's PNGs into an atlas of QOI pages and a KBJ of frames, trimmed, with tile sets as pages of their own; it caches by group, owns `atlas/`, and lists what it does not cook
+
+- **Status:** Accepted
+- **Date:** 2026-10-31
+- **Context:**
+  - M5.4 builds `nadir-cook` and `cargo xtask cook`: a library and a CLI,
+    an incremental cache, and PNG → trim → MaxRects (padding and
+    extrusion) → QOI. It must cook twice to the same bytes, cook again
+    only the atlas group of a changed PNG, and reject paths that differ
+    only in case.
+  - `assets/` held only the sandbox's hand-made QOIs: `atlas.qoi`, whose
+    regions are constants in `stress.rs`, `tiles.qoi`, a `TileSet`
+    (ADR-0023: a whole texture cut into equal tiles, with no padding),
+    and `person.qoi`, whose walk frames feed `ClipFrame`s, which have no
+    size or pivot yet (ADR-0024). Nothing at run time reads a cooked
+    atlas.
+  - ADR-0027 had the cook warn for any chunk the PNG decoder ignores. Of
+    the 4,033 PNGs on the development machine, 739 have only text chunks
+    and 25 `sRGB` alone, and the cook takes every PNG as sRGB anyway.
+  - `xtask` may depend only on `core` and `codec`, and `nadir-cook` on
+    `core`, `codec`, `assets` and `scene`. CI runs the tests on Linux,
+    Windows and macOS, and the last two do not tell names apart by case.
+  - A code review (4 reviewers and a skeptic for each) found sprites in
+    the order and case the files were found in, Greek's final sigma
+    getting past the case rule, folders of outputs that differ in
+    non-ASCII case, which on Windows and macOS made the cook remove a
+    group's own files, and a prune quadratic in the free rectangles.
+  - A critique of the design (3 critics and a skeptic for each) found,
+    among others: an atlas with no page sizes, from which no `uv` can be
+    computed; a tile set's page named by its position, which moves when
+    other pages are added; cache paths trusted for deletes; group names
+    not lowercased; and tests of case and of names not UTF-8 that cannot
+    make their files on Windows and macOS.
+- **Decision** (the user chose the scope, the trimming, the PNG warning,
+  the files left alone and M5.9's place on 2026-10-31):
+  - **Scope:** the cook alone. PNG sources of the sandbox's sprites,
+    converted pixel for pixel from its QOIs, go into `assets/sprites/`,
+    with sidecars. The sandbox keeps drawing its QOIs. A runtime atlas
+    loader and the sandbox's switch to cooked sprites are a task of their
+    own, M5.9, placed right after M5.4, and M5.5 depends on it.
+  - **Groups:** an image's folder names its group. A folder's
+    `atlas.jsonc`, `{ "group": "name" }`, puts its images (not its
+    subfolders') in another; the name must be lowercase and make asset
+    paths. Several folders may share a group. An image directly in the
+    source folder is an error.
+  - **Sidecars:** `<stem>.sprite.jsonc` beside `<stem>.png` gives
+    `frames` (a sheet's cell size), `pivot`, `trim`, or `tiles` (a tile
+    set). Sizes are whole numbers of 1 or more that divide the image's.
+    Unknown keys and wrong types are errors.
+  - **Trimming and packing:** every frame is trimmed to the box of its
+    pixels whose alpha is above 0, unless its sidecar says `"trim":
+    false`, and its offset and untrimmed size are recorded, for M5.5's
+    `ClipFrame` size and pivot. Frames are sorted by height, width, name
+    and index, and packed by MaxRects with the best short-side fit, never
+    rotated, 2 px apart, with their edges extruded 1 px. Pages are squares
+    of 64 to 4096: the smallest that holds all, or 4096 pages filled in
+    turn, each shrunk to fit its frames. A frame whose width or height
+    with its extrusion passes 4096 is an error. A tile set is a page of
+    its own, as it is, at most 4096 × 4096, named after it.
+  - **Outputs:** for group G, `atlas/G_<n>.qoi` (RGBA, sRGB) and
+    `atlas/G.kbj`, version 1, which lists each page's path and size, and
+    each sprite's frames (page, place, trimmed size, offset, untrimmed
+    size) and pivot, or tile size for a tile set. A tile set's page is
+    `atlas/<sprite>.tiles.qoi`. The pivot is in the untrimmed frame's
+    pixels, from (0, 0) at its top-left corner to (sw, sh) at its
+    bottom-right, and is the bottom centre when the sidecar gives none.
+  - **PNG warning:** once per file that has a color chunk other than
+    `sRGB`: `gAMA`, `cHRM`, `iCCP`, `cICP`, `mDCV` or `cLLI`. This
+    changes ADR-0027's rule.
+  - **Files no pipeline cooks:** listed once a run, with why, and left
+    alone. So are, rather than failing the cook, the names among them
+    that are not asset paths, differ from another only in case, are not
+    UTF-8, or are symbolic links. Names starting with `.` are left out.
+  - **Names:** a file the cook reads must have an asset path and a name
+    that is UTF-8, and not be a symbolic link. No other name in a folder
+    above or beside it may equal its own once folded: each character
+    uppercased, then lowercased, so that `Σ`, `σ` and `ς` are one, as
+    Windows and macOS see them. Two groups' atlas files or tile sets'
+    pages, or the folders they are in, that fold alike are an error. The
+    rules run on the list the walk makes, so that they are tested on
+    lists made by hand on every system.
+  - **Order:** a group's sprites, its tile sets' pages, and the packing's
+    ties go by sprite name, never by the order or the case the files were
+    found in, so that a cook after a rename of case alone, which the cache
+    does not see, writes what a clean one does.
+  - **Cache:** `.cache.kbj`, version 1: the cooker (the cook's version and
+    a hash of its executable), an options string (empty: no option
+    changes output yet), and per job (`atlas/G`) the FNV-1a hashes of the
+    files it read and wrote, in path order. A job is skipped when its
+    files, the cooker and the options match and its outputs are there as
+    written; `--force` skips none. Each file is read once, so a hash and
+    what is cooked come from the same bytes. A cache that names a path
+    the cook would not write is not used.
+  - **Output:** each file is written through a `.tmp` and a rename, and
+    the cache last. The cook owns `OUT/atlas/`: after a cook, every file
+    there that no job wrote is removed. The output and source folders may
+    not hold each other.
+  - **CLI:** `nadir-cook [--force] SOURCE OUT`, exit 1 for a failed cook
+    and 2 for a command line not understood. `cargo xtask cook [--force]`
+    runs it, built in release mode, on `assets/` and `target/cooked/`.
+- **Consequences:**
+  - A cooked atlas holds what a loader needs: page sizes for `uv`s,
+    offsets and untrimmed sizes for trimmed frames, and tile sizes. M5.9
+    reads it.
+  - `assets/sprites/` holds each sprite twice, as the QOI the sandbox
+    draws and the PNG the cook packs, until M5.9 retires the QOIs.
+  - Until M5.5 gives `ClipFrame` a size and pivot, a trimmed walk frame
+    drawn as it is would be stretched: the person's frames trim to 10 and
+    12 pixels wide.
+  - A rebuilt cook cooks everything again once.
+  - Names that differ only in non-ASCII case, or in Unicode
+    normalization alone (é composed or not), cannot be tested on disk on
+    every system; the first is checked, the second is not. The fold can
+    join names that Windows and macOS keep apart (`ß` and `ss`), which
+    errs on the safe side.
+  - No test makes a name that is not UTF-8: that needs platform `cfg`,
+    which `tools/cook` may not have.
+- **Alternatives considered:**
+  - Moving the sandbox to cooked sprites now: a runtime atlas asset, and
+    the sandbox, its tests, the demo page and the download moving to
+    `target/cooked`, over about five crates.
+  - Keeping sheet frames whole: a clip's frames would share one size, but
+    sheets and loose images would differ.
+  - Warning for every ignored chunk, or for `sRGB` too: 924 or 185 of the
+    4,033 PNGs would warn.
+  - Failing for files no pipeline cooks: the sandbox's QOIs would have had
+    to leave `assets/`, breaking it until M5.9.
+  - A cache entry per source file, as the spec first had it: a changed
+    image re-packs its whole group anyway, so the group is the unit.
+  - Removing only what the old cache listed: a damaged or forced cache
+    would leave files behind.
+  - Tile sets as numbered pages after the packed ones: a level naming one
+    would point at another page once the group grew.
+  - Pages of any size, not only squares: less memory for some groups, a
+    search the critique did not ask for.
+- **Revisit when:** a group needs more than a few 4096 pages, or squares
+  waste enough memory to matter; a sheet's frames must stay one size,
+  which M5.5's clip import may show; an artist's tool writes PNGs whose
+  colors are not sRGB without a chunk saying so; a project needs links in
+  `assets/`; or M5.7's pack needs an option that changes output, which the
+  cache's options string must then hold.

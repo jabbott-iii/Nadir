@@ -108,7 +108,7 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | `cargo xtask features` | Fails if a ticked roadmap task belongs to no feature in `docs/features.jsonc`, or a feature's `ticked` is not what the roadmap ticks |
 | `cargo xtask golden [--bless] [--backend gl\|metal]` | Renders golden scenes offscreen and compares them to references |
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the dependency-free mutation fuzzer over every parser, or over one |
-| `cargo xtask cook` | Cooks `assets/` into `target/cooked/` |
+| `cargo xtask cook [--force]` | Cooks `assets/` into `target/cooked/`, skipping the atlas groups whose files did not change, unless `--force` |
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |
 | `cargo run -p sandbox` | Runs the sandbox game (opens a window) |

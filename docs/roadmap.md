@@ -2503,7 +2503,7 @@ by the batched sprite renderer.
     3. `cargo xtask ci`: ok, 1,270 tests, with GL on the RTX 3070. CI has
     not run this code yet, and neither Windows nor macOS has.
 
-- [ ] **M5.4 — cook: CLI, cache, textures, atlas packer**
+- [x] **M5.4 — cook: CLI, cache, textures, atlas packer**
   - Note (from M3.5): the sandbox has a hand-made atlas,
     `assets/sprites/atlas.qoi`, with its regions as constants in
     `games/sandbox/src/stress.rs`. Cooked atlases replace both.
@@ -2542,6 +2542,109 @@ by the batched sprite renderer.
     - Case-colliding paths are rejected.
   - Verify: `cargo test -p nadir-cook`; `cargo xtask cook` twice and
     compare hashes
+  - Note: the user chose on 2026-10-31 (ADR-0031):
+    - The cook alone. PNG sources of the sandbox's sprites go into
+      `assets/sprites/`, and the sandbox keeps drawing its QOIs: a runtime
+      atlas loader and the sandbox's switch are M5.9, right after this
+      task, which M5.5 depends on.
+    - Every frame is trimmed, and the atlas records each frame's offset
+      and untrimmed size, for M5.5's `ClipFrame` size and pivot. Tile sets
+      are pages of their own, untrimmed and unpadded.
+    - A PNG warns once for a color chunk other than `sRGB` (`gAMA`,
+      `cHRM`, `iCCP`, `cICP`, `mDCV`, `cLLI`): neither text nor `sRGB`
+      alone does, which changes ADR-0027's rule (M5.1's note).
+    - Files no pipeline cooks yet are listed once a run and left alone.
+  - Note: built, in nadir-cook and xtask:
+    - `nadir_cook::cook(source, out, &Options)` and its `Report`; the CLI
+      `nadir-cook [--force] SOURCE OUT`; `cargo xtask cook [--force]`,
+      which runs it in release mode on `assets/` and `target/cooked/`.
+    - The modules: the walk and its rules (`scan.rs`, the rules a pure
+      function over what the walk lists), sidecars and `atlas.jsonc`
+      (`config.rs`), trimming and extrusion (`image.rs`), MaxRects
+      (`pack.rs`), a group's pages and atlas file (`atlas.rs`), the cache
+      (`cache.rs`).
+    - The formats, in `assets-and-codecs.md`: the sidecar, `atlas.jsonc`,
+      the atlas file and the cache, both version 1.
+    - Source PNGs decode with any width or height PNG allows (M5.1's
+      note): a strip of 8,320 × 1 cooks into 130 frames.
+    - `assets/sprites/`: `person.png` (with `{ "frames": [12, 20] }`),
+      `tree.png`, `rock.png`, `grass.png` and `tiles.png` (with
+      `{ "tiles": [16, 16] }`), converted pixel for pixel from the QOIs by
+      a standard-library Python script (not committed). A test checks the
+      cooked pixels against the QOIs. `atlas.qoi` has no source: it held
+      the same sprites.
+  - Note: a design critique, 3 critics and a skeptic for each, before any
+    code: 35 points, 4 refuted. Among those taken: page sizes in the
+    atlas, without which no `uv` can be computed; tile set pages named
+    after their sprite, so that a group's other pages cannot move them;
+    cache paths checked before they are read, and the cook owning
+    `atlas/` rather than deleting what a cache names; group names
+    lowercase; collisions found per folder, by Unicode's case; skipped
+    files never failing the cook; the scan's rules tested on lists, since
+    Windows and macOS cannot make two names that differ only in case.
+  - Note: one code review round, 4 reviewers and a skeptic for each: 19
+    findings, 18 confirmed in full or in part, 1 refuted. Fixed:
+    - Sprites and tile sets' pages followed the order and case the files
+      were found in: after a rename of case alone, which the cache does
+      not see, a cook was up to date but not what a clean cook writes.
+      They now go by name, and a test renames and compares.
+    - Greek's final sigma got past the case rule (`str::to_lowercase`
+      keeps `σ` and `ς` apart); names are now folded, upper then lower.
+      Folders of outputs that differ in non-ASCII case would have made the
+      cook remove a group's own files on Windows and macOS: refused now.
+    - A link or a name not UTF-8 among the files the cook reads was
+      skipped, so a linked sidecar quietly cooked its image whole: an
+      error now. An argument that is not valid Unicode is a usage error,
+      not a folder with its bytes replaced. A refused cook made its
+      output folder inside the source: it now checks first.
+    - The prune compared every pair of free rectangles: 16,000 frames took
+      about 4 minutes in release. Only the new parts are checked now, to
+      the same packing, which a property test checks.
+    - Tests: the shipped group cooked twice (with its output sort taken
+      out, the cache failed and every test passed), two packed pages, a
+      sheet of two rows, the default pivot of a frame wider than tall;
+      `con.txt`, which Windows 10 opens as the console, moved from the
+      disk to the list tests.
+  - Note: verified on 2026-10-31. `cargo test -p nadir-cook`: 22 unit, 2
+    CLI and 28 integration tests passed. The Verify line, run so that it
+    can fail: `cargo xtask cook`, then `cargo xtask cook --force` into the
+    same folder, then into an emptied one, gave the same bytes each time
+    (hashes of every file), and a plain cook after them found the group up
+    to date. The atlas files were also the same as before the review's
+    fixes. Two order tests fail with the name sort taken out. CI has not
+    run this code, nor has Windows or macOS.
+
+- [ ] **M5.9 — the game draws cooked atlases; the sandbox's sprites are cooked**
+  - Note (from M5.4, ADR-0031): the cook writes `atlas/<group>.kbj`
+    (version 1) and its pages into `target/cooked/`
+    (`assets-and-codecs.md`, "Atlas file"): each page's path and size, and
+    each sprite's frames in page pixels, with their trimmed offset and
+    untrimmed size, and its pivot, or a tile set's tile size.
+    `assets/sprites/` holds the sandbox's sprites twice: the hand-made
+    QOIs it draws, and the PNGs, with sidecars, that the cook packs, pixel
+    for pixel the same.
+  - Note (from M3.5, through M5.4): the sandbox has a hand-made atlas,
+    `assets/sprites/atlas.qoi`, with its regions as constants in
+    `games/sandbox/src/stress.rs`. Cooked atlases replace both.
+  - Note (from M4.5, through M5.4): the field's tile set, `tiles.qoi`
+    (8 × 4 tiles of 16, named in `games/sandbox/src/map.rs`), is
+    `sprites/tiles.png` with `{ "tiles": [16, 16] }`: its page,
+    `atlas/sprites/tiles.tiles.qoi`, is the image as it is, as ADR-0023's
+    `TileSet` needs.
+  - Note (from M5.4): the person's walk frames trim to 10 and 12 pixels
+    wide. Until M5.5 gives `ClipFrame` a size and pivot, a trimmed frame
+    is stretched to its sprite's size: keep the sheet whole with
+    `"trim": false`, or place each frame by its offset.
+  - Depends: M5.4
+  - Do: an asset that reads an atlas file and gives its sprites by name
+    with their `uv`s; the sandbox, its tests, the demo page (`xtask site`,
+    ADR-0029) and the download load cooked sprites from
+    `target/cooked/`, cooked first; retire the hand-made QOIs and
+    `stress.rs`'s region constants.
+  - Accept: the sandbox draws only cooked sprites; its three captures are
+    unchanged, or each change is explained.
+  - Verify: `cargo xtask cook`; `cargo test -p sandbox`; `cargo xtask
+    site`
 
 - [ ] **M5.5 — cook: Aseprite animations, data, fonts**
   - Note (from M4.6, ADR-0024):
@@ -2562,7 +2665,17 @@ by the batched sprite renderer.
       (`games/sandbox/src/main.rs`), from `person.qoi` and the atlas. Its
       crowds start each walker at its own point with
       `Animator::starting_at`, from one walk clip.
-  - Depends: M5.4, M4.6
+  - Depends: M5.4, M4.6, M5.9
+  - Note (from M4.6, through M5.4): a `ClipFrame` has no size or pivot of
+    its own, so a trimmed frame is stretched to its Sprite's size
+    (ADR-0024). The atlas now records each frame's offset (`ox`, `oy`) and
+    untrimmed size (`sw`, `sh`), and its sprite's pivot (ADR-0031): give
+    `ClipFrame` (`#[non_exhaustive]` for this) a size and pivot that
+    `nadir::animate` writes. Then a flip must mirror about the pivot:
+    render's flip mirrors about the quad's centre, for every sprite.
+  - Note (from M5.4): an Aseprite sheet joins its folder's atlas group:
+    `atlas::cook` takes the group's members, and a sheet's frames would
+    come from its JSON rather than a sidecar's `frames`.
   - Note (from M5.2): `bmfont::parse` reads the text and nothing else.
     The font cook still has to:
     - resolve `Font::pages` beside the `.fnt` under the path rules of
@@ -2650,6 +2763,10 @@ by the batched sprite renderer.
   - Note (from M3.2): `AssetServer::new(root, ..)` reads loose files. If
     the `dev` feature compiles loose reading out of release builds, the
     facade's release path changes with it, as this task's Do says.
+  - Note (from M5.4, ADR-0031): pack the outputs `target/cooked/.cache.kbj`
+    lists, not a walk of the folder. An option that changes output, such
+    as the release build's string table, goes in the cache's `options`
+    string, or a forced cook is the only way the cache sees it.
   - Note (from M5.3): `PackSource` implements `Source` (`read`, with
     `modified` left at `None`), and `AssetServer::with_source` takes it.
     `LooseSource` is in every build until then (ADR-0030). The workers call
@@ -2677,6 +2794,10 @@ by the batched sprite renderer.
     second `AnimationFinished`. Decide then whether a finished one should
     hold the new last frame (`Animator::advance`).
   - Depends: M5.6
+  - Note (from M5.4): `xtask` may not link `nadir-cook` (the dependency
+    matrix), so `xtask cook --watch` runs the `nadir-cook` binary again on
+    each change: only the groups whose files changed are cooked, and the
+    cache stays right. A cook built anew cooks everything once.
   - Note (from M5.3): `Source::modified` gives a loose file's time of change.
     A reload keeps the handle, but the server takes a worker's result only
     for an asset in its decoding state, and frees an asset only through an

@@ -1,0 +1,2 @@
+// The person: standing, then the 4 frames of a walk, each 12 × 20.
+{ "frames": [12, 20] }
