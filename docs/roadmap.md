@@ -3222,7 +3222,7 @@ by the batched sprite renderer.
     asset scope.
   - Accept: the state tests in the scene spec pass; no transition happens
     mid-tick.
-  - Verify: `cargo test -p nadir-scene -p nadir`
+  - Verify: `cargo test -p nadir-scene -p NadirGE`
 
 - [ ] **M9.2 — menu kit and game UI**
   - Depends: M7.1, M8.4
@@ -3234,7 +3234,7 @@ by the batched sprite renderer.
     settings (display, audio, controls with rebinding).
   - Accept: focus-navigation unit tests; manual: every menu is fully usable
     with gamepad only and with mouse only.
-  - Verify: `cargo test -p nadir`; `cargo dev` (manual)
+  - Verify: `cargo test -p NadirGE`; `cargo dev` (manual)
 
 - [ ] **M9.3 — settings file**
   - Note (from M4.2): apply settings field by field (`fields()` and
@@ -3248,7 +3248,7 @@ by the batched sprite renderer.
   - Do: `settings.jsonc` load, validate and save; unknown keys preserved;
     invalid values fall back to defaults with a warning; fuzz target.
   - Accept: a test for each fallback rule; the fuzz target is registered.
-  - Verify: `cargo test -p nadir`;
+  - Verify: `cargo test -p NadirGE`;
     `cargo xtask fuzz-smoke --target settings --secs 120`
 
 - [ ] **M9.4 — saves**
@@ -3302,7 +3302,7 @@ by the batched sprite renderer.
     the next launch.
   - Accept: a forced panic (`--debug-panic` flag, dev only) produces a
     complete report.
-  - Verify: `cargo test -p nadir`;
+  - Verify: `cargo test -p NadirGE`;
     `cargo dev -- --debug-panic`, then inspect the report (manual)
 
 - [ ] **M9.7 — content: one complete level of the real game**
@@ -3415,6 +3415,13 @@ by the batched sprite renderer.
   - Accept: the workflow passes YAML review; the secret names are
     documented; no secret values appear anywhere in the repo.
   - Verify: YAML parse/review; `git diff` reviewed for secret material
+  - Note (2026-11-01, ADR-0036): `.github/workflows/release.yml` exists:
+    it publishes the engine's programs for six targets, a signed apt
+    repository, the cook's image and the crates on a `v*` tag, with the
+    environments `release` and `crates-io` (`docs/05-release.md`,
+    "Engine releases"). This task adds the game's signed and notarized
+    packages and the approved store upload to it, and signs the engine's
+    archives too.
 
 - [ ] **M11.3 — Windows minidumps, symbol archiving, `xtask symbolicate`**
   - Depends: M9.6
@@ -3484,7 +3491,6 @@ three OSes from a tag, and the release checklist is complete.
 | IME (`NSTextInputClient`, XIM preedit, Windows IMM) | Localization into CJK languages or a name-entry feature |
 | TrueType rasterizer in cook (glyf outlines → bitmap atlases) | Localization beyond the hand-made bitmap fonts |
 | 2D lighting pass (`light2d`) | Art direction asks for it |
-| `aarch64` Windows and Linux targets | Store or platform demand |
 | Native PipeWire audio | ALSA-compatibility issues reported |
 | Windows installer | A non-Steam/itch distribution channel requires one |
 | Opt-in crash upload | Volume of player bug reports; requires a privacy review |

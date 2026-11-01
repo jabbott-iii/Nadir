@@ -3,11 +3,18 @@ name = "nadir-scene"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Scene layer for the Nadir engine: reflection, registries and the components they describe."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-nadir-codec = { path = "../codec" }
-nadir-core = { path = "../core" }
-nadir-ecs = { path = "../ecs" }
+nadir-codec.workspace = true
+nadir-core.workspace = true
+nadir-ecs.workspace = true
 
 [lints]
 workspace = true

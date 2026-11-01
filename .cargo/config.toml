@@ -1,3 +1,9 @@
 [alias]
 xtask = "run --profile xtask --package xtask --"
 dev   = "run --package sandbox --features dev --"
+
+# Windows: every executable links the C runtime in, so that the released
+# programs need no Visual C++ redistributable, and the tests run the
+# executables as they are released (ADR-0036).
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

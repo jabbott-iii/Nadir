@@ -3,14 +3,16 @@ name = "nadir-bench"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+# The workspace's own benchmarks (ADR-0036).
+publish = false
 
 [dependencies]
-nadir = { path = "../crates/engine" }
-nadir-core = { path = "../crates/core" }
-nadir-codec = { path = "../crates/codec" }
-nadir-collision = { path = "../crates/collision" }
-nadir-ecs = { path = "../crates/ecs" }
-nadir-render = { path = "../crates/render" }
+nadir.workspace = true
+nadir-core.workspace = true
+nadir-codec.workspace = true
+nadir-collision.workspace = true
+nadir-ecs.workspace = true
+nadir-render.workspace = true
 
 [lints]
 workspace = true

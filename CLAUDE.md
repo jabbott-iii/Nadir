@@ -27,7 +27,8 @@ matching files:
 **Permissions:**
 
 - `.claude/settings.json` pre-approves routine `cargo` commands.
-- It denies Git operations that publish or finalize changes, plus `cargo publish`.
+- It denies Git operations that publish or finalize changes, plus `cargo publish`
+  and `make release` (which tags and pushes).
 - It asks before `cargo add`, `cargo update` and `cargo install`.
 - These are guardrails, not a security boundary. The rules in `AGENTS.md` still
   apply when a command slips past a pattern.

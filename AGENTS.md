@@ -9,10 +9,12 @@ exist until the roadmap task that creates it is done. Check before assuming.
 - An engine for top-down 2D games: tilemaps, y-sorted sprites, kinematic
   movement, many entities, bitmap text, mixed audio, gamepad support.
 - **Targets (only these):**
-  - Windows 10+ (x86_64, MSVC)
-  - macOS 12+ (Apple Silicon and Intel, shipped as a universal binary)
-  - Linux (x86_64, X11; Wayland sessions run through XWayland until native
-    Wayland lands, see the roadmap backlog)
+  - Windows 10+ (x86_64 and aarch64, MSVC)
+  - macOS 12+ (Apple Silicon and Intel; the game's packages are a universal
+    binary)
+  - Linux (x86_64 and aarch64, X11; Wayland sessions run through XWayland
+    until native Wayland lands, see the roadmap backlog)
+  - aarch64 Windows and Linux joined with the release pipeline (ADR-0036).
 - **Out of scope:** web/WASM, Android, iOS, consoles, 3D, networking.
 - **Built from the ground up:** zero third-party runtime crates. We write our
   own OS bindings, graphics backends, math, ECS, codecs, mixer, UI and tools.
@@ -36,6 +38,7 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | Tests, CI, `xtask` | `docs/04-quality.md` |
 | The demo page: `site/`, `docs/features.jsonc`, `.github/workflows/pages.yml` | `docs/04-quality.md` ("Demo page"), ADR-0029 |
 | Packaging, signing, crash reports | `docs/05-release.md` |
+| Releases: `.github/workflows/release.yml`, `.github/release/`, `tools/cook/Dockerfile`, `xtask` `dist` and `crates` | `docs/05-release.md` ("Engine releases"), ADR-0036 |
 | Why something is the way it is | `docs/decisions.md` |
 
 ## Non-negotiable rules
@@ -91,7 +94,7 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | `crates/collision` | `nadir-collision` | Shapes, spatial hash, move-and-slide, queries, A*, flow fields | deny |
 | `crates/scene` | `nadir-scene` | Reflection macros, prefabs, levels, saves, game states | deny |
 | `crates/debug` | `nadir-debug` | Immediate-mode debug UI, inspector, console, profiler, trace export (feature `dev`) | deny |
-| `crates/engine` | `nadir` | Facade: `App`, plugins, main loop, re-exports | deny |
+| `crates/engine` | `NadirGE` (`nadir` in code; ADR-0036) | Facade: `App`, plugins, main loop, re-exports | deny |
 | `tools/cook` | `nadir-cook` | Offline asset pipeline (library + CLI) | deny |
 | `xtask` | `xtask` | Build automation: CI checks, goldens, packaging | deny |
 | `games/sandbox` | `sandbox` | The game that drives requirements | deny |
@@ -101,9 +104,10 @@ exist until the roadmap task that creates it is done. Check before assuming.
 
 | Command | What it does |
 | :- | :- |
-| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), `cook`, tests, `deps`, `layers`, `unsafe-audit`, `workflows`, `release-no-dev`, `features`: the full PR gate |
+| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), `cook`, tests, `deps`, `layers`, `crates`, `unsafe-audit`, `workflows`, `release-no-dev`, `features`: the full PR gate |
 | `cargo xtask deps` | Fails if `Cargo.lock` contains any non-workspace package not approved in the policy |
 | `cargo xtask layers` | Fails if a crate depends on a crate the dependency matrix forbids |
+| `cargo xtask crates` | Fails if a crate that crates.io gets lacks a description, license or repository, is at another version than `NadirGE`, or depends on a workspace crate crates.io does not get or by another version (ADR-0036) |
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the allowed crates or lacks a `SAFETY:` comment |
 | `cargo xtask workflows` | Fails if a GitHub workflow uses an action it is not allowed, pins one by anything but a commit SHA, or gives its token more than it may (ADR-0032) |
 | `cargo xtask features` | Fails if a ticked roadmap task belongs to no feature in `docs/features.jsonc`, or a feature's `ticked` is not what the roadmap ticks |
@@ -111,12 +115,15 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the dependency-free mutation fuzzer over every parser, or over one |
 | `cargo xtask cook [--force]` | Cooks `assets/` into `target/cooked/`, skipping the jobs (atlas groups, data files) whose files did not change, unless `--force` |
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
+| `cargo xtask dist [--out DIR]` | Builds this machine's release files into `target/dist`: runs the laid-out programs, then packs the archive and, on Linux, the `.deb`s (needs `dpkg-dev`; ADR-0036) |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |
 | `cargo run -p sandbox` | Runs the sandbox game (opens a window). It draws the cooked sprites: run `cargo xtask cook` first, which `cargo xtask ci` also does, as the sandbox's tests need them too |
+| `make release VERSION=v<version> [DRY_RUN=1]` | For maintainers, never agents (rule 7): checks that HEAD is on `main` at that version, then tags it and pushes the tag, which starts the release workflow (`docs/05-release.md`) |
 
 `xtask` never uploads, publishes or signs with real credentials. Publishing
-happens only in CI: the release jobs, and the demo page's workflow
-(`.github/workflows/pages.yml`, ADR-0029).
+happens only in CI: the release workflow (`.github/workflows/release.yml`,
+ADR-0036), and the demo page's workflow (`.github/workflows/pages.yml`,
+ADR-0029).
 
 ## Conventions
 

@@ -3,9 +3,12 @@ name = "sandbox"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+# The demo game: the release archives and the apt repository carry it
+# (ADR-0036), crates.io does not.
+publish = false
 
 [dependencies]
-nadir = { path = "../../crates/engine" }
+nadir.workspace = true
 
 [features]
 # `cargo dev`: development builds of the engine, where a missing asset shows

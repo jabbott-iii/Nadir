@@ -1,4 +1,5 @@
-//! The parts of `cargo metadata` that the `deps` and `layers` checks read.
+//! The parts of `cargo metadata` that the `deps`, `layers` and `crates`
+//! checks read.
 
 use std::path::Path;
 
@@ -31,8 +32,29 @@ pub(crate) struct Package {
     pub(crate) source: Option<String>,
     /// Whether the package is a member of this workspace.
     pub(crate) is_member: bool,
+    /// Whether crates.io may get it: no `publish = false`, nor a list of
+    /// registries without crates.io.
+    pub(crate) to_crates_io: bool,
+    /// What crates.io shows of it, if the manifest says.
+    pub(crate) about: About,
     /// The dependencies the package's manifest declares, of every kind.
     pub(crate) dependencies: Vec<Dependency>,
+}
+
+/// The fields of a manifest that crates.io shows, each `None` where the
+/// manifest has none.
+#[derive(Debug, Default)]
+pub(crate) struct About {
+    /// `description`.
+    pub(crate) description: Option<String>,
+    /// `license`, an SPDX expression.
+    pub(crate) license: Option<String>,
+    /// `repository`.
+    pub(crate) repository: Option<String>,
+    /// `homepage`.
+    pub(crate) homepage: Option<String>,
+    /// `authors`, each as `Name <email>` or a name.
+    pub(crate) authors: Vec<String>,
 }
 
 /// One dependency declared in a manifest.
@@ -42,6 +64,8 @@ pub(crate) struct Dependency {
     pub(crate) name: String,
     /// Where it comes from, as for [`Package::source`].
     pub(crate) source: Option<String>,
+    /// The version requirement, such as `^0.1.0`, or `*` for none.
+    pub(crate) requirement: String,
     /// The manifest table it is declared in.
     pub(crate) kind: Kind,
 }
@@ -81,6 +105,7 @@ pub(crate) fn parse(text: &str) -> Result<Metadata, Error> {
             dependencies.push(Dependency {
                 name: string(dependency, "name")?.to_string(),
                 source: optional_string(dependency, "source")?,
+                requirement: string(dependency, "req")?.to_string(),
                 kind: kind(dependency)?,
             });
         }
@@ -89,6 +114,14 @@ pub(crate) fn parse(text: &str) -> Result<Metadata, Error> {
             version: string(package, "version")?.to_string(),
             source: optional_string(package, "source")?,
             is_member: members.contains(&id),
+            to_crates_io: to_crates_io(package)?,
+            about: About {
+                description: unless_absent(package, "description")?,
+                license: unless_absent(package, "license")?,
+                repository: unless_absent(package, "repository")?,
+                homepage: unless_absent(package, "homepage")?,
+                authors: strings(package, "authors")?,
+            },
             dependencies,
         });
     }
@@ -106,6 +139,43 @@ fn kind(dependency: &Value) -> Result<Kind, Error> {
         Some("dev") => Ok(Kind::Dev),
         Some("build") => Ok(Kind::Build),
         Some(other) => Err(unexpected(format!("unknown dependency kind `{other}`"))),
+    }
+}
+
+/// Whether `publish` lets crates.io have the package: `null` lets any
+/// registry, `false` is `[]`, and a list names the registries.
+fn to_crates_io(package: &Value) -> Result<bool, Error> {
+    match package.get("publish") {
+        None | Some(Value::Null) => Ok(true),
+        Some(Value::Array(registries)) => Ok(registries
+            .iter()
+            .any(|registry| registry.as_str() == Some("crates-io"))),
+        Some(_) => Err(unexpected("`publish` is not an array or null")),
+    }
+}
+
+/// A field that is an array of strings, or absent.
+fn strings(value: &Value, key: &str) -> Result<Vec<String>, Error> {
+    let Some(items) = value.get(key) else {
+        return Ok(Vec::new());
+    };
+    items
+        .as_array()
+        .ok_or_else(|| unexpected(format!("`{key}` is not an array")))?
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| unexpected(format!("`{key}` holds something not a string")))
+        })
+        .collect()
+}
+
+/// A field that is a string, `null` or absent.
+fn unless_absent(value: &Value, key: &str) -> Result<Option<String>, Error> {
+    match value.get(key) {
+        None => Ok(None),
+        Some(_) => optional_string(value, key),
     }
 }
 
@@ -158,6 +228,8 @@ pub(crate) mod testing {
             version: "0.1.0".to_string(),
             source: None,
             is_member: true,
+            to_crates_io: true,
+            about: About::default(),
             dependencies: Vec::new(),
         }
     }
@@ -169,6 +241,8 @@ pub(crate) mod testing {
             version: version.to_string(),
             source: Some(CRATES_IO.to_string()),
             is_member: false,
+            to_crates_io: true,
+            about: About::default(),
             dependencies: Vec::new(),
         }
     }
@@ -179,6 +253,7 @@ pub(crate) mod testing {
             self.dependencies.push(Dependency {
                 name: name.to_string(),
                 source: None,
+                requirement: "*".to_string(),
                 kind,
             });
             self
@@ -189,6 +264,7 @@ pub(crate) mod testing {
             self.dependencies.push(Dependency {
                 name: name.to_string(),
                 source: Some(CRATES_IO.to_string()),
+                requirement: "^1".to_string(),
                 kind: Kind::Normal,
             });
             self
@@ -314,6 +390,51 @@ mod tests {
             ]
         );
         assert!(metadata.packages[0].dependencies.is_empty());
+    }
+
+    #[test]
+    fn reads_what_crates_io_gets_and_shows() {
+        let text = r#"{"workspace_members": ["a", "b", "c", "d"], "packages": [
+            {"name": "a", "version": "0.1.0", "id": "a", "source": null, "publish": null,
+             "description": "A.", "license": "Apache-2.0", "repository": null,
+             "homepage": "https://a.example/", "authors": ["A <a@a.example>"],
+             "dependencies": [{"name": "b", "source": null, "req": "^0.1.0", "kind": null}]},
+            {"name": "b", "version": "0.1.0", "id": "b", "source": null, "publish": [],
+             "dependencies": []},
+            {"name": "c", "version": "0.1.0", "id": "c", "source": null,
+             "publish": ["mine", "crates-io"], "dependencies": []},
+            {"name": "d", "version": "0.1.0", "id": "d", "source": null, "publish": ["mine"],
+             "dependencies": []}
+        ]}"#;
+        let metadata = parse(text).unwrap();
+        let to_crates_io: Vec<bool> = metadata
+            .packages
+            .iter()
+            .map(|package| package.to_crates_io)
+            .collect();
+        assert_eq!(to_crates_io, [true, false, true, false]);
+        let about = &metadata.packages[0].about;
+        assert_eq!(about.description.as_deref(), Some("A."));
+        assert_eq!(about.license.as_deref(), Some("Apache-2.0"));
+        assert_eq!(about.repository, None);
+        assert_eq!(about.homepage.as_deref(), Some("https://a.example/"));
+        assert_eq!(about.authors, ["A <a@a.example>"]);
+        assert_eq!(metadata.packages[0].dependencies[0].requirement, "^0.1.0");
+        // The sample has none of these fields: the package says nothing.
+        let sample = parse(SAMPLE).unwrap();
+        assert!(sample.packages[0].to_crates_io);
+        assert_eq!(sample.packages[0].about.description, None);
+        assert!(sample.packages[0].about.authors.is_empty());
+        assert_eq!(
+            detail(parse(&text.replace(r#"["A <a@a.example>"]"#, "[7]"))),
+            "`authors` holds something not a string"
+        );
+        assert_eq!(
+            detail(parse(
+                &text.replace(r#""publish": []"#, r#""publish": false"#)
+            )),
+            "`publish` is not an array or null"
+        );
     }
 
     #[test]

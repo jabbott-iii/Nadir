@@ -69,9 +69,10 @@ const MATRIX: &[(&str, Allowed)] = &[
             "nadir-input",
         ]),
     ),
-    // The facade: every crate above it.
+    // The facade: every crate above it. Code calls it `nadir`; its package
+    // is NadirGE, as crates.io has another `nadir` (ADR-0036).
     (
-        "nadir",
+        "NadirGE",
         Allowed::Only(&[
             "nadir-core",
             "nadir-sys",
@@ -96,7 +97,7 @@ const MATRIX: &[(&str, Allowed)] = &[
     ("nadir-bench", Allowed::AnyWorkspaceCrate),
     // `nadir-debug` only behind the `dev` feature: `release-no-dev` checks
     // that part.
-    ("sandbox", Allowed::Only(&["nadir", "nadir-debug"])),
+    ("sandbox", Allowed::Only(&["NadirGE", "nadir-debug"])),
 ];
 
 impl fmt::Display for Allowed {
@@ -255,8 +256,8 @@ mod tests {
             ("nadir-platform", "nadir-gfx"),
             ("nadir-codec", "nadir-assets"),
             ("nadir-scene", "nadir-debug"),
-            ("nadir-debug", "nadir"),
-            ("nadir", "sandbox"),
+            ("nadir-debug", "NadirGE"),
+            ("NadirGE", "sandbox"),
         ] {
             assert_eq!(
                 violations(vec![
@@ -302,10 +303,10 @@ mod tests {
         assert_eq!(
             violations(vec![
                 member("nadir-bench")
-                    .path_dep("nadir", Kind::Normal)
+                    .path_dep("NadirGE", Kind::Normal)
                     .path_dep("nadir-cook", Kind::Normal)
                     .path_dep("left-pad", Kind::Normal),
-                member("nadir"),
+                member("NadirGE"),
                 member("nadir-cook"),
                 vendored,
             ]),
@@ -347,9 +348,9 @@ mod tests {
                 .skip(1)
                 .step_by(2)
                 // The document shortens `nadir-core` to `core` in the
-                // right-hand column.
+                // right-hand column, and names the facade `NadirGE`.
                 .map(|name| {
-                    if name.starts_with("nadir") {
+                    if name.starts_with("nadir") || name == "NadirGE" {
                         name.to_string()
                     } else {
                         format!("nadir-{name}")

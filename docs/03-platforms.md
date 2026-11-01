@@ -8,12 +8,17 @@ backends live in `nadir-gfx`.
 
 | OS | Rust target(s) | Minimum version | Toolchain notes |
 | :- | :- | :- | :- |
-| Windows | `x86_64-pc-windows-msvc` | Windows 10 1809 | MSVC build tools and Windows SDK (also supply `rc.exe`, `signtool.exe`) |
-| macOS | `aarch64-apple-darwin`, `x86_64-apple-darwin` → universal via `lipo` | macOS 12 | Xcode command-line tools (`codesign`, `notarytool`, `lipo`, `iconutil`, `hdiutil`); full Xcode not required |
-| Linux | `x86_64-unknown-linux-gnu` | glibc 2.31 (Ubuntu 20.04 era) | Build release binaries in the oldest supported distro container to set the glibc floor |
+| Windows | `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc` | Windows 10 1809 | MSVC build tools and Windows SDK (also supply `rc.exe`, `signtool.exe`). Every MSVC build links the C runtime statically (`.cargo/config.toml`) |
+| macOS | `aarch64-apple-darwin`, `x86_64-apple-darwin` → universal via `lipo` for the game's packages | macOS 12 | Xcode command-line tools (`codesign`, `notarytool`, `lipo`, `iconutil`, `hdiutil`); full Xcode not required |
+| Linux | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` | glibc 2.31 (Ubuntu 20.04 era) for the game's packages; the engine's releases need 2.34 | Build the game's release binaries in the oldest supported distro container to set the glibc floor |
 
-`aarch64-pc-windows-msvc` and `aarch64-unknown-linux-gnu` are backlog items.
-The code should not assume x86_64, so adding them is a packaging task.
+The aarch64 Windows and Linux targets joined with the release pipeline
+(ADR-0036). Every crate passes clippy for all six targets, and a release
+builds and runs its programs on a runner of each, but `cargo xtask ci`
+runs on x86_64 Linux and Windows and arm64 macOS only. The engine's
+releases build on `ubuntu-24.04`, whose symbols set their glibc floor
+(2.34 on 2026-11-01); the 2.31 floor above is the game's packages'
+(M11.1).
 
 ## Development order
 

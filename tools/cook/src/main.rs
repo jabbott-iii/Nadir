@@ -16,6 +16,9 @@ const EXIT_FAILED: u8 = 1;
 /// The exit code for a command line that was not understood.
 const EXIT_USAGE: u8 = 2;
 
+/// What `--version` prints, and the start of [`cooker`].
+const VERSION: &str = concat!("nadir-cook ", env!("CARGO_PKG_VERSION"));
+
 const USAGE: &str = "Usage: nadir-cook [--force] SOURCE OUT
 
 Cooks the files below SOURCE into OUT: each folder's PNG images, Aseprite
@@ -25,8 +28,9 @@ JSONC file below `data/` into KBJ, `data/<name>.kbj`. A job whose files did
 not change since the last cook into OUT is left as it is.
 
 Options:
-  --force  Cook every job, whatever the cache in OUT says
-  --help   Show this
+  --force    Cook every job, whatever the cache in OUT says
+  --help     Show this
+  --version  Show the version
 ";
 
 fn main() -> ExitCode {
@@ -40,6 +44,13 @@ fn main() -> ExitCode {
     let mut args = Args::from_env();
     if args.flag("--help") {
         return say(&mut io::stdout(), USAGE, ExitCode::SUCCESS);
+    }
+    if args.flag("--version") {
+        return say(
+            &mut io::stdout(),
+            &format!("{VERSION}\n"),
+            ExitCode::SUCCESS,
+        );
     }
     let force = args.flag("--force");
     let paths = match args.finish() {
@@ -88,7 +99,7 @@ fn usage(error: &str) -> ExitCode {
 /// The cooker: this version and a hash of this executable, so that a cook
 /// built anew cooks everything again.
 fn cooker() -> String {
-    let version = concat!("nadir-cook ", env!("CARGO_PKG_VERSION"));
+    let version = VERSION;
     let hash = std::env::current_exe()
         .and_then(std::fs::read)
         .map(|bytes| format!("{:016x}", fnv1a64(&bytes)));

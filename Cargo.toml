@@ -28,10 +28,38 @@ members = [
 inherits = "dev"
 opt-level = 3
 
+# What every member inherits. The package name crates.io knows the facade
+# by, NadirGE, is in crates/engine/Cargo.toml: `nadir` is taken there
+# (ADR-0036).
 [workspace.package]
-edition = "2024"
 version = "0.1.0"
+edition = "2024"
+authors = ["Joseph Anthony Abbott III <jabbottpublicsupport@gmail.com>"]
+description = "A lightweight, cross-platform Rust engine."
 license = "Apache-2.0"
+readme = "README.md"
+homepage = "https://jabbott.dev/Nadir/"
+repository = "https://github.com/jabbott-iii/Nadir"
+keywords = ["2d", "game-engine", "top-down", "gamedev", "rust"]
+categories = ["game-engines", "game-development", "graphics"]
+
+# The workspace's crates, by path here and by version on crates.io, which
+# a published crate's dependencies must name. A release raises `version`
+# above and each of these with it; `cargo xtask crates` checks that they
+# agree (ADR-0036).
+[workspace.dependencies]
+nadir = { path = "crates/engine", version = "0.1.0", package = "NadirGE" }
+nadir-assets = { path = "crates/assets", version = "0.1.0" }
+nadir-codec = { path = "crates/codec", version = "0.1.0" }
+nadir-collision = { path = "crates/collision", version = "0.1.0" }
+nadir-core = { path = "crates/core", version = "0.1.0" }
+nadir-ecs = { path = "crates/ecs", version = "0.1.0" }
+nadir-gfx = { path = "crates/gfx", version = "0.1.0" }
+nadir-input = { path = "crates/input", version = "0.1.0" }
+nadir-platform = { path = "crates/platform", version = "0.1.0" }
+nadir-render = { path = "crates/render", version = "0.1.0" }
+nadir-scene = { path = "crates/scene", version = "0.1.0" }
+nadir-sys = { path = "crates/sys", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"              # sys, platform, gfx override with #![allow(unsafe_code)]

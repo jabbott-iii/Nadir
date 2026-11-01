@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "nadir"
+name = "NadirGE"
 version = "0.1.0"
 dependencies = [
  "nadir-assets",
@@ -34,7 +34,7 @@ version = "0.1.0"
 name = "nadir-bench"
 version = "0.1.0"
 dependencies = [
- "nadir",
+ "NadirGE",
  "nadir-codec",
  "nadir-collision",
  "nadir-core",
@@ -132,7 +132,7 @@ version = "0.1.0"
 name = "sandbox"
 version = "0.1.0"
 dependencies = [
- "nadir",
+ "NadirGE",
 ]
 
 [[package]]

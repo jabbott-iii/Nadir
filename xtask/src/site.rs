@@ -68,7 +68,7 @@ const OWN_FILES: &[&str] = &["site/nadir.css", "site/nadir.js"];
 /// The cooked assets, relative to the workspace root, where
 /// `cargo xtask cook` puts them, and the folder of them the download takes:
 /// the cook's own, which holds what it wrote and nothing else.
-const COOKED: &str = "target/cooked";
+pub(crate) const COOKED: &str = "target/cooked";
 const COOKED_ATLASES: &str = "atlas";
 
 /// The repository, where `GITHUB_REPOSITORY` does not name it.
@@ -235,7 +235,7 @@ fn build_sandbox(root: &Path) -> Result<PathBuf, Error> {
 
 /// The executable of the binary target `name`, from cargo's JSON messages,
 /// one a line.
-fn executable(messages: &str, name: &str) -> Option<PathBuf> {
+pub(crate) fn executable(messages: &str, name: &str) -> Option<PathBuf> {
     messages.lines().rev().find_map(|line| {
         let message = json::parse(line, Limits::default()).ok()?;
         if message.get("reason")?.as_str()? != "compiler-artifact"
@@ -439,7 +439,7 @@ fn package(
 /// The newest glibc symbol version an executable asks for, such as
 /// `2.34`: the oldest glibc it runs on. Read from the version names
 /// (`GLIBC_2.34`) in its bytes; `None` if it names none.
-fn glibc_floor(executable: &[u8]) -> Option<String> {
+pub(crate) fn glibc_floor(executable: &[u8]) -> Option<String> {
     const NAME: &[u8] = b"GLIBC_";
     let mut newest: Option<Vec<u32>> = None;
     let mut rest = executable;
@@ -571,7 +571,7 @@ fn milestones(roadmap: &str, tasks: &[features::Task]) -> Vec<Milestone> {
 }
 
 /// Runs `command`, which prints to the terminal.
-fn run(command: &mut Command) -> Result<(), Error> {
+pub(crate) fn run(command: &mut Command) -> Result<(), Error> {
     let line = describe(command);
     let status = command
         .stdin(Stdio::null())
@@ -592,7 +592,7 @@ fn run(command: &mut Command) -> Result<(), Error> {
 }
 
 /// Runs `command`, and returns what it wrote to standard output.
-fn output(command: &mut Command) -> Result<String, Error> {
+pub(crate) fn output(command: &mut Command) -> Result<String, Error> {
     let line = describe(command);
     let result = command
         .stdin(Stdio::null())
@@ -671,35 +671,35 @@ fn prepare(output: &Path) -> Result<(), Error> {
     )
 }
 
-fn make_dir(dir: &Path) -> Result<(), Error> {
+pub(crate) fn make_dir(dir: &Path) -> Result<(), Error> {
     fs::create_dir_all(dir).map_err(|source| Error::Write {
         path: dir.to_path_buf(),
         source,
     })
 }
 
-fn remove(file: &Path) -> Result<(), Error> {
+pub(crate) fn remove(file: &Path) -> Result<(), Error> {
     fs::remove_file(file).map_err(|source| Error::Write {
         path: file.to_path_buf(),
         source,
     })
 }
 
-fn read_text(path: &Path) -> Result<String, Error> {
+pub(crate) fn read_text(path: &Path) -> Result<String, Error> {
     fs::read_to_string(path).map_err(|source| Error::Read {
         path: path.to_path_buf(),
         source,
     })
 }
 
-fn write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
+pub(crate) fn write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     fs::write(path, bytes).map_err(|source| Error::Write {
         path: path.to_path_buf(),
         source,
     })
 }
 
-fn copy(from: &Path, to: &Path) -> Result<(), Error> {
+pub(crate) fn copy(from: &Path, to: &Path) -> Result<(), Error> {
     fs::copy(from, to).map(drop).map_err(|source| Error::Write {
         path: to.to_path_buf(),
         source,
@@ -709,7 +709,7 @@ fn copy(from: &Path, to: &Path) -> Result<(), Error> {
 /// Copies the cooked atlases under `cooked` into `assets`, as the sandbox
 /// reads them from beside its executable: `atlas/`, which the cook owns,
 /// and nothing else of the folder, such as the cook's cache.
-fn copy_cooked(cooked: &Path, assets: &Path) -> Result<(), Error> {
+pub(crate) fn copy_cooked(cooked: &Path, assets: &Path) -> Result<(), Error> {
     copy_dir(&cooked.join(COOKED_ATLASES), &assets.join(COOKED_ATLASES))
 }
 

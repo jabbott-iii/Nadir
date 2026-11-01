@@ -35,6 +35,7 @@
       "Bash(git reset --hard *)",
       "Bash(git filter-branch *)",
       "Bash(git filter-repo *)",
+      "Bash(make release*)",
       "Bash(cargo publish *)",
       "Bash(cargo login *)"
     ]

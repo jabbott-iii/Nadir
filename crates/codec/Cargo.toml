@@ -3,13 +3,20 @@ name = "nadir-codec"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "File-format codecs for the Nadir engine: inflate, PNG, QOI, WAV, KLZ, JSON(C), KBJ, BMFont, Aseprite."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [features]
 # The PNG decoder, which only the cook tool needs.
 png = []
 
 [dependencies]
-nadir-core = { path = "../core" }
+nadir-core.workspace = true
 
 [[test]]
 name = "png"

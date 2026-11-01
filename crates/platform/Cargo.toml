@@ -3,10 +3,17 @@ name = "nadir-platform"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "OS layer of the Nadir engine: windows, the event loop, input devices, GL surfaces and paths."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-nadir-core = { path = "../core" }
-nadir-sys = { path = "../sys" }
+nadir-core.workspace = true
+nadir-sys.workspace = true
 
 [features]
 # Development builds: the allocation counter, as the global allocator of

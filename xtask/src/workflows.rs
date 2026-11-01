@@ -43,7 +43,7 @@ const CHECKOUT: &str = "actions/checkout";
 const CACHE: &str = "actions/cache";
 
 /// Every workflow, and what it may use. A new workflow adds its row here,
-/// as the docs say it may (the release workflow, `docs/05-release.md`).
+/// as the docs say it may.
 const WORKFLOWS: &[Workflow] = &[
     Workflow {
         file: "ci.yml",
@@ -75,6 +75,16 @@ const WORKFLOWS: &[Workflow] = &[
             "actions/deploy-pages",
         ],
         writes: &[("deploy", &["pages", "id-token"])],
+    },
+    // ADR-0036.
+    Workflow {
+        file: "release.yml",
+        actions: &[
+            CHECKOUT,
+            "actions/upload-artifact",
+            "actions/download-artifact",
+        ],
+        writes: &[("release", &["contents"]), ("image", &["packages"])],
     },
 ];
 
@@ -470,11 +480,51 @@ mod tests {
     #[test]
     fn a_workflow_with_no_row_fails() {
         assert_eq!(
-            violations("release.yml", &ci(&checkout())),
+            violations("deploy.yml", &ci(&checkout())),
             [
-                ".github/workflows/release.yml: no row in the table of what each workflow may use \
+                ".github/workflows/deploy.yml: no row in the table of what each workflow may use \
               (`WORKFLOWS` in xtask/src/workflows.rs)"
             ]
+        );
+    }
+
+    #[test]
+    fn only_the_release_s_publishing_jobs_write() {
+        let job = |name: &str, permission: &str| {
+            ci(&checkout())
+                + &format!(
+                    "  {name}:\n    runs-on: ubuntu-latest\n    permissions:\n      \
+                     {permission}: write\n    steps:\n      - run: true\n"
+                )
+        };
+        assert_eq!(
+            violations("release.yml", &job("release", "contents")),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            violations("release.yml", &job("image", "packages")),
+            Vec::<String>::new()
+        );
+        for (name, permission) in [
+            ("build", "contents"),
+            ("crates", "contents"),
+            ("release", "packages"),
+            ("image", "contents"),
+            ("crates", "id-token"),
+        ] {
+            assert_eq!(
+                violations("release.yml", &job(name, permission)),
+                [format!(
+                    ".github/workflows/release.yml:17: the job `{name}` may not grant \
+                     `{permission}: write`"
+                )]
+            );
+        }
+        // Nor may it use the cache, which a release does not trust.
+        let cache = format!("      - uses: actions/cache@{SHA} # v6.1.0\n");
+        assert_eq!(
+            violations("release.yml", &ci(&(checkout() + &cache))).len(),
+            1
         );
     }
 

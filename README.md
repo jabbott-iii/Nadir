@@ -24,7 +24,7 @@ so Claude Code (or another coding agent) can start building it right away.
 | `docs/02-dependency-policy.md` | The build-it-ourselves rule, the exception process, the build-vs-buy register |
 | `docs/03-platforms.md` | Windows, macOS and Linux specifics |
 | `docs/04-quality.md` | Testing strategy, own test harnesses, CI, `xtask` checks |
-| `docs/05-release.md` | Build profiles, packaging, signing, notarization, crash reports |
+| `docs/05-release.md` | Build profiles, releases, packaging, signing, notarization, crash reports |
 | `docs` | One spec per subsystem: responsibilities, API sketch, invariants, tests |
 | `docs/roadmap.md` | Milestones M0–M11 plus backlog, with checkbox tasks and acceptance criteria |
 | `docs/decisions.md` | Architecture decision records (ADRs) |
@@ -41,3 +41,46 @@ so Claude Code (or another coding agent) can start building it right away.
    bindings, the graphics backends, codecs, the ECS, the mixer, the debug UI
    and the test harnesses are all ours. See `docs/02-dependency-policy.md` and
    ADR-0002.
+
+## Releases
+
+A tag `v<version>` publishes a release (`docs/05-release.md`, "Engine
+releases"; ADR-0036). Each one has:
+
+- **Programs** on the
+  [GitHub release](https://github.com/jabbott-iii/Nadir/releases/latest),
+  for Linux, Windows and macOS on x86_64 and arm64: `nadir-cook`, the asset
+  pipeline, and the sandbox game, which draws on Linux only so far (an
+  empty window on Windows and macOS until roadmap tasks M2.6 and M2.7).
+  They are not signed yet.
+- **apt** packages `nadir-cook` and `nadir-sandbox`, for amd64 and arm64:
+
+  ```bash
+  curl -fsSL https://github.com/jabbott-iii/Nadir/releases/latest/download/nadir-archive-keyring.gpg \
+    | sudo tee /usr/share/keyrings/nadir-archive-keyring.gpg > /dev/null
+  echo "deb [signed-by=/usr/share/keyrings/nadir-archive-keyring.gpg] https://github.com/jabbott-iii/Nadir/releases/latest/download ./" \
+    | sudo tee /etc/apt/sources.list.d/nadir.list
+  sudo apt update && sudo apt install nadir-cook nadir-sandbox
+  ```
+
+- **A container image** of the cook, `ghcr.io/jabbott-iii/nadir-cook`, for
+  `linux/amd64` and `linux/arm64`:
+
+  ```bash
+  docker run --rm --user "$(id -u):$(id -g)" --volume "$PWD:/work" \
+    ghcr.io/jabbott-iii/nadir-cook assets cooked
+  ```
+
+- **Crates** on crates.io. The engine is `NadirGE`, since `nadir` was
+  taken, and code names it `nadir`:
+
+  ```toml
+  [dependencies]
+  NadirGE = "0.1"
+  ```
+
+  ```rust
+  use nadir::prelude::*;
+  ```
+
+  The cook installs with `cargo install nadir-cook`.

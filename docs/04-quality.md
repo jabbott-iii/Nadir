@@ -54,7 +54,7 @@ pub fn check_sized<T: std::fmt::Debug>(
   drawing, and its offscreen-frame tests (`App::offscreen`, ADR-0029)
   return early, but only while the variable is unset.
   - The facade's tests are behind its `dev` feature, not `headless-test`,
-    so `cargo test -p nadir --features dev` on Linux needs EGL and an
+    so `cargo test -p NadirGE --features dev` on Linux needs EGL and an
     OpenGL 3.3 driver.
 - A nightly job runs with random seeds and prints the seeds it used.
 - Shrinking is deliberately minimal, and only `check_sized` does it: the
@@ -170,7 +170,7 @@ pub fn check_sized<T: std::fmt::Debug>(
     (`App::play_replay`).
 - The runs are headless: `App::update` with no window. Every frame stage
   runs, logs go to the standard error, and no asset load finishes.
-- `NADIR_BLESS=1 cargo test -p nadir --test determinism` writes the
+- `NADIR_BLESS=1 cargo test -p NadirGE --test determinism` writes the
   fixtures, after it checks two live runs alike and their replay at three
   pacings.
 - Scope: the same build. One hash file serves Linux, Windows and macOS for
@@ -263,7 +263,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 - Tests assert **0 allocations** in steady state:
   - the facade's unit test `steady_frames` in `crates/engine/src/app.rs`
     draws 10,000 sprite entities of its own through the real loop,
-    offscreen, for 100 frames (`cargo test -p nadir --features dev`), and
+    offscreen, for 100 frames (`cargo test -p NadirGE --features dev`), and
     checks `FrameAllocs` against its own count frame by frame. Since M4.5
     the ground is a tile layer of 64 × 64 cells, a quarter of them
     animated, whose view moves in the warm-up to where four chunks meet:
@@ -344,6 +344,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 | `test` | `cargo test --workspace --all-features` |
 | `deps` | `cargo metadata --format-version 1`, parsed with `nadir-codec::json`; every package with a non-null `source` must appear in `xtask/deps-allowlist.txt` with its exact version. A path package from outside the workspace also fails (vendored code) |
 | `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |
+| `crates` | Same metadata (ADR-0036). Each workspace member that crates.io gets (no `publish = false`) must have a description, a license and a repository; be at `NadirGE`'s version; and depend on workspace crates only if crates.io gets them too, by the requirement `^<version>`. Notes the crates it checked |
 | `unsafe-audit` | Scans `*.rs`, ignoring comments and string literals: no `unsafe` outside `sys`/`platform`/`gfx`; `allow`, `expect` or `warn(unsafe_code)` only in those three crate roots; every `unsafe {` / `unsafe impl` preceded by a `// SAFETY:` comment that ends at most 3 lines above it; prints a per-crate `unsafe` count (reviewed if it grows) |
 | `workflows` | Reads each file of `.github/workflows` line by line (ADR-0032). Fails a workflow with no row in its table of the actions each may use and the jobs that may grant `write`, with the permissions each may; an action not in its row, not pinned by a full commit SHA, or with no `# v…` tag comment on its line (a list item is read however it is spaced); top-level permissions other than `{}` or `contents: read`, or none; a job's `write` on any permission its row does not name, or permissions written on one line (`write-all`, `read-all`, `{ … }`); `pull_request_target`; and an `actions/checkout` without `persist-credentials: false` |
 | `release-no-dev` | Runs `cargo tree -p sandbox -e normal --prefix none` without the `dev` feature and fails if `nadir-debug` appears |
@@ -401,7 +402,15 @@ understood.
   - fuzz smoke for 30 minutes per parser
   - property tests with random seeds
   - a full asset cook of `assets/`
-- **Release (tag `v*`):** see `docs/05-release.md`.
+- **Release (tag `v*`)** (`.github/workflows/release.yml`, ADR-0036): a
+  gate checks the tag against the workspace's version, `main` and CI's
+  verdict on the commit; six runners, one per target
+  (`ubuntu-24.04`, `ubuntu-24.04-arm`, `windows-2025`, `windows-11-arm`,
+  `macos-15-intel`, `macos-15`), each run `cargo --locked xtask dist`;
+  then the crates go to crates.io, and after them the GitHub release with
+  the signed apt repository and the cook's image on ghcr.io.
+  `docs/05-release.md`, "Engine releases", has the steps and the secrets.
+  It uses no cache: a release builds from its commit alone.
 - **Demo page** (`.github/workflows/pages.yml`, ADR-0029): publishes
   <https://jabbott.dev/Nadir/> through GitHub Pages, whose source must be
   "GitHub Actions" in the repository's settings.
@@ -479,15 +488,19 @@ understood.
     `github-actions`: there are no crates to update.
   - Grant `permissions: contents: read`, or none, by default, and elevate
     only in release jobs, the demo page's workflow and code scanning:
-    `actions: read` for the demo page's gate, to find CI's runs of a
-    commit, `pages: write` and `id-token: write` for its deploy job, and
-    `security-events: write` for CodeQL's analysis job.
+    `actions: read` for the demo page's and the release's gates, to find
+    CI's runs of a commit, `pages: write` and `id-token: write` for the
+    page's deploy job, `security-events: write` for CodeQL's analysis job,
+    and, in the release (ADR-0036), `contents: write` for its `release`
+    job and `packages: write` for its `image` job.
   - Use no third-party actions beyond `actions/checkout`,
     `actions/cache` and `actions/upload-artifact`/`download-artifact`, and,
     in the demo page's workflow only, `actions/upload-pages-artifact` and
     `actions/deploy-pages` (ADR-0029), and in the code scanning workflow
-    only, `github/codeql-action/init` and `analyze` (ADR-0032). Install the
-    toolchain with `rustup` commands directly.
+    only, `github/codeql-action/init` and `analyze` (ADR-0032). The release
+    workflow uses `actions/checkout` and the artifact actions alone, and
+    `docker`, `gh`, `gpg` and `cargo` commands for the rest (ADR-0036).
+    Install the toolchain with `rustup` commands directly.
   - Never run on `pull_request_target`, and check out with
     `persist-credentials: false`.
   - `cargo xtask workflows` checks these rules in every workflow.

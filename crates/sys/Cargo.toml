@@ -3,6 +3,13 @@ name = "nadir-sys"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Hand-written raw FFI declarations for the Nadir engine: Win32, Cocoa/objc, X11, EGL and OpenGL."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [lints]
 workspace = true

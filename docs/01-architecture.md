@@ -55,11 +55,11 @@ approves it.
 | `nadir-collision` | `core` |
 | `nadir-scene` | `core`, `ecs`, `assets`, `codec` |
 | `nadir-debug` | `core`, `ecs`, `scene`, `render`, `input` |
-| `nadir` (facade) | all crates above |
+| `NadirGE` (facade, `nadir` in code; ADR-0036) | all crates above |
 | `nadir-cook` | `core`, `codec`, `assets`, `scene` |
 | `xtask` | `core`, `codec` |
 | `nadir-bench` | any workspace crate |
-| `sandbox` | `nadir`, `nadir-debug` (behind `dev` feature) |
+| `sandbox` | `NadirGE`, `nadir-debug` (behind `dev` feature) |
 
 ## Workspace layout
 

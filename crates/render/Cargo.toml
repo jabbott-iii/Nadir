@@ -3,12 +3,19 @@ name = "nadir-render"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "2D renderer for the Nadir engine: sprite batching, y-sort, tilemap chunks, camera and atlases."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-nadir-assets = { path = "../assets" }
-nadir-codec = { path = "../codec" }
-nadir-core = { path = "../core" }
-nadir-gfx = { path = "../gfx" }
+nadir-assets.workspace = true
+nadir-codec.workspace = true
+nadir-core.workspace = true
+nadir-gfx.workspace = true
 
 [features]
 # Builds the tests that draw on an offscreen OpenGL 3.3 (core profile)

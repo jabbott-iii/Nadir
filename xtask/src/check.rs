@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::error::Error;
-use crate::{cargo, deps, features, layers, release_no_dev, unsafe_audit, workflows};
+use crate::{cargo, crates, deps, features, layers, release_no_dev, unsafe_audit, workflows};
 
 /// What a check found.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -60,6 +60,11 @@ pub(crate) const CHECKS: &[Check] = &[
         name: "layers",
         about: "Workspace crates depend only on what the dependency matrix allows",
         run: layers::run,
+    },
+    Check {
+        name: "crates",
+        about: "The crates for crates.io have their metadata, one version and published dependencies",
+        run: crates::run,
     },
     Check {
         name: "unsafe-audit",
@@ -384,6 +389,7 @@ mod tests {
                 "test",
                 "deps",
                 "layers",
+                "crates",
                 "unsafe-audit",
                 "workflows",
                 "release-no-dev",

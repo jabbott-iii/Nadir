@@ -1,25 +1,37 @@
 [package]
-name = "nadir"
+name = "NadirGE"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description.workspace = true
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+# Code names the crate `nadir`. crates.io has a crate of that name already,
+# so the package is NadirGE there (ADR-0036).
+[lib]
+name = "nadir"
 
 [dependencies]
-nadir-assets = { path = "../assets" }
-nadir-collision = { path = "../collision" }
-nadir-core = { path = "../core" }
-nadir-ecs = { path = "../ecs" }
-nadir-gfx = { path = "../gfx" }
-nadir-input = { path = "../input" }
-nadir-platform = { path = "../platform" }
-nadir-render = { path = "../render" }
-nadir-scene = { path = "../scene" }
+nadir-assets.workspace = true
+nadir-collision.workspace = true
+nadir-core.workspace = true
+nadir-ecs.workspace = true
+nadir-gfx.workspace = true
+nadir-input.workspace = true
+nadir-platform.workspace = true
+nadir-render.workspace = true
+nadir-scene.workspace = true
 
 [dev-dependencies]
 # The tests write QOI textures, and check that a QOI file too short for
 # its size is refused before anything is allocated; and they encode atlas
 # files for `Sprite::from_atlas` and `Clips::add_atlas`.
-nadir-codec = { path = "../codec" }
+nadir-codec.workspace = true
 
 [features]
 # Development builds: a failed asset shows its placeholder rather than

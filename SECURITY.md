@@ -2,19 +2,19 @@
 
 ## Supported versions
 
-Nadir is in development and has not had a release: the workspace is at
-version 0.1.0, and the release pipeline is roadmap milestone M11 (see
-[`docs/05-release.md`](docs/05-release.md)). There are no maintenance
-branches. Security fixes land on `main`.
+Nadir is in development. A tag `v<version>` publishes a release through
+`.github/workflows/release.yml` (see "Engine releases" in
+[`docs/05-release.md`](docs/05-release.md)): programs on the GitHub
+release, an apt repository, a container image and crates on crates.io.
+There are no maintenance branches. Security fixes land on `main`, and
+reach users in the next release.
 
 | Version | Supported |
 | :- | :- |
 | `main` | :white_check_mark: |
+| The newest release, once there is one | :white_check_mark: |
 | The sandbox download on the [demo page](https://jabbott.dev/Nadir/), rebuilt from each commit of `main` that passes CI | :white_check_mark: (the latest one) |
-| Earlier commits and downloads | :x: |
-
-Once there are releases, this table will list the ones that receive
-fixes.
+| Earlier commits, downloads and releases | :x: |
 
 ## Reporting a vulnerability
 
@@ -116,9 +116,11 @@ Out of scope:
   image at the size limit takes to decode.
 - **Attacks that need control of the player's account**, such as
   replacing the game's executable or its libraries.
-- **The lack of code signing on the demo page's download.** It is not a
-  release; verify it with the SHA-256 the page gives. Releases are to be
-  signed and, on macOS, notarized (`docs/05-release.md`).
+- **The lack of code signing on the demo page's download and on the
+  releases' programs.** Verify the download with the SHA-256 the page
+  gives, and a release's files with its `SHA256SUMS`. Signing, and
+  notarization on macOS, come with roadmap task M11.2
+  (`docs/05-release.md`).
 
 Nadir has no third-party crates (see
 [`docs/02-dependency-policy.md`](docs/02-dependency-policy.md)), so there
@@ -136,6 +138,18 @@ sha256sum nadir-sandbox-linux-x86_64.tar.gz
 Compare the result with the hash on the page. The download is built by the
 workflow in `.github/workflows/pages.yml` from that commit, after CI passed
 on it.
+
+A release's files are listed with their SHA-256 in its `SHA256SUMS`:
+
+```bash
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+The apt repository is signed: apt refuses an index that the key in
+`nadir-archive-keyring.gpg` did not sign. Compare that key's fingerprint
+(`gpg --show-keys nadir-archive-keyring.gpg`) with the one in
+`docs/05-release.md` before you trust it. Each release is built by
+`.github/workflows/release.yml` from a commit of `main` that CI passed.
 
 ## How the code is kept safe
 

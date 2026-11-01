@@ -3,6 +3,13 @@ name = "nadir-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Foundation types for the Nadir engine: math, color, rects, time, logging, RNG, hashing and handles."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [features]
 # Records `profile_scope!` timings. Off by default: scopes compile to nothing.

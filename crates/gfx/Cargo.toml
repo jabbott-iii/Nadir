@@ -3,11 +3,18 @@ name = "nadir-gfx"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Small render hardware interface for the Nadir engine, with an OpenGL 3.3 core backend."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-nadir-core = { path = "../core" }
-nadir-platform = { path = "../platform" }
-nadir-sys = { path = "../sys" }
+nadir-core.workspace = true
+nadir-platform.workspace = true
+nadir-sys.workspace = true
 
 [features]
 # Builds the tests that draw on an offscreen OpenGL 3.3 (core profile)

@@ -3,9 +3,16 @@ name = "nadir-collision"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Collision for the Nadir engine: shapes, a spatial hash, move-and-slide, sweeps and queries."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-nadir-core = { path = "../core" }
+nadir-core.workspace = true
 
 [lints]
 workspace = true

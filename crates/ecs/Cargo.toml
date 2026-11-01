@@ -3,9 +3,16 @@ name = "nadir-ecs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Entity-component system for the Nadir engine: sparse sets, resources, events, commands, schedule."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-nadir-core = { path = "../core" }
+nadir-core.workspace = true
 
 [lints]
 workspace = true

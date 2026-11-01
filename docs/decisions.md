@@ -20,7 +20,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0001 — Desktop-only targets: Windows, macOS, Linux
 
-- **Status:** Accepted
+- **Status:** Accepted; ADR-0036 adds aarch64 Windows and Linux to its targets
 - **Date:** 2026-10-12
 - **Context:** Web/WASM, Android, iOS and consoles each impose architecture
   constraints:
@@ -2513,3 +2513,236 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   needs another tool's JSON among its sources; M7.1 reads the font file
   (then the cook checks its fonts with that reader); or a clip needs
   frames from two sprites.
+
+## ADR-0036 — Releases from a tag: six targets on GitHub Releases, a signed apt repository beside them, the cook's image on ghcr.io, and the crates on crates.io with the facade as NadirGE
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+- **Context:**
+  - The user asked for a release pipeline that a pushed version tag
+    starts:
+    - Linux, Windows and macOS programs for both x86_64 and arm64;
+    - a container image tagged with the version;
+    - a Debian apt release;
+    - the crates on crates.io, under the name NadirGE if `nadir` is taken;
+    - and crates.io metadata in the root manifest's `[workspace.package]`.
+  - The engine is a library. Its only programs are `nadir-cook` and the
+    sandbox, and only the cook runs without a window.
+  - On 2026-11-01:
+    - `nadir` on crates.io was a static site builder (0.1.6);
+    - `nadirge` and every `nadir-*` name the workspace uses were free.
+  - ADR-0001 supports Windows and Linux on x64 only, and the roadmap's
+    backlog left aarch64 Windows and Linux to "store or platform demand".
+    Every crate passed `cargo clippy --all-targets --all-features -D
+    warnings` for `aarch64-unknown-linux-gnu`, `aarch64-pc-windows-msvc`,
+    `x86_64-pc-windows-msvc` and both macOS targets.
+  - The user's choices (asked 2026-11-01):
+    - a release carries the cook and the sandbox, and the image only the
+      cook. The sandbox draws only on Linux so far: with no OpenGL context
+      on Windows until M2.6, nor on macOS until M2.7, it runs there in an
+      empty window (ADR-0019). The user chose to ship it on all six
+      targets anyway;
+    - the image is tagged with the version and `latest`;
+    - the apt repository is signed and lives on GitHub Releases;
+    - crates.io takes a token from a CI secret.
+  - M11.2 (signing, notarization and the game's packages) is still ahead.
+- **Decision:**
+  - **Targets:** aarch64 Linux (gnu) and Windows (MSVC) join ADR-0001's
+    targets. A release builds all six:
+    `{x86_64,aarch64}-{unknown-linux-gnu,pc-windows-msvc,apple-darwin}`.
+    Each builds on a hosted runner of its own system and processor, so
+    its programs run there before release: `ubuntu-24.04`,
+    `ubuntu-24.04-arm`, `windows-2025`, `windows-11-arm`,
+    `macos-15-intel` and `macos-15`. macOS ships one archive per
+    processor; the universal binary stays with the game's packages
+    (M11.1).
+  - **`cargo xtask dist [--out DIR]`** builds the release files for the
+    machine it runs on:
+    - it cooks `assets/`, and builds `nadir-cook` and the sandbox in
+      release, `--locked`;
+    - it lays out `nadir-<version>-<target>/`: the two executables, the
+      sandbox's cooked atlases in `assets/` beside it, `README.txt` and
+      `LICENSE`. On Windows and macOS the README says the sandbox shows
+      an empty window until M2.6 and M2.7;
+    - it runs them:
+      - `nadir-cook --version` must print the version;
+      - the laid-out cook must cook `assets/` into the atlases
+        `target/cooked` has, byte for byte;
+      - the sandbox must refuse the scene `none`, which it does before
+        it opens a window;
+    - it packs a `.zip` on Windows, with the system's `tar.exe`, and a
+      `.tar.gz` elsewhere.
+    - On Linux it also makes two Debian packages with `dpkg-deb`:
+      - `nadir-cook`, as `/usr/bin/nadir-cook`;
+      - `nadir-sandbox`, in `/usr/lib/games/nadir-sandbox` with its
+        atlases, and linked from `/usr/games/nadir-sandbox`.
+
+      A package's file is named for the release's version
+      (`nadir-cook_0.2.0-rc.1_arm64.deb`), while its control says Debian's
+      (`0.2.0~rc.1`): GitHub turns `~` into `.` in an asset's name.
+      `dpkg-shlibdeps` gives each package's dependencies on the
+      libraries it links (`libc6 (>= 2.34), libgcc-s1 (>= 4.2)` from an
+      `ubuntu-24.04` build). The sandbox also depends on the libraries it
+      loads at run time: `libx11-6`, `libegl1` and `libopengl0`.
+
+    It signs nothing and uploads nothing.
+  - **Windows** executables link the C runtime statically
+    (`target-feature=+crt-static` in `.cargo/config.toml`, for every
+    MSVC build). They then need no Visual C++ redistributable, and CI
+    tests what ships.
+  - **`nadir-cook --version`** prints `nadir-cook <version>`.
+  - **`.github/workflows/release.yml`**, on a pushed tag `v*`. Its jobs:
+    - `gate` stops unless:
+      - the tag is `v` plus `[workspace.package]`'s version;
+      - its commit is on `main`;
+      - and CI has a successful push run of that commit.
+
+      A version with a `-` is a pre-release.
+    - `build` runs one runner per target:
+      - `cargo xtask dist`;
+      - on Linux, the archived sandbox's `--capture` with llvmpipe;
+      - and, on the two Linux runners, a cook linked statically against
+        musl for the image.
+    - `crates` (environment `crates-io`), once every build passed, runs
+      `cargo publish --workspace --locked`, which packages and builds
+      every crate from its package before it uploads any, then publishes
+      them in the order of their dependencies, with the
+      `CARGO_REGISTRY_TOKEN` secret. It runs before anything else is
+      published: crates.io refuses what no local check sees, and a
+      refusal then leaves nothing out. cargo refuses to start if
+      crates.io has any of them at the version already, so each attempt
+      leaves out those it has. crates.io takes 5 new crates at once and
+      then one each 10 minutes, so an attempt it stops with `status 429`
+      waits 10 minutes and tries again, up to 15 times; the first
+      release, of 13 new crates, takes about 80 minutes.
+    - `release` (environment `release`, `contents: write`), once the
+      crates are out:
+      - makes the flat apt repository from the two Linux targets' `.deb`s with
+        `.github/release/apt-repo.sh`: `Packages`, `Packages.gz`,
+        `Release`, and `InRelease` and `Release.gpg` signed with the
+        `APT_SIGNING_KEY` secret, plus the public key as
+        `nadir-archive-keyring.gpg`;
+      - sums every file into `SHA256SUMS`;
+      - creates the GitHub release as a draft with all of them, then
+        publishes it.
+
+      A pre-release is not marked latest. A draft from a failed attempt
+      is filled again; a published release is never changed.
+    - `image` (`packages: write`), once the crates are out, logs in to
+      ghcr.io with the job's token
+      and builds `ghcr.io/jabbott-iii/nadir-cook` for `linux/amd64` and
+      `linux/arm64` with `docker buildx`, from `tools/cook/Dockerfile`:
+      `FROM scratch`, the static cook, `LICENSE`, nothing run. The
+      daemon's own builder makes one platform at a time on these runners,
+      so the job makes a `docker-container` builder (BuildKit's
+      `moby/buildkit` image). It pushes with no provenance attestation, so
+      the index lists the two platforms alone, and tags the version and,
+      unless it is a pre-release, `latest`. It then runs the pushed amd64
+      image's `--version`.
+    Each build checks that its runner's host is its target, and runs
+    `cargo --locked xtask dist`: a Cargo.lock that a version's raise
+    left behind fails there. A required reviewer on `crates-io` holds the
+    whole release. The gate is a check of the tagged commit's own
+    workflow, not an access control: a `v*` tag ruleset limits who can
+    tag. The workflow may use `actions/checkout` and `upload-artifact` /
+    `download-artifact` only. Only `release` may write contents, and only
+    `image` packages; `cargo xtask workflows` checks both.
+  - **apt** reads the newest release:
+
+    ```
+    deb [signed-by=/usr/share/keyrings/nadir-archive-keyring.gpg] https://github.com/jabbott-iii/Nadir/releases/latest/download ./
+    ```
+
+    apt asks for `…/latest/download/./InRelease`. On 2026-11-01 GitHub
+    redirected such a path to the newest release's asset, as it does
+    without the `./`. Locally, apt 2.8.3 verified an ed25519-signed
+    `InRelease` made by the script, fetched both packages, and refused a
+    tampered `InRelease` and `Packages.gz`.
+  - **crates.io** gets 13 crates:
+    - the facade, as the package **NadirGE**, whose library keeps the
+      name `nadir` (`[lib] name`), so code still writes `nadir::`;
+    - `nadir-cook`;
+    - and the eleven `nadir-*` crates the facade needs.
+
+    `publish = false` keeps the sandbox, `xtask`, `nadir-bench`,
+    `nadir-audio` and `nadir-debug` off it; the last two have no code yet.
+    `[workspace.package]` holds the shared metadata, which every crate
+    for crates.io inherits, with a description of its own. The user's
+    `name = "NadirGE"` there, which cargo ignores in that table, moved to
+    `crates/engine/Cargo.toml`. `[workspace.dependencies]` gives each
+    workspace crate its path and the release's version.
+  - **`cargo xtask crates`,** in `cargo xtask ci` after `layers`, fails
+    when a crate that crates.io gets:
+    - lacks a description, license or repository;
+    - is at another version than NadirGE;
+    - or depends on a workspace crate that crates.io does not get, or by a
+      requirement other than `^<version>`.
+  - **Docs:** the dependency matrix and `cargo test -p NadirGE` name the
+    package. `docs/05-release.md` gains "Engine releases": the secrets,
+    the one-time settings and the steps of a release.
+- **Consequences:**
+  - Good:
+    - A tag publishes everything at one version, from a commit CI
+      passed, with each program run on its own system and processor.
+    - The apt repository needs no server: the release's assets are the
+      repository, signed by a key only the `release` environment holds.
+    - The image is the static cook alone: no base image to keep up to
+      date, and nothing to emulate when it builds.
+    - A crate of one release never builds against an older release's
+      crates. A manifest without what crates.io requires fails CI
+      (`cargo xtask crates`); one that will not build from its package
+      fails the `crates` job before any crate is uploaded; and anything
+      else crates.io refuses stops the release before the GitHub release
+      and the image go out.
+  - Bad:
+    - Nothing is signed or notarized until M11.2. macOS quarantines a
+      downloaded archive (its README says how to clear that), and
+      SmartScreen warns on Windows.
+    - The Windows and macOS archives carry a sandbox that shows an empty
+      window until M2.6 and M2.7.
+    - The first release spends about 80 minutes on crates.io's limit for
+      new crates, unless crates.io raises it for the account.
+    - The Linux programs need glibc 2.34 or newer (the `ubuntu-24.04`
+      build's symbols), not `docs/03-platforms.md`'s 2.31 floor, which
+      stays the game packages' (M11.1).
+    - apt sees only the newest release, and an `apt update` while a
+      release publishes can fetch an `InRelease` and a `Packages.gz` of
+      two releases, failing until it runs again.
+    - `cargo xtask ci` runs on x86_64 Linux and Windows and arm64 macOS
+      only. The arm64 Linux and Windows targets, and Intel macOS, are
+      built and run only by a release (and passed clippy here, once).
+    - The packages fail `lintian` on a missing `changelog.gz` and on
+      unstripped executables (kept, for symbolicated backtraces), and
+      warn on a copyright notice and missing manual pages. apt does not
+      check these.
+    - The first publish of 13 new crates needs a token: trusted
+      publishing works only on crates that exist.
+    - crates.io shows each crate the repository's README, which is the
+      design bundle's.
+    - `windows-11-arm` and `macos-15-intel` are images GitHub may retire
+      before the others.
+- **Alternatives considered:**
+  - `nadirge-*` for every crate: free too, but a rename through every
+    manifest, doc and check, when only `nadir` is taken.
+  - The apt repository on the demo page's Pages site: every version
+    kept, but `pages.yml` would rebuild it from release assets at each
+    deploy, and the two workflows would depend on each other.
+  - `.deb` files with no repository: no key to keep, but no
+    `apt upgrade`.
+  - An image `FROM debian` with the glibc cook: a base image to update,
+    and the sandbox could not run in it anyway.
+  - Cross-compiling the arm64 targets on x86_64 runners: nothing would
+    run on arm64 before release.
+  - A container action (`docker/build-push-action`), or
+    `rust-lang/crates-io-auth-action` for trusted publishing: third-party
+    actions, where a few `docker` and `cargo` commands do.
+- **Revisit when:**
+  - M11.2 signs and notarizes the game's packages (then the engine's
+    archives too);
+  - GitHub announces the retirement of `macos-15-intel` or
+    `windows-11-arm`;
+  - all 13 crates exist on crates.io (then trusted publishing can replace
+    the token);
+  - apt users need an older version than the newest;
+  - `nadir-audio` or `nadir-debug` gains code that the facade uses (then
+    crates.io gets it).

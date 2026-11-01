@@ -3,10 +3,17 @@ name = "nadir-assets"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Asset management for the Nadir engine: handles, typed storage, the VFS, loaders and hot reload."
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-nadir-core = { path = "../core" }
-nadir-codec = { path = "../codec" }
+nadir-core.workspace = true
+nadir-codec.workspace = true
 
 [lints]
 workspace = true
