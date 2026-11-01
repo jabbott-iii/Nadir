@@ -2118,3 +2118,89 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   colors are not sRGB without a chunk saying so; a project needs links in
   `assets/`; or M5.7's pack needs an option that changes output, which the
   cache's options string must then hold.
+
+## ADR-0032 — CodeQL scans the Rust code and the workflows; Dependabot keeps the actions' pins current; `cargo xtask workflows` enforces the CI supply-chain rules
+
+- **Status:** Accepted
+- **Date:** 2026-10-31
+- **Context:**
+  - `docs/04-quality.md` says every action is pinned by its full commit
+    SHA with its tag in a comment, that workflows use only
+    `actions/checkout`, `actions/cache` and the artifact actions (plus the
+    Pages actions in the demo page's workflow, ADR-0029), and that tokens
+    get `contents: read` unless a job needs more. Nothing checked this.
+  - The user added `.github/workflows/codeql.yml` from GitHub's template.
+    It pinned `actions/checkout@v7` and `github/codeql-action/*@v4` by tag,
+    had no top-level `permissions`, left the checkout's token in
+    `.git/config`, and used an action the rules did not allow.
+  - The user also added `.github/dependabot.yml` from GitHub's starter
+    file, with an empty `package-ecosystem`, so it did nothing.
+  - On 2026-10-31 the user asked to fix Dependabot's file, to pin
+    CodeQL's actions by SHA and allow CodeQL, and to update the workflows
+    for proper security vetting and CI.
+- **Decision:**
+  - **CodeQL is allowed,** in `codeql.yml` only: `github/codeql-action/init`
+    and `analyze`, pinned by SHA (v4.39.1). It scans `rust` and `actions`
+    (the workflows themselves) with no build, with the `security-extended`
+    queries, on pushes to `main`, on pull requests, weekly and by hand. Its
+    token has no default permissions; the job has `contents: read` and
+    `security-events: write`, to upload the results.
+  - **Dependabot watches `github-actions` only,** weekly, for releases at
+    least 7 days old (`cooldown`), with the week's updates in one pull
+    request whose commits start `ci:`. It updates the SHA and the tag
+    comment on the same line. There is no `cargo` entry: there are no
+    crates to update, and `cargo xtask deps` fails on one.
+  - **`cargo xtask workflows`,** part of `cargo xtask ci`, reads each file
+    of `.github/workflows` line by line and fails:
+    - a workflow with no row in its table of the actions each workflow may
+      use and the jobs that may grant `write`, with the permissions each
+      may (`codeql.yml`'s `analyze`: `security-events`; `pages.yml`'s
+      `deploy`: `pages` and `id-token`; no other job);
+    - an action not in its row, or not pinned by 40 hex digits, or with no
+      `# v…` comment on its line;
+    - top-level permissions other than `{}` or `contents: read`, or none;
+    - a job's `write` on any permission its row does not name, including
+      one GitHub adds later, or a job's permissions written on one line
+      (`write-all`, `read-all`, `{ … }`), which it cannot read;
+    - `pull_request_target`, which runs with the base repository's token;
+    - an `actions/checkout` without `persist-credentials: false`.
+  - **A newer push to a pull request cancels its older run,** in CI and
+    CodeQL. Any other run is a concurrency group of its own: a group lets
+    one run wait, so a third push would cancel the second, and every
+    commit of `main` needs its CI verdict for the demo page's workflow.
+- **Consequences:**
+  - Good:
+    - The rules in `docs/04-quality.md` are checked on every push, on all
+      three systems, as `deps` and `layers` check the dependency rules.
+      Against the template's `codeql.yml`, the check reports all five of
+      its problems.
+    - Code scanning covers the Rust code and the workflows, including
+      their injection and unpinned-action queries.
+    - Pins move forward by reviewed pull requests, a week after a release.
+  - Bad:
+    - A line-based reading misses a `uses:` or permission written in flow
+      style (`{ uses: … }`) or in a block scalar. The workflows are written
+      one key a line.
+    - `security-extended` raises more alerts to triage than the default
+      suite.
+    - CodeQL's action is one more action with write access, though only
+      to code scanning.
+    - A new workflow, such as the release one (`docs/05-release.md`), must
+      add its row to the table first.
+- **Alternatives considered:**
+  - zizmor or actionlint in CI: tools from outside the workspace,
+    downloaded on every run; CodeQL's `actions` queries cover workflow
+    injection and unpinned actions, and the xtask check covers the
+    project's own rules.
+  - OpenSSF Scorecard or `actions/dependency-review-action`: more actions
+    with tokens, for a workspace with no third-party crates, whose
+    dependency rule `cargo xtask deps` already enforces.
+  - `cargo audit` or `cargo deny`: there are no crates to audit.
+  - Leave CodeQL's actions pinned by tag: a moved tag would run new code
+    with `security-events: write`, unreviewed.
+  - Parse the workflows as YAML: needs a YAML parser of our own for a
+    check of a few line shapes.
+- **Revisit when:** a workflow needs a flow-style `uses:` or a reusable
+  workflow from outside the repository; the release workflow lands; CodeQL's
+  alerts outgrow triage; or GitHub makes immutable actions the default,
+  which would make a tag as safe as a SHA.

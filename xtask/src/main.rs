@@ -20,6 +20,7 @@ mod metadata;
 mod release_no_dev;
 mod site;
 mod unsafe_audit;
+mod workflows;
 
 use std::fmt::Write as _;
 use std::io::{self, Write};
@@ -194,6 +195,7 @@ mod tests {
             "deps",
             "layers",
             "unsafe-audit",
+            "workflows",
             "release-no-dev",
             "features",
             "ci",

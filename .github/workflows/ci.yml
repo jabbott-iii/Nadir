@@ -7,6 +7,8 @@
 #   actions/upload-artifact / download-artifact.
 # - Install the toolchain with rustup, not with an action.
 # - The token may only read the repository.
+# `cargo xtask workflows`, part of `cargo xtask ci`, checks the first two
+# and the last, in every workflow (ADR-0032).
 
 name: CI
 
@@ -23,6 +25,14 @@ defaults:
   run:
     # The same shell on all three systems, so each step means the same thing.
     shell: bash
+
+# A newer push to a pull request's branch cancels its older run. A push to a
+# branch is a group of its own, never cancelled or held back: a group lets
+# only one run wait, so a third push would cancel the second, and every
+# commit of main needs its verdict, which the demo page's workflow waits for.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ci:

@@ -1,11 +1,29 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+# Dependabot keeps the actions in .github/workflows current: the commit SHAs
+# they are pinned by, and the version comments beside them
+# (docs/04-quality.md, "Supply-chain hygiene for CI itself"). CI checks each
+# pull request it opens, like any other, and a maintainer reviews it.
+#
+# There is no `cargo` entry: the workspace has no third-party crates to
+# update (docs/02-dependency-policy.md), and `cargo xtask deps` fails the
+# build if one appears.
 
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "github-actions"
+    # For GitHub Actions, "/" covers .github/workflows.
+    directory: "/"
     schedule:
       interval: "weekly"
+    # Proposes a release only once it is a week old, so that one pulled or
+    # found compromised soon after it was published never is.
+    cooldown:
+      default-days: 7
+    # The week's updates in one pull request.
+    groups:
+      actions:
+        patterns:
+          - "*"
+    # "ci: bump the actions group ...", as commit subjects start with the
+    # area they change.
+    commit-message:
+      prefix: "ci"

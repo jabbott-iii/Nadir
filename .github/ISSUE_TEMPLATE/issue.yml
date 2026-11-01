@@ -1,0 +1,120 @@
+name: Issue
+description: Report a bug, propose a feature or change, or ask about Nadir. One form for every kind of issue.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Please search the [existing issues](https://github.com/jabbott-iii/Nadir/issues?q=is%3Aissue) and the [roadmap](https://github.com/jabbott-iii/Nadir/blob/main/docs/roadmap.md) first: if one covers this, comment there instead.
+
+        **Do not report a security vulnerability here.** Report it privately, as [SECURITY.md](https://github.com/jabbott-iii/Nadir/blob/main/SECURITY.md) describes.
+
+        Nadir is a desktop-only 2D engine with no third-party crates. Web and WASM, mobile, consoles, 3D and networking are out of scope ([docs/00-overview.md](https://github.com/jabbott-iii/Nadir/blob/main/docs/00-overview.md)).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Bug or crash
+        - Feature or change proposal
+        - Performance
+        - Documentation
+        - Build, CI or tooling (xtask, the cook)
+        - Demo page (jabbott.dev/Nadir)
+        - Question
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: areas
+    attributes:
+      label: Areas
+      description: The crates or parts it concerns. Pick "Not sure" if you do not know.
+      multiple: true
+      options:
+        - Not sure
+        - core (math, time, logging, handles)
+        - sys or platform (OS bindings, windows, input devices, audio output)
+        - gfx (OpenGL or Metal backend)
+        - render (sprites, tilemaps, camera, text)
+        - ecs
+        - input (actions and bindings)
+        - audio
+        - codec (PNG, QOI, QOA, WAV, JSON, KBJ, KLZ, BMFont)
+        - assets (asset server, loaders, hot reload)
+        - collision
+        - scene (reflection, prefabs, levels, saves)
+        - debug tools
+        - engine facade (App, plugins, main loop)
+        - cook (tools/cook)
+        - xtask or CI
+        - sandbox game
+        - benchmarks
+        - docs
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: In a sentence or two, what happens, or what you propose.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: |
+        For a bug: the steps to reproduce it, what you expected and what happened instead.
+        For a proposal: the problem it solves, what you propose (with an API sketch if it helps), and the alternatives you considered.
+        For performance: the scene, what you measured and how (`cargo xtask bench`, the profiler), and the numbers.
+        For a question: what you are trying to do, and what you tried.
+      placeholder: |
+        1. Run `cargo run -p sandbox -- --scene stress-sprites`
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit you built (`git rev-parse --short HEAD`), or the build the demo page names.
+      placeholder: 65f905d
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Platforms
+      multiple: true
+      options:
+        - Not platform-specific
+        - Linux (X11)
+        - Linux (Wayland, through XWayland)
+        - Windows
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: The OS version, CPU, GPU and driver (the log names the OpenGL renderer), `rustc -V`, and any environment variables you set, such as `LIBGL_ALWAYS_SOFTWARE`.
+      placeholder: Ubuntu 24.04, x86_64, Mesa 25.2.8 (llvmpipe), rustc 1.99.0
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and output
+      description: |
+        Command output, a panic message, or the game's log, `nadir.log`: in `~/.local/share/<game>/` on Linux, `%LOCALAPPDATA%\<studio>\<game>\` on Windows and `~/Library/Logs/<game>/` on macOS.
+        Remove user names, paths and anything else you do not want to share.
+      render: text
+  - type: textarea
+    id: context
+    attributes:
+      label: Related tasks, decisions and context
+      description: A roadmap task or ADR this touches (such as M5.9 or ADR-0031), screenshots or recordings, and anything else that helps.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and the roadmap.
+          required: true
+        - label: This is not a security vulnerability, and it holds no secrets, credentials or private data.
+          required: true
+        - label: I would like to work on this once a maintainer confirms it.

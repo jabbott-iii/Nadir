@@ -101,10 +101,11 @@ exist until the roadmap task that creates it is done. Check before assuming.
 
 | Command | What it does |
 | :- | :- |
-| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), tests, `deps`, `layers`, `unsafe-audit`, `release-no-dev`, `features`: the full PR gate |
+| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), tests, `deps`, `layers`, `unsafe-audit`, `workflows`, `release-no-dev`, `features`: the full PR gate |
 | `cargo xtask deps` | Fails if `Cargo.lock` contains any non-workspace package not approved in the policy |
 | `cargo xtask layers` | Fails if a crate depends on a crate the dependency matrix forbids |
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the allowed crates or lacks a `SAFETY:` comment |
+| `cargo xtask workflows` | Fails if a GitHub workflow uses an action it is not allowed, pins one by anything but a commit SHA, or gives its token more than it may (ADR-0032) |
 | `cargo xtask features` | Fails if a ticked roadmap task belongs to no feature in `docs/features.jsonc`, or a feature's `ticked` is not what the roadmap ticks |
 | `cargo xtask golden [--bless] [--backend gl\|metal]` | Renders golden scenes offscreen and compares them to references |
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the dependency-free mutation fuzzer over every parser, or over one |

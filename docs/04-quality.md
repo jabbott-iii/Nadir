@@ -343,6 +343,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 | `deps` | `cargo metadata --format-version 1`, parsed with `nadir-codec::json`; every package with a non-null `source` must appear in `xtask/deps-allowlist.txt` with its exact version. A path package from outside the workspace also fails (vendored code) |
 | `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |
 | `unsafe-audit` | Scans `*.rs`, ignoring comments and string literals: no `unsafe` outside `sys`/`platform`/`gfx`; `allow`, `expect` or `warn(unsafe_code)` only in those three crate roots; every `unsafe {` / `unsafe impl` preceded by a `// SAFETY:` comment that ends at most 3 lines above it; prints a per-crate `unsafe` count (reviewed if it grows) |
+| `workflows` | Reads each file of `.github/workflows` line by line (ADR-0032). Fails a workflow with no row in its table of the actions each may use and the jobs that may grant `write`, with the permissions each may; an action not in its row, not pinned by a full commit SHA, or with no `# v…` tag comment on its line (a list item is read however it is spaced); top-level permissions other than `{}` or `contents: read`, or none; a job's `write` on any permission its row does not name, or permissions written on one line (`write-all`, `read-all`, `{ … }`); `pull_request_target`; and an `actions/checkout` without `persist-credentials: false` |
 | `release-no-dev` | Runs `cargo tree -p sandbox -e normal --prefix none` without the `dev` feature and fails if `nadir-debug` appears |
 | `features` | Reads `docs/features.jsonc` with `nadir-codec::json` and the roadmap's task lines (`- [x] **M3.3 — …**`, or `[X]`). Fails when a line looks like a task's (a list item, indented, quoted or numbered or not, with a checkbox of one character and, anywhere after it, the start of a task ID such as `M5.3` or `m5.3`, bold or not, outside a longer word) but cannot be read as one, two tasks share an ID, a ticked task belongs to no feature, a feature's `ticked` (the tasks ticked when its summary was written) is not what the roadmap ticks or names a task the feature does not need, a feature names a task the roadmap lacks or names one twice, two features share a name, or an entry is not an object of `name`, `area`, `summary` (none blank) and `tasks` (at least one ID). Notes how many features are shipped, in progress and planned (ADR-0029) |
 | `ci` | All of the above in order; stops at the first failure and prints a summary table |
@@ -384,6 +385,14 @@ understood.
   Before the checkout, the workflow turns Git's `core.autocrlf` off. A
   Windows runner would otherwise check the files out with CRLF line
   endings, and tests that read committed files expect them as committed.
+
+  A newer push to a pull request cancels its older run. Any other run is a
+  concurrency group of its own, so every commit of `main` gets its verdict.
+- **Code scanning** (`.github/workflows/codeql.yml`, ADR-0032): CodeQL
+  reads the Rust code and the workflows, with no build, using the
+  `security-extended` queries, on pushes to `main`, on pull requests,
+  weekly and by hand, and reports to the repository's Security tab. Its
+  analysis job has `contents: read` and `security-events: write`.
 - **Nightly:**
   - `xtask bench` (report only)
   - fuzz smoke for 30 minutes per parser
@@ -431,7 +440,8 @@ understood.
        the oldest glibc it runs on, read from the version names in the
        executable;
      - and fills `site/index.html` from the commit, the workspace, the
-       roadmap, the features and the captures' `capture.json`, beside
+       roadmap, the features and the captures' `capture.json`, and
+       `site/llms.txt`, the same as plain text for language models, beside
        `site/nadir.css` and `site/nadir.js`.
   3. `actions/upload-pages-artifact` uploads `target/site`, and the deploy
      job, the only one with `pages: write` and `id-token: write`, publishes
@@ -439,7 +449,16 @@ understood.
 
   The page loads jabbott.dev's own stylesheet and script as that site
   serves them, and its header and footer repeat that site's: a change to
-  that site's markup may need `site/index.html` to follow. The page's own
+  that site's markup may need `site/index.html` to follow. So does its
+  head, as that site's `_includes/seo.html` writes it for search and answer
+  engines: a description, the canonical address, Open Graph and Twitter
+  cards with the first scene's poster and video, and one JSON-LD graph of
+  the page, its breadcrumbs, the engine's source (`SoftwareSourceCode`),
+  the download (`SoftwareApplication`) and each scene (`VideoObject`), which
+  refers to jabbott.dev's `WebSite` and `Person` by their `@id`.
+  jabbott.dev's `robots.txt` and `sitemap.xml` cover the page; its
+  `llms.txt` gives the build, the scenes' numbers, the download and every
+  feature by status, and the footer links to it. The page's own
   files, `nadir.css`, `nadir.js`, the media and the download, carry the
   commit in their addresses (`?v=`), so a page and the files it names stay
   together through browsers' caches. A page built on a developer's machine
@@ -448,15 +467,24 @@ understood.
   earlier one wrote.
 - **Supply-chain hygiene for CI itself:**
   - Pin every action by full commit SHA, with the tag as a comment.
-  - Grant `permissions: contents: read` by default, and elevate only in
-    release jobs and the demo page's workflow: `actions: read` for its gate,
-    to find CI's runs of a commit, and `pages: write` and `id-token: write`
-    for its deploy job.
+    Dependabot (`.github/dependabot.yml`) proposes new pins and comments
+    each week, in one pull request, for releases at least a week old; CI
+    checks it and a maintainer reviews it. It watches only
+    `github-actions`: there are no crates to update.
+  - Grant `permissions: contents: read`, or none, by default, and elevate
+    only in release jobs, the demo page's workflow and code scanning:
+    `actions: read` for the demo page's gate, to find CI's runs of a
+    commit, `pages: write` and `id-token: write` for its deploy job, and
+    `security-events: write` for CodeQL's analysis job.
   - Use no third-party actions beyond `actions/checkout`,
     `actions/cache` and `actions/upload-artifact`/`download-artifact`, and,
     in the demo page's workflow only, `actions/upload-pages-artifact` and
-    `actions/deploy-pages` (ADR-0029). Install the toolchain with `rustup`
-    commands directly.
+    `actions/deploy-pages` (ADR-0029), and in the code scanning workflow
+    only, `github/codeql-action/init` and `analyze` (ADR-0032). Install the
+    toolchain with `rustup` commands directly.
+  - Never run on `pull_request_target`, and check out with
+    `persist-credentials: false`.
+  - `cargo xtask workflows` checks these rules in every workflow.
 - **Caching:** cache `~/.cargo/registry` and `target/` keyed on the
   `Cargo.lock` + `rust-toolchain.toml` hash using `actions/cache`
   (SHA-pinned).

@@ -1,0 +1,10 @@
+# Every issue uses the one form, issue.yml, so a maintainer can confirm a
+# change before a pull request (CONTRIBUTING.md, "Contribution workflow").
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/jabbott-iii/Nadir/security/advisories/new
+    about: Report it privately through GitHub's private vulnerability reporting (see SECURITY.md), never in a public issue.
+  - name: See the engine run
+    url: https://jabbott.dev/Nadir/
+    about: The demo page plays the sandbox as the latest build on main draws it, and lists every feature.

@@ -11,8 +11,9 @@
 //! 4. Packs the sandbox and its assets into `downloads/`, with `tar`, and
 //!    takes its SHA-256 with `sha256sum`.
 //! 5. Fills `site/index.html` from the commit (`git`), the workspace, the
-//!    roadmap, the features and the captures, and copies `site/nadir.css`
-//!    and `site/nadir.js` beside it.
+//!    roadmap, the features and the captures, and `site/llms.txt`, the
+//!    same as plain text for language models, and copies `site/nadir.css`
+//!    and `site/nadir.js` beside them.
 //!
 //! It reads and writes only the workspace and the output directory, and
 //! makes no network calls: the page loads jabbott.dev's stylesheet and
@@ -52,12 +53,14 @@ const WRITTEN: &[&str] = &[
     "media",
     "downloads",
     "index.html",
+    "llms.txt",
     "nadir.css",
     "nadir.js",
 ];
 
 /// The page's own files, relative to the workspace root.
 const TEMPLATE: &str = "site/index.html";
+const TEXT_TEMPLATE: &str = "site/llms.txt";
 const OWN_FILES: &[&str] = &["site/nadir.css", "site/nadir.js"];
 
 /// The repository, where `GITHUB_REPOSITORY` does not name it.
@@ -178,6 +181,9 @@ pub(crate) fn command(mut args: Args, root: &Path, out: &mut dyn Write) -> Resul
     };
     let html = page::render(&read_text(&root.join(TEMPLATE))?, &page).map_err(Error::Internal)?;
     write(&output.join("index.html"), html.as_bytes())?;
+    let text = page::render_text(&read_text(&root.join(TEXT_TEMPLATE))?, &page)
+        .map_err(Error::Internal)?;
+    write(&output.join("llms.txt"), text.as_bytes())?;
     for file in OWN_FILES {
         let from = root.join(file);
         let name = from.file_name().map(PathBuf::from).unwrap_or_default();
@@ -490,9 +496,10 @@ Its log is in ~/.local/share/Sandbox/nadir.log.
 fn build_info(root: &Path) -> Result<Build, Error> {
     let git = |args: &[&str]| output(Command::new("git").args(args).current_dir(root));
     let commit = git(&["rev-parse", "HEAD"])?.trim().to_string();
-    let shown = git(&["show", "-s", "--format=%cs%n%s", "HEAD"])?;
+    let shown = git(&["show", "-s", "--format=%cs%n%cI%n%s", "HEAD"])?;
     let mut lines = shown.lines();
     let date = lines.next().unwrap_or_default().to_string();
+    let time = lines.next().unwrap_or_default().to_string();
     let subject = lines.next().unwrap_or_default().to_string();
     let toolchain = toolchain(&read_text(&root.join("rust-toolchain.toml"))?)
         .ok_or_else(|| Error::Internal("rust-toolchain.toml names no `channel`".to_string()))?;
@@ -505,6 +512,7 @@ fn build_info(root: &Path) -> Result<Build, Error> {
     Ok(Build {
         commit,
         date,
+        time,
         subject,
         toolchain,
         crates,
@@ -903,6 +911,7 @@ mod tests {
         Build {
             commit: "0123456789abcdef".to_string(),
             date: "2026-10-31".to_string(),
+            time: "2026-10-31T21:28:48-07:00".to_string(),
             subject: "A change".to_string(),
             toolchain: "1.99.0".to_string(),
             crates: 18,

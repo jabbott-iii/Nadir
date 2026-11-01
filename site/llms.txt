@@ -1,0 +1,45 @@
+# Nadir
+
+> Nadir is a 2D top-down game engine for desktop, written in Rust from the ground up by Joseph Abbott III, with no third-party crates: its own OS bindings, OpenGL renderer, ECS, collision, codecs and tools. https://jabbott.dev/Nadir/ plays the engine's sandbox game as commit {{commit_short}} draws it, recorded in CI, and lists the engine's features with how far each has come.
+
+Key facts:
+
+- Status: in development, {{tasks_done}} of {{tasks_total}} roadmap tasks done at commit {{commit_short}} of {{commit_date}} ({{commit_subject}})
+- Language: Rust {{toolchain}}, edition 2024; {{crates}} crates in the workspace; third-party crates: {{third_party}}
+- Targets: Windows 10+ (x86_64), macOS 12+ (Apple Silicon and Intel) and Linux (x86_64, X11). Only Linux runs so far: Windows and macOS need their windows (roadmap M1.5, M1.6) and OpenGL contexts (M2.6, M2.7).
+- Out of scope: web and WASM, Android, iOS, consoles, 3D and networking
+- License: Apache-2.0
+- Source: {{repository_url}}
+- Author: Joseph Abbott III, software engineer (https://jabbott.dev/resume/)
+
+## Pages
+
+- [Engine demo](https://jabbott.dev/Nadir/): the recorded scenes, this build, the roadmap's milestones and every feature
+- [Repository]({{repository_url}}): the source, with the design in docs/
+
+## Scenes
+
+Each is drawn offscreen by the engine on the CI runner, one 60 Hz tick a frame, and encoded as VP9 WebM at twice the size:
+
+{{scenes}}
+
+## Download
+
+{{download}}
+
+## Features
+
+{{features_lede}}
+
+{{features}}
+
+## Roadmap milestones
+
+{{milestones}}
+
+## Optional
+
+- [Roadmap]({{repository_url}}/blob/{{commit}}/docs/roadmap.md): every task, with its acceptance criteria
+- [Architecture]({{repository_url}}/blob/{{commit}}/docs/01-architecture.md): the crates, their dependency matrix, the main loop and threading
+- [Decisions]({{repository_url}}/blob/{{commit}}/docs/decisions.md): the architecture decision records
+- [jabbott.dev](https://jabbott.dev/llms.txt): the author's site: resume, engineering log and other projects

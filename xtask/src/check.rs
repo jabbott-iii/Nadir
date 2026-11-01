@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::error::Error;
-use crate::{cargo, deps, features, layers, release_no_dev, unsafe_audit};
+use crate::{cargo, deps, features, layers, release_no_dev, unsafe_audit, workflows};
 
 /// What a check found.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -59,6 +59,11 @@ pub(crate) const CHECKS: &[Check] = &[
         name: "unsafe-audit",
         about: "`unsafe` only in sys, platform and gfx, each use with a SAFETY comment",
         run: unsafe_audit::run,
+    },
+    Check {
+        name: "workflows",
+        about: "Workflows use only allowed actions, pinned by SHA, with least-privilege tokens",
+        run: workflows::run,
     },
     Check {
         name: "release-no-dev",
@@ -373,6 +378,7 @@ mod tests {
                 "deps",
                 "layers",
                 "unsafe-audit",
+                "workflows",
                 "release-no-dev",
                 "features"
             ]

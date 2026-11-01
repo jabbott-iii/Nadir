@@ -1,11 +1,34 @@
 //! The demo page's HTML: `site/index.html` with its placeholders filled
 //! from the build, the recordings and the features. Everything taken from
-//! them is escaped here.
+//! them is escaped here. Also its `llms.txt`, from `site/llms.txt`: the
+//! same, as plain text for language models.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use nadir_codec::json::{self, Value};
+
 use crate::features::{Feature, Status};
+
+/// The page's address, which its metadata gives every file it names under.
+const PAGE_URL: &str = "https://jabbott.dev/Nadir/";
+
+/// jabbott.dev's own nodes in its structured data, which this page's refer
+/// to as that site's pages do.
+const SITE_ID: &str = "https://jabbott.dev/#website";
+const PERSON_ID: &str = "https://jabbott.dev/#person";
+
+/// The page's title, as `<title>` gives it before the site's name.
+const TITLE: &str = "Nadir engine demo";
+
+/// What the page is, for search results and link previews.
+const DESCRIPTION: &str = "Nadir, a 2D top-down game engine in Rust with no third-party crates: \
+                           its scenes as the latest build draws them, and its features.";
+
+/// What the engine is, in the structured data.
+const ENGINE: &str = "A 2D top-down game engine for desktop, written in Rust from the ground \
+                      up: its own OS bindings, OpenGL renderer, ECS, collision, codecs and \
+                      tools, with no third-party crates.";
 
 /// The commit the page was built from, and the workspace at it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,6 +37,9 @@ pub(crate) struct Build {
     pub(crate) commit: String,
     /// The commit's date, `YYYY-MM-DD`.
     pub(crate) date: String,
+    /// The commit's date and time, in ISO 8601 with its offset, such as
+    /// `2026-10-31T21:28:48-07:00`.
+    pub(crate) time: String,
     /// The first line of its message.
     pub(crate) subject: String,
     /// The pinned toolchain, such as `1.99.0`.
@@ -114,6 +140,16 @@ pub(crate) fn render(template: &str, page: &Page) -> Result<String, String> {
     fill(template, &values(page))
 }
 
+/// The page as plain text, for language models: `template` with each
+/// `{{name}}` replaced, unescaped.
+///
+/// # Errors
+///
+/// As [`render`].
+pub(crate) fn render_text(template: &str, page: &Page) -> Result<String, String> {
+    fill(template, &text_values(page))
+}
+
 /// `template` with each `{{name}}` replaced by its value.
 fn fill(template: &str, values: &BTreeMap<&str, String>) -> Result<String, String> {
     let mut out = String::with_capacity(template.len() * 2);
@@ -135,47 +171,110 @@ fn fill(template: &str, values: &BTreeMap<&str, String>) -> Result<String, Strin
     Ok(out)
 }
 
+/// The features by status, and the roadmap's tasks.
+struct Counts {
+    shipped: usize,
+    in_progress: usize,
+    planned: usize,
+    done: usize,
+    total: usize,
+}
+
+impl Counts {
+    fn of(page: &Page) -> Self {
+        let count = |status| {
+            page.features
+                .iter()
+                .filter(|(_, other)| *other == status)
+                .count()
+        };
+        Self {
+            shipped: count(Status::Shipped),
+            in_progress: count(Status::InProgress),
+            planned: count(Status::Planned),
+            done: page.milestones.iter().map(|milestone| milestone.done).sum(),
+            total: page
+                .milestones
+                .iter()
+                .map(|milestone| milestone.total)
+                .sum(),
+        }
+    }
+
+    /// The sentence above the features.
+    fn features_lede(&self, version: &str) -> String {
+        format!(
+            "{} shipped, {} in progress and {} planned. Each feature is marked from the \
+             roadmap's ticks at {version}, so the list moves as the tasks land.",
+            self.shipped, self.in_progress, self.planned
+        )
+    }
+}
+
+/// The packages from outside the workspace, as the page says it.
+fn third_party(build: &Build) -> String {
+    match build.third_party {
+        0 => "None".to_string(),
+        n => n.to_string(),
+    }
+}
+
+// Each build's media and download have the same names, so their addresses
+// carry the commit, `version`, as the stylesheet's and script's do: a page
+// and the files it names stay together through the caches.
+
+/// A scene's file, `media/<scene>.<extension>`, relative to the page.
+fn media(scene: &Scene, extension: &str, version: &str) -> String {
+    format!("media/{}.{extension}?v={version}", scene.name)
+}
+
+/// The download's file, relative to the page.
+fn download_path(download: &Download, version: &str) -> String {
+    format!("downloads/{}?v={version}", download.file)
+}
+
+/// What the download needs besides Linux on x86_64.
+fn requirements(download: &Download) -> String {
+    let glibc = download.glibc.as_ref().map_or(String::new(), |glibc| {
+        format!(" and glibc {glibc} or newer")
+    });
+    format!("X11 with OpenGL 3.3{glibc}")
+}
+
 /// The value of every placeholder, as HTML.
 fn values(page: &Page) -> BTreeMap<&'static str, String> {
     let build = page.build;
-    let count = |status| {
-        page.features
-            .iter()
-            .filter(|(_, other)| *other == status)
-            .count()
-    };
-    let (shipped, in_progress, planned) = (
-        count(Status::Shipped),
-        count(Status::InProgress),
-        count(Status::Planned),
-    );
-    let done: usize = page.milestones.iter().map(|milestone| milestone.done).sum();
-    let total: usize = page
-        .milestones
-        .iter()
-        .map(|milestone| milestone.total)
-        .sum();
-    let third_party = match build.third_party {
-        0 => "None".to_string(),
-        n => n.to_string(),
-    };
-    // Each build's media and download have the same names, so their
-    // addresses carry the commit, as the stylesheet's and script's do: a
-    // page and the files it names stay together through the caches.
+    let counts = Counts::of(page);
     let version = build.short();
-    let poster = page.recordings.first().map_or(String::new(), |recording| {
-        format!("media/{}.png?v={version}", recording.scene.name)
-    });
+    let first = page.recordings.first();
+    let media_size = |side: fn(&Capture) -> u32| {
+        first.map_or(String::new(), |recording| {
+            (side(&recording.capture) * 2).to_string()
+        })
+    };
     let mut values = BTreeMap::new();
     let mut set = |name, value: String| {
         values.insert(name, value);
     };
+    set("description", escape(DESCRIPTION));
     set(
-        "description",
-        escape(
-            "Nadir, a 2D top-down game engine in Rust with no third-party crates: \
-             its scenes as the latest build draws them, and its features.",
-        ),
+        "poster",
+        escape(&first.map_or(String::new(), |recording| {
+            media(recording.scene, "png", version)
+        })),
+    );
+    set(
+        "video",
+        escape(&first.map_or(String::new(), |recording| {
+            media(recording.scene, "webm", version)
+        })),
+    );
+    set("media_width", media_size(|capture| capture.width));
+    set("media_height", media_size(|capture| capture.height));
+    set("structured_data", structured_data(page));
+    set(
+        "year",
+        escape(build.date.get(..4).unwrap_or(build.date.as_str())),
     );
     set(
         "lede",
@@ -187,9 +286,8 @@ fn values(page: &Page) -> BTreeMap<&'static str, String> {
              passed CI on main.",
         ),
     );
-    set("poster", escape(&poster));
     set("commit", escape(&build.commit));
-    set("commit_short", escape(build.short()));
+    set("commit_short", escape(version));
     set(
         "commit_url",
         escape(&format!("{}/commit/{}", build.repository, build.commit)),
@@ -199,28 +297,271 @@ fn values(page: &Page) -> BTreeMap<&'static str, String> {
     set("repository_url", escape(&build.repository));
     set("toolchain", escape(&build.toolchain));
     set("crates", build.crates.to_string());
-    set("third_party", third_party);
-    set("tasks_done", done.to_string());
-    set("tasks_total", total.to_string());
+    set("third_party", third_party(build));
+    set("tasks_done", counts.done.to_string());
+    set("tasks_total", counts.total.to_string());
     set("scene_tabs", scene_tabs(page.recordings));
     set("scenes", scenes(page.recordings, version));
     set("milestones", milestones(page.milestones));
     set("download", download(page.download, version));
     set(
         "feature_filters",
-        feature_filters(page.features.len(), shipped, in_progress, planned),
+        feature_filters(
+            page.features.len(),
+            counts.shipped,
+            counts.in_progress,
+            counts.planned,
+        ),
     );
-    set(
-        "features_lede",
-        escape(&format!(
-            "{shipped} shipped, {in_progress} in progress and {planned} planned. Each \
-             feature is marked from the roadmap's ticks at {}, so the list moves as the \
-             tasks land.",
-            build.short()
-        )),
-    );
+    set("features_lede", escape(&counts.features_lede(version)));
     set("features", features(page.features));
     values
+}
+
+/// The value of every placeholder of `llms.txt`, as plain text.
+fn text_values(page: &Page) -> BTreeMap<&'static str, String> {
+    let build = page.build;
+    let counts = Counts::of(page);
+    let version = build.short();
+    BTreeMap::from([
+        ("commit", build.commit.clone()),
+        ("commit_short", version.to_string()),
+        ("commit_date", build.date.clone()),
+        ("commit_subject", build.subject.clone()),
+        ("repository_url", build.repository.clone()),
+        ("toolchain", build.toolchain.clone()),
+        ("crates", build.crates.to_string()),
+        ("third_party", third_party(build)),
+        ("tasks_done", counts.done.to_string()),
+        ("tasks_total", counts.total.to_string()),
+        ("scenes", scenes_text(page.recordings, version)),
+        ("download", download_text(page.download, version)),
+        ("features_lede", counts.features_lede(version)),
+        ("features", features_text(page.features)),
+        ("milestones", milestones_text(page.milestones)),
+    ])
+}
+
+/// The page's structured data: one JSON-LD graph of the page, its
+/// breadcrumbs, the engine's source, the sandbox's download and each
+/// scene's video. Its site and author are jabbott.dev's nodes, by their
+/// `@id`, with what this page's metadata says of them.
+fn structured_data(page: &Page) -> String {
+    let build = page.build;
+    let version = build.short();
+    let text = |text: &str| Value::String(text.to_string());
+    let id = |fragment: &str| format!("{PAGE_URL}#{fragment}");
+    let person = || reference(PERSON_ID);
+    let poster = page
+        .recordings
+        .first()
+        .map(|recording| format!("{PAGE_URL}{}", media(recording.scene, "png", version)));
+    let videos: Vec<Value> = page
+        .recordings
+        .iter()
+        .map(|recording| {
+            let (scene, capture) = (recording.scene, &recording.capture);
+            let seconds = f64::from(capture.frames) / f64::from(capture.fps.max(1));
+            object(vec![
+                ("@type", text("VideoObject")),
+                ("@id", text(&id(&format!("scene-{}", scene.name)))),
+                ("name", text(&format!("Nadir: {}", scene.title))),
+                ("description", text(scene.caption)),
+                (
+                    "thumbnailUrl",
+                    text(&format!("{PAGE_URL}{}", media(scene, "png", version))),
+                ),
+                (
+                    "contentUrl",
+                    text(&format!("{PAGE_URL}{}", media(scene, "webm", version))),
+                ),
+                ("encodingFormat", text("video/webm")),
+                ("uploadDate", text(&build.time)),
+                ("duration", text(&format!("PT{}S", one_place(seconds)))),
+                ("width", Value::Int(i64::from(capture.width) * 2)),
+                ("height", Value::Int(i64::from(capture.height) * 2)),
+                ("author", person()),
+            ])
+        })
+        .collect();
+    let mut web_page = vec![
+        ("@type", text("WebPage")),
+        ("@id", text(&id("page"))),
+        ("url", text(PAGE_URL)),
+        ("name", text(TITLE)),
+        ("description", text(DESCRIPTION)),
+        ("inLanguage", text("en-US")),
+        ("isPartOf", reference(SITE_ID)),
+        ("about", reference(&id("engine"))),
+        ("mainEntity", reference(&id("engine"))),
+        ("author", person()),
+        ("publisher", person()),
+        ("dateModified", text(&build.time)),
+        ("breadcrumb", reference(&id("breadcrumb"))),
+    ];
+    if let Some(poster) = &poster {
+        web_page.push(("primaryImageOfPage", text(poster)));
+    }
+    web_page.push((
+        "video",
+        Value::Array(
+            videos
+                .iter()
+                .filter_map(|video| video.get("@id").cloned())
+                .map(|id| Value::Object(vec![("@id".to_string(), id)]))
+                .collect(),
+        ),
+    ));
+    let crumb = |position: i64, name: &str, url: &str| {
+        object(vec![
+            ("@type", text("ListItem")),
+            ("position", Value::Int(position)),
+            ("name", text(name)),
+            ("item", text(url)),
+        ])
+    };
+    let download = page.download;
+    let mut sandbox = vec![
+        ("@type", text("SoftwareApplication")),
+        ("@id", text(&id("sandbox"))),
+        ("name", text("Nadir sandbox")),
+        (
+            "description",
+            text(&format!(
+                "The game that drives the Nadir engine's requirements, as commit {version} \
+                 draws it."
+            )),
+        ),
+        ("applicationCategory", text("GameApplication")),
+        ("operatingSystem", text("Linux")),
+        ("processorRequirements", text("x86_64")),
+        ("softwareRequirements", text(&requirements(download))),
+        ("softwareVersion", text(version)),
+        (
+            "downloadUrl",
+            text(&format!("{PAGE_URL}{}", download_path(download, version))),
+        ),
+        ("fileSize", text(&megabytes(download.bytes))),
+        ("isAccessibleForFree", Value::Bool(true)),
+        ("author", person()),
+    ];
+    if let Some(poster) = &poster {
+        sandbox.push(("screenshot", text(poster)));
+    }
+    let mut graph = vec![
+        object(web_page),
+        object(vec![
+            ("@type", text("BreadcrumbList")),
+            ("@id", text(&id("breadcrumb"))),
+            (
+                "itemListElement",
+                Value::Array(vec![
+                    crumb(1, "Home", "https://jabbott.dev/"),
+                    crumb(2, "Deployments", "https://jabbott.dev/deployments/"),
+                    crumb(3, "Nadir", PAGE_URL),
+                ]),
+            ),
+        ]),
+        object(vec![
+            ("@type", text("SoftwareSourceCode")),
+            ("@id", text(&id("engine"))),
+            ("name", text("Nadir")),
+            ("description", text(ENGINE)),
+            ("url", text(PAGE_URL)),
+            ("codeRepository", text(&build.repository)),
+            ("programmingLanguage", text("Rust")),
+            // As the workspace's `Cargo.toml` says.
+            (
+                "license",
+                text("https://www.apache.org/licenses/LICENSE-2.0"),
+            ),
+            ("creativeWorkStatus", text("In development")),
+            ("dateModified", text(&build.time)),
+            (
+                "keywords",
+                Value::Array(
+                    [
+                        "game engine",
+                        "2D",
+                        "top-down",
+                        "Rust",
+                        "ECS",
+                        "OpenGL",
+                        "tilemaps",
+                        "no dependencies",
+                    ]
+                    .map(text)
+                    .to_vec(),
+                ),
+            ),
+            ("author", person()),
+            ("targetProduct", reference(&id("sandbox"))),
+        ]),
+        object(sandbox),
+    ];
+    graph.extend(videos);
+    graph.extend([
+        object(vec![
+            ("@type", text("WebSite")),
+            ("@id", text(SITE_ID)),
+            ("url", text("https://jabbott.dev/")),
+            ("name", text("Joseph Abbott III")),
+        ]),
+        object(vec![
+            ("@type", text("Person")),
+            ("@id", text(PERSON_ID)),
+            ("name", text("Joseph Abbott III")),
+            ("url", text("https://jabbott.dev/")),
+            (
+                "sameAs",
+                Value::Array(
+                    [
+                        "https://github.com/jabbott-iii",
+                        "https://www.linkedin.com/in/josephabbottiii/",
+                        "https://x.com/jabbottiii",
+                    ]
+                    .map(text)
+                    .to_vec(),
+                ),
+            ),
+        ]),
+    ]);
+    let data = object(vec![
+        ("@context", text("https://schema.org")),
+        ("@graph", Value::Array(graph)),
+    ]);
+    script_safe(&json::to_string_pretty(&data))
+}
+
+/// A JSON object of `members`, in their order.
+fn object(members: Vec<(&str, Value)>) -> Value {
+    Value::Object(
+        members
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+    )
+}
+
+/// A reference to the node `id`.
+fn reference(id: &str) -> Value {
+    object(vec![("@id", Value::String(id.to_string()))])
+}
+
+/// `json` as it may stand in a `<script>`: `<`, `>` and `&`, which can
+/// stand only in its strings, written as escapes, so that no `</script>`
+/// or `<!--` ends or changes the element early.
+fn script_safe(json: &str) -> String {
+    let mut out = String::with_capacity(json.len());
+    for c in json.chars() {
+        if matches!(c, '<' | '>' | '&') {
+            out.push('\\');
+            let _ = write!(out, "u{:04x}", u32::from(c));
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// The scenes' tabs.
@@ -334,19 +675,16 @@ fn milestones(milestones: &[Milestone]) -> String {
 /// The download button and what it gets. `version` goes on its address.
 fn download(download: &Download, version: &str) -> String {
     let file = escape(&download.file);
-    let glibc = download.glibc.as_ref().map_or(String::new(), |glibc| {
-        format!(" and glibc {} or newer", escape(glibc))
-    });
     format!(
         "        <div class=\"nadir-download\">\n\
-         \x20         <a class=\"btn btn--amber btn--block\" href=\"downloads/{file}?v={version}\" \
+         \x20         <a class=\"btn btn--amber btn--block\" href=\"{path}\" \
          download=\"{file}\">\
          <svg class=\"icon\" viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" aria-hidden=\"true\" \
          focusable=\"false\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" \
          stroke-linecap=\"square\"><path d=\"M12 4v11M7 10l5 5 5-5M5 20h14\"/></svg>\
          <span>Download for Linux</span></a>\n\
          \x20         <p class=\"nadir-download__meta\">The sandbox, as this build drew \
-         it: x86_64, for X11 with OpenGL 3.3{glibc} &middot; {size} &middot; <span \
+         it: x86_64, for {requirements} &middot; {size} &middot; <span \
          class=\"nadir-mono\">{file}</span></p>\n\
          \x20         <p class=\"nadir-download__meta\">SHA-256 <span class=\"nadir-mono \
          nadir-hash\">{sha}</span></p>\n\
@@ -355,9 +693,10 @@ fn download(download: &Download, version: &str) -> String {
          macOS builds need their windows (roadmap M1.5, M1.6), their OpenGL contexts \
          (M2.6, M2.7) and a build on those systems.</p>\n\
          \x20       </div>",
+        path = escape(&download_path(download, version)),
+        requirements = escape(&requirements(download)),
         size = escape(&megabytes(download.bytes)),
         sha = escape(&download.sha256),
-        version = escape(version),
     )
 }
 
@@ -409,6 +748,96 @@ fn features(features: &[(Feature, Status)]) -> String {
         );
     }
     trim_line_end(html)
+}
+
+/// Each scene, as a line of `llms.txt`: its video, what it shows, and what
+/// its capture saw.
+fn scenes_text(recordings: &[Recording], version: &str) -> String {
+    let mut text = String::new();
+    for recording in recordings {
+        let (scene, capture) = (recording.scene, &recording.capture);
+        let seconds = f64::from(capture.frames) / f64::from(capture.fps.max(1));
+        let _ = writeln!(
+            text,
+            "- [{title}]({PAGE_URL}{video}): {caption} Frames: {frames} in {seconds} s, a \
+             tick each. Sprites a frame: {sprites}. Sprite batches: {batches}. Tiles a \
+             frame: {tiles}. Mean tick: {tick:.3} ms, the longest {longest:.3} ms. \
+             World hash: {hash}. Drawn offscreen at {width} × {height} by {renderer}.",
+            title = scene.title,
+            video = media(scene, "webm", version),
+            caption = scene.caption,
+            frames = thousands(u64::from(capture.frames)),
+            seconds = one_place(seconds),
+            sprites = thousands(capture.mean_sprites.round() as u64),
+            batches = one_place(capture.mean_batches),
+            tiles = thousands(capture.mean_tiles.round() as u64),
+            tick = capture.mean_tick_ms,
+            longest = capture.longest_tick_ms,
+            hash = capture.world_hash,
+            width = capture.width,
+            height = capture.height,
+            renderer = capture.renderer,
+        );
+    }
+    trim_line_end(text)
+}
+
+/// The download, as a line of `llms.txt`.
+fn download_text(download: &Download, version: &str) -> String {
+    format!(
+        "- [{file}]({PAGE_URL}{path}): the sandbox as this build drew it, for Linux on x86_64, \
+         {requirements}; {size}; SHA-256 {sha}. Unpack it and run `./sandbox`; its README \
+         names the scenes and keys.",
+        file = download.file,
+        path = download_path(download, version),
+        requirements = requirements(download),
+        size = megabytes(download.bytes),
+        sha = download.sha256,
+    )
+}
+
+/// The features, as `llms.txt` lists them: under a heading for each status
+/// that has any, in the file's order.
+fn features_text(features: &[(Feature, Status)]) -> String {
+    let mut text = String::new();
+    for status in [Status::Shipped, Status::InProgress, Status::Planned] {
+        let mut first = true;
+        for (feature, _) in features.iter().filter(|(_, other)| *other == status) {
+            if first {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                let _ = writeln!(text, "### {}\n", status.name());
+                first = false;
+            }
+            let _ = writeln!(
+                text,
+                "- {} ({}): {} Roadmap tasks: {}.",
+                feature.name,
+                feature.area,
+                feature
+                    .summary
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                feature.tasks.join(", "),
+            );
+        }
+    }
+    trim_line_end(text)
+}
+
+/// The milestones, as `llms.txt` lists them.
+fn milestones_text(milestones: &[Milestone]) -> String {
+    let mut text = String::new();
+    for milestone in milestones {
+        let _ = writeln!(
+            text,
+            "- {}, {}: {} of {} tasks done",
+            milestone.id, milestone.title, milestone.done, milestone.total
+        );
+    }
+    trim_line_end(text)
 }
 
 /// The status as the page's filters and classes name it.
@@ -483,6 +912,7 @@ mod tests {
         Build {
             commit: "0123456789abcdef".to_string(),
             date: "2026-10-31".to_string(),
+            time: "2026-10-31T21:28:48-07:00".to_string(),
             subject: "M5.2 codec: KLZ & KBJ".to_string(),
             toolchain: "1.99.0".to_string(),
             crates: 18,
@@ -552,9 +982,9 @@ mod tests {
         assert_eq!(megabytes(1_260_000), "1.3 MB");
     }
 
-    #[test]
-    fn the_template_in_the_repository_fills_with_everything_escaped() {
-        let template = include_str!("../../../site/index.html");
+    /// Calls `check` with a page of one scene, the download, two milestones
+    /// and two features, one shipped and one planned.
+    fn with_page(check: impl FnOnce(&Page)) {
         let build = build();
         let recordings = [Recording {
             scene: &FIELD,
@@ -582,52 +1012,217 @@ mod tests {
         ];
         let features = [
             (feature("Tilemaps", &["M4.5"]), Status::Shipped),
-            (feature("Pack files", &["M5.7"]), Status::Planned),
+            (feature("Pack files", &["M5.7", "M5.8"]), Status::Planned),
         ];
-        let page = Page {
+        check(&Page {
             build: &build,
             recordings: &recordings,
             download: &download,
             milestones: &milestones,
             features: &features,
-        };
-        let html = render(template, &page).expect("every placeholder has a value");
-        assert!(!html.contains("{{"), "a placeholder is left");
-        // The scenes become tab panels only when the script shows the tabs.
-        assert!(!html.contains("tabpanel"));
-        for expected in [
-            "<a class=\"nadir-mono\" href=\"https://github.com/jabbott-iii/Nadir/commit/\
-             0123456789abcdef\">0123456</a>",
-            "M5.2 codec: KLZ &amp; KBJ",
-            "<dd>10 of 16 tasks</dd>",
-            "<dd>None</dd>",
-            "A person &lt;walks&gt;.",
-            "<dd>10,203</dd>",
-            "<dd>2,210</dd>",
-            "<dd>0.004 ms <small>longest 0.045</small></dd>",
-            "by llvmpipe (LLVM 20.1.2, 256 bits) on the CI runner, and encoded at twice the size",
-            "src=\"media/field.webm?v=0123456\" type=\"video/webm\"",
-            "poster=\"media/field.png?v=0123456\" preload=\"auto\" muted loop playsinline \
-             controls autoplay>",
-            "content=\"https://jabbott.dev/Nadir/media/field.png?v=0123456\"",
-            "<figure class=\"nadir-scene\" id=\"scene-field\" aria-labelledby=\"title-field\" \
-             data-scene=\"field\">",
-            "<h2 class=\"nadir-scene__title\" id=\"title-field\">The field</h2>",
-            "for X11 with OpenGL 3.3 and glibc 2.34 or newer",
-            "data-state=\"active\"",
-            "style=\"width: 25%\"",
-            "href=\"downloads/nadir-sandbox-linux-x86_64.tar.gz?v=0123456\" \
-             download=\"nadir-sandbox-linux-x86_64.tar.gz\">",
-            "1.3 MB",
-            "Draws &quot;things&quot;.",
-            "<span class=\"nadir-status nadir-status--planned\">Planned</span>",
-            "data-status-filter=\"shipped\" aria-pressed=\"false\">Shipped <span \
-             class=\"chip__count\">1</span>",
-            "1 shipped, 0 in progress and 1 planned.",
-            "/blob/0123456789abcdef/docs/roadmap.md",
-        ] {
-            assert!(html.contains(expected), "missing {expected:?}");
-        }
+        });
+    }
+
+    #[test]
+    fn the_template_in_the_repository_fills_with_everything_escaped() {
+        with_page(|page| {
+            let html = render(include_str!("../../../site/index.html"), page)
+                .expect("every placeholder has a value");
+            assert!(!html.contains("{{"), "a placeholder is left");
+            // The scenes become tab panels only when the script shows the tabs.
+            assert!(!html.contains("tabpanel"));
+            for expected in [
+                "<a class=\"nadir-mono\" href=\"https://github.com/jabbott-iii/Nadir/commit/\
+                 0123456789abcdef\">0123456</a>",
+                "M5.2 codec: KLZ &amp; KBJ",
+                "<dd>10 of 16 tasks</dd>",
+                "<dd>None</dd>",
+                "A person &lt;walks&gt;.",
+                "<dd>10,203</dd>",
+                "<dd>2,210</dd>",
+                "<dd>0.004 ms <small>longest 0.045</small></dd>",
+                "by llvmpipe (LLVM 20.1.2, 256 bits) on the CI runner, and encoded at twice the \
+                 size",
+                "src=\"media/field.webm?v=0123456\" type=\"video/webm\"",
+                "poster=\"media/field.png?v=0123456\" preload=\"auto\" muted loop playsinline \
+                 controls autoplay>",
+                "<meta property=\"og:image\" content=\"https://jabbott.dev/Nadir/media/field.png?\
+                 v=0123456\">",
+                "<meta property=\"og:image:width\" content=\"960\">",
+                "<meta property=\"og:image:height\" content=\"540\">",
+                "<meta property=\"og:video\" content=\"https://jabbott.dev/Nadir/media/field.webm?\
+                 v=0123456\">",
+                "<meta name=\"twitter:image\" content=\"https://jabbott.dev/Nadir/media/field.png?\
+                 v=0123456\">",
+                "<figure class=\"nadir-scene\" id=\"scene-field\" aria-labelledby=\"title-field\" \
+                 data-scene=\"field\">",
+                "<h2 class=\"nadir-scene__title\" id=\"title-field\">The field</h2>",
+                "for X11 with OpenGL 3.3 and glibc 2.34 or newer",
+                "data-state=\"active\"",
+                "style=\"width: 25%\"",
+                "href=\"downloads/nadir-sandbox-linux-x86_64.tar.gz?v=0123456\" \
+                 download=\"nadir-sandbox-linux-x86_64.tar.gz\">",
+                "1.3 MB",
+                "Draws &quot;things&quot;.",
+                "<span class=\"nadir-status nadir-status--planned\">Planned</span>",
+                "data-status-filter=\"shipped\" aria-pressed=\"false\">Shipped <span \
+                 class=\"chip__count\">1</span>",
+                "1 shipped, 0 in progress and 1 planned.",
+                "/blob/0123456789abcdef/docs/roadmap.md",
+                "<span>&copy; 2026 Joseph Abbott III</span>",
+                // jabbott.dev's header and footer since its log moved to /log/.
+                "<a class=\"btn btn--amber\" href=\"https://jabbott.dev/\">",
+                "<a class=\"btn btn--amber\" href=\"https://jabbott.dev/log/\">",
+                "<li><a href=\"https://jabbott.dev/\">Home</a></li>",
+                "<li><a href=\"https://jabbott.dev/log/\">Engineering log</a></li>",
+            ] {
+                assert!(html.contains(expected), "missing {expected:?}");
+            }
+        });
+    }
+
+    /// The node of type `kind` in `graph`.
+    fn node<'a>(graph: &'a [Value], kind: &str) -> &'a Value {
+        graph
+            .iter()
+            .find(|node| node.get("@type").and_then(Value::as_str) == Some(kind))
+            .unwrap_or_else(|| panic!("no {kind} node"))
+    }
+
+    /// The string `key` of the object `value`.
+    fn string<'a>(value: &'a Value, key: &str) -> &'a str {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("no string `{key}`"))
+    }
+
+    #[test]
+    fn the_structured_data_is_json_ld_of_the_page_its_engine_download_and_videos() {
+        with_page(|page| {
+            let html = render(include_str!("../../../site/index.html"), page).unwrap();
+            let (_, rest) = html
+                .split_once("<script type=\"application/ld+json\">")
+                .expect("the structured data");
+            let (data, _) = rest.split_once("</script>").expect("its end");
+            let data = json::parse(data, nadir_codec::Limits::default()).expect("JSON");
+            assert_eq!(string(&data, "@context"), "https://schema.org");
+            let graph = data.get("@graph").and_then(Value::as_array).unwrap();
+
+            let web_page = node(graph, "WebPage");
+            assert_eq!(string(web_page, "url"), "https://jabbott.dev/Nadir/");
+            assert_eq!(
+                string(web_page, "dateModified"),
+                "2026-10-31T21:28:48-07:00"
+            );
+            assert_eq!(
+                string(web_page, "primaryImageOfPage"),
+                "https://jabbott.dev/Nadir/media/field.png?v=0123456"
+            );
+            let referred = |value: &Value| string(value, "@id").to_string();
+            assert_eq!(
+                web_page.get("isPartOf").map(referred).as_deref(),
+                Some("https://jabbott.dev/#website")
+            );
+
+            let crumbs = node(graph, "BreadcrumbList")
+                .get("itemListElement")
+                .and_then(Value::as_array)
+                .unwrap();
+            let names: Vec<&str> = crumbs.iter().map(|crumb| string(crumb, "name")).collect();
+            assert_eq!(names, ["Home", "Deployments", "Nadir"]);
+
+            let engine = node(graph, "SoftwareSourceCode");
+            assert_eq!(
+                string(engine, "codeRepository"),
+                "https://github.com/jabbott-iii/Nadir"
+            );
+            assert_eq!(string(engine, "programmingLanguage"), "Rust");
+
+            let sandbox = node(graph, "SoftwareApplication");
+            assert_eq!(
+                string(sandbox, "downloadUrl"),
+                "https://jabbott.dev/Nadir/downloads/nadir-sandbox-linux-x86_64.tar.gz?v=0123456"
+            );
+            assert_eq!(
+                string(sandbox, "softwareRequirements"),
+                "X11 with OpenGL 3.3 and glibc 2.34 or newer"
+            );
+            assert_eq!(string(sandbox, "fileSize"), "1.3 MB");
+
+            let video = node(graph, "VideoObject");
+            assert_eq!(
+                string(video, "@id"),
+                "https://jabbott.dev/Nadir/#scene-field"
+            );
+            assert_eq!(string(video, "name"), "Nadir: The field");
+            // Read back as it was, though the page holds no `<` or `>` in it.
+            assert_eq!(string(video, "description"), "A person <walks>.");
+            assert!(!rest.split("</script>").next().unwrap().contains('<'));
+            assert_eq!(
+                string(video, "contentUrl"),
+                "https://jabbott.dev/Nadir/media/field.webm?v=0123456"
+            );
+            assert_eq!(string(video, "duration"), "PT10S");
+            assert_eq!(string(video, "uploadDate"), "2026-10-31T21:28:48-07:00");
+            assert_eq!(video.get("width").and_then(Value::as_i64), Some(960));
+            assert_eq!(
+                web_page
+                    .get("video")
+                    .and_then(Value::as_array)
+                    .map(|videos| videos.iter().map(referred).collect::<Vec<_>>()),
+                Some(vec!["https://jabbott.dev/Nadir/#scene-field".to_string()])
+            );
+
+            let person = node(graph, "Person");
+            assert_eq!(string(person, "@id"), "https://jabbott.dev/#person");
+        });
+    }
+
+    #[test]
+    fn text_in_a_script_cannot_end_it() {
+        let text = "</script><!-- & -->";
+        let json = json::to_string_compact(&Value::String(text.to_string()));
+        let safe = script_safe(&json);
+        assert!(!safe.contains(['<', '>', '&']), "{safe}");
+        assert_eq!(
+            json::parse(&safe, nadir_codec::Limits::default()),
+            Ok(Value::String(text.to_string()))
+        );
+    }
+
+    #[test]
+    fn the_text_template_in_the_repository_fills_without_escaping() {
+        with_page(|page| {
+            let text = render_text(include_str!("../../../site/llms.txt"), page)
+                .expect("every placeholder has a value");
+            assert!(!text.contains("{{"), "a placeholder is left");
+            assert!(!text.contains("&amp;") && !text.contains("&lt;"), "{text}");
+            for expected in [
+                "# Nadir\n\n> Nadir is a 2D top-down game engine",
+                "10 of 16 roadmap tasks done",
+                "at commit 0123456 of 2026-10-31 (M5.2 codec: KLZ & KBJ)",
+                "third-party crates: None",
+                "- [The field](https://jabbott.dev/Nadir/media/field.webm?v=0123456): A person \
+                 <walks>. Frames: 600 in 10 s, a tick each. Sprites a frame: 10,203. Sprite \
+                 batches: 2. Tiles a frame: 2,210. Mean tick: 0.004 ms, the \
+                 longest 0.045 ms. World hash: cba9d2bc0882b423. Drawn offscreen at 480 × 270 \
+                 by llvmpipe (LLVM 20.1.2, 256 bits).",
+                "- [nadir-sandbox-linux-x86_64.tar.gz](https://jabbott.dev/Nadir/downloads/\
+                 nadir-sandbox-linux-x86_64.tar.gz?v=0123456): the sandbox as this build drew it, \
+                 for Linux on x86_64, X11 with OpenGL 3.3 and glibc 2.34 or newer; 1.3 MB; \
+                 SHA-256 abab",
+                "1 shipped, 0 in progress and 1 planned.",
+                "### Shipped\n\n- Tilemaps (Graphics): Draws \"things\". Roadmap tasks: M4.5.\n\n\
+                 ### Planned\n\n- Pack files (Graphics): Draws \"things\". Roadmap tasks: M5.7, \
+                 M5.8.\n\n## Roadmap",
+                "- M4, Simulation: 8 of 8 tasks done\n- M5, Content pipeline: 2 of 8 tasks done",
+                "https://github.com/jabbott-iii/Nadir/blob/0123456789abcdef/docs/roadmap.md",
+            ] {
+                assert!(text.contains(expected), "missing {expected:?} in\n{text}");
+            }
+            assert!(!text.contains("### In progress"), "{text}");
+        });
     }
 
     #[test]
