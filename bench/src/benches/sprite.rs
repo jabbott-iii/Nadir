@@ -19,7 +19,9 @@ const GRASS: u32 = 2;
 /// `sprite_sort_batch`: the renderer's work on the CPU for one frame shaped
 /// like the sandbox's stress scene (`--scene stress-sprites`): 192 grass
 /// tiles under 10,000 people, 10 props and the player, 10,203 sprites in 2
-/// batches.
+/// batches. The scene draws its grass from the same page as the rest since
+/// M5.9, in 1 batch; the frame keeps the grass a texture of its own, so
+/// that it is the frame its recorded times were measured on.
 ///
 /// It times what `docs/subsystems/render.md` budgets as sort and batch:
 /// the sort keys, the sort, the batches, and packing each sprite's

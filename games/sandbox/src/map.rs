@@ -1,6 +1,6 @@
 //! The field's map, built by hand: 64 × 48 tiles of 16 pixels, written
 //! as rows of letters. It makes the ground, a tile layer of the tile set
-//! `assets/sprites/tiles.qoi`, and the collision grid; the tall walls,
+//! `assets/sprites/tiles.png`, cooked, and the collision grid; the tall walls,
 //! trees and rocks stand on it as y-sorted sprites (`docs/subsystems/
 //! render.md`, "Tilemaps").
 //!
@@ -20,10 +20,10 @@ use nadir::prelude::*;
 
 use crate::Prop;
 
-/// The tile set: 8 × 4 tiles of 16 pixels, numbered row by row.
-pub(crate) const TILE_SET: &str = "sprites/tiles.qoi";
-const COLUMNS: u16 = 8;
-const ROWS: u16 = 4;
+/// The tile set's tiles across and down, numbered row by row: 8 × 4 of 16
+/// pixels, as the map's tile numbers count them.
+pub(crate) const COLUMNS: u16 = 8;
+pub(crate) const ROWS: u16 = 4;
 
 /// A tile's side, in pixels.
 pub(crate) const TILE: f32 = 16.0;
@@ -102,15 +102,6 @@ const MAP: [&str; HEIGHT as usize] = [
     "#...,......................;............;......................#",
     "################################################################",
 ];
-
-/// The tile set of the texture `texture`.
-pub(crate) fn tile_set(texture: Handle<Texture>) -> TileSet {
-    TileSet {
-        texture,
-        columns: COLUMNS,
-        rows: ROWS,
-    }
-}
 
 /// What the map makes.
 pub(crate) struct Map {
@@ -196,7 +187,8 @@ mod tests {
     fn the_grid_is_solid_where_the_walls_and_the_water_are() {
         let app = crate::tests::scene(crate::Scene::Field);
         let world = app.world();
-        let set = tile_set(world.resource::<crate::Sprites>().tiles);
+        let set = world.resource::<crate::Sprites>().tiles;
+        assert_eq!((set.columns, set.rows), (COLUMNS, ROWS));
         let map = build(set);
         let collisions = world.resource::<Collisions>();
         let grid = collisions.grid();

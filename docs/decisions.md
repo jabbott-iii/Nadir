@@ -1699,7 +1699,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0029 — CI records the sandbox and publishes a demo page at jabbott.dev/Nadir/; a features file covers the roadmap
 
-- **Status:** Accepted
+- **Status:** Accepted; what its download packs, and the sandbox's fallback to the workspace's `assets`, are superseded by ADR-0033
 - **Date:** 2026-10-31
 - **Context:**
   - The user asked for a CI/CD workflow that deploys a working demo of
@@ -2204,3 +2204,116 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   workflow from outside the repository; the release workflow lands; CodeQL's
   alerts outgrow triage; or GitHub makes immutable actions the default,
   which would make a tag as safe as a SHA.
+
+## ADR-0033 — The game reads the cooked atlas through a strict reader in codec and an `Atlas` asset in render; `load_now` makes it before the first tick; `cargo xtask ci` cooks before its tests
+
+- **Status:** Accepted
+- **Date:** 2026-10-31
+- **Context:**
+  - Roadmap M5.9: the game draws cooked atlases. The cook writes
+    `atlas/<group>.kbj`, version 1 (ADR-0031), and the sandbox drew
+    hand-made QOIs, with an atlas's regions written as constants in
+    `stress.rs`.
+  - The sandbox builds its world, sprites, clips and tile sets, before its
+    first tick, and needs the regions to do it. The asset server loads
+    only on its workers, and finalizes in later frames (ADR-0030).
+  - The rules for parsers (`.claude/rules/parsers.md`) give every reader of
+    files a fuzz target, and the fuzzer, in `xtask`, may reach only `core`
+    and `codec`.
+  - The sandbox may depend on `nadir` alone, tests included, so it cannot
+    cook for its own tests.
+  - ADR-0029's download packed `assets/`, and the sandbox fell back to the
+    workspace's `assets`: both change here.
+  - On 2026-10-31 the user chose: `AssetServer::load_now`; a `cook` check
+    in `cargo xtask ci` before `test`; the grass on the same page as the
+    rest, so that the stress scene is one batch; and the task in one
+    change across seven crates.
+- **Decision:**
+  - **`nadir_codec::atlas::parse`** reads the file into `AtlasFile`,
+    `Page`, `SpriteEntry` (`SpriteKind::Pivot` or `Tiles`) and `Frame`,
+    `#[non_exhaustive]`. It reads the version before anything else (any
+    other than 1 is not supported), refuses unknown members, and checks
+    every frame on a page and inside its cell, the names in byte order,
+    and a tile set one whole page. Its errors are
+    `CodecError::Atlas { at, kind }`, `at` a member path such as
+    `sprites[2].frames[0].w`: a KBJ value has no byte offset. The fuzz
+    target `atlas` asserts what the reader promises of what it accepts.
+  - **The cook reads what it writes** with that reader, and fails the
+    group if the reader refuses it, and its version is the reader's. The
+    reader does not check that page paths are asset paths, which the game
+    also asks: an output path past an asset path's 1,024 bytes, from a
+    source path near that length, would still cook.
+  - **`nadir_render::Atlas`** is the asset: pages (paths that must be
+    lowercase asset paths ending `.qoi`, and sizes), and sprites by name
+    with each frame's uv, trimmed size, offset and untrimmed size, and a
+    sprite's pivot or a tile set's tile size. It needs nothing to
+    finalize, and has no placeholder. `Atlas::load_pages(server, scope)`
+    loads its pages as `Texture`s in a scope, by page index.
+  - **`AssetServer::load_now(_in)`** makes one asset before it returns:
+    read and decoded on the calling thread if it is new, waited for if a
+    worker has it, made now if it waits to be. It makes and frees nothing
+    else, and spends no budget. A failure, a context without what
+    `finalize` needs included, is final, as any failure is, and returns
+    the error.
+  - **`Sprite::from_atlas(texture, sprite, frame)`** makes a sprite of a
+    frame at its trimmed size, with the sprite's pivot normalized in the
+    trimmed quad, so that its pixels land where the untrimmed cell's
+    would. Flipped, its frame must be untrimmed or trimmed evenly left
+    and right, since render's flip mirrors about the quad's middle;
+    animated, every frame must have its trimmed size and offset, as an
+    untrimmed sheet's do, since `nadir::animate` writes only the uv
+    (M5.5).
+  - **The sandbox** reads `atlas/sprites.kbj` with `load_now` from
+    `assets` beside its executable, else the workspace's `target/cooked`,
+    and refuses, saying to run `cargo xtask cook`, an atlas that is
+    missing or is not `assets/` as it is now cooked: a sprite it draws
+    missing, the person's frames trimmed, a tile set other than 8 × 4.
+    The person's sheet is cooked untrimmed (`"trim": false`) until M5.5
+    gives clip frames a size; the trees and rocks are trimmed and placed
+    by their offsets. The hand-made QOIs and `stress.rs`'s regions are
+    gone.
+  - **`cargo xtask ci` cooks before `test`** (the check `cook`, as
+    `cargo xtask cook` runs it), on all three systems. `cargo xtask site`
+    cooks first, and its download holds `target/cooked/atlas` and nothing
+    else of that folder, as `assets/atlas` beside the sandbox.
+- **Consequences:**
+  - Good:
+    - The three captures are the same, frame for frame: 1,800 frames
+      byte for byte as before, on llvmpipe, with the same world hashes.
+      The field's mean batches go from 17.7 to 9.4 (its trees, rocks and
+      person share a page) and the stress scene's from 2 to 1 (the grass
+      joins it).
+    - The cook cannot write an atlas file the codec reader refuses.
+    - A stale cook says so, rather than drawing stretched frames.
+  - Bad:
+    - `cargo test -p sandbox`, `cargo run -p sandbox` and `cargo dev` need
+      `cargo xtask cook` first. `cargo xtask ci` does it, and adds a release
+      build of the cook to each CI job, not yet timed on Windows and macOS.
+    - Sprites on one page share a texture, so at the same feet y they are
+      drawn in the order they are extracted, the props before the person,
+      where the person's texture handle had put them first. No captured
+      frame has such a tie; in play, a person stopped beside a trunk at
+      exactly its feet's y is drawn in front of it rather than behind.
+      Spawning the person first would keep the old order, and change every
+      world hash.
+    - `Sprite::from_atlas` places a frame up to the `f32` rounding of its
+      normalized pivot, exact for the sandbox's frames, not for every size.
+    - The sprite bench keeps the grass a texture of its own, 2 batches, so
+      that it is the frame its recorded times were measured on.
+- **Alternatives considered:**
+  - Sprites and clips naming atlas entries, resolved by a facade system once
+    the atlas loads: no blocking, but every sprite, clip and tile set waits
+    on a lookup, and a tick before the atlas loads has nothing to draw.
+  - The game calling `finish_all_loads` with an empty context before any
+    texture loads: no new API, but any asset loaded earlier that needs the
+    GPU fails.
+  - The reader in render, with no fuzz target: one crate fewer, against
+    the rule for parsers.
+  - A separate CI step that cooks before `cargo xtask ci`: the local gate
+    would need it run first.
+  - The grass in a folder of its own, keeping the stress scene's 2 batches.
+- **Revisit when:** M5.5 gives clip frames a size and pivot, and flips
+  about the pivot (then turn the person's trim back on); a game needs an
+  asset with a GPU resource before its window opens; M5.7's pack replaces
+  `target/cooked` for release builds; or a second atlas version is
+  written.

@@ -5,7 +5,7 @@ use nadir_assets::Handle;
 use nadir_collision::Shape;
 use nadir_core::{Color, Rect, Vec2};
 use nadir_ecs::{Component, Entity};
-use nadir_render::{Flip, SortMode, SpriteDraw, Texture};
+use nadir_render::{AtlasSprite, Flip, SortMode, SpriteDraw, Texture};
 
 nadir_scene::reflect_struct! {
     /// Where an entity is, in world pixels (+Y down), as the last tick left
@@ -96,6 +96,33 @@ impl Sprite {
             sort: draw.sort,
             flip: draw.flip,
         }
+    }
+
+    /// A sprite of frame `frame` of `sprite`, from a cooked
+    /// [`Atlas`](nadir_render::Atlas), in `texture`, which must be the
+    /// frame's page, with the sprite's pivot at the entity's position: the
+    /// frame's trimmed size, one world unit a pixel, placed so that its
+    /// pixels are where the untrimmed cell would have them, up to the
+    /// rounding of its normalized pivot; otherwise as [`Sprite::new`] makes
+    /// one. `None` if `sprite` has no such frame, or is a tile set.
+    ///
+    /// Flipped, its frame must be untrimmed or trimmed evenly left and
+    /// right: a flip mirrors the trimmed quad about its own middle.
+    /// Animated, every frame must have this one's trimmed size and offset,
+    /// as an untrimmed sheet's do: an [`Animator`](crate::Animator) changes
+    /// only the uv, so another frame is stretched to this one's quad
+    /// (roadmap M5.5).
+    pub fn from_atlas(
+        texture: Handle<Texture>,
+        sprite: &AtlasSprite,
+        frame: usize,
+    ) -> Option<Self> {
+        let pivot = sprite.pivot()?;
+        let frame = sprite.frame(frame)?;
+        let mut drawn = Self::new(texture, frame.size().as_vec2());
+        drawn.uv = frame.uv();
+        drawn.pivot = frame.pivot_in(pivot);
+        Some(drawn)
     }
 
     /// The sprite to draw with its pivot at `position`.
@@ -214,3 +241,41 @@ impl Component for Player {}
 impl Component for Facing {}
 impl Component for Parent {}
 impl Component for SaveId {}
+
+#[cfg(test)]
+mod tests {
+    use nadir_assets::{Asset, DecodeCtx};
+    use nadir_codec::{Limits, json, kbj};
+    use nadir_render::Atlas;
+
+    use super::*;
+
+    #[test]
+    fn a_sprite_of_a_trimmed_frame_covers_the_pixels_of_its_cell() {
+        let text = r#"{ "version": 1,
+            "pages": [ { "path": "atlas/props_0.qoi", "w": 64, "h": 64 } ],
+            "sprites": [ { "name": "props/rock",
+              "frames": [ { "page": 0, "x": 3, "y": 5, "w": 14, "h": 10, "ox": 1, "oy": 2, "sw": 16, "sh": 12 } ],
+              "pivot": [8.0, 12.0] } ] }"#;
+        let value = json::parse(text, Limits::default()).expect("the test's JSON");
+        let bytes = kbj::encode(&value, Limits::default()).expect("encodable");
+        let atlas = Atlas::decode(
+            &bytes,
+            &DecodeCtx::new("atlas/props.kbj", Limits::default()),
+        )
+        .expect("an atlas");
+        let rock = atlas.sprite("props/rock").expect("the rock");
+        let texture = Handle::new(nadir_core::GenIndex::new(0, std::num::NonZeroU32::MIN));
+        assert!(Sprite::from_atlas(texture, rock, 1).is_none());
+        let sprite = Sprite::from_atlas(texture, rock, 0).expect("a frame");
+        assert_eq!(sprite.size, Vec2::new(14.0, 10.0));
+        assert_eq!(sprite.uv, rock.frames()[0].uv());
+        // At the rock's feet, the quad's corner is the cell's, moved by the
+        // trim.
+        let feet = Vec2::new(40.0, 30.0);
+        let draw = sprite.draw(feet);
+        let corner = draw.position - draw.pivot * draw.size;
+        assert_eq!(corner, feet - Vec2::new(8.0, 12.0) + Vec2::new(1.0, 2.0));
+        assert_eq!((sprite.layer, sprite.color), (0, Color::WHITE));
+    }
+}

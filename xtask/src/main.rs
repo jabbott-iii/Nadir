@@ -153,10 +153,6 @@ fn usage() -> String {
             "site",
             "Build the demo page into target/site, or [--out DIR]: captures, videos, download",
         ),
-        (
-            "cook",
-            "Cook assets/ into target/cooked: [--force] cooks every group again",
-        ),
     ]);
     for (name, about) in commands {
         // Writing to a `String` cannot fail.
@@ -284,7 +280,8 @@ mod tests {
     fn fuzz_smoke_takes_its_own_options() {
         assert_eq!(
             usage_error(&["fuzz-smoke", "--target", "nope"]),
-            "unknown fuzz target `nope`; the targets are: json, qoi, inflate, png, klz, kbj, bmfont, wav"
+            "unknown fuzz target `nope`; the targets are: json, qoi, inflate, png, klz, kbj, bmfont, wav, \
+             atlas"
         );
         assert_eq!(
             usage_error(&["fuzz-smoke", "--secs"]),

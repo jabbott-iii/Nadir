@@ -96,7 +96,9 @@ pub enum CookError {
         /// The other.
         second: String,
     },
-    /// An encoder refused what the cook made.
+    /// An encoder refused what the cook made, or the game's atlas reader
+    /// refused the atlas file it encoded: a pivot past what an `f32`
+    /// holds, say.
     Encode {
         /// The output, below the output folder.
         path: String,

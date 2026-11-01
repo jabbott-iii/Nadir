@@ -70,7 +70,7 @@ pub use tick_stats::TickStats;
 
 /// What most games use, for one `use nadir::prelude::*`.
 pub mod prelude {
-    pub use nadir_assets::{AssetServer, Handle, LoadState};
+    pub use nadir_assets::{AssetServer, FinalizeCtx, Handle, LoadState};
     pub use nadir_collision::{LayerMask, Shape, TileGrid};
     pub use nadir_core::time::{Frame, Stopwatch, Tick};
     pub use nadir_core::{Color, IVec2, Key, MouseButton, Pcg32, Rect, UVec2, Vec2};
@@ -79,8 +79,8 @@ pub mod prelude {
     };
     pub use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Binding, Input};
     pub use nadir_render::{
-        Camera2D, Flip, FrameStats, RenderFrame, SortMode, SpriteDraw, Texture, Tile, TileLayer,
-        TileLayerDraw, TileLayers, TileSet,
+        Atlas, AtlasFrame, AtlasPage, AtlasSprite, Camera2D, Flip, FrameStats, RenderFrame,
+        SortMode, SpriteDraw, Texture, Tile, TileLayer, TileLayerDraw, TileLayers, TileSet,
     };
 
     pub use crate::{

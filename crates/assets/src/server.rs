@@ -114,6 +114,36 @@ impl<T: Asset> Storage for Assets<T> {
     }
 }
 
+/// `path` as an [`AssetPath`] of an asset of type `T`: its last part ends
+/// in one of [`Asset::EXTENSIONS`].
+fn checked<T: Asset>(path: &str) -> Result<AssetPath, AssetError> {
+    let path = AssetPath::new(path)?;
+    match path.extension() {
+        Some(extension) if T::EXTENSIONS.contains(&extension) => Ok(path),
+        _ => Err(AssetError::Extension {
+            expected: T::EXTENSIONS,
+        }),
+    }
+}
+
+/// Reads the file at `path` from `source` and decodes it, as a worker does.
+/// A panic in either fails the asset, and goes no further.
+fn read_and_decode<T: Asset>(
+    source: &dyn Source,
+    path: &AssetPath,
+    limits: Limits,
+) -> Result<T::Decoded, AssetError> {
+    panic::catch_unwind(AssertUnwindSafe(|| {
+        let bytes = source.read(path)?;
+        T::decode(&bytes, &DecodeCtx::new(path.as_str(), limits))
+    }))
+    .unwrap_or_else(|_| {
+        Err(AssetError::Invalid(
+            "reading or decoding it panicked".to_string(),
+        ))
+    })
+}
+
 /// How long [`AssetServer::finish_completed_loads`] spends making assets,
 /// unless [`AssetServer::set_finish_budget`] changes it.
 const FINISH_BUDGET: Duration = Duration::from_millis(2);
@@ -189,13 +219,7 @@ impl AssetServer {
         if let Some(handle) = assets.find(path, scope) {
             return handle;
         }
-        let checked = AssetPath::new(path).and_then(|path| match path.extension() {
-            Some(extension) if T::EXTENSIONS.contains(&extension) => Ok(path),
-            _ => Err(AssetError::Extension {
-                expected: T::EXTENSIONS,
-            }),
-        });
-        let path = match checked {
+        let path = match checked::<T>(path) {
             Ok(path) => path,
             Err(error) => return assets.insert(path, scope, Slot::Pending(Err(error))),
         };
@@ -203,19 +227,71 @@ impl AssetServer {
         let done = assets.job_sender();
         let (source, limits) = (Arc::clone(&self.source), self.limits);
         self.workers.run(Box::new(move || {
-            let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                let bytes = source.read(&path)?;
-                T::decode(&bytes, &DecodeCtx::new(path.as_str(), limits))
-            }))
-            .unwrap_or_else(|_| {
-                Err(AssetError::Invalid(
-                    "reading or decoding it panicked".to_string(),
-                ))
-            });
+            let result = read_and_decode::<T>(source.as_ref(), &path, limits);
             // Fails only once the server is gone, when nothing waits for it.
             let _ = done.send((handle, result));
         }));
         handle
+    }
+
+    /// Loads the asset at `path` in [`Scope::Global`], and makes it before
+    /// returning. [`AssetServer::load_now_in`] says how.
+    ///
+    /// # Errors
+    ///
+    /// Why the asset failed to load, as [`AssetServer::error`] gives it.
+    pub fn load_now<T: Asset>(
+        &mut self,
+        path: &str,
+        ctx: &mut FinalizeCtx<'_>,
+    ) -> Result<Handle<T>, AssetError> {
+        self.load_now_in(path, Scope::Global, ctx)
+    }
+
+    /// Loads the asset at `path` in `scope`, and makes it with the
+    /// resources in `ctx` before returning: for the data a game needs to
+    /// set its world up before the first tick, such as an atlas's regions,
+    /// which needs no resource the game does not have yet.
+    ///
+    /// `ctx` must hold every resource [`Asset::finalize`] needs: an asset
+    /// made without one fails, as a finish without it would, and a failure
+    /// is final. While a game sets up, before its window opens, there is no
+    /// GPU device to give, so only assets that need none, such as an atlas,
+    /// can be made then.
+    ///
+    /// It gives the handle [`AssetServer::load_in`] would. A new path is
+    /// read and decoded on this thread, and made at once. A path loaded
+    /// before keeps its load: one a worker is still decoding is waited for,
+    /// and one waiting to be made is made now; one already made, or
+    /// failed, is as it was. No other asset is made or freed, and no finish
+    /// budget is spent.
+    ///
+    /// # Errors
+    ///
+    /// Why the asset failed to load, as [`AssetServer::error`] gives it. It
+    /// is then [`LoadState::Failed`] under its handle, with its placeholder
+    /// if placeholders are shown, and logged with its path, as any failure
+    /// is. [`AssetServer::load`] of the path gives that handle.
+    pub fn load_now_in<T: Asset>(
+        &mut self,
+        path: &str,
+        scope: Scope,
+        ctx: &mut FinalizeCtx<'_>,
+    ) -> Result<Handle<T>, AssetError> {
+        let path = assets::lowercase(path);
+        let path = path.as_ref();
+        let assets = self.storages.get_mut::<T>();
+        let handle = match assets.find(path, scope) {
+            Some(handle) => handle,
+            None => {
+                let result = checked::<T>(path).and_then(|checked| {
+                    read_and_decode::<T>(self.source.as_ref(), &checked, self.limits)
+                });
+                assets.insert(path, scope, Slot::Pending(result))
+            }
+        };
+        assets.finish_now(handle, ctx, self.on_failure)?;
+        Ok(handle)
     }
 
     /// Unloads `scope`: every asset loaded in it and in no other scope goes,

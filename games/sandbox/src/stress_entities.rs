@@ -8,18 +8,15 @@
 //! a wall all round. Each person collides at their feet, turns now and
 //! then, and walks 1 to 3 pixels a tick; a tenth of them are triggers,
 //! which walk through the others and notice them. The people are drawn from
-//! the atlas, in 1 batch, walking as in `stress-sprites`, and the walls are
+//! the cooked atlas, in 1 batch, walking as in `stress-sprites`, and the walls are
 //! a tile layer of stone, drawn a
 //! chunk at a time: the 4 chunks or fewer of 32 × 32 tiles in view. The
 //! camera follows the player, tinted yellow, who walks through everything.
 
 use nadir::prelude::*;
 
-use crate::stress::{
-    ATLAS, PERSON, PERSON_SIZE, PLAYER_TINT, Pace, WALK, Walker, facing, heading, stagger,
-    turn_crowd, unit,
-};
-use crate::{Gait, Ground, map, spawn_player};
+use crate::stress::{PLAYER_TINT, Pace, Walker, facing, heading, stagger, turn_crowd, unit};
+use crate::{Gait, Ground, Sprites, map, spawn_player};
 
 /// How many people jostle.
 pub(crate) const BODIES: usize = 5_000;
@@ -33,12 +30,11 @@ const TILE: f32 = 16.0;
 const PACE: f32 = 3.0;
 
 /// Adds the maze, the people, the player and the systems to `app`.
-pub(crate) fn add(app: App, tiles: Handle<Texture>) -> App {
-    let atlas = app.world().resource_mut::<AssetServer>().load(ATLAS);
+pub(crate) fn add(app: App, sprites: &Sprites) -> App {
     let mut app = app.register_component::<Walker>();
-    let gait = Gait::new(&app, atlas, PERSON, WALK);
+    let gait = Gait::new(&app, &sprites.person);
     let (grid, open) = maze();
-    let walls = walls(&grid, map::tile_set(tiles));
+    let walls = walls(&grid, sprites.tiles);
     let world = app.world_mut();
     for (index, &cell) in (0u32..).zip(&open[..BODIES]) {
         let half = Vec2::new(5.0 + 2.0 * unit(index, 90), 3.0 + 2.0 * unit(index, 91));
@@ -61,8 +57,7 @@ pub(crate) fn add(app: App, tiles: Handle<Texture>) -> App {
         });
         let feet = grid.cell_rect(cell).center() + Vec2::new(0.0, extent);
         let velocity = heading(index, 0) * PACE;
-        let mut sprite = Sprite::new(atlas, PERSON_SIZE);
-        sprite.uv = PERSON;
+        let mut sprite = sprites.person[0].sprite;
         sprite.layer = 1;
         world
             .spawn()
@@ -74,8 +69,7 @@ pub(crate) fn add(app: App, tiles: Handle<Texture>) -> App {
             .with(Animator::starting_at(gait.walk, stagger(index)))
             .with(facing(velocity));
     }
-    let mut person = Sprite::new(atlas, PERSON_SIZE);
-    person.uv = PERSON;
+    let mut person = sprites.person[0].sprite;
     person.layer = 1;
     person.color = PLAYER_TINT;
     spawn_player(world, person, &gait);
@@ -195,10 +189,14 @@ mod tests {
         let walkers = world.read::<Walker>();
         let velocities = world.read::<Velocity>();
         let sprites = world.read::<Sprite>();
+        let walk: Vec<Rect> = world.resource::<Sprites>().person[1..]
+            .iter()
+            .map(|region| region.frame.uv())
+            .collect();
         let mut frames = [0; 4];
         for (entity, _) in walkers.iter() {
             let sprite = sprites.get(entity).expect("drawn");
-            let frame = WALK.iter().position(|&uv| uv == sprite.uv);
+            let frame = walk.iter().position(|&uv| uv == sprite.uv);
             frames[frame.expect("a frame of the walk")] += 1;
             let velocity = velocities.get(entity).expect("one").0;
             assert_eq!(sprite.flip.x, velocity.x < 0.0, "{entity:?}");

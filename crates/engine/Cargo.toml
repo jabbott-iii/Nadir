@@ -17,7 +17,8 @@ nadir-scene = { path = "../scene" }
 
 [dev-dependencies]
 # The tests write QOI textures, and check that a QOI file too short for
-# its size is refused before anything is allocated.
+# its size is refused before anything is allocated; and they encode atlas
+# files for `Sprite::from_atlas`.
 nadir-codec = { path = "../codec" }
 
 [features]

@@ -82,7 +82,7 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | `crates/sys` | `nadir-sys` | Hand-written raw FFI declarations (Win32, Cocoa/objc, X11, EGL, GL, ALSA, CoreAudio, WASAPI, XInput, evdev) | allowed |
 | `crates/platform` | `nadir-platform` | Windows, event loop, input devices, GL/Metal surfaces, audio device output, paths, dynamic loading | allowed |
 | `crates/gfx` | `nadir-gfx` | Small render hardware interface (RHI) with an OpenGL 3.3 core backend and, from M10, a Metal backend | allowed |
-| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont | deny |
+| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, the cook's atlas files | deny |
 | `crates/ecs` | `nadir-ecs` | Generational entities, sparse-set storage, resources, events, commands, schedule | deny |
 | `crates/input` | `nadir-input` | Physical keys, device state, action maps, per-tick latching, bindings | deny |
 | `crates/render` | `nadir-render` | Sprite batching, y-sort, tilemap chunks, camera, bitmap text, debug draw, passes | deny |
@@ -101,7 +101,7 @@ exist until the roadmap task that creates it is done. Check before assuming.
 
 | Command | What it does |
 | :- | :- |
-| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), tests, `deps`, `layers`, `unsafe-audit`, `workflows`, `release-no-dev`, `features`: the full PR gate |
+| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), `cook`, tests, `deps`, `layers`, `unsafe-audit`, `workflows`, `release-no-dev`, `features`: the full PR gate |
 | `cargo xtask deps` | Fails if `Cargo.lock` contains any non-workspace package not approved in the policy |
 | `cargo xtask layers` | Fails if a crate depends on a crate the dependency matrix forbids |
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the allowed crates or lacks a `SAFETY:` comment |
@@ -112,7 +112,7 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | `cargo xtask cook [--force]` | Cooks `assets/` into `target/cooked/`, skipping the atlas groups whose files did not change, unless `--force` |
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |
-| `cargo run -p sandbox` | Runs the sandbox game (opens a window) |
+| `cargo run -p sandbox` | Runs the sandbox game (opens a window). It draws the cooked sprites: run `cargo xtask cook` first, which `cargo xtask ci` also does, as the sandbox's tests need them too |
 
 `xtask` never uploads, publishes or signs with real credentials. Publishing
 happens only in CI: the release jobs, and the demo page's workflow

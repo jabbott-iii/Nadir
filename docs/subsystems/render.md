@@ -38,6 +38,7 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
     flipped tiles, and tile layers ordered among the sprites
   - golden scenes: `tile_layers`, `animated_tiles_0ms` and
     `animated_tiles_350ms`
+- M5.9: the `Atlas` asset, a cooked atlas's regions (ADR-0033), below
 - Not built yet:
   - text, UI sprites, debug draw and post
   - the smooth-camera and native-resolution modes
@@ -67,6 +68,40 @@ pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
 - `RenderFrame` so far has `camera`, `clear`, `sprites`, and since M4.5
   `tile_layers` and `time`. The other fields below come with their tasks.
   `Camera2D` has no rotation yet.
+- **`Atlas`** (M5.9, ADR-0033): the asset of a cooked atlas file,
+  `atlas/<group>.kbj`, read with `nadir_codec::atlas::parse`
+  (`docs/subsystems/assets-and-codecs.md`). It holds data and no GPU
+  resource, so `finalize` needs nothing in its context, and a game makes
+  it before its window opens with `AssetServer::load_now`. Its page paths
+  must be asset paths ending `.qoi`, as written, lowercase. It has no
+  placeholder.
+
+  ```rust
+  impl Atlas {
+      pub fn pages(&self) -> &[AtlasPage];                       // path(), size()
+      pub fn page(&self, frame: &AtlasFrame) -> Option<&AtlasPage>;
+      pub fn sprite(&self, name: &str) -> Option<&AtlasSprite>;  // by name, binary search
+      pub fn sprites(&self) -> &[AtlasSprite];
+      pub fn load_pages(&self, server: &mut AssetServer, scope: Scope) -> Vec<Handle<Texture>>;  // by page index
+  }
+  impl AtlasSprite { name(), frames(), frame(i), pivot() /* untrimmed px; None for a tile set */,
+                     tile_size(), tile_set(texture) -> Option<TileSet> }
+  impl AtlasFrame { page(), uv() /* x, y, w, h over the page's size */, size() /* trimmed */,
+                    offset(), source_size(), is_empty(), pivot_in(pivot_px) -> Vec2 /* normalized in the trimmed quad */ }
+  ```
+
+  - The facade's `Sprite::from_atlas(texture, sprite, frame)` makes a
+    sprite of a frame: its trimmed size, its pivot normalized in the
+    trimmed quad, so that its pixels land where the untrimmed cell's
+    would, up to the `f32` rounding of that pivot. A flip mirrors the
+    trimmed quad about its own middle, so a flipped sprite's frame must be
+    untrimmed or trimmed evenly left and right; `nadir::animate` changes
+    only the uv, so an animated sprite's frames must all have the trimmed
+    size and offset of the one it was made from, as an untrimmed sheet's
+    do, until M5.5 gives clip frames a size and pivot.
+  - Sprites that share a page share a texture, so at the same feet y their
+    order falls to the order they were drawn in, not to their textures'
+    handles (see "Sort keys").
 - `FrameStats.batches` counts the sprite draws made, a batch split by a
   tile layer counting twice. `tiles` and `chunks` count the tiles and the
   chunk draws. `SpriteBatcher::stats` knows no tile layers: its `batches`

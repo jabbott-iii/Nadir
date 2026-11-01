@@ -40,6 +40,12 @@ pub(crate) const CHECKS: &[Check] = &[
         about: "cargo clippy --workspace --all-targets --all-features -- -D warnings",
         run: |root| pass_through(root, CLIPPY),
     },
+    // Before `test`: the sandbox's tests draw the cooked sprites (ADR-0033).
+    Check {
+        name: "cook",
+        about: "Cook assets/ into target/cooked: [--force] cooks every group again",
+        run: |root| pass_through(root, &crate::cook_command(false)),
+    },
     Check {
         name: "test",
         about: "cargo test --workspace --all-features",
@@ -374,6 +380,7 @@ mod tests {
             [
                 "fmt",
                 "clippy",
+                "cook",
                 "test",
                 "deps",
                 "layers",

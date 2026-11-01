@@ -27,8 +27,10 @@
 //!   (`capture.rs`). In the field the person walks a tour, unless
 //!   `--replay` plays a replay.
 //!
-//! The assets are in `assets` beside the executable, as in the demo
-//! page's download, or else in the workspace's `assets`.
+//! The sprites are cooked (`assets/sprites/`, cooked by `cargo xtask cook`
+//! into one atlas): they are read from `assets` beside the executable, as
+//! the demo page's download has them, or else from the workspace's
+//! `target/cooked`.
 //!
 //! A recording, when its window is closed, and its replay each log their
 //! ticks and the world's hash after them (`replay.rs`); a recording whose
@@ -98,17 +100,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     result
 }
 
-/// The assets: `assets` beside the executable, where the demo page's
-/// download has them (ADR-0029), or else the workspace's.
+/// The cooked assets: `assets` beside the executable, where the demo
+/// page's download has them (ADR-0029), or else the workspace's
+/// `target/cooked`, where `cargo xtask cook` puts them.
 fn assets() -> PathBuf {
     let beside = env::current_exe()
         .ok()
         .and_then(|exe| Some(exe.parent()?.join("assets")));
     match beside {
         Some(dir) if dir.is_dir() => dir,
-        _ => concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into(),
+        _ => COOKED.into(),
     }
 }
+
+/// The workspace's cooked assets.
+const COOKED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/cooked");
 
 /// What the command line asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -244,13 +250,6 @@ const PLAYER_START: Vec2 = Vec2::new(240.0, 160.0);
 /// How long each frame of a walk shows: the four frames take 400 ms.
 const STEP: Duration = Duration::from_millis(100);
 
-/// Frame `index` of `sprites/person.qoi`: five frames of 12 × 20 pixels
-/// in a row, standing, then four of a walk.
-fn person_frame(index: u32) -> Rect {
-    let left = index as f32 / 5.0;
-    Rect::new(Vec2::new(left, 0.0), Vec2::new(left + 0.2, 1.0))
-}
-
 /// The clips of a person: standing, and walking. `move_player` plays them,
 /// and each scene makes them from the texture it draws people from.
 struct Gait {
@@ -259,27 +258,116 @@ struct Gait {
 }
 
 impl Gait {
-    /// A person in `texture`: standing in the region `stand`, and walking
-    /// through the four regions `walk`, each for [`STEP`]. Adds the clips
-    /// to the app's [`Clips`].
-    fn new(app: &App, texture: Handle<Texture>, stand: Rect, walk: [Rect; 4]) -> Self {
-        let frame = |uv| ClipFrame::new(texture, uv, STEP);
+    /// A person standing in `frames[0]` and walking through the other four,
+    /// each for [`STEP`]. Adds the clips to the app's [`Clips`].
+    fn new(app: &App, frames: &[Region; 5]) -> Self {
+        let frame = |region: &Region| ClipFrame::new(region.texture(), region.frame.uv(), STEP);
         let mut clips = app.world().resource_mut::<Clips>();
         Self {
-            stand: clips.add(Clip::new(vec![frame(stand)], Playback::Loop)),
-            walk: clips.add(Clip::new(walk.map(frame).to_vec(), Playback::Loop)),
+            stand: clips.add(Clip::new(vec![frame(&frames[0])], Playback::Loop)),
+            walk: clips.add(Clip::new(
+                frames[1..].iter().map(frame).collect(),
+                Playback::Loop,
+            )),
         }
     }
 }
 
-/// The textures.
+/// The cooked atlas of `assets/sprites/`.
+const ATLAS: &str = "atlas/sprites.kbj";
+
+/// The sprites, from the cooked atlas [`ATLAS`]: every one on its first
+/// page, but for the tile set, which has its own.
 struct Sprites {
-    person: Handle<Texture>,
-    tree: Handle<Texture>,
-    rock: Handle<Texture>,
-    grass: Handle<Texture>,
-    /// The tile set of the field and of the maze ([`map::TILE_SET`]).
-    tiles: Handle<Texture>,
+    /// The person: standing, then the four frames of a walk, each 12 × 20
+    /// and untrimmed (`assets/sprites/person.sprite.jsonc`).
+    person: [Region; 5],
+    tree: Region,
+    rock: Region,
+    grass: Region,
+    /// The tile set of the field and of the maze.
+    tiles: TileSet,
+}
+
+/// A frame of a sprite of the atlas, and a [`Sprite`] of it in its page's
+/// texture, placed by its sprite's pivot.
+#[derive(Clone, Copy, Debug)]
+struct Region {
+    frame: AtlasFrame,
+    sprite: Sprite,
+}
+
+impl Region {
+    /// The texture of its page.
+    fn texture(&self) -> Handle<Texture> {
+        self.sprite.texture
+    }
+}
+
+impl Sprites {
+    /// Loads the atlas from the cooked assets, now, and its pages in the
+    /// background, as the textures they are.
+    ///
+    /// # Errors
+    ///
+    /// If the atlas is not there, or is not `assets/` as it is now cooked:
+    /// a sprite the sandbox draws is missing, the person's frames are
+    /// trimmed, or the tile set is not the map's 8 × 4. The error says to
+    /// cook the assets.
+    fn load(app: &App) -> Result<Self, Box<dyn Error>> {
+        let mut server = app.world().resource_mut::<AssetServer>();
+        let cook = "run `cargo xtask cook` to cook `assets/` into `target/cooked`";
+        let atlas = server
+            .load_now::<Atlas>(ATLAS, &mut FinalizeCtx::new())
+            .map_err(|error| {
+                format!("the sprites, `{ATLAS}`, cannot be loaded: {error}; {cook}")
+            })?;
+        let atlas = server.get(atlas).cloned().ok_or("the atlas did not load")?;
+        let pages = atlas.load_pages(&mut server, nadir::assets::Scope::Global);
+        let stale = |what: &str| format!("`{ATLAS}` is not `assets/` as it is now: {what}; {cook}");
+        let sprite = |name: &str| {
+            atlas
+                .sprite(name)
+                .ok_or_else(|| stale(&format!("it has no `{name}`")))
+        };
+        let region = |name: &str, index: usize| -> Result<Region, String> {
+            let sprite = sprite(name)?;
+            let missing = || stale(&format!("`{name}` has no frame {index}"));
+            let frame = *sprite.frame(index).ok_or_else(missing)?;
+            let texture = *pages.get(frame.page()).ok_or_else(missing)?;
+            let drawn = Sprite::from_atlas(texture, sprite, index).ok_or_else(missing)?;
+            Ok(Region {
+                frame,
+                sprite: drawn,
+            })
+        };
+        let person = [0, 1, 2, 3, 4].map(|index| region("sprites/person", index));
+        let person = person.into_iter().collect::<Result<Vec<_>, _>>()?;
+        // The clips swap the frames on one sprite: whole frames, all one
+        // size, until a clip's frame has a size of its own (roadmap M5.5).
+        if person.iter().any(|region| {
+            region.frame.size() != UVec2::new(12, 20) || region.frame.offset() != UVec2::ZERO
+        }) {
+            return Err(stale("the person's frames are trimmed, or not 12 × 20").into());
+        }
+        let tiles = sprite("sprites/tiles")?;
+        let tiles = tiles
+            .frames()
+            .first()
+            .and_then(|frame| pages.get(frame.page()))
+            .and_then(|&page| tiles.tile_set(page))
+            .filter(|set| (set.columns, set.rows) == (map::COLUMNS, map::ROWS))
+            .ok_or_else(|| stale("its tile set is not the map's 8 × 4 tiles"))?;
+        Ok(Self {
+            person: person
+                .try_into()
+                .map_err(|_| stale("the person does not have 5 frames"))?,
+            tree: region("sprites/tree", 0)?,
+            rock: region("sprites/rock", 0)?,
+            grass: region("sprites/grass", 0)?,
+            tiles,
+        })
+    }
 }
 
 /// A thing that does not move.
@@ -310,18 +398,14 @@ struct Report {
     longest_tick: Duration,
 }
 
-/// Sets the game up on `app`: its textures, actions, entities and systems.
-fn game(app: App, scene: Scene) -> Result<App, nadir::input::InputError> {
-    let sprites = {
-        let mut assets = app.world().resource_mut::<AssetServer>();
-        Sprites {
-            person: assets.load("sprites/person.qoi"),
-            tree: assets.load("sprites/tree.qoi"),
-            rock: assets.load("sprites/rock.qoi"),
-            grass: assets.load("sprites/grass.qoi"),
-            tiles: assets.load(map::TILE_SET),
-        }
-    };
+/// Sets the game up on `app`: its sprites, actions, entities and systems.
+///
+/// # Errors
+///
+/// If the cooked sprites cannot be loaded ([`Sprites::load`]), or the
+/// action map cannot be made.
+fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
+    let sprites = Sprites::load(&app)?;
 
     let mut map = ActionMap::<Act>::new()?;
     let keys = |up, down, left, right| Binding::KeyComposite2 {
@@ -356,8 +440,8 @@ fn game(app: App, scene: Scene) -> Result<App, nadir::input::InputError> {
     let app = app.insert_resource(AllocTally::default());
     let app = match scene {
         Scene::Field => field(app, &sprites),
-        Scene::StressSprites => stress::add(app),
-        Scene::StressEntities => stress_entities::add(app, sprites.tiles),
+        Scene::StressSprites => stress::add(app, &sprites),
+        Scene::StressEntities => stress_entities::add(app, &sprites),
     };
     Ok(app.insert_resource(sprites))
 }
@@ -376,9 +460,8 @@ fn at_feet(half: Vec2, layer: LayerMask, mask: LayerMask) -> Collider {
 /// The field: the map's ground and grid, its tall walls, trees and rocks,
 /// then the person, and the camera on them.
 fn field(mut app: App, sprites: &Sprites) -> App {
-    let walk = [1, 2, 3, 4].map(person_frame);
-    let gait = Gait::new(&app, sprites.person, person_frame(0), walk);
-    let set = map::tile_set(sprites.tiles);
+    let gait = Gait::new(&app, &sprites.person);
+    let set = sprites.tiles;
     let map = map::build(set);
     let world = app.world_mut();
     for &feet in &map.walls {
@@ -392,14 +475,8 @@ fn field(mut app: App, sprites: &Sprites) -> App {
     // from below.
     for &(kind, feet) in &map.props {
         let (mut sprite, half) = match kind {
-            Prop::Tree => (
-                Sprite::new(sprites.tree, Vec2::new(24.0, 48.0)),
-                Vec2::new(4.0, 3.0),
-            ),
-            Prop::Rock => (
-                Sprite::new(sprites.rock, Vec2::new(16.0, 12.0)),
-                Vec2::new(7.0, 4.0),
-            ),
+            Prop::Tree => (sprites.tree.sprite, Vec2::new(4.0, 3.0)),
+            Prop::Rock => (sprites.rock.sprite, Vec2::new(7.0, 4.0)),
         };
         sprite.layer = 1;
         world
@@ -408,7 +485,7 @@ fn field(mut app: App, sprites: &Sprites) -> App {
             .with(sprite)
             .with(at_feet(half, map::WORLD, map::WORLD));
     }
-    let mut person = Sprite::new(sprites.person, Vec2::new(12.0, 20.0));
+    let mut person = sprites.person[0].sprite;
     person.layer = 1;
     let player = spawn_player(world, person, &gait);
     world.write::<Collider>().insert(
@@ -726,16 +803,17 @@ mod tests {
         scene(Scene::Field)
     }
 
-    /// A scene, set up as the game sets it, without a window.
+    /// A scene, set up as the game sets it, without a window, from the
+    /// workspace's cooked assets.
     pub(crate) fn scene(scene: Scene) -> App {
         game(
             App::new(Config {
-                assets: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").into(),
+                assets: COOKED.into(),
                 ..Config::default()
             }),
             scene,
         )
-        .expect("the sandbox sets up")
+        .unwrap_or_else(|error| panic!("the sandbox does not set up: {error}"))
     }
 
     /// Keeps the once-a-second report quiet: it goes by the wall clock, and
@@ -886,11 +964,20 @@ mod tests {
         assert!(world.read::<Sprite>().get(player).expect("drawn").flip.x);
     }
 
-    /// Where the last frame drew the person from in their sheet.
+    /// The person's size: of every frame of theirs.
+    const PERSON: Vec2 = Vec2::new(12.0, 20.0);
+
+    /// The region of frame `index` of the person in the atlas: standing,
+    /// then four of a walk.
+    fn person_frame(app: &App, index: usize) -> Rect {
+        app.world().resource::<Sprites>().person[index].frame.uv()
+    }
+
+    /// Where the last frame drew the person from in the atlas: the one
+    /// sprite of their size.
     fn drawn_person(app: &App) -> Rect {
-        let person = app.world().resource::<Sprites>().person;
         let out = app.world().resource::<RenderFrame>();
-        let drawn = out.sprites.iter().find(|sprite| sprite.texture == person);
+        let drawn = out.sprites.iter().find(|sprite| sprite.size == PERSON);
         drawn.expect("the person is drawn").uv
     }
 
@@ -898,7 +985,7 @@ mod tests {
     fn the_person_walks_through_four_frames_while_they_go_and_stands_when_they_stop() {
         let mut app = sandbox();
         app.update(TICK, &[]);
-        assert_eq!(drawn_person(&app), person_frame(0));
+        assert_eq!(drawn_person(&app), person_frame(&app, 0));
         let key = |pressed| nadir::Event::Key {
             key: Key::D,
             pressed,
@@ -913,14 +1000,14 @@ mod tests {
             seen.push(drawn_person(&app));
         }
         seen.dedup();
-        let walk = [1, 2, 3, 4, 1].map(person_frame);
+        let walk = [1, 2, 3, 4, 1].map(|index| person_frame(&app, index));
         assert_eq!(seen, walk);
         // Let go: standing at once, the walk's next start from its first
         // frame.
         app.update(TICK, &[key(false)]);
-        assert_eq!(drawn_person(&app), person_frame(0));
+        assert_eq!(drawn_person(&app), person_frame(&app, 0));
         app.update(TICK, &[key(true)]);
-        assert_eq!(drawn_person(&app), person_frame(1));
+        assert_eq!(drawn_person(&app), person_frame(&app, 1));
     }
 
     #[test]
@@ -930,20 +1017,45 @@ mod tests {
         app.update(8 * MS, &[]);
         let world = app.world();
         let out = world.resource::<RenderFrame>();
-        let map = map::build(map::tile_set(world.resource::<Sprites>().tiles));
+        let sprites = world.resource::<Sprites>();
+        let map = map::build(sprites.tiles);
         assert_eq!(out.sprites.len(), map.walls.len() + map.props.len() + 1);
         assert!(out.sprites.iter().all(|sprite| sprite.layer == 1));
-        let person = world.resource::<Sprites>().person;
         let drawn: Vec<&SpriteDraw> = out
             .sprites
             .iter()
-            .filter(|sprite| sprite.texture == person)
+            .filter(|sprite| sprite.size == PERSON)
             .collect();
         assert_eq!(drawn.len(), 1);
         assert_eq!(drawn[0].position, PLAYER_START);
-        assert_eq!((drawn[0].layer, drawn[0].size), (1, Vec2::new(12.0, 20.0)));
+        assert_eq!(drawn[0].layer, 1);
         // Standing, the first frame of the sheet.
-        assert_eq!(drawn[0].uv, person_frame(0));
+        assert_eq!(drawn[0].uv, person_frame(&app, 0));
+        // A tree is trimmed of its 4 clear rows at the top, and drawn where
+        // its whole cell of 24 × 48 would have its pixels: its feet at its
+        // position.
+        let tree = out
+            .sprites
+            .iter()
+            .find(|sprite| sprite.uv == sprites.tree.frame.uv())
+            .expect("a tree");
+        assert_eq!(tree.size, Vec2::new(24.0, 44.0));
+        let corner = tree.position - tree.pivot * tree.size;
+        assert_eq!(
+            corner,
+            tree.position - Vec2::new(12.0, 48.0) + Vec2::new(0.0, 4.0)
+        );
+        // Every one of them on one page, the tall walls but on the tile
+        // set's.
+        let page = sprites.person[0].texture();
+        for sprite in &out.sprites {
+            let texture = if sprite.size == Vec2::new(16.0, 32.0) {
+                sprites.tiles.texture
+            } else {
+                page
+            };
+            assert_eq!(sprite.texture, texture, "{sprite:?}");
+        }
         assert_eq!(out.camera.position, PLAYER_START);
         // The ground, under everything, and around it the stone's color.
         let ground = world.resource::<Ground>();
@@ -1038,10 +1150,10 @@ mod tests {
             app.update(TICK, &[]);
             let out = app.world().resource::<RenderFrame>();
             let sprites = app.world().resource::<Sprites>();
-            let nearest = |texture| {
+            let nearest = |of: &dyn Fn(&SpriteDraw) -> bool| {
                 out.sprites
                     .iter()
-                    .filter(|sprite| sprite.texture == texture)
+                    .filter(|sprite| of(sprite))
                     .min_by(|a, b| {
                         (a.position - tree)
                             .length()
@@ -1050,7 +1162,11 @@ mod tests {
                     .copied()
                     .expect("drawn")
             };
-            let (person, tree) = (nearest(sprites.person), nearest(sprites.tree));
+            let tree_uv = sprites.tree.frame.uv();
+            let (person, tree) = (
+                nearest(&|sprite| sprite.size == PERSON),
+                nearest(&|sprite| sprite.uv == tree_uv),
+            );
             // Sorted against each other by their feet: one layer, y-sorted.
             assert_eq!((person.layer, person.sort), (tree.layer, SortMode::YSort));
             assert_eq!(tree.sort, SortMode::YSort);
@@ -1094,33 +1210,51 @@ mod tests {
     }
 
     #[test]
-    fn every_sprite_file_is_there() {
-        let app = sandbox();
-        for name in ["person", "tree", "rock", "grass", "atlas", "tiles"] {
-            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sprites/");
-            let bytes = std::fs::read(format!("{path}{name}.qoi")).expect("the sprite file");
-            assert!(bytes.starts_with(b"qoif"), "{name}");
-        }
-        assert!(app.world().resource::<AssetServer>().has_pending());
+    fn without_the_cooked_sprites_the_sandbox_says_to_cook_them() {
+        let empty = std::env::temp_dir().join(format!("sandbox-uncooked-{}", std::process::id()));
+        std::fs::create_dir_all(&empty).expect("an empty folder");
+        let config = Config {
+            assets: empty.clone(),
+            ..Config::default()
+        };
+        let error = match game(App::new(config), Scene::Field) {
+            Ok(_) => panic!("the sandbox set up with nothing cooked"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("`atlas/sprites.kbj`"), "{error}");
+        assert!(error.contains("run `cargo xtask cook`"), "{error}");
+        std::fs::remove_dir(&empty).expect("remove the folder");
     }
 
     #[test]
-    fn the_person_sheet_is_five_frames_of_12_by_20_in_a_row() {
-        let bytes = std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/sprites/person.qoi"
-        ))
-        .expect("the person");
-        let size = |at: usize| {
-            u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
-        };
-        assert_eq!((size(4), size(8)), (60, 20));
-        for index in 0..5 {
-            let frame = person_frame(index);
-            let left = 12.0 * index as f32;
-            assert!((frame.min.x * 60.0 - left).abs() < 1e-3, "{frame:?}");
-            assert!((frame.max.x * 60.0 - left - 12.0).abs() < 1e-3, "{frame:?}");
-            assert_eq!((frame.min.y, frame.max.y), (0.0, 1.0));
+    fn the_sprites_load_from_the_cooked_atlas_and_its_pages_in_the_background() {
+        let app = sandbox();
+        let world = app.world();
+        let server = world.resource::<AssetServer>();
+        let atlas = server
+            .assets::<Atlas>()
+            .and_then(|atlases| atlases.handle(ATLAS));
+        assert_eq!(
+            atlas.and_then(|atlas| server.state(atlas)),
+            Some(LoadState::Loaded)
+        );
+        // The pages are textures, still loading: no frame has run.
+        let sprites = world.resource::<Sprites>();
+        for texture in [sprites.person[0].texture(), sprites.tiles.texture] {
+            assert_eq!(server.state(texture), Some(LoadState::Loading));
         }
+        assert_eq!(
+            server.path(sprites.person[0].texture()),
+            Some("atlas/sprites_0.qoi")
+        );
+        assert_eq!(
+            server.path(sprites.tiles.texture),
+            Some("atlas/sprites/tiles.tiles.qoi")
+        );
+        // The tile set is the map's: 8 × 4 tiles.
+        assert_eq!(
+            (sprites.tiles.columns, sprites.tiles.rows),
+            (map::COLUMNS, map::ROWS)
+        );
     }
 }

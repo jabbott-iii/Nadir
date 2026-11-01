@@ -127,7 +127,7 @@
     {
       "name": "10,000 sprites with no allocation",
       "area": "Graphics",
-      "summary": "The stress scene draws 10,203 sprites in 2 batches. A test counts every allocation the engine makes through Rust's allocator in the real loop and finds none in 100 steady frames, and sorting and batching such a frame takes about 0.74 ms on an i7-11800H.",
+      "summary": "The stress scene draws 10,203 sprites in 1 batch, all from one page of the cooked atlas. A test counts every allocation the engine makes through Rust's allocator in the real loop and finds none in 100 steady frames, and sorting and batching such a frame takes about 0.74 ms on an i7-11800H.",
       "tasks": ["M3.5"],
       "ticked": ["M3.5"]
     },
@@ -204,9 +204,9 @@
     {
       "name": "Asset cooking",
       "area": "Tools",
-      "summary": "An offline pipeline packs each folder's PNG images into an atlas: it trims each image and sheet frame to its pixels, packs them into square pages with padding and extruded edges, keeps tile sets as pages of their own, and writes QOI pages with a file of where each frame went. The same files cook to the same bytes, and an incremental cache cooks again only the groups whose files changed. The game will draw its sprites from these atlases, and the pipeline will import Aseprite animations, turn data files into KBJ, and prepare bitmap fonts.",
+      "summary": "An offline pipeline packs each folder's PNG images into an atlas: it trims each image and sheet frame to its pixels, packs them into square pages with padding and extruded edges, keeps tile sets as pages of their own, and writes QOI pages with a file of where each frame went, which it checks with the game's own reader. The same files cook to the same bytes, and an incremental cache cooks again only the groups whose files changed. The game loads an atlas before its first frame and finds its sprites by name, each trimmed frame placed where its whole cell would be: every sprite in the demo is cooked, drawn pixel for pixel as the hand-made images were, with fewer batches. The pipeline will import Aseprite animations, turn data files into KBJ, and prepare bitmap fonts.",
       "tasks": ["M5.4", "M5.9", "M5.5"],
-      "ticked": ["M5.4"]
+      "ticked": ["M5.4", "M5.9"]
     },
     {
       "name": "Levels and prefabs",

@@ -2614,7 +2614,7 @@ by the batched sprite renderer.
     fixes. Two order tests fail with the name sort taken out. CI has not
     run this code, nor has Windows or macOS.
 
-- [ ] **M5.9 — the game draws cooked atlases; the sandbox's sprites are cooked**
+- [x] **M5.9 — the game draws cooked atlases; the sandbox's sprites are cooked**
   - Note (from M5.4, ADR-0031): the cook writes `atlas/<group>.kbj`
     (version 1) and its pages into `target/cooked/`
     (`assets-and-codecs.md`, "Atlas file"): each page's path and size, and
@@ -2645,6 +2645,40 @@ by the batched sprite renderer.
     unchanged, or each change is explained.
   - Verify: `cargo xtask cook`; `cargo test -p sandbox`; `cargo xtask
     site`
+  - Done 2026-10-31 (ADR-0033). The user chose `AssetServer::load_now`, a
+    `cook` check in `cargo xtask ci` before `test`, the grass on the
+    sprites' page (one batch), and the change across seven crates: codec,
+    assets, render, the facade, the sandbox, xtask and the cook's tests.
+    - Built: `nadir_codec::atlas::parse` (strict, the version read first,
+      errors by member path, fuzz target `atlas` asserting what it
+      promises); the cook reads each atlas it writes with it; render's
+      `Atlas` asset and `Atlas::load_pages`; `load_now(_in)`;
+      `Sprite::from_atlas`; the sandbox from `target/cooked`, or `assets`
+      beside its executable, refusing a missing or stale cook with "run
+      `cargo xtask cook`"; the person's sheet cooked whole
+      (`"trim": false`); the hand-made QOIs and `stress.rs`'s regions
+      removed; `cargo xtask site` cooks first and ships
+      `target/cooked/atlas` alone.
+    - A design critique of 28 points before the code led to: the version
+      checked first; the cook checking its output with the reader;
+      `from_atlas` taking the sprite (its pivot is in pixels, the
+      `Sprite`'s normalized) and saying what it does not suit; the stale
+      cook refused; `load_pages`; `cook` listed once in xtask's help; the
+      download taking only `atlas/`; the M3.5 feature's and the bench's
+      batch counts.
+    - Captures, on llvmpipe, against captures of HEAD made before the
+      change: all 1,800 frames byte for byte the same, and the world
+      hashes the same (field `9912a04b202a07fc`, stress-sprites
+      `a1f04a806ac57d1e`, stress-entities `9a1fddda443950b8`). Mean
+      batches: field 17.7 to 9.4, stress-sprites 2 to 1, stress-entities
+      1. The download, unpacked, draws the field's 600 frames the same.
+    - One change no capture shows: sprites on one page that tie on feet y
+      are drawn in extraction order, the props before the person, where
+      texture handles used to order them (ADR-0033).
+    - Verify: `cargo xtask cook` cooked 1 group, 5 sprites on 2 pages;
+      `cargo test -p sandbox`, 33 passed; `cargo xtask site` on llvmpipe
+      wrote the page, 3 scenes, 42 features; `cargo xtask fuzz-smoke
+      --target atlas --secs 20`, 12.6 million inputs, no finding.
 
 - [ ] **M5.5 — cook: Aseprite animations, data, fonts**
   - Note (from M4.6, ADR-0024):
@@ -2662,10 +2696,22 @@ by the batched sprite renderer.
       `Playback::Loop`, and a count N the sequence N times, then
       `Playback::Once`.
     - The sandbox builds its clips in `Gait::new`
-      (`games/sandbox/src/main.rs`), from `person.qoi` and the atlas. Its
-      crowds start each walker at its own point with
-      `Animator::starting_at`, from one walk clip.
+      (`games/sandbox/src/main.rs`), from the cooked atlas's
+      `sprites/person` frames (`Sprites::load`, since M5.9). Its crowds
+      start each walker at its own point with `Animator::starting_at`,
+      from one walk clip.
   - Depends: M5.4, M4.6, M5.9
+  - Note (from M5.9, ADR-0033): `assets/sprites/person.sprite.jsonc` says
+    `"trim": false`, and the sandbox refuses trimmed person frames: turn
+    trimming back on once a `ClipFrame` has a size and pivot, and update
+    `Sprites::load`'s check. `Sprite::from_atlas` takes the trimmed size
+    and normalized pivot of one frame: animating or flipping such a sprite
+    needs the per-frame size and pivot, and a flip about the pivot, that
+    this task adds. Its normalized pivot rounds in `f32` for some sizes
+    (7/13 × 13 is 7.0000005): place by pixels, or test fractional
+    positions. A sheet's frames now come by name from render's `Atlas`
+    (`sprite(name)?.frames()`), with `Atlas::load_pages` for their
+    textures.
   - Note (from M4.6, through M5.4): a `ClipFrame` has no size or pivot of
     its own, so a trimmed frame is stretched to its Sprite's size
     (ADR-0024). The atlas now records each frame's offset (`ox`, `oy`) and
@@ -2763,6 +2809,10 @@ by the batched sprite renderer.
   - Note (from M3.2): `AssetServer::new(root, ..)` reads loose files. If
     the `dev` feature compiles loose reading out of release builds, the
     facade's release path changes with it, as this task's Do says.
+  - Note (from M5.9, ADR-0033): the sandbox reads `target/cooked`, or
+    `assets` beside its executable, as the demo page's download has it;
+    `cargo xtask ci` cooks before its tests. Release builds reading the
+    pack change both.
   - Note (from M5.4, ADR-0031): pack the outputs `target/cooked/.cache.kbj`
     lists, not a walk of the folder. An option that changes output, such
     as the release build's string table, goes in the cache's `options`
@@ -2803,6 +2853,10 @@ by the batched sprite renderer.
     for an asset in its decoding state, and frees an asset only through an
     unloaded scope: a reload needs a state of its own, and must
     `Asset::release` the old value once the new one is made.
+  - Note (from M5.9, ADR-0033): an atlas is read once, with `load_now`,
+    and its regions are copied into the game's sprites and clips at setup:
+    reloading `atlas/<group>.kbj` must reach them, by name, or the game
+    must look its regions up each time.
   - Do: `xtask cook --watch`; the runtime mtime watcher; reloading
     textures, data, levels and shaders in dev.
   - Accept: an edit appears in the running game within 1 s, and existing

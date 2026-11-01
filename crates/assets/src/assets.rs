@@ -254,6 +254,44 @@ impl<T: Asset> Assets<T> {
         }
     }
 
+    /// Makes the asset under `handle` now: waits for its worker if it is
+    /// still decoding, and finalizes it if it waits to be. Returns how its
+    /// load ended.
+    pub(crate) fn finish_now(
+        &mut self,
+        handle: Handle<T>,
+        ctx: &mut FinalizeCtx<'_>,
+        on_failure: OnFailure,
+    ) -> Result<(), AssetError> {
+        let decoding = |assets: &Self| {
+            assets
+                .arena
+                .get(handle.id())
+                .is_some_and(|entry| matches!(entry.slot, Slot::Decoding))
+        };
+        while decoding(self) && self.in_flight > 0 {
+            // It cannot be disconnected: `done` is a sender.
+            let Ok(decoded) = self.results().recv() else {
+                break;
+            };
+            self.take(decoded);
+        }
+        let Some(entry) = self.arena.get_mut(handle.id()) else {
+            return Err(AssetError::Invalid("it was unloaded".to_string()));
+        };
+        if matches!(entry.slot, Slot::Pending(_)) {
+            finalize(entry, ctx, on_failure);
+            self.pending.retain(|&pending| pending != handle);
+        }
+        match &entry.slot {
+            Slot::Loaded(_) => Ok(()),
+            Slot::Failed { error, .. } => Err(error.clone()),
+            Slot::Decoding | Slot::Pending(_) | Slot::Finalizing => {
+                Err(AssetError::Invalid("it did not finish loading".to_string()))
+            }
+        }
+    }
+
     /// Takes `scope` from every asset, and removes those it leaves in no
     /// scope. Returns how many it removed.
     ///

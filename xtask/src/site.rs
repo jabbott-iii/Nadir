@@ -2,14 +2,16 @@
 //! at <https://jabbott.dev/Nadir/> (ADR-0029), into `target/site` or
 //! `DIR`.
 //!
-//! 1. Checks `docs/features.jsonc` as `cargo xtask features` does.
+//! 1. Checks `docs/features.jsonc` as `cargo xtask features` does, and
+//!    cooks `assets/` into `target/cooked` as `cargo xtask cook` does: the
+//!    sandbox draws the cooked sprites (ADR-0033).
 //! 2. Builds the sandbox in release and captures each of [`SCENES`]
 //!    offscreen (`--capture`), which needs an offscreen OpenGL context.
 //! 3. Encodes each capture with GStreamer (`gst-launch-1.0`) into a VP9
 //!    WebM and a PNG poster, at twice the size: every pixel of the game a
 //!    square of four.
-//! 4. Packs the sandbox and its assets into `downloads/`, with `tar`, and
-//!    takes its SHA-256 with `sha256sum`.
+//! 4. Packs the sandbox and its cooked atlases, `target/cooked/atlas`, into
+//!    `downloads/`, with `tar`, and takes its SHA-256 with `sha256sum`.
 //! 5. Fills `site/index.html` from the commit (`git`), the workspace, the
 //!    roadmap, the features and the captures, and `site/llms.txt`, the
 //!    same as plain text for language models, and copies `site/nadir.css`
@@ -63,6 +65,12 @@ const TEMPLATE: &str = "site/index.html";
 const TEXT_TEMPLATE: &str = "site/llms.txt";
 const OWN_FILES: &[&str] = &["site/nadir.css", "site/nadir.js"];
 
+/// The cooked assets, relative to the workspace root, where
+/// `cargo xtask cook` puts them, and the folder of them the download takes:
+/// the cook's own, which holds what it wrote and nothing else.
+const COOKED: &str = "target/cooked";
+const COOKED_ATLASES: &str = "atlas";
+
 /// The repository, where `GITHUB_REPOSITORY` does not name it.
 const REPOSITORY: &str = "jabbott-iii/Nadir";
 
@@ -84,9 +92,9 @@ const SCENES: &[Scene] = &[
         name: "stress-sprites",
         title: "10,000 sprites",
         caption: "10,000 people walk about on a lawn of grass sprites, among trees and \
-                  rocks, each an entity that the engine moves and animates. The lawn is one \
-                  texture and everything on it one atlas, y-sorted, so a frame is two \
-                  batches: the budget is 10,000 sprites at 60 frames a second in at most 30 \
+                  rocks, each an entity that the engine moves and animates. The lawn and \
+                  everything on it are one page of the cooked atlas, y-sorted, so a frame is \
+                  one batch: the budget is 10,000 sprites at 60 frames a second in at most 30 \
                   draw calls, with no allocation in a frame.",
         poster_frame: 300,
     },
@@ -132,6 +140,9 @@ pub(crate) fn command(mut args: Args, root: &Path, out: &mut dyn Write) -> Resul
         }
         return Ok(false);
     }
+    writeln!(out, "site: cooking {COOKED}").map_err(Error::Output)?;
+    out.flush().map_err(Error::Output)?;
+    cargo::run(root, &crate::cook_command(false))?;
     let roadmap = features::read(root, ROADMAP)?;
     let tasks = features::tasks(&roadmap);
     let features: Vec<_> = features::parse(&features::read(root, FEATURES)?)
@@ -361,8 +372,9 @@ fn read_frame(path: &Path, offset: u64, length: u64) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
-/// Packs the sandbox's executable and the workspace's assets, with a
-/// note, into a `.tar.gz` in `downloads`, by way of `work`.
+/// Packs the sandbox's executable and its cooked atlases
+/// (`target/cooked/atlas`, as `assets/atlas`), with a note, into a
+/// `.tar.gz` in `downloads`, by way of `work`.
 fn package(
     root: &Path,
     sandbox: &Path,
@@ -380,7 +392,7 @@ fn package(
     })?;
     let glibc = glibc_floor(&executable);
     copy(sandbox, &dir.join("sandbox"))?;
-    copy_dir(&root.join("assets"), &dir.join("assets"))?;
+    copy_cooked(&root.join(COOKED), &dir.join("assets"))?;
     write(
         &dir.join("README.txt"),
         package_note(build, glibc.as_deref()).as_bytes(),
@@ -476,7 +488,9 @@ Run it from this directory:
 
     ./sandbox
 
-WASD or the arrow keys walk. Close the window to quit. The other scenes:
+Its sprites are in assets/, as `cargo xtask cook` cooked them from the
+repository's assets/. WASD or the arrow keys walk. Close the window to
+quit. The other scenes:
 
     ./sandbox --scene stress-sprites
     ./sandbox --scene stress-entities
@@ -692,6 +706,13 @@ fn copy(from: &Path, to: &Path) -> Result<(), Error> {
     })
 }
 
+/// Copies the cooked atlases under `cooked` into `assets`, as the sandbox
+/// reads them from beside its executable: `atlas/`, which the cook owns,
+/// and nothing else of the folder, such as the cook's cache.
+fn copy_cooked(cooked: &Path, assets: &Path) -> Result<(), Error> {
+    copy_dir(&cooked.join(COOKED_ATLASES), &assets.join(COOKED_ATLASES))
+}
+
 /// Copies the files under `from` into `to`, keeping the tree.
 fn copy_dir(from: &Path, to: &Path) -> Result<(), Error> {
     make_dir(to)?;
@@ -904,6 +925,43 @@ mod tests {
         let file = dir.join("file");
         fs::write(&file, "x").unwrap();
         assert!(matches!(prepare(&file), Err(Error::Read { .. })));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_download_takes_the_cooked_atlases_alone() {
+        let dir = scratch("cooked");
+        let cooked = dir.join("cooked");
+        for (path, text) in [
+            ("atlas/sprites.kbj", "atlas"),
+            ("atlas/sprites/tiles.tiles.qoi", "tiles"),
+            (".cache.kbj", "cache"),
+            ("stray.txt", "stray"),
+        ] {
+            let file = cooked.join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, text).unwrap();
+        }
+        let assets = dir.join("staged/assets");
+        copy_cooked(&cooked, &assets).unwrap();
+        let mut found = Vec::new();
+        let mut stack = vec![assets.clone()];
+        while let Some(at) = stack.pop() {
+            for entry in fs::read_dir(at).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    let relative = path.strip_prefix(&assets).unwrap();
+                    found.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+        found.sort();
+        assert_eq!(
+            found,
+            ["atlas/sprites.kbj", "atlas/sprites/tiles.tiles.qoi"]
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 

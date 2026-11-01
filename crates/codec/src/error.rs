@@ -4,7 +4,7 @@ use std::fmt;
 
 #[cfg(feature = "png")]
 use crate::png;
-use crate::{bmfont, inflate, json, kbj, klz, qoi, wav};
+use crate::{atlas, bmfont, inflate, json, kbj, klz, qoi, wav};
 
 /// Errors produced by `nadir-codec`.
 ///
@@ -69,6 +69,15 @@ pub enum CodecError {
         /// What is wrong.
         kind: bmfont::ErrorKind,
     },
+    /// A KBJ file is not an atlas file the game can read
+    /// ([`atlas::parse`](crate::atlas::parse)).
+    Atlas {
+        /// Where the problem is, such as `sprites[2].frames[0].w`; empty
+        /// for the file as a whole.
+        at: String,
+        /// What is wrong.
+        kind: atlas::ErrorKind,
+    },
     /// A value cannot be encoded as KBJ.
     KbjEncode {
         /// Why not.
@@ -105,6 +114,10 @@ impl fmt::Display for CodecError {
             Self::Klz { offset, kind } => write!(f, "KLZ error at byte {offset}: {kind}"),
             Self::Kbj { offset, kind } => write!(f, "KBJ error at byte {offset}: {kind}"),
             Self::KbjEncode { kind } => write!(f, "cannot encode as KBJ: {kind}"),
+            Self::Atlas { at, kind } if at.is_empty() => {
+                write!(f, "atlas error in the file: {kind}")
+            }
+            Self::Atlas { at, kind } => write!(f, "atlas error at `{at}`: {kind}"),
             Self::Wav { offset, kind } => write!(f, "WAV error at byte {offset}: {kind}"),
             Self::BmFont { line, column, kind } => {
                 write!(f, "BMFont error at line {line}, column {column}: {kind}")

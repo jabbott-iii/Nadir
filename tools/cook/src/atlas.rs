@@ -12,8 +12,8 @@ use crate::config::{Layout, Sprite};
 use crate::image::Pixels;
 use crate::pack::{self, Rect};
 
-/// The atlas file's version.
-pub(crate) const VERSION: i64 = 1;
+/// The atlas file's version: the one the game's reader reads.
+pub(crate) const VERSION: i64 = nadir_codec::atlas::VERSION;
 /// The space between two frames in a page, in pixels.
 pub(crate) const PADDING: u32 = 2;
 /// How far each frame's edge pixels are repeated outward.
@@ -194,7 +194,8 @@ fn name(path: &str) -> &str {
 /// [`CookError::Decode`] for a PNG the decoder refuses,
 /// [`CookError::Layout`] for an image that does not fit its sidecar,
 /// [`CookError::TooBig`] for a frame bigger than the largest page, and
-/// [`CookError::Encode`] if an output cannot be written as QOI or KBJ.
+/// [`CookError::Encode`] if an output cannot be written as QOI or KBJ, or
+/// the game's atlas reader refuses the atlas file written.
 pub(crate) fn cook(group: &str, members: &[Member<'_>]) -> Result<Cooked, CookError> {
     let mut warnings = Vec::new();
     // By name, whatever order the files were found in, so that the same
@@ -365,11 +366,18 @@ pub(crate) fn cook(group: &str, members: &[Member<'_>]) -> Result<Cooked, CookEr
     ]);
 
     let kbj = format!("atlas/{group}.kbj");
-    let mut files = vec![(
-        kbj.clone(),
-        nadir_codec::kbj::encode(&atlas, Limits::default())
-            .map_err(|error| CookError::Encode { path: kbj, error })?,
-    )];
+    let bytes =
+        nadir_codec::kbj::encode(&atlas, Limits::default()).map_err(|error| CookError::Encode {
+            path: kbj.clone(),
+            error,
+        })?;
+    // The game's reader takes it, or the cook refuses it: a pivot too large
+    // for the game's numbers, say.
+    nadir_codec::atlas::parse(&bytes, Limits::default()).map_err(|error| CookError::Encode {
+        path: kbj.clone(),
+        error,
+    })?;
+    let mut files = vec![(kbj, bytes)];
     let page_count = pages.len();
     for (path, pixels) in pages {
         let header = Header {

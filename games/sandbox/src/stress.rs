@@ -5,12 +5,12 @@
 //! a second, in at most 30 draw calls, with no allocation in a frame
 //! (`docs/00-overview.md`, roadmap M3).
 //!
-//! Everything that stands on the grass, the player included, is drawn from
-//! one atlas texture, so that the 10,203 sprites are 2 batches: the grass,
-//! and the rest. The camera stays on the view's centre, and the crowd
-//! inside the view. Each walker is an entity, which the engine moves by
-//! its velocity and animates: a walk of four frames from the atlas, each
-//! walker at its own point in it, facing the way it goes. The player is
+//! The grass and everything that stands on it, the player included, are
+//! drawn from one page of the cooked atlas, so that the 10,203 sprites are
+//! 1 batch. The camera stays on the view's centre, and the crowd inside the
+//! view. Each walker is an entity, which the engine moves by its velocity
+//! and animates: a walk of four frames from the atlas, each walker at its
+//! own point in it, facing the way it goes. The player is
 //! tinted yellow and drawn over the crowd, one
 //! layer up, to be found in it: the crowd covers each spot about 20 deep.
 //! They walk with WASD inside the view, which stays put, and stop at its
@@ -42,33 +42,7 @@ const PROPS: [(Prop, i32, i32); 10] = [
 /// The view, which the crowd stays inside.
 const VIEW: Vec2 = Vec2::new(480.0, 270.0);
 
-/// The atlas: `assets/sprites/atlas.qoi`, 128 × 64 pixels.
-pub(crate) const ATLAS: &str = "sprites/atlas.qoi";
-const ATLAS_SIZE: Vec2 = Vec2::new(128.0, 64.0);
-
-/// A region of the atlas, from pixels to its normalized `uv`.
-const fn region(x: f32, y: f32, width: f32, height: f32) -> Rect {
-    Rect::new(
-        Vec2::new(x / ATLAS_SIZE.x, y / ATLAS_SIZE.y),
-        Vec2::new((x + width) / ATLAS_SIZE.x, (y + height) / ATLAS_SIZE.y),
-    )
-}
-
-/// Where the person standing, the tree and the rock are in the atlas. Each
-/// has a transparent pixel around it.
-pub(crate) const PERSON: Rect = region(1.0, 1.0, 12.0, 20.0);
-const TREE: Rect = region(18.0, 1.0, 24.0, 48.0);
-const ROCK: Rect = region(1.0, 22.0, 16.0, 12.0);
-
-/// The four frames of the person's walk in the atlas, in a row, apart.
-pub(crate) const WALK: [Rect; 4] = [
-    region(65.0, 1.0, 12.0, 20.0),
-    region(78.0, 1.0, 12.0, 20.0),
-    region(91.0, 1.0, 12.0, 20.0),
-    region(104.0, 1.0, 12.0, 20.0),
-];
-
-/// A person's size, in pixels.
+/// A person's size, in pixels: the size of their frames in the atlas.
 pub(crate) const PERSON_SIZE: Vec2 = Vec2::new(12.0, 20.0);
 
 /// The player's tint in a crowd, so that they can be told from it.
@@ -89,21 +63,19 @@ impl Component for Walker {}
 pub(crate) struct Pace(pub(crate) f32);
 
 /// Adds the stress scene's props, crowd, player and systems to `app`.
-pub(crate) fn add(app: App) -> App {
-    let atlas = app.world().resource_mut::<AssetServer>().load(ATLAS);
+pub(crate) fn add(app: App, sprites: &Sprites) -> App {
     let mut app = app.register_component::<Walker>();
-    let gait = Gait::new(&app, atlas, PERSON, WALK);
+    let gait = Gait::new(&app, &sprites.person);
     let world = app.world_mut();
-    let sprite = |size: Vec2, uv: Rect| {
-        let mut sprite = Sprite::new(atlas, size);
-        sprite.uv = uv;
+    let sprite = |region: &crate::Region| {
+        let mut sprite = region.sprite;
         sprite.layer = 1;
         sprite
     };
     for &(kind, x, y) in &PROPS {
         let prop = match kind {
-            Prop::Tree => sprite(Vec2::new(24.0, 48.0), TREE),
-            Prop::Rock => sprite(Vec2::new(16.0, 12.0), ROCK),
+            Prop::Tree => sprite(&sprites.tree),
+            Prop::Rock => sprite(&sprites.rock),
         };
         world
             .spawn()
@@ -112,7 +84,7 @@ pub(crate) fn add(app: App) -> App {
     }
     for index in 0..CROWD as u32 {
         let velocity = heading(index, 0);
-        let mut walker = sprite(PERSON_SIZE, PERSON);
+        let mut walker = sprite(&sprites.person[0]);
         walker.color = tint(index);
         world
             .spawn()
@@ -123,9 +95,9 @@ pub(crate) fn add(app: App) -> App {
             .with(Animator::starting_at(gait.walk, stagger(index)))
             .with(facing(velocity));
     }
-    // Last, and a layer up: the same atlas right after the crowd, so still
+    // Last, and a layer up: the same page right after the crowd, so still
     // one batch with it.
-    let mut person = sprite(PERSON_SIZE, PERSON);
+    let mut person = sprite(&sprites.person[0]);
     person.color = PLAYER_TINT;
     person.layer = 2;
     spawn_player(world, person, &gait);
@@ -151,7 +123,8 @@ fn draw_grass(world: &World, _frame: &Frame) {
     for row in 0..12 {
         for column in 0..16 {
             let corner = Vec2::new(column as f32 * 32.0, row as f32 * 32.0);
-            let mut tile = SpriteDraw::new(grass, corner, Vec2::splat(32.0));
+            let mut tile = SpriteDraw::new(grass.texture(), corner, grass.frame.size().as_vec2());
+            tile.uv = grass.frame.uv();
             tile.pivot = Vec2::ZERO;
             tile.sort = SortMode::Fixed(0);
             out.sprites.push(tile);
@@ -289,13 +262,13 @@ mod tests {
     use crate::tests::{TICK, player, position, scene};
 
     #[test]
-    fn a_frame_draws_everything_on_the_grass_from_the_atlas() {
+    fn a_frame_draws_the_grass_and_everything_on_it_from_one_page() {
         let mut app = scene(Scene::StressSprites);
         app.update(TICK, &[]);
         let world = app.world();
         let out = world.resource::<RenderFrame>();
         assert_eq!(out.sprites.len(), 16 * 12 + PROPS.len() + CROWD + 1);
-        let atlas = world
+        let page = world
             .read::<Sprite>()
             .get(player(&app))
             .expect("drawn")
@@ -303,13 +276,16 @@ mod tests {
         let assets = world.resource::<AssetServer>();
         let loaded = assets.assets::<Texture>();
         assert_eq!(
-            loaded.and_then(|textures| textures.handle(ATLAS)),
-            Some(atlas)
+            loaded.and_then(|textures| textures.handle("atlas/sprites_0.qoi")),
+            Some(page)
         );
+        // One texture: one batch.
+        assert!(out.sprites.iter().all(|sprite| sprite.texture == page));
+        let sprites = world.resource::<Sprites>();
         let (grass, rest): (Vec<&SpriteDraw>, Vec<&SpriteDraw>) =
             out.sprites.iter().partition(|sprite| sprite.layer == 0);
         assert_eq!(grass.len(), 16 * 12);
-        assert!(rest.iter().all(|sprite| sprite.texture == atlas));
+        assert!(grass.iter().all(|tile| tile.uv == sprites.grass.frame.uv()));
         // The player, tinted, over everything else on the grass.
         let (over, crowd): (Vec<&SpriteDraw>, Vec<&SpriteDraw>) =
             rest.iter().partition(|sprite| sprite.layer == 2);
@@ -317,13 +293,19 @@ mod tests {
         assert_eq!(over.len(), 1);
         assert_eq!(over[0].position, position(&app, player(&app)));
         assert_eq!(over[0].color, PLAYER_TINT);
-        assert_eq!(over[0].uv, PERSON, "the player stands");
+        assert_eq!(
+            over[0].uv,
+            sprites.person[0].frame.uv(),
+            "the player stands"
+        );
         assert_eq!(out.camera.position, VIEW * 0.5);
         // The crowd walks, out of step: every frame of the walk is drawn,
         // each by about a quarter of the crowd. The rest are the props.
+        let walk = sprites.person[1..].iter().map(|region| region.frame.uv());
+        let walk: Vec<Rect> = walk.collect();
         let mut frames = [0; 4];
         for walker in crowd.iter().filter(|sprite| sprite.size == PERSON_SIZE) {
-            let frame = WALK.iter().position(|&uv| uv == walker.uv);
+            let frame = walk.iter().position(|&uv| uv == walker.uv);
             frames[frame.expect("a frame of the walk")] += 1;
         }
         assert_eq!(frames.iter().sum::<usize>(), CROWD);
@@ -387,28 +369,32 @@ mod tests {
     }
 
     #[test]
-    fn the_atlas_regions_are_inside_the_atlas_and_apart() {
-        let bytes = std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/sprites/atlas.qoi"
-        ))
-        .expect("the atlas");
-        let size = |at: usize| {
-            u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
-        };
-        assert_eq!((size(4), size(8)), (128, 64));
-        let regions = [PERSON, TREE, ROCK, WALK[0], WALK[1], WALK[2], WALK[3]];
+    fn the_people_and_props_are_whole_frames_apart_on_one_page() {
+        let app = scene(Scene::StressSprites);
+        let sprites = app.world().resource::<Sprites>();
+        // The person's frames are whole: they swap on one sprite of
+        // [`PERSON_SIZE`], which a trimmed frame would be stretched to.
+        for region in &sprites.person {
+            assert_eq!(region.frame.size().as_vec2(), PERSON_SIZE);
+            assert_eq!(region.frame.offset(), UVec2::ZERO);
+        }
+        let mut regions = sprites.person.to_vec();
+        regions.extend([sprites.tree, sprites.rock, sprites.grass]);
+        let page = regions[0].texture();
         for (index, region) in regions.iter().enumerate() {
-            assert!(region.min.x > 0.0 && region.min.y > 0.0, "{region:?}");
-            assert!(region.max.x < 1.0 && region.max.y < 1.0, "{region:?}");
+            assert_eq!(region.texture(), page, "{region:?}");
+            let uv = region.frame.uv();
             for other in &regions[index + 1..] {
-                let apart = region.max.x < other.min.x
-                    || other.max.x < region.min.x
-                    || region.max.y < other.min.y
-                    || other.max.y < region.min.y;
-                assert!(apart, "{region:?} and {other:?} touch");
+                let other = other.frame.uv();
+                let apart = uv.max.x <= other.min.x
+                    || other.max.x <= uv.min.x
+                    || uv.max.y <= other.min.y
+                    || other.max.y <= uv.min.y;
+                assert!(apart, "{uv:?} and {other:?} overlap");
             }
         }
+        // The tile set is a page of its own.
+        assert_ne!(sprites.tiles.texture, page);
     }
 
     /// A steady frame of the scene allocates nothing.

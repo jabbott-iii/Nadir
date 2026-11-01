@@ -339,6 +339,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 | :- | :- |
 | `fmt` | `cargo fmt --all -- --check` |
 | `clippy` | `cargo clippy --workspace --all-targets --all-features -- -D warnings` |
+| `cook` | `cargo run --release --package nadir-cook -- assets target/cooked`, as `cargo xtask cook` runs it: before `test`, since the sandbox's tests draw the cooked sprites (ADR-0033). It cooks the groups whose files changed, so it is quick when nothing did |
 | `test` | `cargo test --workspace --all-features` |
 | `deps` | `cargo metadata --format-version 1`, parsed with `nadir-codec::json`; every package with a non-null `source` must appear in `xtask/deps-allowlist.txt` with its exact version. A path package from outside the workspace also fails (vendored code) |
 | `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |
@@ -361,7 +362,8 @@ understood.
      M2.2, because `cargo xtask ci` runs the headless OpenGL tests).
   3. `cargo xtask ci`, with `LIBGL_ALWAYS_SOFTWARE=1` and, on Linux,
      `NADIR_EXPECT_GL_RENDERER=llvmpipe`: the OpenGL tests fail on any other
-     renderer.
+     renderer. Its `cook` check cooks `assets/` into `target/cooked` before
+     the tests, on all three systems (ADR-0033).
   4. Linux only, from M2.5: `cargo xtask golden`, with the same two
      variables, set on that step too.
      - It runs even when the checks fail: they draw the same scenes, and
@@ -435,7 +437,10 @@ understood.
        llvmpipe;
      - encodes each into a VP9 WebM at twice the size (each pixel a square
        of four, which 4:2:0 chroma keeps whole) and a PNG poster;
-     - packs the sandbox and `assets/` into
+     - cooks `assets/` into `target/cooked` first, as `cargo xtask cook`
+       does: the sandbox draws the cooked sprites (ADR-0033);
+     - packs the sandbox and the cooked atlases, `target/cooked/atlas` and
+       nothing else of that folder, as `assets/atlas` beside it, into
        `downloads/nadir-sandbox-linux-x86_64.tar.gz`, with its SHA-256 and
        the oldest glibc it runs on, read from the version names in the
        executable;

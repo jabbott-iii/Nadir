@@ -116,6 +116,20 @@ fn a_wrong_file_is_named_in_its_error() {
 }
 
 #[test]
+fn an_atlas_the_game_could_not_read_is_refused() {
+    let root = dir("unreadable");
+    let source = root.join("source");
+    write(&source, "g/a.png", plain(2, 2, [1, 2, 3, 255]));
+    // A pivot past what an `f32` holds, which the game's numbers are.
+    write(&source, "g/a.sprite.jsonc", r#"{ "pivot": [1, 1e39] }"#);
+    assert!(matches!(
+        cook(&source, &root.join("out")),
+        Err(CookError::Encode { path, error: nadir_codec::CodecError::Atlas { .. } })
+            if path == "atlas/g.kbj"
+    ));
+}
+
+#[test]
 fn the_output_folder_and_the_source_folder_must_not_hold_each_other() {
     let root = dir("overlap");
     let source = root.join("source");

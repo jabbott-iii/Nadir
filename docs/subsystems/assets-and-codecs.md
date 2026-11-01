@@ -36,6 +36,7 @@ Every decoder:
 | `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (settings, dev data) | Order-preserving objects: `Vec<(String, Value)>` |
 | `kbj` | Below | ✓ | ✓ | yes | Binary form of the JSON value tree for cooked data. See below |
 | `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines. See subset below |
+| `atlas` | The cook's atlas file, version 1, below | — | ✓ | yes | KBJ, then checked strictly; read by render's `Atlas` asset (ADR-0033). See below |
 
 ### Inflate (documented, tested)
 
@@ -509,6 +510,39 @@ font asset (M5.5).
   that are not UTF-8 become U+FFFD, so that every input reaches the
   parser.
 
+### Atlas file reader (documented, tested)
+
+`atlas::parse(bytes, limits)` reads the cook's `atlas/<group>.kbj`
+(below, "Atlas file") into an `AtlasFile` of `Page`s and `SpriteEntry`s,
+each sprite a `SpriteKind::Pivot` or `SpriteKind::Tiles` with its `Frame`s.
+The types are `#[non_exhaustive]`: only the reader makes them. As built in
+M5.9 (ADR-0033):
+
+- **KBJ first**, with the KBJ decoder and its limits; a file that is not
+  KBJ is a `CodecError::Kbj`.
+- **The version first:** any whole number other than 1 is
+  `Version { found }`, "not supported", whatever else the file holds, so a
+  later file's new members never read as wrong.
+- **Strict:** each object has its members and no others; one page at
+  least, of 1 to 4096 a side, with a non-empty path; sprite names
+  non-empty, in byte order, none twice; one frame at least each; a pivot of
+  two finite numbers that fit an `f32`, or a tile size of two whole numbers
+  of 1 or more, not both.
+- **Frames:** whole numbers that fit 32 bits, on a page that exists and
+  inside it, and inside their untrimmed cell of 1 × 1 or more (checked
+  sums). An empty frame is 0 × 0 on page 0 at (0, 0) with no offset; a
+  frame of one side 0 is refused.
+- **Tile sets:** one frame, the whole of its page, untrimmed, a whole
+  number of tiles across and down.
+- **Errors** name where in the file: `CodecError::Atlas { at, kind }`, with
+  `at` a member path such as `sprites[2].frames[0].w`, since a KBJ value
+  carries no byte offset; empty for the file as a whole.
+- **Tests:** a rule a test, from hand-written JSON text encoded to KBJ, in
+  `crates/codec/src/atlas.rs`. **Fuzz target:** `atlas`, with seeds in
+  `fuzz/corpus/atlas/` (the sandbox's cooked file, the least a file can be,
+  a tile set, a sheet with an empty frame); what it accepts must keep the
+  promises above, which the target asserts.
+
 ## `nadir-assets`
 
 ### Handles and storage
@@ -530,6 +564,8 @@ impl AssetServer {
     pub fn with_source(source: impl Source + 'static, on_failure: OnFailure) -> Self;
     pub fn load<T: Asset>(&mut self, path: &str) -> Handle<T>;                    // load_in(path, Scope::Global)
     pub fn load_in<T: Asset>(&mut self, path: &str, scope: Scope) -> Handle<T>;   // dedups by path; queues the read
+    pub fn load_now<T: Asset>(&mut self, path: &str, ctx: &mut FinalizeCtx<'_>) -> Result<Handle<T>, AssetError>;  // load_now_in(.., Global, ..)
+    pub fn load_now_in<T: Asset>(&mut self, path: &str, scope: Scope, ctx: &mut FinalizeCtx<'_>) -> Result<Handle<T>, AssetError>; // M5.9: made before it returns
     pub fn unload_scope(&mut self, scope: Scope) -> usize;                        // how many went
     pub fn get<T: Asset>(&self, h: Handle<T>) -> Option<&T>;        // loaded, or a failed one's placeholder
     pub fn state<T: Asset>(&self, h: Handle<T>) -> Option<LoadState>;  // None: nothing under that handle
@@ -581,6 +617,16 @@ pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no al
     over those still decoding, so a later load can be made first. The
     types share the budget and take turns at going first, so one type's
     backlog cannot hold another's back for long.
+  - `load_now` (M5.9, ADR-0033) gives the handle `load_in` would, and
+    makes the asset before it returns: a new path is read and decoded on
+    the calling thread; one a worker is decoding is waited for, and one
+    waiting to be made is made now. It makes and frees nothing else, and
+    spends no budget. It is for the data a game needs before its first
+    tick, such as an atlas's regions: its context must hold whatever
+    `finalize` needs, a failure is final, and before the window opens
+    there is no GPU device, so only assets that need none can be made then.
+    On a failure it returns the error; `load` of the path gives the failed
+    handle, with its placeholder if shown.
   - `finish_all_loads` waits for every job and makes every asset, with no
     budget: type by type, in the order of each type's first load, and each
     type's in load order, so the same loads are made in the same order on
@@ -780,6 +826,15 @@ KBJ, its members in this order:
 ```
 
 - A frame's `uv` is its `x, y, w, h` over its page's `w, h`.
+- The game reads it with `nadir_codec::atlas::parse` (above, "Atlas file
+  reader"), through render's `Atlas` asset (`docs/subsystems/render.md`),
+  and the cook reads each one it writes the same way, so that it never
+  writes one that reader refuses: a sidecar's pivot past what an `f32`
+  holds fails the cook, naming the atlas file. The reader does not check
+  that page paths are asset paths, as the game also does: a source path
+  near an asset path's 1,024 bytes could still cook to a page the game
+  cannot load. The version is the reader's
+  `atlas::VERSION`.
 - The pivot is in the untrimmed frame's pixels, from (0, 0) at its top-left
   corner to (`sw`, `sh`) at its bottom-right; in the trimmed quad it is
   ((px − ox) / w, (py − oy) / h).
@@ -868,8 +923,9 @@ KBJ, its members in this order:
     `crates/codec/tests/bmfont/`
   - JSON: RFC 8259 examples plus the JSONC extensions; deep nesting hits the
     limit and errors, it doesn't overflow the stack
-- **Fuzz targets** (fuzz smoke): every decoder above, the pack TOC reader,
-  the level reader and the save reader.
+- **Fuzz targets** (fuzz smoke): every decoder above, the atlas file reader
+  (`atlas`, M5.9), the pack TOC reader, the level reader and the save
+  reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   load every cooked asset through `PackSource` and `LooseSource`.
 - **The cook** (`tools/cook`): the scan's rules on lists of names made by
@@ -879,8 +935,8 @@ KBJ, its members in this order:
   the sidecar's and the cache's errors; and on real folders, the atlas
   file, a group's pages, a cook into two folders byte for byte, an
   incremental cook against a clean one, what each change cooks again,
-  stale files removed, and the workspace's `assets/` cooked to its
-  hand-made QOIs' pixels.
+  stale files removed, and the workspace's `assets/` cooked to its PNGs'
+  pixels, cell by cell, into a file the game's reader takes.
 - **The asset server** (`crates/assets/tests`): loads that never wait for a
   source held shut, order, budgets and turns, panics, scopes. The load
   storm (`storm.rs`) asks for 1,000 images in one frame, and holds every

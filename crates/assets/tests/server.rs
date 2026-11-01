@@ -556,3 +556,126 @@ fn a_release_that_fails_is_logged_with_the_path() {
         "no log line names the file"
     );
 }
+
+#[test]
+fn load_now_makes_the_asset_before_it_returns() {
+    let mut server = AssetServer::new(root("load_now"), OnFailure::Placeholder);
+    let mut counts = Counts::default();
+    let hello = server
+        .load_now::<Text>("Notes/Hello.txt", &mut FinalizeCtx::new().with(&mut counts))
+        .expect("loaded");
+    assert_eq!(text(&server, hello), Some("HELLO"));
+    assert_eq!(server.state(hello), Some(LoadState::Loaded));
+    assert_eq!(counts.finalized, ["hello"]);
+    assert!(!server.has_pending(), "nothing is left for a finish");
+    // The same path gives the same handle, now or later, and is not made
+    // again.
+    let mut counts = Counts::default();
+    let again =
+        server.load_now::<Text>("notes/hello.txt", &mut FinalizeCtx::new().with(&mut counts));
+    assert_eq!(again, Ok(hello));
+    assert_eq!(server.load::<Text>("notes/hello.txt"), hello);
+    assert_eq!(counts, Counts::default());
+    // It is in the scope it was loaded in now too.
+    let in_level =
+        server.load_now_in::<Text>("notes/hello.txt", Scope::Level, &mut FinalizeCtx::new());
+    assert_eq!(in_level, Ok(hello));
+    assert_eq!(server.unload_scope(Scope::Global), 0);
+    assert_eq!(text(&server, hello), Some("HELLO"));
+}
+
+#[test]
+fn load_now_returns_why_it_failed_and_the_asset_shows_its_placeholder() {
+    let mut server = AssetServer::new(root("load_now_fails"), OnFailure::Placeholder);
+    let mut counts = Counts::default();
+    let mut ctx = FinalizeCtx::new().with(&mut counts);
+    assert_eq!(
+        server.load_now::<Text>("notes/missing.txt", &mut ctx),
+        Err(AssetError::NotFound)
+    );
+    assert_eq!(
+        server.load_now::<Text>("notes/bad.txt", &mut ctx),
+        Err(AssetError::Invalid("not UTF-8".to_string()))
+    );
+    assert_eq!(
+        server.load_now::<Text>("notes/hello.png", &mut ctx),
+        Err(AssetError::Extension {
+            expected: &["txt", "text"]
+        })
+    );
+    // Under its handle, as for any load: failed, with its placeholder.
+    let missing = server.load::<Text>("notes/missing.txt");
+    assert_eq!(server.state(missing), Some(LoadState::Failed));
+    assert_eq!(text(&server, missing), Some("?"));
+    // Asked again, it fails again, from what it holds.
+    assert_eq!(
+        server.load_now::<Text>("notes/missing.txt", &mut ctx),
+        Err(AssetError::NotFound)
+    );
+    // A resource the context lacks fails it too, as it would a finish, and
+    // for good: a later finish with the resource does not make it.
+    let mut bare = AssetServer::new(root("load_now_bare"), OnFailure::Nothing);
+    assert_eq!(
+        bare.load_now::<Text>("notes/hello.txt", &mut FinalizeCtx::new()),
+        Err(AssetError::MissingContext(std::any::type_name::<Counts>()))
+    );
+    assert_eq!(finish(&mut bare), Counts::default());
+    let hello = bare.load::<Text>("notes/hello.txt");
+    assert_eq!(bare.state(hello), Some(LoadState::Failed));
+    // A decoder that panics fails its asset, on this thread as on a worker.
+    let dir = root("load_now_panic");
+    fs::write(dir.join("notes/panic.txt"), "panic").expect("write a file");
+    let mut server = AssetServer::new(dir, OnFailure::Nothing);
+    assert_eq!(
+        server.load_now::<Raw>("notes/panic.txt", &mut FinalizeCtx::new()),
+        Err(AssetError::Invalid(
+            "reading or decoding it panicked".to_string()
+        ))
+    );
+}
+
+#[test]
+fn load_now_waits_for_a_load_already_on_a_worker_and_leaves_the_others() {
+    let (source, gate) = Gated::new(&[("notes/hello.txt", "hello"), ("notes/other.txt", "other")]);
+    let mut server = AssetServer::with_source(source, OnFailure::Placeholder);
+    let other = server.load::<Text>("notes/other.txt");
+    let hello = server.load::<Text>("notes/hello.txt");
+    // The workers wait at the gate until another thread opens it.
+    let opener = thread::spawn({
+        let gate = Arc::clone(&gate);
+        move || {
+            thread::sleep(Duration::from_millis(20));
+            open(&gate);
+        }
+    });
+    let mut counts = Counts::default();
+    let now = server.load_now::<Text>("notes/hello.txt", &mut FinalizeCtx::new().with(&mut counts));
+    opener.join().expect("the opener");
+    assert_eq!(now, Ok(hello));
+    assert_eq!(text(&server, hello), Some("HELLO"));
+    assert_eq!(counts.finalized, ["hello"]);
+    // The other load is left for a finish, decoded or not.
+    assert_eq!(server.state(other), Some(LoadState::Loading));
+    assert_eq!(finish(&mut server).finalized, ["other"]);
+    assert_eq!(text(&server, other), Some("OTHER"));
+}
+
+#[test]
+fn load_now_makes_its_asset_alone_of_those_the_workers_decoded() {
+    let mut server = AssetServer::new(root("load_now_decoded"), OnFailure::Placeholder);
+    let hello = server.load::<Text>("notes/hello.txt");
+    let other = server.load::<Text>("notes/other.txt");
+    // Time for the workers to decode both, so that waiting for one takes
+    // the other's result too; the test holds either way.
+    thread::sleep(Duration::from_millis(20));
+    let mut counts = Counts::default();
+    assert_eq!(
+        server.load_now::<Text>("notes/other.txt", &mut FinalizeCtx::new().with(&mut counts)),
+        Ok(other)
+    );
+    assert_eq!(counts.finalized, ["other"]);
+    assert_eq!(server.state(hello), Some(LoadState::Loading));
+    // The first is made by the next finish, and the second not again.
+    assert_eq!(finish(&mut server).finalized, ["hello"]);
+    assert_eq!(text(&server, hello), Some("HELLO"));
+}

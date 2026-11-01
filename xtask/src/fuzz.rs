@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use nadir_codec::inflate::ErrorKind as InflateError;
-use nadir_codec::{CodecError, Limits, adler32, bmfont, inflate, json, kbj, klz, png, qoi, wav};
+use nadir_codec::{
+    CodecError, Limits, adler32, atlas, bmfont, inflate, json, kbj, klz, png, qoi, wav,
+};
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
 use nadir_core::testing::{DEFAULT_SEED, SEED_VAR};
@@ -68,6 +70,10 @@ const TARGETS: &[Target] = &[
     Target {
         name: "wav",
         run: decode_wav,
+    },
+    Target {
+        name: "atlas",
+        run: parse_atlas,
     },
 ];
 
@@ -227,6 +233,54 @@ fn parse_bmfont(input: &[u8]) {
 /// The `wav` target: `nadir_codec::wav::decode`, with the default limits.
 fn decode_wav(input: &[u8]) {
     let _ = wav::decode(input, Limits::default());
+}
+
+/// The `atlas` target: `nadir_codec::atlas::parse`, with the default
+/// limits. What it accepts must keep the promises the game's atlas asset
+/// relies on: each frame on a page that exists and inside it, and inside
+/// its cell; the names in order; a tile set one whole page.
+fn parse_atlas(input: &[u8]) {
+    let Ok(file) = atlas::parse(input, Limits::default()) else {
+        return;
+    };
+    assert!(!file.pages.is_empty(), "an atlas with no page");
+    for pair in file.sprites.windows(2) {
+        assert!(
+            pair[0].name.as_bytes() < pair[1].name.as_bytes(),
+            "sprites out of order"
+        );
+    }
+    let within =
+        |start: u32, length: u32, end: u32| u64::from(start) + u64::from(length) <= u64::from(end);
+    for sprite in &file.sprites {
+        assert!(!sprite.frames.is_empty(), "a sprite with no frame");
+        for frame in &sprite.frames {
+            let page = &file.pages[frame.page as usize];
+            assert!(
+                within(frame.x, frame.width, page.width)
+                    && within(frame.y, frame.height, page.height),
+                "a frame off its page"
+            );
+            assert!(
+                within(frame.offset_x, frame.width, frame.source_width)
+                    && within(frame.offset_y, frame.height, frame.source_height)
+                    && frame.source_width > 0
+                    && frame.source_height > 0,
+                "a frame outside its cell"
+            );
+        }
+        if let atlas::SpriteKind::Tiles([width, height]) = sprite.kind {
+            let frame = &sprite.frames[0];
+            let page = &file.pages[frame.page as usize];
+            assert!(
+                sprite.frames.len() == 1
+                    && (frame.width, frame.height) == (page.width, page.height)
+                    && frame.width % width == 0
+                    && frame.height % height == 0,
+                "a tile set that is not a page of whole tiles"
+            );
+        }
+    }
 }
 
 /// The most bytes of pixels the `png` target decodes to: a 2048 × 2048

@@ -114,7 +114,13 @@ Optional:
 
 ### Build and run
 
+The sandbox draws cooked sprites: cook `assets/` into `target/cooked`
+first, and again after changing them. `cargo xtask ci` cooks before its
+tests, which need the cooked sprites too; run `cargo xtask cook` before
+`cargo test` on its own.
+
 ```bash
+cargo xtask cook
 cargo run -p sandbox
 cargo run -p sandbox -- --scene stress-sprites
 cargo dev
@@ -131,7 +137,7 @@ Windows and macOS, and the same commands CI runs:
 
 | Command | What it does |
 | :- | :- |
-| `cargo xtask ci` | The whole pull request gate: fmt check, clippy with `-D warnings`, tests, `deps`, `layers`, `unsafe-audit`, `workflows`, `release-no-dev`, `features` |
+| `cargo xtask ci` | The whole pull request gate: fmt check, clippy with `-D warnings`, `cook`, tests, `deps`, `layers`, `unsafe-audit`, `workflows`, `release-no-dev`, `features` |
 | `cargo xtask deps` | Fails if `Cargo.lock` holds a package from outside the workspace that the policy does not approve |
 | `cargo xtask layers` | Fails if a crate depends on one the dependency matrix forbids |
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the three allowed crates, or without a `SAFETY:` comment |
@@ -156,9 +162,9 @@ not run it. If you are used to `make`:
 | `make check` | `cargo xtask ci` |
 | `make fmt` | `cargo fmt --all` |
 | `make lint` | `cargo clippy --workspace --all-targets --all-features -- -D warnings` |
-| `make test` | `cargo test --workspace --all-features` |
+| `make test` | `cargo xtask cook`, then `cargo test --workspace --all-features` |
 | `make bench` | `cargo xtask bench` |
-| `make run` | `cargo run -p sandbox` |
+| `make run` | `cargo xtask cook`, then `cargo run -p sandbox` |
 
 ## Checks
 
