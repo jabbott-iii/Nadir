@@ -22,6 +22,10 @@ const SIDE: u32 = 64;
 const STALL: Duration = Duration::from_millis(4);
 /// What else a frame does, in the test's place.
 const FRAME: Duration = Duration::from_millis(1);
+/// How many times the storm may run: one run must keep to [`STALL`].
+const ATTEMPTS: usize = 5;
+/// How long the test waits before it runs the storm again.
+const PAUSE: Duration = Duration::from_secs(2);
 
 /// An image, made on the main thread from its decoded pixels, as a
 /// texture is uploaded.
@@ -146,14 +150,21 @@ fn a_storm_of_1000_loads_finishes_with_no_frame_stalled_over_4_ms() {
     // The main thread and the workers fill every core, so another process
     // that wants one can take the main thread's for a time slice, which is
     // longer than the margin the budget leaves. A run held that way is run
-    // again: one of three must keep to the limit. The server itself never
-    // waits in a frame (`loading_never_waits_for_the_file` in server.rs).
+    // again after a pause, since on a shared machine a busy spell can last
+    // longer than several runs back to back: one of five must keep to the
+    // limit (ADR-0034). The server itself never waits in a frame
+    // (`loading_never_waits_for_the_file` in server.rs).
     let mut reports = Vec::new();
-    let passed = (0..3).any(|_| match storm(&root) {
-        Ok(_) => true,
-        Err(report) => {
-            reports.push(report);
-            false
+    let passed = (0..ATTEMPTS).any(|attempt| {
+        if attempt > 0 {
+            thread::sleep(PAUSE);
+        }
+        match storm(&root) {
+            Ok(_) => true,
+            Err(report) => {
+                reports.push(report);
+                false
+            }
         }
     });
     fs::remove_dir_all(&root).expect("remove the test directory");

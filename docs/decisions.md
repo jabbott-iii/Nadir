@@ -1834,7 +1834,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0030 — The asset server decodes on its own workers and finalizes within a frame budget; an asset stays while any scope it was loaded in holds it; offscreen frames wait for their loads
 
-- **Status:** Proposed
+- **Status:** Proposed; its rule that one storm run of three must keep to the limit is superseded by ADR-0034
 - **Date:** 2026-10-31
 - **Context:**
   - M5.3 moves reading and decoding off the main thread. The architecture
@@ -2317,3 +2317,61 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   asset with a GPU resource before its window opens; M5.7's pack replaces
   `target/cooked` for release builds; or a second atlas version is
   written.
+
+## ADR-0034 — The storm test runs the storm up to five times, 2 s apart; one run must keep to the limit
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+- **Context:**
+  - ADR-0030 holds every frame's finish in the storm test
+    (`crates/assets/tests/storm.rs`) under 4 ms. One run of three must keep
+    to the limit, so that another process taking a core for a time slice
+    does not fail it. The three runs came back to back.
+  - CI run 41286083390, for `ad30aee` (M5.9), failed on `macos-latest`
+    alone: all three runs went over, their slowest finishes 4.5, 8.5 and
+    24.6 ms, and the test took 6.3 s. The same commit passed on Linux and
+    Windows. In the five runs before, the test passed on all three systems
+    in 1.7 to 2.2 s, about one run's time.
+  - M5.9 changed nothing a finish does: not `finish`, `Budget`, the 2 ms
+    budget or the worker count. About 6 to 8 images a frame reached the
+    main thread on average (1,000 over 127 to 165 frames), far under the
+    budget, so a 24.6 ms finish is time the main thread did not run.
+  - A shared CI machine can stay busy for seconds, and three runs back to
+    back, about 3 s, fit inside one such spell.
+- **Decision:**
+  - The storm test runs the storm up to 5 times (`ATTEMPTS`), and waits
+    2 s (`PAUSE`) before each run after the first. One run must keep to the
+    limit, as before.
+  - What a run must keep to is unchanged: every finish under 4 ms, and in
+    an optimized build the whole first frame too.
+  - A run that keeps to it ends the test, so a first run that does adds no
+    time.
+- **Consequences:**
+  - Good:
+    - To fail the test, a busy spell must now last across five runs over
+      about 13 s, not three runs over about 3 s.
+    - A server whose own work goes over the limit still fails every run:
+      its work does not change from one run to the next.
+  - Bad:
+    - The test still times the wall clock: a longer spell fails it, more
+      rarely.
+    - A failing test takes about 8 s longer.
+    - An overrun that happens only some of the time is a little more likely
+      to pass, one run of five rather than one of three.
+- **Alternatives considered:**
+  - Re-running the CI job by hand: no change, and the next busy spell fails
+    CI again.
+  - More runs back to back, with no pause: they fit inside the same spell.
+  - Moving the 4 ms check to the benchmarks, nightly or by hand on fixed
+    hardware, and keeping a storm in `cargo test` that checks only that the
+    1,000 load: no more such failures, but M5.3's criterion would no longer
+    be checked by `cargo test`.
+  - Timing the main thread's CPU time rather than the wall clock: a time
+    slice taken by another process would not count, but it needs new
+    bindings in `nadir-sys` and `nadir-platform`, and assets may not depend
+    on platform, even for tests (M2.3).
+  - Letting a few frames go over the limit: changes what M5.3's criterion
+    says.
+- **Revisit when:** the storm test fails in CI with all five runs over the
+  limit (then move the check to the benchmarks, or time CPU), or CI moves
+  to machines with cores of their own.

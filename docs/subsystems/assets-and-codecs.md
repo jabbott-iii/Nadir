@@ -943,5 +943,6 @@ KBJ, its members in this order:
   frame's finish under 4 ms in every build, and the whole first frame, the
   1,000 calls included, only when optimized:
   `cargo test --release -p nadir-assets --test storm` (ADR-0030). One of
-  three runs must keep to the limit, so that another process taking a core
-  for a time slice does not fail it.
+  five runs, 2 s apart, must keep to the limit, so that another process
+  taking a core for a time slice, or a shared machine busy for seconds,
+  does not fail it (ADR-0034).
