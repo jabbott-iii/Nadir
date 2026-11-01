@@ -327,8 +327,11 @@ pub fn check_sized<T: std::fmt::Debug>(
     sprites (`facade_frame_10k`, M4.6, ADR-0024)
   - A* on 256×256
   - mixer with 32 voices
-  - QOI decode 2048²
-  - inflate 10 MB
+  - QOI decode 2048² (`qoi_decode_2048`: an RGBA image of five kinds of
+    tile, so that every kind of chunk is common)
+  - inflate 10 MB (`inflate_10mb`: a zlib stream of 10 MiB, noise in stored
+    blocks and literals and matches in fixed-Huffman blocks, written by the
+    bench; it has no dynamic blocks, see the roadmap backlog)
 
 ## `xtask` checks
 

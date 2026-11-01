@@ -4,7 +4,9 @@
 mod collision;
 mod ecs;
 mod facade;
+mod inflate;
 mod json;
+mod qoi;
 mod sprite;
 mod tiles;
 
@@ -25,6 +27,14 @@ pub(crate) const ALL: &[Benchmark] = &[
     Benchmark {
         name: "json_parse",
         run: json::parse,
+    },
+    Benchmark {
+        name: "qoi_decode_2048",
+        run: qoi::decode,
+    },
+    Benchmark {
+        name: "inflate_10mb",
+        run: inflate::zlib,
     },
     Benchmark {
         name: "sprite_sort_batch",

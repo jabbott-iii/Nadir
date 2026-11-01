@@ -8,6 +8,20 @@
       "iterations": 6
     },
     {
+      "name": "qoi_decode_2048",
+      "median_ns": 24583592.5,
+      "p95_ns": 25180138.0,
+      "samples": 50,
+      "iterations": 1
+    },
+    {
+      "name": "inflate_10mb",
+      "median_ns": 16185026.5,
+      "p95_ns": 16855229.0,
+      "samples": 50,
+      "iterations": 1
+    },
+    {
       "name": "sprite_sort_batch",
       "median_ns": 744471.0384615385,
       "p95_ns": 758780.6153846154,
