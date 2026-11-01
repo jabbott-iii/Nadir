@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
-use nadir_cook::{Options, Report};
+use nadir_cook::{Counts, Options, Report};
 use nadir_core::cli::Args;
 use nadir_core::hash::fnv1a64;
 
@@ -18,12 +18,14 @@ const EXIT_USAGE: u8 = 2;
 
 const USAGE: &str = "Usage: nadir-cook [--force] SOURCE OUT
 
-Cooks the files below SOURCE into OUT: each folder's PNG images into an
-atlas, `atlas/<group>_<n>.qoi` and `atlas/<group>.kbj`. A group whose files
-did not change since the last cook into OUT is left as it is.
+Cooks the files below SOURCE into OUT: each folder's PNG images, Aseprite
+exports and BMFont fonts into an atlas, `atlas/<group>_<n>.qoi` and
+`atlas/<group>.kbj`, with each font's `atlas/<font>.font.kbj`; and each
+JSONC file below `data/` into KBJ, `data/<name>.kbj`. A job whose files did
+not change since the last cook into OUT is left as it is.
 
 Options:
-  --force  Cook every group, whatever the cache in OUT says
+  --force  Cook every job, whatever the cache in OUT says
   --help   Show this
 ";
 
@@ -102,23 +104,32 @@ fn describe(report: &Report, out: &str) -> (String, String) {
     let mut text = String::new();
     let mut cooked = 0;
     for job in &report.jobs {
-        let line = match job.cooked_counts {
-            Some((sprites, pages)) => {
-                cooked += 1;
-                format!(
-                    "cook: {}: {} on {}\n",
-                    job.name,
-                    count(sprites, "sprite"),
-                    count(pages, "page")
-                )
+        let line = match job.counts {
+            Some(Counts::Atlas {
+                sprites,
+                pages,
+                clips,
+                fonts,
+            }) => {
+                let mut made = format!("{} on {}", count(sprites, "sprite"), count(pages, "page"));
+                for (n, thing) in [(clips, "clip"), (fonts, "font")] {
+                    if n > 0 {
+                        made.push_str(&format!(", {}", count(n, thing)));
+                    }
+                }
+                format!("cook: {}: {made}\n", job.name)
             }
+            Some(Counts::Data) => format!("cook: {}: cooked\n", job.name),
             None => format!("cook: {}: up to date\n", job.name),
         };
+        if job.counts.is_some() {
+            cooked += 1;
+        }
         text.push_str(&line);
     }
     text.push_str(&format!(
         "cook: {} cooked, {} up to date, into {out}\n",
-        count(cooked, "group"),
+        count(cooked, "job"),
         report.jobs.len() - cooked
     ));
     let mut warnings = String::new();
@@ -157,16 +168,38 @@ mod tests {
         let report = Report {
             jobs: vec![
                 JobReport {
+                    name: "atlas/fonts".to_string(),
+                    cooked: true,
+                    files: 3,
+                    counts: Some(Counts::Atlas {
+                        sprites: 1,
+                        pages: 1,
+                        clips: 0,
+                        fonts: 1,
+                    }),
+                },
+                JobReport {
                     name: "atlas/sprites".to_string(),
                     cooked: true,
                     files: 3,
-                    cooked_counts: Some((5, 1)),
+                    counts: Some(Counts::Atlas {
+                        sprites: 5,
+                        pages: 1,
+                        clips: 2,
+                        fonts: 0,
+                    }),
                 },
                 JobReport {
                     name: "atlas/ui".to_string(),
                     cooked: false,
                     files: 2,
-                    cooked_counts: None,
+                    counts: None,
+                },
+                JobReport {
+                    name: "data/items".to_string(),
+                    cooked: true,
+                    files: 1,
+                    counts: Some(Counts::Data),
                 },
             ],
             skipped: vec![(
@@ -178,9 +211,11 @@ mod tests {
         let (text, warnings) = describe(&report, "target/cooked");
         assert_eq!(
             text,
-            "cook: atlas/sprites: 5 sprites on 1 page\n\
+            "cook: atlas/fonts: 1 sprite on 1 page, 1 font\n\
+             cook: atlas/sprites: 5 sprites on 1 page, 2 clips\n\
              cook: atlas/ui: up to date\n\
-             cook: 1 group cooked, 1 up to date, into target/cooked\n"
+             cook: data/items: cooked\n\
+             cook: 3 jobs cooked, 1 up to date, into target/cooked\n"
         );
         assert_eq!(
             warnings,

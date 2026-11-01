@@ -1,12 +1,13 @@
 //! File-format codecs for the Nadir engine: Adler-32, inflate, PNG, QOI, QOA,
-//! WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, and the
-//! cook's atlas files.
+//! WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite's
+//! sprite sheet data, and the cook's atlas files.
 //!
 //! Every decoder treats its input as untrusted: it returns a [`CodecError`]
 //! for anything malformed, checks sizes against [`Limits`], and never
 //! panics.
 
 pub mod adler32;
+pub mod aseprite;
 pub mod atlas;
 pub mod bmfont;
 mod error;

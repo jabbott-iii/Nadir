@@ -53,8 +53,10 @@ nadir_scene::reflect_newtype! {
 /// until prefabs bring the `Handle` encoding (roadmap M5.6, ADR-0020).
 ///
 /// On an entity with an [`Animator`](crate::Animator), the system
-/// `nadir::animate` writes its `texture` and `uv` each frame; on one with a
-/// [`Facing`], its `flip.x`.
+/// `nadir::animate` writes its `texture` and `uv` each frame, and its `size`
+/// and `pivot` when the frame shown has a [`Placement`](crate::Placement), as
+/// a cooked atlas's clips' frames do; on one with a [`Facing`], its
+/// `flip.x`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sprite {
     /// The texture, usually an atlas page.
@@ -75,7 +77,8 @@ pub struct Sprite {
     pub layer: u8,
     /// How it is ordered within its layer.
     pub sort: SortMode,
-    /// Which way its texture is mirrored.
+    /// Which way it is mirrored, about its pivot (render's
+    /// [`SpriteDraw::flip`]).
     pub flip: Flip,
 }
 
@@ -106,12 +109,10 @@ impl Sprite {
     /// rounding of its normalized pivot; otherwise as [`Sprite::new`] makes
     /// one. `None` if `sprite` has no such frame, or is a tile set.
     ///
-    /// Flipped, its frame must be untrimmed or trimmed evenly left and
-    /// right: a flip mirrors the trimmed quad about its own middle.
-    /// Animated, every frame must have this one's trimmed size and offset,
-    /// as an untrimmed sheet's do: an [`Animator`](crate::Animator) changes
-    /// only the uv, so another frame is stretched to this one's quad
-    /// (roadmap M5.5).
+    /// Flipped, it mirrors about its pivot, so the trimmed quad lands where
+    /// the mirrored cell's pixels would. Animated, by a clip of
+    /// [`Clips::add_atlas`](crate::Clips::add_atlas), each frame is placed
+    /// by its own trimmed size and pivot ([`ClipFrame::from_atlas`](crate::ClipFrame::from_atlas)).
     pub fn from_atlas(
         texture: Handle<Texture>,
         sprite: &AtlasSprite,
@@ -252,7 +253,7 @@ mod tests {
 
     #[test]
     fn a_sprite_of_a_trimmed_frame_covers_the_pixels_of_its_cell() {
-        let text = r#"{ "version": 1,
+        let text = r#"{ "version": 2,
             "pages": [ { "path": "atlas/props_0.qoi", "w": 64, "h": 64 } ],
             "sprites": [ { "name": "props/rock",
               "frames": [ { "page": 0, "x": 3, "y": 5, "w": 14, "h": 10, "ox": 1, "oy": 2, "sw": 16, "sh": 12 } ],

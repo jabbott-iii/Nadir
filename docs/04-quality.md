@@ -236,8 +236,9 @@ pub fn check_sized<T: std::fmt::Debug>(
   - A target may do more than call its parser. One whose format carries
     checksums repairs a copy of each input, so that mutations get past
     them (`png`). One that can check its own answers asserts them, so that
-    a wrong answer is a finding too (`inflate`, `klz`, `kbj`). See
-    `docs/subsystems/assets-and-codecs.md`.
+    a wrong answer is a finding too (`inflate`, `klz`, `kbj`), and so does
+    one whose reader makes promises its users rely on (`atlas`,
+    `aseprite`). See `docs/subsystems/assets-and-codecs.md`.
 - The optional coverage-guided fuzzing (`cargo fuzz`) is a separate,
   **unapproved** proposal (policy item 29).
 
@@ -339,7 +340,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 | :- | :- |
 | `fmt` | `cargo fmt --all -- --check` |
 | `clippy` | `cargo clippy --workspace --all-targets --all-features -- -D warnings` |
-| `cook` | `cargo run --release --package nadir-cook -- assets target/cooked`, as `cargo xtask cook` runs it: before `test`, since the sandbox's tests draw the cooked sprites (ADR-0033). It cooks the groups whose files changed, so it is quick when nothing did |
+| `cook` | `cargo run --release --package nadir-cook -- assets target/cooked`, as `cargo xtask cook` runs it: before `test`, since the sandbox's tests draw the cooked sprites (ADR-0033). It cooks the jobs (atlas groups, data files) whose files changed, so it is quick when nothing did |
 | `test` | `cargo test --workspace --all-features` |
 | `deps` | `cargo metadata --format-version 1`, parsed with `nadir-codec::json`; every package with a non-null `source` must appear in `xtask/deps-allowlist.txt` with its exact version. A path package from outside the workspace also fails (vendored code) |
 | `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |

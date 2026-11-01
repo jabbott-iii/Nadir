@@ -68,8 +68,9 @@ pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
 - `RenderFrame` so far has `camera`, `clear`, `sprites`, and since M4.5
   `tile_layers` and `time`. The other fields below come with their tasks.
   `Camera2D` has no rotation yet.
-- **`Atlas`** (M5.9, ADR-0033): the asset of a cooked atlas file,
-  `atlas/<group>.kbj`, read with `nadir_codec::atlas::parse`
+- **`Atlas`** (M5.9, ADR-0033; clips in M5.5, ADR-0035): the asset of a
+  cooked atlas file, `atlas/<group>.kbj`, version 2, read with
+  `nadir_codec::atlas::parse`
   (`docs/subsystems/assets-and-codecs.md`). It holds data and no GPU
   resource, so `finalize` needs nothing in its context, and a game makes
   it before its window opens with `AssetServer::load_now`. Its page paths
@@ -85,7 +86,9 @@ pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
       pub fn load_pages(&self, server: &mut AssetServer, scope: Scope) -> Vec<Handle<Texture>>;  // by page index
   }
   impl AtlasSprite { name(), frames(), frame(i), pivot() /* untrimmed px; None for a tile set */,
-                     tile_size(), tile_set(texture) -> Option<TileSet> }
+                     tile_size(), tile_set(texture) -> Option<TileSet>,
+                     clips() /* an Aseprite export's tags, by name */, clip(name) -> Option<&AtlasClip> }
+  impl AtlasClip { name(), is_looping(), frames() -> &[AtlasClipFrame] /* frame(): index, duration() */ }
   impl AtlasFrame { page(), uv() /* x, y, w, h over the page's size */, size() /* trimmed */,
                     offset(), source_size(), is_empty(), pivot_in(pivot_px) -> Vec2 /* normalized in the trimmed quad */ }
   ```
@@ -93,12 +96,12 @@ pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
   - The facade's `Sprite::from_atlas(texture, sprite, frame)` makes a
     sprite of a frame: its trimmed size, its pivot normalized in the
     trimmed quad, so that its pixels land where the untrimmed cell's
-    would, up to the `f32` rounding of that pivot. A flip mirrors the
-    trimmed quad about its own middle, so a flipped sprite's frame must be
-    untrimmed or trimmed evenly left and right; `nadir::animate` changes
-    only the uv, so an animated sprite's frames must all have the trimmed
-    size and offset of the one it was made from, as an untrimmed sheet's
-    do, until M5.5 gives clip frames a size and pivot.
+    would. The snap below rounds the pivot's offset, so that its `f32`
+    rounding cannot move them. A flip mirrors the quad about that pivot,
+    so a frame trimmed unevenly mirrors as its cell would.
+    `Clips::add_atlas` makes the sprites' clips, each frame placed the
+    same way by `ClipFrame::from_atlas`, which `nadir::animate` writes into
+    the Sprite with the texture and uv (ADR-0035).
   - Sprites that share a page share a texture, so at the same feet y their
     order falls to the order they were drawn in, not to their textures'
     handles (see "Sort keys").
@@ -135,7 +138,7 @@ pub struct SpriteDraw {
     pub color: Color,
     pub layer: u8,
     pub sort: SortMode,                   // YSort | Fixed(u32)
-    pub flip: Flip,
+    pub flip: Flip,                       // mirrors about the pivot (ADR-0035)
 }
 ```
 
@@ -192,7 +195,7 @@ fn push_instance(out: &mut Vec<f32>, s: &SpriteDraw, uv: [f32; 4], color: [f32; 
     out.extend_from_slice(&[
         s.position.x, s.position.y,      // location 0: pos (pivot, world)
         s.size.x, s.size.y,              // location 1: size
-        s.pivot.x, s.pivot.y,            // location 2: pivot (normalized)
+        pivot.x, pivot.y,                // location 2: pivot (normalized), 1 - x for flip.x, 1 - y for flip.y
         uv[0], uv[1], uv[2], uv[3],      // location 3: uv rect (flip applied by swapping)
         color[0], color[1], color[2], color[3], // location 4: linear color
         s.rotation,                      // location 5: rotation (radians, clockwise)
@@ -208,7 +211,17 @@ fn push_instance(out: &mut Vec<f32>, s: &SpriteDraw, uv: [f32; 4], color: [f32; 
   (`BLIT_QUAD`), as the shaders rule asks: GL's bottom-up render targets
   are accounted for there.
 - In pixel-perfect mode, an unrotated sprite's position is packed with its
-  top-left corner moved to the nearest whole virtual pixel (ADR-0018).
+  top-left corner moved to the nearest whole virtual pixel (ADR-0018). The
+  corner's offset from the position, the pivot (mirrored by the flip)
+  times the size, is first rounded to 1/256 of a world unit: a normalized
+  pivot rounds in `f32` (7/13 × 13 is 7.0000005), which would move a
+  corner on a half-pixel tie to the pixel below (ADR-0035).
+- A flip mirrors the sprite about its pivot: the uv rect is swapped, and
+  the packed pivot is `1 - x` for `flip.x` and `1 - y` for `flip.y`. A
+  pivot in the middle of the width mirrors in place left to right; a
+  sprite with its pivot at its feet hangs below them mirrored top to
+  bottom, still sorted by its feet. Rotation turns the mirrored quad
+  about the pivot.
 - One dynamic instance buffer, sized to the frame's peak. It grows by
   doubling and never shrinks during a session.
 - The unit quad is a static 4-vertex triangle strip.
@@ -345,7 +358,9 @@ pub struct TileLayerDraw { pub tiles: Handle<TileLayer>, pub layer: u8, pub dept
     boundaries)
   - `\n` line breaks
   - per-run color via a tiny markup: `{c:#ff0}text{/c}`
-- A missing glyph renders the font's `?` and logs once per character.
+- A missing glyph renders the font file's `fallback`: BMFont's fallback
+  glyph if the font has one, else its `?` (`assets-and-codecs.md`, "Font
+  file"), and logs once per character.
 - Glyph quads go through the `text` pipeline (alpha mask × tint). For pixel
   fonts, the font texture can also be RGBA and use the sprite pipeline.
 

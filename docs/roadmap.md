@@ -2680,7 +2680,7 @@ by the batched sprite renderer.
       wrote the page, 3 scenes, 42 features; `cargo xtask fuzz-smoke
       --target atlas --secs 20`, 12.6 million inputs, no finding.
 
-- [ ] **M5.5 — cook: Aseprite animations, data, fonts**
+- [x] **M5.5 — cook: Aseprite animations, data, fonts**
   - Note (from M4.6, ADR-0024):
     - Clips are `nadir::Clip`s in the facade's `Clips`, the only source of
       `Handle<Clip>`: a clip never becomes an asset of the asset server.
@@ -2737,6 +2737,69 @@ by the batched sprite renderer.
     BMFont → font asset.
   - Accept: sandbox animations come from Aseprite exports.
   - Verify: `cargo test -p nadir-cook`; `cargo dev` (manual)
+  - Done 2026-11-01 (ADR-0035). The user chose one task across six crates
+    (codec, render, the facade, the cook, the sandbox, xtask), clips in the
+    atlas file (version 2) rather than `anim/<name>.kbj`, render's flip
+    about the pivot, and the sandbox's export written by hand in
+    Aseprite's format, as Aseprite is not installed here.
+    - Built: `nadir_codec::aseprite` (the json-array subset, each tag
+      expanded to the frames Aseprite plays, checked against its
+      `doc_exporter.cpp` and `playback.cpp`; fuzz target `aseprite`); atlas
+      version 2 with each sprite's clips, and render's
+      `AtlasSprite::clips`; `ClipFrame::placement` and `from_atlas`,
+      `Clip::try_new`, `ClipError`, and `Clips::add_named`, `find`, `name`
+      and `add_atlas`; `nadir::animate` writing a frame's size and pivot;
+      the flip about the pivot, and the snapped offset rounded to 1/256; the
+      cook's exports (their sheets taken, frames placed in their canvas,
+      tags as clips), fonts (pages checked, glyphs as trimmed frames,
+      `atlas/<font>.font.kbj`) and data (`assets/data/**/*.jsonc` →
+      `data/<path>.kbj`), the cache's inputs being every file read; the
+      sandbox's person from `assets/sprites/person.json`, trimmed again,
+      its gait from `Clips::add_atlas`, its crowds' stagger from the walk's
+      length.
+    - The design critique made 33 points; its refuters threw out one. From
+      them: a one-frame tag shown on every repeat, `repeat` at most 65535
+      and each tag's clip counted, with those before it, before it is made;
+      the sheet and pages
+      claimed before grouping, matched as asset paths; a frame's own
+      image, for fonts of several pages; inputs of every file read; data
+      only below `data/`; fonts' files beside their atlas; `ClipFrame`'s
+      one `placement`; `add_atlas` all or none, returning handles; and the
+      snapped offset rounded, as the note above asked about pivots that
+      round in `f32` (`pixel_perfect_sprites_snap_their_corner_as_their_pixels_would`
+      fails with the rounding taken out).
+    - Captures, on llvmpipe, against captures of HEAD (`e72175f`) made
+      before the change: all 1,800 frames byte for byte the same, and the
+      world hashes (field `9912a04b202a07fc`, stress-sprites
+      `a1f04a806ac57d1e`, stress-entities `9a1fddda443950b8`) and mean
+      batches (9.4, 1, 1) the same. The person's frames are 10 and 12
+      wide, placed by their offsets; their pivots normalize exactly
+      ((6 − 1)/10 and 6/12), so the captures do not test a pivot that
+      rounds: the render test above does.
+    - Verify: `cargo test -p nadir-cook`, 24 unit, 2 CLI and 41
+      integration tests passed. `cargo dev` on Linux (Wayland session,
+      XWayland, Mesa, Intel UHD Graphics TGL GT1), 10 s of the field: 60
+      ticks and 60 frames a second, 57 sprites in 9 batches, 0 not ready,
+      no warnings, and no allocation after the first second; no key was
+      pressed. The session looked at captured frames of the person walking
+      right and left, which step through the walk and mirror about the
+      feet; no person watched the window. `cargo xtask fuzz-smoke --target
+      aseprite --secs 20`, 3.7 million inputs, and `--target atlas`, 10.5
+      million, found nothing.
+    - The code review made 14 points, all low, every one real at least in
+      part, all fixed: a font's page could name a PNG in a subfolder (now
+      a file name beside the font, as an export's sheet is); data outputs
+      were left out of the name check, and data jobs went by their paths
+      as found rather than by name; the sandbox never checked the `stand`
+      clip's frames (it now fails if the tag takes two); four of the snap
+      test's six cases passed without the rounding (each now must fail
+      without it); and docs that said split layers are refused, the atlas
+      file's section was version 1, clips were counted with checked
+      arithmetic before any was made, `add_atlas` returned handles by full
+      name, and a missing glyph draws `?` whatever BMFont's fallback.
+    - Not from Aseprite itself: the sandbox's export and the codec's
+      vectors are written by hand from its source. A real export of the
+      person can replace `person.json` without other changes.
 
 - [ ] **M5.6 — cook: LDtk importer; scene: prefabs and level loading**
   - Note (from M4.2): reflect `Handle<T>` as its asset path here
@@ -2768,17 +2831,19 @@ by the batched sprite renderer.
     - It writes only its clip's name, looked up in the facade's `Clips`,
       which `AssetServer::path` cannot see: `ReflectContext` needs a way to
       reach `Clips` beside the asset server. scene.md's
-      `"clip": "anim/slime_idle"` is a clip's name, not a file's path.
+      `"clip": "enemies/slime/idle"` is a clip's name, `<sprite>/<tag>`
+      (`Clips::find`, M5.5), not a file's path.
     - Its time and finished flag are transient.
     - On an entity with an `Animator`, `Sprite`'s texture and uv are written
-      each frame by `nadir::animate`; on one with a `Facing`, its `flip.x`.
-      The other fields, and these on entities without the component, are
-      the game's.
+      each frame by `nadir::animate`, and its size and pivot when the frame
+      has a placement, as an atlas's clips' frames do (M5.5, ADR-0035); on
+      one with a `Facing`, its `flip.x`. The other fields, and these on
+      entities without the component, are the game's.
   - Note (from M4.7, ADR-0025): registering `Sprite`, `Collider` or
     `Animator` changes every world hash in
     `crates/engine/tests/determinism/hashes.txt`: bless it again. The hash
     must leave out what `nadir::animate` writes each frame (`Sprite`'s
-    texture, uv and `flip.x`): a per-field "not hashed" marker in the
+    texture, uv, size, pivot and `flip.x`): a per-field "not hashed" marker in the
     reflect macros is the likely way, which M9.4's `saved` flag could share.
     `nadir::world_hash` (which `App::world_hash`, the sandbox and the test's
     whole-world column call) builds the `ReflectContext`, so it can give it
@@ -2793,6 +2858,15 @@ by the batched sprite renderer.
     not assets: `load_level` removes a level's own (M4.6's note to M5.3).
     Assets show a frame or more after their load in a window, so a loading
     state (M9.1) can wait for `has_pending` to clear.
+  - Note (from M5.5, ADR-0035): prefabs and other data are `.jsonc` below
+    `assets/data/`, which the cook writes as KBJ at `data/<path>.kbj`
+    (`assets/data/prefabs/slime.jsonc` → `data/prefabs/slime.kbj`). A
+    level's atlas clips come with `Clips::add_atlas`, which returns their
+    handles: `load_level` removes them with `Clips::remove`, as it removes
+    its `TileLayers`. Adding an atlas twice is `ClipError::NameTaken`.
+    Every `.json` the cook finds is read as an Aseprite export: LDtk's own
+    JSON must keep its `.ldtk` and `.ldtkl` extensions, or the scan must
+    learn them first.
   - Depends: M5.5, M4.5, M4.2
   - Do:
     - LDtk → `.klvl` (tile layers, IntGrid → collision, entities, tall
@@ -2813,6 +2887,9 @@ by the batched sprite renderer.
     `assets` beside its executable, as the demo page's download has it;
     `cargo xtask ci` cooks before its tests. Release builds reading the
     pack change both.
+  - Note (from M5.5, ADR-0035): the cook's outputs are `atlas/` (pages,
+    atlas files, fonts' `.font.kbj`) and `data/`, each job's listed in the
+    cache: pack those.
   - Note (from M5.4, ADR-0031): pack the outputs `target/cooked/.cache.kbj`
     lists, not a walk of the folder. An option that changes output, such
     as the release build's string table, goes in the cache's `options`
@@ -2857,6 +2934,11 @@ by the batched sprite renderer.
     and its regions are copied into the game's sprites and clips at setup:
     reloading `atlas/<group>.kbj` must reach them, by name, or the game
     must look its regions up each time.
+  - Note (from M5.5, ADR-0035): the atlas file holds the clips too, named
+    `<sprite>/<tag>` in `Clips` (`Clips::find`), so one reload reaches
+    both; `Clips::add_atlas` refuses names already there, so a reload
+    replaces each clip by name. An export's `.json`, its sheet and its
+    sidecar are its group's files, as a font's `.fnt` and pages are.
   - Do: `xtask cook --watch`; the runtime mtime watcher; reloading
     textures, data, levels and shaders in dev.
   - Accept: an edit appears in the running game within 1 s, and existing
@@ -2950,6 +3032,16 @@ by the batched sprite renderer.
 ## M7 — Developer tools
 
 - [ ] **M7.1 — render: bitmap text**
+  - Note (from M5.5, ADR-0035): the cook writes each font as
+    `atlas/<font>.font.kbj`, version 1 (`assets-and-codecs.md`, "Font
+    file"): BMFont's metrics, the atlas file and sprite of its glyphs, the
+    glyphs by id (a frame of the sprite if it has pixels, BMFont's offsets
+    of its untrimmed rectangle, its advance), the kerning pairs sorted, and
+    the fallback glyph (BMFont's, else `?`). Each glyph's frame is trimmed:
+    its atlas frame's offset places the pixels. The glyphs share the
+    group's RGBA pages, alpha straight. Write its reader in codec, with a
+    fuzz target, and have the cook read back each font file it writes, as
+    it does the atlas file.
   - Depends: M5.5, M3.3
   - Do: the font asset; layout (wrap, align, kerning, color markup); the
     `text` pipeline; the missing-glyph fallback.

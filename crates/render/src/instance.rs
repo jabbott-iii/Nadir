@@ -13,7 +13,7 @@ use crate::SpriteDraw;
 /// | :- | :- | :- |
 /// | 0, 1 | 0 | position: the pivot in the world |
 /// | 2, 3 | 1 | size |
-/// | 4, 5 | 2 | pivot, normalized |
+/// | 4, 5 | 2 | pivot, normalized, mirrored with the flip: `1 - x` for `flip.x` |
 /// | 6 to 9 | 3 | uv rect: u0, v0, u1, v1, with the flip applied by swapping |
 /// | 10 to 13 | 4 | color, linear |
 /// | 14 | 5 | rotation, radians, clockwise |
@@ -48,7 +48,18 @@ pub(crate) fn push_instance(
     if sprite.flip.y {
         (v0, v1) = (v1, v0);
     }
-    let offset = sprite.pivot * sprite.size;
+    // The quad mirrors about the pivot, as its texture does in it.
+    let mut pivot = sprite.pivot;
+    if sprite.flip.x {
+        pivot.x = 1.0 - pivot.x;
+    }
+    if sprite.flip.y {
+        pivot.y = 1.0 - pivot.y;
+    }
+    // To 1/256 of a world unit: a normalized pivot rounds in `f32`
+    // (7/13 × 13 is 7.0000005), which would snap a corner on a half-pixel
+    // tie to the pixel below.
+    let offset = (pivot * sprite.size * 256.0).round() * (1.0 / 256.0);
     let position = match snap_zoom {
         Some(zoom) if sprite.rotation == 0.0 => {
             let corner = sprite.position - offset;
@@ -62,8 +73,8 @@ pub(crate) fn push_instance(
         position.y,
         sprite.size.x,
         sprite.size.y,
-        sprite.pivot.x,
-        sprite.pivot.y,
+        pivot.x,
+        pivot.y,
         u0,
         v0,
         u1,
@@ -130,6 +141,63 @@ mod tests {
         assert_eq!(pack(&sprite, false, None)[6..10], [0.75, 0.5, 0.25, 1.0]);
         sprite.flip = Flip { x: true, y: true };
         assert_eq!(pack(&sprite, false, None)[6..10], [0.75, 1.0, 0.25, 0.5]);
+    }
+
+    #[test]
+    fn a_flip_mirrors_the_quad_about_its_pivot() {
+        // A trimmed frame 10 wide with its pivot 4 pixels in, at x = 100:
+        // it covers 96 to 106, and mirrored 94 to 104.
+        let mut sprite = sprite();
+        sprite.size = Vec2::new(10.0, 20.0);
+        sprite.pivot = Vec2::new(0.4, 1.0);
+        assert_eq!(pack(&sprite, false, None)[4..6], [0.4, 1.0]);
+        sprite.flip.x = true;
+        assert_eq!(pack(&sprite, false, None)[4..6], [0.6, 1.0]);
+        // Its feet stay at y = 50: mirrored top to bottom, it hangs below
+        // them.
+        sprite.flip = Flip { x: false, y: true };
+        assert_eq!(pack(&sprite, false, None)[4..6], [0.4, 0.0]);
+        // A pivot in the middle mirrors in place.
+        sprite.pivot = Vec2::new(0.5, 0.5);
+        sprite.flip = Flip { x: true, y: true };
+        assert_eq!(pack(&sprite, false, None)[4..6], [0.5, 0.5]);
+    }
+
+    #[test]
+    fn pixel_perfect_sprites_snap_their_corner_as_their_pixels_would() {
+        // A frame `width` wide whose pivot is `pixels` in, at x = 0.5, a
+        // tie near the origin, where `f32` keeps the normalized pivot's
+        // rounding: its corner, mirrored or not, goes up to the next whole
+        // pixel. Each case snaps a pixel low with the pivot's offset left
+        // unrounded, as the check below shows.
+        let cases = [
+            (7.0, 13.0, false),
+            (6.0, 13.0, true),
+            (5.0, 6.0, true),
+            (9.0, 10.0, true),
+            (10.0, 12.0, true),
+            (13.0, 14.0, true),
+        ];
+        for (pixels, width, flipped) in cases {
+            let mut sprite = sprite();
+            sprite.size = Vec2::new(width, 20.0);
+            sprite.pivot = Vec2::new(pixels / width, 1.0);
+            sprite.position = Vec2::new(0.5, 50.0);
+            sprite.flip.x = flipped;
+            let floats = pack(&sprite, false, Some(1.0));
+            let from_left = if flipped { width - pixels } else { pixels };
+            let expected = (0.5 - from_left + 0.5_f32).floor();
+            let corner = floats[0] - floats[4] * floats[2];
+            assert!(
+                (corner - expected).abs() < 1e-3,
+                "{pixels}/{width}, flipped {flipped}: corner {corner}, not {expected}"
+            );
+            let unrounded = (0.5 - floats[4] * floats[2] + 0.5_f32).floor();
+            assert_ne!(
+                unrounded, expected,
+                "{pixels}/{width}: the case needs the rounding"
+            );
+        }
     }
 
     #[test]

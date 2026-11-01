@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use nadir_codec::inflate::ErrorKind as InflateError;
 use nadir_codec::{
-    CodecError, Limits, adler32, atlas, bmfont, inflate, json, kbj, klz, png, qoi, wav,
+    CodecError, Limits, adler32, aseprite, atlas, bmfont, inflate, json, kbj, klz, png, qoi, wav,
 };
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
@@ -74,6 +74,10 @@ const TARGETS: &[Target] = &[
     Target {
         name: "atlas",
         run: parse_atlas,
+    },
+    Target {
+        name: "aseprite",
+        run: parse_aseprite,
     },
 ];
 
@@ -237,8 +241,10 @@ fn decode_wav(input: &[u8]) {
 
 /// The `atlas` target: `nadir_codec::atlas::parse`, with the default
 /// limits. What it accepts must keep the promises the game's atlas asset
-/// relies on: each frame on a page that exists and inside it, and inside
-/// its cell; the names in order; a tile set one whole page.
+/// and the facade's clips rely on: each frame on a page that exists and
+/// inside it, and inside its cell; the names in order; a tile set one
+/// whole page, with no clips; each clip of frames the sprite has, that
+/// last, its name with no `/`.
 fn parse_atlas(input: &[u8]) {
     let Ok(file) = atlas::parse(input, Limits::default()) else {
         return;
@@ -279,8 +285,94 @@ fn parse_atlas(input: &[u8]) {
                     && frame.height % height == 0,
                 "a tile set that is not a page of whole tiles"
             );
+            assert!(sprite.clips.is_empty(), "a tile set with clips");
+        }
+        for pair in sprite.clips.windows(2) {
+            assert!(
+                pair[0].name.as_bytes() < pair[1].name.as_bytes(),
+                "clips out of order"
+            );
+        }
+        for clip in &sprite.clips {
+            assert!(
+                !clip.name.is_empty() && !clip.name.contains('/'),
+                "a clip's name that would not make its full name"
+            );
+            assert!(!clip.frames.is_empty(), "a clip with no frame");
+            assert!(
+                clip.frames
+                    .iter()
+                    .all(|step| (step.frame as usize) < sprite.frames.len() && step.millis > 0),
+                "a clip of a frame the sprite lacks, or of one that lasts zero"
+            );
         }
     }
+}
+
+/// The `aseprite` target: `nadir_codec::aseprite::parse`, with the default
+/// limits. What it accepts must keep the promises the cook relies on: one
+/// frame at least, each inside the sheet and inside the canvas they all
+/// share, lasting; each tag's clip of frames the export has, all of them
+/// together within the limit, the names apart and with no `/`.
+fn parse_aseprite(input: &[u8]) {
+    // The reader takes text. Bytes that are not UTF-8 become U+FFFD, so
+    // that every input reaches it.
+    let text = String::from_utf8_lossy(input);
+    let limits = Limits::default();
+    let Ok(export) = aseprite::parse(&text, limits) else {
+        return;
+    };
+    let within =
+        |start: u32, length: u32, end: u32| u64::from(start) + u64::from(length) <= u64::from(end);
+    assert!(!export.frames.is_empty(), "an export with no frame");
+    assert!(
+        !export.image.is_empty() && !export.image.contains(['/', '\\']),
+        "a sheet that is not a file name"
+    );
+    let canvas = (
+        export.frames[0].source_width,
+        export.frames[0].source_height,
+    );
+    for frame in &export.frames {
+        assert!(
+            frame.width > 0
+                && frame.height > 0
+                && within(frame.x, frame.width, export.width)
+                && within(frame.y, frame.height, export.height),
+            "a frame off its sheet"
+        );
+        assert!(
+            (frame.source_width, frame.source_height) == canvas
+                && within(frame.offset_x, frame.width, frame.source_width)
+                && within(frame.offset_y, frame.height, frame.source_height),
+            "a frame outside its canvas"
+        );
+        assert!(frame.duration > 0, "a frame that lasts zero");
+    }
+    let mut total = 0;
+    let mut names: Vec<&str> = Vec::new();
+    for tag in &export.tags {
+        assert!(
+            !tag.frames.is_empty()
+                && tag
+                    .frames
+                    .iter()
+                    .all(|&frame| (frame as usize) < export.frames.len()),
+            "a clip of a frame the export lacks"
+        );
+        assert!(
+            !tag.name.is_empty() && !tag.name.contains('/'),
+            "a tag's name that would not make a clip's"
+        );
+        total += tag.frames.len();
+        names.push(&tag.name);
+    }
+    assert!(total <= limits.max_entries, "clips past the limit");
+    names.sort_unstable();
+    assert!(
+        names.windows(2).all(|pair| pair[0] != pair[1]),
+        "two tags of one name"
+    );
 }
 
 /// The most bytes of pixels the `png` target decodes to: a 2048 × 2048
@@ -1510,6 +1602,43 @@ mod tests {
         assert!(ansi.fallback.is_some());
         assert!(ansi.glyphs.iter().any(|glyph| glyph.id == 0x2018));
         assert!(ansi.glyphs.iter().all(|glyph| glyph.id != 145));
+    }
+
+    #[test]
+    fn the_atlas_seeds_are_files_the_codec_accepts() {
+        let files: Vec<atlas::AtlasFile> = seeds_of("atlas")
+            .iter()
+            .map(|seed| atlas::parse(seed, Limits::default()))
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // Among them, clips, and the sandbox's cooked sprites.
+        assert!(
+            files
+                .iter()
+                .any(|file| file.sprites.iter().any(|sprite| sprite.clips.len() > 1))
+        );
+        assert!(files.iter().any(|file| {
+            file.sprites
+                .iter()
+                .any(|sprite| sprite.name == "sprites/person")
+        }));
+    }
+
+    #[test]
+    fn the_aseprite_seeds_are_exports_the_reader_accepts() {
+        let exports: Vec<aseprite::Export> = seeds_of("aseprite")
+            .iter()
+            .map(|seed| aseprite::parse(std::str::from_utf8(seed).unwrap(), Limits::default()))
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // Among them, a ping-pong of repeats, and an export with no tags.
+        assert!(exports.iter().any(|export| {
+            export
+                .tags
+                .iter()
+                .any(|tag| tag.repeat > 0 && tag.direction != aseprite::Direction::Forward)
+        }));
+        assert!(exports.iter().any(|export| export.tags.is_empty()));
     }
 
     #[test]

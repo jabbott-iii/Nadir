@@ -1,0 +1,51 @@
+{ "frames": [
+   {
+    "filename": "knight 0.aseprite",
+    "frame": { "x": 0, "y": 0, "w": 16, "h": 16 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 16, "h": 16 },
+    "sourceSize": { "w": 16, "h": 16 },
+    "duration": 100
+   },
+   {
+    "filename": "knight 1.aseprite",
+    "frame": { "x": 16, "y": 0, "w": 16, "h": 16 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 16, "h": 16 },
+    "sourceSize": { "w": 16, "h": 16 },
+    "duration": 150
+   },
+   {
+    "filename": "knight 2.aseprite",
+    "frame": { "x": 32, "y": 0, "w": 16, "h": 16 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 16, "h": 16 },
+    "sourceSize": { "w": 16, "h": 16 },
+    "duration": 100
+   }
+ ],
+ "meta": {
+  "app": "http://www.aseprite.org/",
+  "version": "1.2.25-x64",
+  "image": "knight.png",
+  "format": "RGBA8888",
+  "size": { "w": 48, "h": 16 },
+  "scale": "1",
+  "frameTags": [
+   { "name": "idle", "from": 0, "to": 0, "direction": "forward" },
+   { "name": "swing", "from": 1, "to": 2, "direction": "pingpong" }
+  ],
+  "layers": [
+   { "name": "Body", "color": "#6acd5bff", "data": "group" },
+   { "name": "Armor", "group": "Body", "opacity": 255, "blendMode": "normal" },
+   { "name": "Shadow", "opacity": 127, "blendMode": "multiply" }
+  ],
+  "slices": [
+   { "name": "Hand", "color": "#0000ffff", "keys": [{ "frame": 0, "bounds": {"x": 10, "y": 6, "w": 3, "h": 3 }, "pivot": {"x": 1, "y": 1 } }] },
+   { "name": "Panel", "color": "#0000ffff", "data": "nine", "keys": [{ "frame": 0, "bounds": {"x": 0, "y": 0, "w": 16, "h": 16 }, "center": {"x": 4, "y": 4, "w": 8, "h": 8 } }] }
+  ]
+ }
+}

@@ -30,7 +30,8 @@
 //! The sprites are cooked (`assets/sprites/`, cooked by `cargo xtask cook`
 //! into one atlas): they are read from `assets` beside the executable, as
 //! the demo page's download has them, or else from the workspace's
-//! `target/cooked`.
+//! `target/cooked`. The person's clips are the tags of their Aseprite
+//! export, `assets/sprites/person.json`.
 //!
 //! A recording, when its window is closed, and its replay each log their
 //! ticks and the world's hash after them (`replay.rs`); a recording whose
@@ -247,30 +248,15 @@ const SPEED: f32 = 120.0;
 /// Where the person starts: where their feet are.
 const PLAYER_START: Vec2 = Vec2::new(240.0, 160.0);
 
-/// How long each frame of a walk shows: the four frames take 400 ms.
-const STEP: Duration = Duration::from_millis(100);
-
-/// The clips of a person: standing, and walking. `move_player` plays them,
-/// and each scene makes them from the texture it draws people from.
+/// The clips of a person, the tags of their Aseprite export: standing, and
+/// walking. `move_player` plays them, and the crowds walk from their own
+/// points of the walk.
+#[derive(Clone, Copy, Debug)]
 struct Gait {
     stand: Handle<Clip>,
     walk: Handle<Clip>,
-}
-
-impl Gait {
-    /// A person standing in `frames[0]` and walking through the other four,
-    /// each for [`STEP`]. Adds the clips to the app's [`Clips`].
-    fn new(app: &App, frames: &[Region; 5]) -> Self {
-        let frame = |region: &Region| ClipFrame::new(region.texture(), region.frame.uv(), STEP);
-        let mut clips = app.world().resource_mut::<Clips>();
-        Self {
-            stand: clips.add(Clip::new(vec![frame(&frames[0])], Playback::Loop)),
-            walk: clips.add(Clip::new(
-                frames[1..].iter().map(frame).collect(),
-                Playback::Loop,
-            )),
-        }
-    }
+    /// How long the walk lasts, once through.
+    cycle: Duration,
 }
 
 /// The cooked atlas of `assets/sprites/`.
@@ -279,9 +265,12 @@ const ATLAS: &str = "atlas/sprites.kbj";
 /// The sprites, from the cooked atlas [`ATLAS`]: every one on its first
 /// page, but for the tile set, which has its own.
 struct Sprites {
-    /// The person: standing, then the four frames of a walk, each 12 × 20
-    /// and untrimmed (`assets/sprites/person.sprite.jsonc`).
+    /// The person: standing, then the four frames of a walk, each a cell of
+    /// 12 × 20 trimmed to its pixels (`assets/sprites/person.json`, an
+    /// export in Aseprite's format).
     person: [Region; 5],
+    /// The person's clips.
+    gait: Gait,
     tree: Region,
     rock: Region,
     grass: Region,
@@ -305,15 +294,15 @@ impl Region {
 }
 
 impl Sprites {
-    /// Loads the atlas from the cooked assets, now, and its pages in the
-    /// background, as the textures they are.
+    /// Loads the atlas from the cooked assets, now, its pages in the
+    /// background, as the textures they are, and adds its clips to the
+    /// app's [`Clips`].
     ///
     /// # Errors
     ///
     /// If the atlas is not there, or is not `assets/` as it is now cooked:
-    /// a sprite the sandbox draws is missing, the person's frames are
-    /// trimmed, or the tile set is not the map's 8 × 4. The error says to
-    /// cook the assets.
+    /// a sprite or a clip the sandbox draws is missing, or the tile set is
+    /// not the map's 8 × 4. The error says to cook the assets.
     fn load(app: &App) -> Result<Self, Box<dyn Error>> {
         let mut server = app.world().resource_mut::<AssetServer>();
         let cook = "run `cargo xtask cook` to cook `assets/` into `target/cooked`";
@@ -343,13 +332,22 @@ impl Sprites {
         };
         let person = [0, 1, 2, 3, 4].map(|index| region("sprites/person", index));
         let person = person.into_iter().collect::<Result<Vec<_>, _>>()?;
-        // The clips swap the frames on one sprite: whole frames, all one
-        // size, until a clip's frame has a size of its own (roadmap M5.5).
-        if person.iter().any(|region| {
-            region.frame.size() != UVec2::new(12, 20) || region.frame.offset() != UVec2::ZERO
-        }) {
-            return Err(stale("the person's frames are trimmed, or not 12 × 20").into());
-        }
+        // The clips, each frame placed by its own trimmed size and pivot.
+        let mut clips = app.world().resource_mut::<Clips>();
+        clips
+            .add_atlas(&atlas, &pages)
+            .map_err(|error| format!("the clips of `{ATLAS}` cannot be added: {error}"))?;
+        let clip = |name: &str| {
+            clips
+                .find(name)
+                .ok_or_else(|| stale(&format!("it has no clip `{name}`")))
+        };
+        let walk = clip("sprites/person/walk")?;
+        let gait = Gait {
+            stand: clip("sprites/person/stand")?,
+            walk,
+            cycle: clips.get(walk).map_or(Duration::ZERO, Clip::duration),
+        };
         let tiles = sprite("sprites/tiles")?;
         let tiles = tiles
             .frames()
@@ -362,6 +360,7 @@ impl Sprites {
             person: person
                 .try_into()
                 .map_err(|_| stale("the person does not have 5 frames"))?,
+            gait,
             tree: region("sprites/tree", 0)?,
             rock: region("sprites/rock", 0)?,
             grass: region("sprites/grass", 0)?,
@@ -460,7 +459,7 @@ fn at_feet(half: Vec2, layer: LayerMask, mask: LayerMask) -> Collider {
 /// The field: the map's ground and grid, its tall walls, trees and rocks,
 /// then the person, and the camera on them.
 fn field(mut app: App, sprites: &Sprites) -> App {
-    let gait = Gait::new(&app, &sprites.person);
+    let gait = sprites.gait;
     let set = sprites.tiles;
     let map = map::build(set);
     let world = app.world_mut();
@@ -964,20 +963,29 @@ mod tests {
         assert!(world.read::<Sprite>().get(player).expect("drawn").flip.x);
     }
 
-    /// The person's size: of every frame of theirs.
-    const PERSON: Vec2 = Vec2::new(12.0, 20.0);
-
     /// The region of frame `index` of the person in the atlas: standing,
     /// then four of a walk.
     fn person_frame(app: &App, index: usize) -> Rect {
         app.world().resource::<Sprites>().person[index].frame.uv()
     }
 
-    /// Where the last frame drew the person from in the atlas: the one
-    /// sprite of their size.
+    /// Whether `sprite` shows a frame of the person: their frames are
+    /// trimmed, so not all one size.
+    fn is_person(sprites: &Sprites, sprite: &SpriteDraw) -> bool {
+        sprites
+            .person
+            .iter()
+            .any(|region| region.frame.uv() == sprite.uv)
+    }
+
+    /// Where the last frame drew the person from in the atlas.
     fn drawn_person(app: &App) -> Rect {
         let out = app.world().resource::<RenderFrame>();
-        let drawn = out.sprites.iter().find(|sprite| sprite.size == PERSON);
+        let sprites = app.world().resource::<Sprites>();
+        let drawn = out
+            .sprites
+            .iter()
+            .find(|sprite| is_person(&sprites, sprite));
         drawn.expect("the person is drawn").uv
     }
 
@@ -1024,13 +1032,18 @@ mod tests {
         let drawn: Vec<&SpriteDraw> = out
             .sprites
             .iter()
-            .filter(|sprite| sprite.size == PERSON)
+            .filter(|sprite| is_person(&sprites, sprite))
             .collect();
         assert_eq!(drawn.len(), 1);
         assert_eq!(drawn[0].position, PLAYER_START);
         assert_eq!(drawn[0].layer, 1);
-        // Standing, the first frame of the sheet.
+        // Standing, the first frame of the sheet, trimmed a pixel in from
+        // the left, and drawn where its cell of 12 × 20 has those pixels.
         assert_eq!(drawn[0].uv, person_frame(&app, 0));
+        let corner = drawn[0].position - drawn[0].pivot * drawn[0].size;
+        let offset = sprites.person[0].frame.offset().as_vec2();
+        assert_eq!(offset, Vec2::new(1.0, 0.0));
+        assert_eq!(corner, PLAYER_START - Vec2::new(6.0, 20.0) + offset);
         // A tree is trimmed of its 4 clear rows at the top, and drawn where
         // its whole cell of 24 × 48 would have its pixels: its feet at its
         // position.
@@ -1164,7 +1177,7 @@ mod tests {
             };
             let tree_uv = sprites.tree.frame.uv();
             let (person, tree) = (
-                nearest(&|sprite| sprite.size == PERSON),
+                nearest(&|sprite| is_person(&sprites, sprite)),
                 nearest(&|sprite| sprite.uv == tree_uv),
             );
             // Sorted against each other by their feet: one layer, y-sorted.
@@ -1256,5 +1269,34 @@ mod tests {
             (sprites.tiles.columns, sprites.tiles.rows),
             (map::COLUMNS, map::ROWS)
         );
+        // The person's clips, their export's tags, with each frame's
+        // trimmed size and pivot, 100 ms each: standing in frame 0, and
+        // walking through the other four.
+        let clips = world.resource::<Clips>();
+        assert_eq!(clips.name(sprites.gait.stand), Some("sprites/person/stand"));
+        assert_eq!(clips.name(sprites.gait.walk), Some("sprites/person/walk"));
+        let stand = clips.get(sprites.gait.stand).expect("the stand");
+        let walk = clips.get(sprites.gait.walk).expect("the walk");
+        assert_eq!(
+            (stand.playback(), walk.playback()),
+            (Playback::Loop, Playback::Loop)
+        );
+        assert_eq!((stand.frames().len(), walk.frames().len()), (1, 4));
+        assert_eq!(sprites.gait.cycle, Duration::from_millis(400));
+        let shown = stand.frames().iter().chain(walk.frames());
+        for (frame, region) in shown.zip(&sprites.person) {
+            assert_eq!(
+                (frame.texture, frame.uv),
+                (region.texture(), region.frame.uv())
+            );
+            assert_eq!(
+                frame.placement,
+                Some(Placement {
+                    size: region.sprite.size,
+                    pivot: region.sprite.pivot
+                })
+            );
+            assert_eq!(frame.duration, Duration::from_millis(100));
+        }
     }
 }

@@ -1,5 +1,8 @@
-// The person: standing, then the 4 frames of a walk, each 12 × 20.
-// Untrimmed until a clip's frame has a size and pivot of its own (roadmap
-// M5.5): the clips swap regions on one sprite, which a trimmed frame of
-// another width would be stretched to fit.
-{ "frames": [12, 20], "trim": false }
+// The person: `person.json`, an export in Aseprite's json-array format of
+// `person.png`, standing (the tag `stand`) and then the 4 frames of a walk
+// (`walk`), each 12 × 20, 100 ms. It was written by hand, as Aseprite 1.3
+// writes `aseprite -b person.aseprite --sheet person.png --data person.json
+// --format json-array --list-tags`, since the person has no `.aseprite`
+// file yet (ADR-0035): its `meta.version` is a placeholder. Each frame is
+// trimmed, and the pivot is its feet, (6, 20): the defaults.
+{}

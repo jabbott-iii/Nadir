@@ -47,49 +47,73 @@ pub enum CookError {
         /// The other, as found.
         second: String,
     },
-    /// An image directly in the source folder: an image's folder names its
-    /// group.
+    /// An image, an Aseprite export or a font directly in the source
+    /// folder: its folder names its group.
     ImageAtRoot {
-        /// The image, as found.
+        /// The file, as found.
         path: String,
     },
-    /// A `.sprite.jsonc` with no `.png` of its name beside it.
+    /// A `.sprite.jsonc` with no `.json` or `.png` of its name beside it.
     OrphanSidecar {
         /// The sidecar, as found.
         path: String,
     },
-    /// A sidecar or an `atlas.jsonc` that says something wrong.
+    /// A sidecar, an `atlas.jsonc`, an Aseprite export, a font or a data
+    /// file that says something wrong, or names a sheet or page that is not
+    /// there.
     Config {
         /// The file, as found.
         path: String,
         /// What is wrong.
         reason: String,
     },
-    /// An image that does not fit the sidecar's frames or tiles.
+    /// An image that does not fit its sidecar's frames or tiles, a sheet
+    /// that does not fit its export, or a font whose pages do not fit it.
     Layout {
-        /// The image, lowercased.
+        /// The image, the export or the font, lowercased.
         path: String,
         /// What does not fit.
         reason: String,
     },
-    /// A PNG the decoder refused.
+    /// A file a decoder refused: a PNG, an Aseprite export, a font or a
+    /// data file.
     Decode {
-        /// The image, lowercased.
+        /// The file, lowercased.
         path: String,
         /// Why.
         error: CodecError,
     },
+    /// An image that two exports or fonts take as their sheet or page.
+    Claimed {
+        /// The image, as found.
+        path: String,
+        /// One that takes it, as found.
+        first: String,
+        /// The other.
+        second: String,
+    },
+    /// Two files of one atlas group that make sprites of one name: an image
+    /// and an export, say, or a font and an image that is not its page.
+    SpriteNameTaken {
+        /// The sprite's name.
+        name: String,
+        /// One file, as found.
+        first: String,
+        /// The other.
+        second: String,
+    },
     /// A frame too big for the largest page, with its extrusion.
     TooBig {
-        /// The image, lowercased.
+        /// The image, the export or the font, lowercased.
         path: String,
         /// The frame, from 0.
         frame: usize,
         /// Its width and height, trimmed.
         size: (u32, u32),
     },
-    /// Two outputs, or folders of outputs, that would be one on a system
-    /// that ignores case: groups' atlas files, or tile sets' pages.
+    /// Two outputs, or folders of outputs, that are one, or would be on a
+    /// system that ignores case: groups' atlas files, tile sets' pages, or
+    /// fonts' files.
     OutputCollision {
         /// One, below the output folder.
         first: String,
@@ -140,15 +164,34 @@ impl fmt::Display for CookError {
             ),
             Self::ImageAtRoot { path } => write!(
                 f,
-                "`{path}` is not in a folder: an image's folder names its atlas group"
+                "`{path}` is not in a folder: its folder names its atlas group"
             ),
             Self::OrphanSidecar { path } => {
-                write!(f, "`{path}` has no image of its name beside it")
+                write!(
+                    f,
+                    "`{path}` has no image or Aseprite export of its name beside it"
+                )
             }
             Self::Config { path, reason } | Self::Layout { path, reason } => {
                 write!(f, "`{path}`: {reason}")
             }
             Self::Decode { path, error } => write!(f, "`{path}`: {error}"),
+            Self::Claimed {
+                path,
+                first,
+                second,
+            } => write!(
+                f,
+                "`{path}` is taken by both `{first}` and `{second}`: an image is the sheet or page of one"
+            ),
+            Self::SpriteNameTaken {
+                name,
+                first,
+                second,
+            } => write!(
+                f,
+                "`{first}` and `{second}` would both be the sprite `{name}`"
+            ),
             Self::TooBig {
                 path,
                 frame,

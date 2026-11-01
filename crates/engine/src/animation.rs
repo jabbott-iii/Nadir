@@ -1,19 +1,22 @@
 //! Sprite animation: [`Clip`]s of frames, kept in [`Clips`], and the
 //! [`Animator`] that plays one on its entity's [`Sprite`](crate::Sprite)
-//! (ADR-0024).
+//! (ADR-0024). A cooked atlas's clips, from Aseprite's tags, are added with
+//! [`Clips::add_atlas`], each frame placed as its trimmed pixels (ADR-0035).
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
 use nadir_assets::Handle;
-use nadir_core::{GenArena, Rect};
+use nadir_core::{GenArena, Rect, Vec2};
 use nadir_ecs::{Component, Entity};
-use nadir_render::Texture;
+use nadir_render::{Atlas, AtlasSprite, Texture};
 
-/// One frame of a [`Clip`]: a region of a texture, shown for `duration`.
+/// One frame of a [`Clip`]: a region of a texture, shown for `duration`,
+/// and maybe the size and pivot of its quad.
 ///
-/// Made with [`ClipFrame::new`] outside this crate, so that fields can be
-/// added later (a trimmed frame's size and pivot, roadmap M5.5).
+/// Made with [`ClipFrame::new`] or [`ClipFrame::from_atlas`] outside this
+/// crate, so that fields can be added later.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct ClipFrame {
@@ -23,18 +26,102 @@ pub struct ClipFrame {
     pub uv: Rect,
     /// How long the frame shows: more than zero.
     pub duration: Duration,
+    /// The quad the frame is drawn as, which `nadir::animate` writes into
+    /// the Sprite with the texture and uv: a trimmed frame's own size and
+    /// pivot. `None` leaves the Sprite's size and pivot as they are, which
+    /// may be those that a frame of another clip wrote.
+    pub placement: Option<Placement>,
+}
+
+/// The size and pivot of a frame's quad, as [`Sprite::size`](crate::Sprite::size)
+/// and [`Sprite::pivot`](crate::Sprite::pivot) hold them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placement {
+    /// The size in world units.
+    pub size: Vec2,
+    /// The point of the quad at the entity's position, normalized.
+    pub pivot: Vec2,
 }
 
 impl ClipFrame {
-    /// The region `uv` of `texture`, shown for `duration`.
+    /// The region `uv` of `texture`, shown for `duration`, in the quad the
+    /// Sprite already has.
     pub const fn new(texture: Handle<Texture>, uv: Rect, duration: Duration) -> Self {
         Self {
             texture,
             uv,
             duration,
+            placement: None,
+        }
+    }
+
+    /// Frame `frame` of `sprite`, from a cooked [`Atlas`], in `texture`,
+    /// which must be the frame's page, shown for `duration`: placed as
+    /// [`Sprite::from_atlas`](crate::Sprite::from_atlas) places it, its
+    /// trimmed size at one world unit a pixel, with the sprite's pivot where
+    /// the untrimmed cell has it. So the frames of a clip, trimmed each to
+    /// its own pixels, show where the sheet drew them, and mirror about the
+    /// pivot. `None` if `sprite` has no such frame, or is a tile set.
+    pub fn from_atlas(
+        texture: Handle<Texture>,
+        sprite: &AtlasSprite,
+        frame: usize,
+        duration: Duration,
+    ) -> Option<Self> {
+        let pivot = sprite.pivot()?;
+        let frame = sprite.frame(frame)?;
+        Some(Self {
+            texture,
+            uv: frame.uv(),
+            duration,
+            placement: Some(Placement {
+                size: frame.size().as_vec2(),
+                pivot: frame.pivot_in(pivot),
+            }),
+        })
+    }
+}
+
+/// Why a clip could not be made or added.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ClipError {
+    /// The clip has no frame.
+    NoFrames,
+    /// A frame lasts zero.
+    FrameLastsZero {
+        /// The frame, from 0.
+        index: usize,
+    },
+    /// The frames together last longer than a `Duration` holds.
+    TooLong,
+    /// [`Clips`] has a clip of this name already.
+    NameTaken(String),
+    /// The textures given for an atlas's pages are not one for each.
+    WrongPages {
+        /// The atlas's pages.
+        needed: usize,
+        /// The textures given.
+        given: usize,
+    },
+}
+
+impl fmt::Display for ClipError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoFrames => write!(f, "a clip needs a frame"),
+            Self::FrameLastsZero { index } => write!(f, "frame {index} of a clip lasts zero"),
+            Self::TooLong => write!(f, "a clip's frames last longer than a Duration holds"),
+            Self::NameTaken(name) => write!(f, "there is a clip named `{name}` already"),
+            Self::WrongPages { needed, given } => write!(
+                f,
+                "the atlas has {needed} pages, and {given} textures were given for them"
+            ),
         }
     }
 }
+
+impl std::error::Error for ClipError {}
 
 /// What a [`Clip`] does at its end.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -62,27 +149,39 @@ impl Clip {
     /// # Panics
     ///
     /// If there are no frames, if a frame lasts zero, or if the frames
-    /// together last longer than a `Duration` can hold.
+    /// together last longer than a `Duration` can hold: see
+    /// [`Clip::try_new`].
     pub fn new(frames: Vec<ClipFrame>, playback: Playback) -> Self {
-        assert!(!frames.is_empty(), "a clip needs a frame");
+        match Self::try_new(frames, playback) {
+            Ok(clip) => clip,
+            Err(error) => panic!("{error}"),
+        }
+    }
+
+    /// A clip of `frames`, in order, as [`Clip::new`] makes it.
+    ///
+    /// # Errors
+    ///
+    /// [`ClipError::NoFrames`], [`ClipError::FrameLastsZero`] or
+    /// [`ClipError::TooLong`].
+    pub fn try_new(frames: Vec<ClipFrame>, playback: Playback) -> Result<Self, ClipError> {
+        if frames.is_empty() {
+            return Err(ClipError::NoFrames);
+        }
         let mut ends = Vec::with_capacity(frames.len());
         let mut end = Duration::ZERO;
         for (index, frame) in frames.iter().enumerate() {
-            assert!(
-                !frame.duration.is_zero(),
-                "frame {index} of a clip lasts zero"
-            );
-            end = match end.checked_add(frame.duration) {
-                Some(end) => end,
-                None => panic!("a clip's frames last longer than a Duration holds"),
-            };
+            if frame.duration.is_zero() {
+                return Err(ClipError::FrameLastsZero { index });
+            }
+            end = end.checked_add(frame.duration).ok_or(ClipError::TooLong)?;
             ends.push(end);
         }
-        Self {
+        Ok(Self {
             frames,
             ends,
             playback,
-        }
+        })
     }
 
     /// The frames, in order.
@@ -121,13 +220,21 @@ fn from_nanos(nanos: u128) -> Duration {
     Duration::new(seconds, (nanos % 1_000_000_000) as u32)
 }
 
-/// The clips, by handle: a resource that the engine adds. An [`Animator`]
-/// names its clip by the handle that [`Clips::add`] gives.
+/// The clips, by handle, and by name for those that have one: a resource
+/// that the engine adds. An [`Animator`] names its clip by the handle that
+/// [`Clips::add`], [`Clips::add_named`] or [`Clips::add_atlas`] gives.
 ///
 /// It is the only place `Handle<Clip>`s come from: a clip is not an asset
 /// of the `AssetServer` (ADR-0024).
 pub struct Clips {
-    clips: GenArena<Clip>,
+    clips: GenArena<Named>,
+    names: BTreeMap<String, Handle<Clip>>,
+}
+
+/// A clip, and its name if it has one.
+struct Named {
+    clip: Clip,
+    name: Option<String>,
 }
 
 impl Clips {
@@ -135,24 +242,123 @@ impl Clips {
     pub fn new() -> Self {
         Self {
             clips: GenArena::new(),
+            names: BTreeMap::new(),
         }
     }
 
-    /// Adds `clip`, and returns its handle.
+    /// Adds `clip`, with no name, and returns its handle.
     pub fn add(&mut self, clip: Clip) -> Handle<Clip> {
-        Handle::new(self.clips.insert(clip))
+        Handle::new(self.clips.insert(Named { clip, name: None }))
+    }
+
+    /// Adds `clip` named `name`, and returns its handle.
+    ///
+    /// # Errors
+    ///
+    /// [`ClipError::NameTaken`] if a clip has that name: none is added.
+    pub fn add_named(
+        &mut self,
+        name: impl Into<String>,
+        clip: Clip,
+    ) -> Result<Handle<Clip>, ClipError> {
+        let name = name.into();
+        if self.names.contains_key(&name) {
+            return Err(ClipError::NameTaken(name));
+        }
+        let handle = Handle::new(self.clips.insert(Named {
+            clip,
+            name: Some(name.clone()),
+        }));
+        self.names.insert(name, handle);
+        Ok(handle)
+    }
+
+    /// Adds every clip of every sprite of `atlas`, each named by its sprite
+    /// and its own name, as `sprites/person/walk`, with its frames placed
+    /// by [`ClipFrame::from_atlas`] in `pages`, the textures of the atlas's
+    /// pages ([`Atlas::load_pages`]). Returns their handles sprite by sprite,
+    /// in the atlas's order, and each sprite's clips by name. A looping clip
+    /// is [`Playback::Loop`]; the others [`Playback::Once`].
+    ///
+    /// # Errors
+    ///
+    /// [`ClipError::WrongPages`] if `pages` is not one texture a page, and
+    /// [`ClipError::NameTaken`] if a clip has one of their names, as when an
+    /// atlas is added twice. Then none is added.
+    pub fn add_atlas(
+        &mut self,
+        atlas: &Atlas,
+        pages: &[Handle<Texture>],
+    ) -> Result<Vec<Handle<Clip>>, ClipError> {
+        if pages.len() != atlas.pages().len() {
+            return Err(ClipError::WrongPages {
+                needed: atlas.pages().len(),
+                given: pages.len(),
+            });
+        }
+        let mut made = Vec::new();
+        for sprite in atlas.sprites() {
+            for clip in sprite.clips() {
+                let name = format!("{}/{}", sprite.name(), clip.name());
+                if self.names.contains_key(&name) {
+                    return Err(ClipError::NameTaken(name));
+                }
+                // The atlas reader checked that each step shows a frame of
+                // the sprite, which is on one of the pages.
+                let frames = clip
+                    .frames()
+                    .iter()
+                    .filter_map(|step| {
+                        let page = sprite.frame(step.frame())?.page();
+                        ClipFrame::from_atlas(
+                            *pages.get(page)?,
+                            sprite,
+                            step.frame(),
+                            step.duration(),
+                        )
+                    })
+                    .collect();
+                let playback = if clip.is_looping() {
+                    Playback::Loop
+                } else {
+                    Playback::Once
+                };
+                made.push((name, Clip::try_new(frames, playback)?));
+            }
+        }
+        Ok(made
+            .into_iter()
+            .map(|(name, clip)| {
+                self.add_named(name, clip)
+                    .expect("each name was checked as free, and they differ")
+            })
+            .collect())
     }
 
     /// The clip of `handle`, or `None` if it was removed.
     pub fn get(&self, handle: Handle<Clip>) -> Option<&Clip> {
-        self.clips.get(handle.id())
+        self.clips.get(handle.id()).map(|named| &named.clip)
     }
 
-    /// Removes the clip of `handle`, and returns it. Animators that still
-    /// play it stop where they are; the first such animator in the process
-    /// logs a warning.
+    /// The clip named `name`, such as `sprites/person/walk`.
+    pub fn find(&self, name: &str) -> Option<Handle<Clip>> {
+        self.names.get(name).copied()
+    }
+
+    /// The name of the clip of `handle`, if it has one and was not removed.
+    pub fn name(&self, handle: Handle<Clip>) -> Option<&str> {
+        self.clips.get(handle.id())?.name.as_deref()
+    }
+
+    /// Removes the clip of `handle`, and its name, and returns it.
+    /// Animators that still play it stop where they are; the first such
+    /// animator in the process logs a warning.
     pub fn remove(&mut self, handle: Handle<Clip>) -> Option<Clip> {
-        self.clips.remove(handle.id())
+        let named = self.clips.remove(handle.id())?;
+        if let Some(name) = &named.name {
+            self.names.remove(name);
+        }
+        Some(named.clip)
     }
 
     /// How many clips there are.
@@ -184,13 +390,14 @@ impl fmt::Debug for Clips {
 /// advances it by how long the simulation ran since the last frame (the
 /// change in `RenderFrame::time`), so clips slow and stop with the clock,
 /// as animated tiles do. It then writes the texture and the uv of the frame
-/// it shows into the Sprite, which `nadir::extract_sprites` draws.
+/// it shows into the Sprite, and its size and pivot if the frame has a
+/// [`Placement`], which `nadir::extract_sprites` draws.
 ///
 /// Its time is frame state. It moves once a frame, by however the ticks
 /// fell into frames, so a fixed system may call [`Animator::play`] and
 /// [`Animator::restart`], but must not decide anything by
-/// [`Animator::elapsed`], [`Animator::is_finished`] or the Sprite's
-/// texture and uv: to wait for a clip, count ticks (roadmap M4.7).
+/// [`Animator::elapsed`], [`Animator::is_finished`] or what it writes into
+/// the Sprite: to wait for a clip, count ticks (roadmap M4.7).
 ///
 /// An animator that starts (new, played or restarted) is advanced on its
 /// first frame by that frame's whole step, so it is first drawn up to one
@@ -398,6 +605,23 @@ mod tests {
             Clip::new(vec![frame(Duration::MAX), frame(NS)], Playback::Loop)
         });
         assert!(long.is_err(), "longer than a Duration");
+        // The same, as errors.
+        assert_eq!(
+            Clip::try_new(Vec::new(), Playback::Loop),
+            Err(ClipError::NoFrames)
+        );
+        assert_eq!(
+            Clip::try_new(vec![frame(MS), frame(Duration::ZERO)], Playback::Once),
+            Err(ClipError::FrameLastsZero { index: 1 })
+        );
+        assert_eq!(
+            Clip::try_new(vec![frame(Duration::MAX), frame(NS)], Playback::Loop),
+            Err(ClipError::TooLong)
+        );
+        assert_eq!(
+            ClipError::FrameLastsZero { index: 1 }.to_string(),
+            "frame 1 of a clip lasts zero"
+        );
         // As long as a Duration holds is long enough.
         let longest = Clip::new(vec![frame(Duration::MAX - NS), frame(NS)], Playback::Loop);
         assert_eq!(longest.duration(), Duration::MAX);
@@ -535,5 +759,144 @@ mod tests {
         assert_ne!(fall, walk);
         assert_eq!(clips.get(walk), None);
         assert_eq!(format!("{clips:?}"), "Clips { len: 2 }");
+    }
+
+    #[test]
+    fn a_named_clip_is_found_by_its_name_until_removed() {
+        let mut clips = Clips::new();
+        let walk = clips
+            .add_named("sprites/person/walk", clip(&[100], Playback::Loop))
+            .expect("a free name");
+        let unnamed = clips.add(clip(&[10], Playback::Once));
+        assert_eq!(clips.find("sprites/person/walk"), Some(walk));
+        assert_eq!(clips.name(walk), Some("sprites/person/walk"));
+        assert_eq!(clips.name(unnamed), None);
+        assert_eq!(clips.find("sprites/person"), None);
+        assert_eq!(
+            clips.add_named("sprites/person/walk", clip(&[5], Playback::Loop)),
+            Err(ClipError::NameTaken("sprites/person/walk".to_string()))
+        );
+        assert_eq!(clips.len(), 2);
+        clips.remove(walk);
+        assert_eq!(clips.find("sprites/person/walk"), None);
+        assert_eq!(clips.name(walk), None);
+        // The name is free again.
+        let again = clips
+            .add_named("sprites/person/walk", clip(&[5], Playback::Loop))
+            .expect("a free name");
+        assert_ne!(again, walk);
+    }
+
+    /// An atlas of two pages: a person whose two frames are trimmed apart,
+    /// with two clips, and a tree with none.
+    fn atlas() -> Atlas {
+        use nadir_assets::{Asset, DecodeCtx};
+        use nadir_codec::{Limits, json, kbj};
+        let text = r#"{ "version": 2,
+            "pages": [ { "path": "atlas/sprites_0.qoi", "w": 64, "h": 64 },
+                       { "path": "atlas/sprites_1.qoi", "w": 64, "h": 64 } ],
+            "sprites": [
+              { "name": "sprites/person",
+                "frames": [ { "page": 0, "x": 1, "y": 1, "w": 10, "h": 20, "ox": 1, "oy": 0, "sw": 12, "sh": 20 },
+                            { "page": 1, "x": 1, "y": 1, "w": 9, "h": 18, "ox": 2, "oy": 2, "sw": 12, "sh": 20 } ],
+                "pivot": [6.0, 20.0],
+                "clips": [ { "name": "stand", "loop": true, "frames": [[0, 100]] },
+                           { "name": "wave", "loop": false, "frames": [[1, 40], [0, 60]] } ] },
+              { "name": "sprites/tree",
+                "frames": [ { "page": 0, "x": 20, "y": 1, "w": 24, "h": 44, "ox": 0, "oy": 4, "sw": 24, "sh": 48 } ],
+                "pivot": [12.0, 48.0] } ] }"#;
+        let value = json::parse(text, Limits::default()).expect("the test's JSON");
+        let bytes = kbj::encode(&value, Limits::default()).expect("encodable");
+        Atlas::decode(
+            &bytes,
+            &DecodeCtx::new("atlas/sprites.kbj", Limits::default()),
+        )
+        .expect("an atlas")
+    }
+
+    #[test]
+    fn an_atlas_s_clips_are_added_by_name_each_frame_placed_on_its_page() {
+        let atlas = atlas();
+        let pages = [texture(7), texture(8)];
+        let mut clips = Clips::new();
+        let added = clips.add_atlas(&atlas, &pages).expect("the clips");
+        let stand = clips.find("sprites/person/stand").expect("stand");
+        let wave = clips.find("sprites/person/wave").expect("wave");
+        assert_eq!(added, [stand, wave]);
+        assert_eq!(clips.len(), 2);
+
+        let stand = clips.get(stand).expect("a clip");
+        assert_eq!(stand.playback(), Playback::Loop);
+        assert_eq!(stand.duration(), 100 * MS);
+        let wave = clips.get(wave).expect("a clip");
+        assert_eq!(wave.playback(), Playback::Once);
+        let person = atlas.sprite("sprites/person").expect("the person");
+        let shown: Vec<(Handle<Texture>, Rect, Duration)> = wave
+            .frames()
+            .iter()
+            .map(|frame| (frame.texture, frame.uv, frame.duration))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (pages[1], person.frames()[1].uv(), 40 * MS),
+                (pages[0], person.frames()[0].uv(), 60 * MS),
+            ]
+        );
+        // Each frame its own quad, with the pivot where the cell has it: a
+        // frame 2 pixels in from the left, 9 wide, has the pivot 6 - 2 = 4
+        // pixels in.
+        assert_eq!(
+            wave.frames()[0].placement,
+            Some(Placement {
+                size: Vec2::new(9.0, 18.0),
+                pivot: Vec2::new(4.0 / 9.0, 18.0 / 18.0),
+            })
+        );
+        assert_eq!(
+            wave.frames()[1].placement,
+            Some(Placement {
+                size: Vec2::new(10.0, 20.0),
+                pivot: Vec2::new(0.5, 1.0),
+            })
+        );
+    }
+
+    #[test]
+    fn an_atlas_s_clips_are_added_all_or_none() {
+        let atlas = atlas();
+        let mut clips = Clips::new();
+        assert_eq!(
+            clips.add_atlas(&atlas, &[texture(7)]),
+            Err(ClipError::WrongPages {
+                needed: 2,
+                given: 1
+            })
+        );
+        assert!(clips.is_empty());
+        // One name already taken: none is added.
+        clips
+            .add_named("sprites/person/wave", clip(&[5], Playback::Loop))
+            .expect("a free name");
+        assert_eq!(
+            clips.add_atlas(&atlas, &[texture(7), texture(8)]),
+            Err(ClipError::NameTaken("sprites/person/wave".to_string()))
+        );
+        assert_eq!(clips.len(), 1);
+        assert_eq!(clips.find("sprites/person/stand"), None);
+    }
+
+    #[test]
+    fn a_frame_of_an_atlas_is_placed_as_a_sprite_of_it_would_be() {
+        let atlas = atlas();
+        let person = atlas.sprite("sprites/person").expect("the person");
+        let frame = ClipFrame::from_atlas(texture(8), person, 1, 40 * MS).expect("a frame");
+        let sprite = crate::Sprite::from_atlas(texture(8), person, 1).expect("a sprite");
+        let placement = frame.placement.expect("placed");
+        assert_eq!(
+            (frame.uv, placement.size, placement.pivot),
+            (sprite.uv, sprite.size, sprite.pivot)
+        );
+        assert!(ClipFrame::from_atlas(texture(8), person, 2, MS).is_none());
     }
 }

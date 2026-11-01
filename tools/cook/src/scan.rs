@@ -12,10 +12,19 @@ use crate::CookError;
 
 /// The extension of the images the cook packs.
 const IMAGE: &str = ".png";
-/// The extension of an image's sidecar.
+/// The extension of an image's or an export's sidecar.
 const SIDECAR: &str = ".sprite.jsonc";
 /// The name of a folder's settings.
 const FOLDER_CONFIG: &str = "atlas.jsonc";
+/// The extension of an Aseprite export: every `.json` is read as one.
+pub(crate) const EXPORT: &str = ".json";
+/// The extension of a BMFont font, in the text format.
+pub(crate) const FONT: &str = ".fnt";
+/// The folder of the data files, below the source folder: each `.jsonc` in
+/// it, or below it, is data.
+const DATA_FOLDER: &str = "data/";
+/// The extension of a data file.
+pub(crate) const DATA: &str = ".jsonc";
 
 /// Something the walk found below the source folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +59,12 @@ pub(crate) struct Source {
 pub(crate) struct Plan {
     /// The images, by path, each with its sidecar if it has one.
     pub(crate) images: Vec<(Source, Option<Source>)>,
+    /// The Aseprite exports, by path, each with its sidecar if it has one.
+    pub(crate) exports: Vec<(Source, Option<Source>)>,
+    /// The BMFont fonts, by path.
+    pub(crate) fonts: Vec<Source>,
+    /// The data files, by path.
+    pub(crate) data: Vec<Source>,
     /// The folders' `atlas.jsonc` files, by path.
     pub(crate) configs: Vec<Source>,
     /// What is not cooked, by path as found, and why.
@@ -111,17 +126,27 @@ enum Role {
     Image,
     Sidecar,
     Config,
+    Export,
+    Font,
+    Data,
     Other,
 }
 
 fn role(path: &str) -> Role {
-    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
-    if name == FOLDER_CONFIG {
+    let path = path.to_ascii_lowercase();
+    let name = path.rsplit('/').next().unwrap_or(&path);
+    if path.starts_with(DATA_FOLDER) && name.ends_with(DATA) {
+        Role::Data
+    } else if name == FOLDER_CONFIG {
         Role::Config
     } else if name.ends_with(SIDECAR) {
         Role::Sidecar
     } else if name.ends_with(IMAGE) {
         Role::Image
+    } else if name.ends_with(EXPORT) {
+        Role::Export
+    } else if name.ends_with(FONT) {
+        Role::Font
     } else {
         Role::Other
     }
@@ -145,12 +170,13 @@ pub(crate) fn fold(name: &str) -> String {
 
 /// Applies the rules to what [`walk`] found, in any order.
 ///
-/// - A file the cook reads (an image, a sidecar, an `atlas.jsonc`) must
-///   have an asset path and a name that is UTF-8, and not be a symbolic
-///   link; and no other name in a folder that holds it, or in its folders,
-///   may equal its own once [`fold`]ed. Other files with such names are
-///   skipped, and say why.
-/// - An image must be in a folder, and a sidecar beside its image.
+/// - A file the cook reads (an image, a sidecar, an `atlas.jsonc`, an
+///   Aseprite export, a font, a data file) must have an asset path and a
+///   name that is UTF-8, and not be a symbolic link; and no other name in a
+///   folder that holds it, or in its folders, may equal its own once
+///   [`fold`]ed. Other files with such names are skipped, and say why.
+/// - An image, an export or a font must be in a folder, and a sidecar
+///   beside its export, or else its image, of the same name.
 ///
 /// # Errors
 ///
@@ -213,6 +239,9 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
     let mut images = Vec::new();
     let mut sidecars = Vec::new();
     let mut configs = Vec::new();
+    let mut exports = Vec::new();
+    let mut fonts = Vec::new();
+    let mut data = Vec::new();
     for entry in &entries {
         let read = role(&entry.path) != Role::Other;
         let reason = match entry.kind {
@@ -263,10 +292,13 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
             path,
         };
         match role {
-            Role::Image if parent(&source.path).is_empty() => {
+            Role::Image | Role::Export | Role::Font if parent(&source.path).is_empty() => {
                 return Err(CookError::ImageAtRoot { path: source.found });
             }
             Role::Image => images.push(source),
+            Role::Export => exports.push(source),
+            Role::Font => fonts.push(source),
+            Role::Data => data.push(source),
             Role::Sidecar => sidecars.push(source),
             Role::Config => configs.push(source),
             Role::Other => {
@@ -275,13 +307,21 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
         }
     }
 
+    // A sidecar goes with the export of its name, or else the image.
     let mut paired: BTreeMap<String, Option<Source>> = images
         .iter()
-        .map(|image| (image.path.clone(), None))
+        .chain(&exports)
+        .map(|file| (file.path.clone(), None))
         .collect();
     for sidecar in sidecars {
         let stem = &sidecar.path[..sidecar.path.len() - SIDECAR.len()];
-        match paired.get_mut(&format!("{stem}{IMAGE}")) {
+        let export = format!("{stem}{EXPORT}");
+        let owner = if paired.contains_key(&export) {
+            export
+        } else {
+            format!("{stem}{IMAGE}")
+        };
+        match paired.get_mut(&owner) {
             Some(slot) => *slot = Some(sidecar),
             None => {
                 return Err(CookError::OrphanSidecar {
@@ -290,15 +330,22 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
             }
         }
     }
-    let images = images
-        .into_iter()
-        .map(|image| {
-            let sidecar = paired.remove(&image.path).flatten();
-            (image, sidecar)
-        })
-        .collect();
+    let mut with_sidecars = |files: Vec<Source>| -> Vec<(Source, Option<Source>)> {
+        files
+            .into_iter()
+            .map(|file| {
+                let sidecar = paired.remove(&file.path).flatten();
+                (file, sidecar)
+            })
+            .collect()
+    };
+    let images = with_sidecars(images);
+    let exports = with_sidecars(exports);
     Ok(Plan {
         images,
+        exports,
+        fonts,
+        data,
         configs,
         skipped: skipped.into_iter().collect(),
     })
@@ -365,6 +412,71 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn exports_fonts_and_data_are_cooked_and_a_sidecar_goes_with_its_export() {
+        let found = plan(&[
+            folder("data"),
+            folder("data/Items"),
+            file("data/Items/Sword.jsonc"),
+            file("data/settings.jsonc"),
+            file("data/notes.txt"),
+            folder("fonts"),
+            file("fonts/pixel.fnt"),
+            file("fonts/pixel_0.png"),
+            folder("sprites"),
+            file("sprites/person.json"),
+            file("sprites/person.png"),
+            file("sprites/person.sprite.jsonc"),
+            file("sprites/tree.png"),
+            file("sprites/tree.sprite.jsonc"),
+            file("sprites/notes.jsonc"),
+        ])
+        .expect("a plan");
+        assert_eq!(
+            found.exports,
+            [(
+                source("sprites/person.json"),
+                Some(source("sprites/person.sprite.jsonc"))
+            )]
+        );
+        // The export's sheet is an image until the export claims it.
+        assert_eq!(
+            found.images,
+            [
+                (source("fonts/pixel_0.png"), None),
+                (source("sprites/person.png"), None),
+                (
+                    source("sprites/tree.png"),
+                    Some(source("sprites/tree.sprite.jsonc"))
+                ),
+            ]
+        );
+        assert_eq!(found.fonts, [source("fonts/pixel.fnt")]);
+        assert_eq!(
+            found.data,
+            [
+                source("data/Items/Sword.jsonc"),
+                source("data/settings.jsonc")
+            ]
+        );
+        // A `.jsonc` outside `data/` that is not a sidecar is no one's.
+        let skipped: Vec<&str> = found
+            .skipped
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect();
+        assert_eq!(skipped, ["data/notes.txt", "sprites/notes.jsonc"]);
+        // Exports and fonts need a folder, as images do.
+        for path in ["person.json", "pixel.fnt"] {
+            assert_eq!(
+                plan(&[file(path)]),
+                Err(CookError::ImageAtRoot {
+                    path: path.to_string()
+                })
+            );
+        }
     }
 
     #[test]

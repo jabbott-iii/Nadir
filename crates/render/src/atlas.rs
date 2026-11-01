@@ -1,5 +1,8 @@
 //! The atlas asset: a cooked atlas file, `atlas/<group>.kbj`, which says
-//! where each sprite's frames are on the atlas's pages (ADR-0033).
+//! where each sprite's frames are on the atlas's pages (ADR-0033), and the
+//! clips an Aseprite export's tags make of them (ADR-0035).
+
+use std::time::Duration;
 
 use nadir_assets::{
     Asset, AssetError, AssetPath, AssetServer, DecodeCtx, FinalizeCtx, Handle, Scope,
@@ -10,8 +13,8 @@ use nadir_core::{Rect, UVec2, Vec2};
 use crate::{Texture, TileSet};
 
 /// An atlas the cook made: its pages, and its sprites by name, each with
-/// its frames on the pages. A game loads it, then its pages as the
-/// [`Texture`]s they are ([`Atlas::load_pages`]).
+/// its frames on the pages and its clips. A game loads it, then its pages as
+/// the [`Texture`]s they are ([`Atlas::load_pages`]).
 ///
 /// It needs no GPU, so [`Asset::finalize`] needs nothing in its context,
 /// and a game can make it before its window opens, with
@@ -31,13 +34,32 @@ pub struct AtlasPage {
     size: UVec2,
 }
 
-/// A sprite of an atlas: an image, a sheet of frames, or a tile set.
+/// A sprite of an atlas: an image, a sheet of frames, an Aseprite export,
+/// or a tile set.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AtlasSprite {
     name: String,
     frames: Vec<AtlasFrame>,
     pivot: Option<Vec2>,
     tile_size: Option<UVec2>,
+    clips: Vec<AtlasClip>,
+}
+
+/// A clip of a sprite, from a tag of its Aseprite export: frames of the
+/// sprite shown one after another, looping or once. The facade makes a
+/// `Clip` of each (`Clips::add_atlas`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AtlasClip {
+    name: String,
+    looping: bool,
+    frames: Vec<AtlasClipFrame>,
+}
+
+/// One step of an [`AtlasClip`]: a frame of its sprite, shown for a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AtlasClipFrame {
+    frame: usize,
+    duration: Duration,
 }
 
 /// Where a frame is on its page, trimmed to its pixels, and where it was in
@@ -129,6 +151,21 @@ impl AtlasSprite {
         self.tile_size
     }
 
+    /// Its clips, in byte order of their names: none for a tile set, or for
+    /// a sprite that is not an Aseprite export with tags.
+    pub fn clips(&self) -> &[AtlasClip] {
+        &self.clips
+    }
+
+    /// Its clip named `name`, the tag's name, such as `walk`.
+    pub fn clip(&self, name: &str) -> Option<&AtlasClip> {
+        let index = self
+            .clips
+            .binary_search_by(|clip| clip.name.as_bytes().cmp(name.as_bytes()))
+            .ok()?;
+        self.clips.get(index)
+    }
+
     /// It as a tile set of `texture`, which must be its page, if it is one.
     pub fn tile_set(&self, texture: Handle<Texture>) -> Option<TileSet> {
         let tile = self.tile_size?;
@@ -138,6 +175,36 @@ impl AtlasSprite {
             columns: u16::try_from(size.x / tile.x).ok()?,
             rows: u16::try_from(size.y / tile.y).ok()?,
         })
+    }
+}
+
+impl AtlasClip {
+    /// Its name within its sprite: not empty, with no `/`.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Whether it starts again at its end; otherwise it stops on its last
+    /// frame.
+    pub fn is_looping(&self) -> bool {
+        self.looping
+    }
+
+    /// What it shows, in order: one at least.
+    pub fn frames(&self) -> &[AtlasClipFrame] {
+        &self.frames
+    }
+}
+
+impl AtlasClipFrame {
+    /// The frame, an index into its sprite's [`AtlasSprite::frames`].
+    pub fn frame(&self) -> usize {
+        self.frame
+    }
+
+    /// How long it shows: a whole number of milliseconds, 1 or more.
+    pub fn duration(&self) -> Duration {
+        self.duration
     }
 }
 
@@ -226,6 +293,22 @@ impl Asset for Atlas {
                     SpriteKind::Tiles([w, h]) => Some(UVec2::new(w, h)),
                     _ => None,
                 },
+                clips: sprite
+                    .clips
+                    .into_iter()
+                    .map(|clip| AtlasClip {
+                        name: clip.name,
+                        looping: clip.looping,
+                        frames: clip
+                            .frames
+                            .iter()
+                            .map(|step| AtlasClipFrame {
+                                frame: step.frame as usize,
+                                duration: Duration::from_millis(u64::from(step.millis)),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
             })
             .collect();
         Ok(Atlas { pages, sprites })
@@ -271,14 +354,16 @@ mod tests {
         )
     }
 
-    const ATLAS: &str = r#"{ "version": 1,
+    const ATLAS: &str = r#"{ "version": 2,
         "pages": [ { "path": "atlas/sprites_0.qoi", "w": 128, "h": 128 },
                    { "path": "atlas/sprites/tiles.tiles.qoi", "w": 128, "h": 64 } ],
         "sprites": [
           { "name": "sprites/person",
             "frames": [ { "page": 0, "x": 33, "y": 85, "w": 10, "h": 20, "ox": 1, "oy": 0, "sw": 12, "sh": 20 },
                         { "page": 0, "x": 0, "y": 0, "w": 0, "h": 0, "ox": 0, "oy": 0, "sw": 12, "sh": 20 } ],
-            "pivot": [6.0, 20.0] },
+            "pivot": [6.0, 20.0],
+            "clips": [ { "name": "blink", "loop": false, "frames": [[0, 250], [1, 40], [0, 1000]] },
+                       { "name": "stand", "loop": true, "frames": [[0, 100]] } ] },
           { "name": "sprites/tiles",
             "frames": [ { "page": 1, "x": 0, "y": 0, "w": 128, "h": 64, "ox": 0, "oy": 0, "sw": 128, "sh": 64 } ],
             "tiles": [16, 16] },
@@ -373,12 +458,60 @@ mod tests {
                 "{path}"
             );
         }
-        // And the file itself is checked by the codec.
-        let text = ATLAS.replacen(r#""version": 1"#, r#""version": 9"#, 1);
-        assert!(matches!(
-            decoded(&text),
-            Err(AssetError::Decode(nadir_codec::CodecError::Atlas { .. }))
-        ));
+        // And the file itself is checked by the codec: version 1, which had
+        // no clips, and later ones are refused.
+        for version in [1, 9] {
+            let text = ATLAS.replacen(r#""version": 2"#, &format!(r#""version": {version}"#), 1);
+            assert!(text.contains(&format!(r#""version": {version}"#)));
+            assert!(
+                matches!(
+                    decoded(&text),
+                    Err(AssetError::Decode(nadir_codec::CodecError::Atlas { ref at, .. })) if at == "version"
+                ),
+                "version {version}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sprite_s_clips_are_found_by_name_with_their_frames_and_times() {
+        let atlas = decoded(ATLAS).expect("an atlas");
+        let person = atlas.sprite("sprites/person").expect("the person");
+        let names: Vec<&str> = person.clips().iter().map(AtlasClip::name).collect();
+        assert_eq!(names, ["blink", "stand"]);
+        let blink = person.clip("blink").expect("a clip");
+        assert!(!blink.is_looping());
+        let steps: Vec<(usize, Duration)> = blink
+            .frames()
+            .iter()
+            .map(|step| (step.frame(), step.duration()))
+            .collect();
+        assert_eq!(
+            steps,
+            [
+                (0, Duration::from_millis(250)),
+                (1, Duration::from_millis(40)),
+                (0, Duration::from_secs(1)),
+            ]
+        );
+        assert!(person.clip("stand").expect("a clip").is_looping());
+        assert!(person.clip("walk").is_none());
+        assert!(person.clip("").is_none());
+        // Sprites with none.
+        assert!(
+            atlas
+                .sprite("sprites/tree")
+                .expect("the tree")
+                .clips()
+                .is_empty()
+        );
+        assert!(
+            atlas
+                .sprite("sprites/tiles")
+                .expect("the tiles")
+                .clips()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -120,14 +120,15 @@ pub trait FromValue: Reflect + Sized {
   "extends": "enemy_base",            // single inheritance, resolved at load, cycle-checked
   "components": {
     "Sprite":   { "atlas": "atlas/enemies", "region": "slime_idle_0" },
-    "Animator": { "clip": "anim/slime_idle" },
+    "Animator": { "clip": "enemies/slime/idle" },   // a clip of Clips: the tag `idle` of `enemies/slime.json`
     "Health":   { "current": 12, "max": 12 },
     "Collider": { "shape": { "Circle": { "radius": 6 } }, "layer": ["Enemy"], "mask": ["World", "Player"] }
   }
 }
 ```
 
-- Cooked to KBJ, then loaded into `PrefabLibrary`.
+- Cooked to KBJ, `data/prefabs/slime.kbj` (M5.5, ADR-0035), then loaded
+  into `PrefabLibrary`.
 - `spawn_prefab(commands, "slime", overrides)` applies component values in
   order: base, then derived, then per-instance overrides from the level.
 

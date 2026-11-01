@@ -42,7 +42,8 @@ pub enum SortMode {
     Fixed(u32),
 }
 
-/// Which way a sprite's texture is mirrored, in place.
+/// Which way a sprite or a tile is mirrored: a sprite about its pivot
+/// ([`SpriteDraw::flip`]), a tile in its cell.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Flip {
     /// Left to right.
@@ -75,7 +76,10 @@ pub struct SpriteDraw {
     pub layer: u8,
     /// How it is ordered within its layer.
     pub sort: SortMode,
-    /// Which way its texture is mirrored.
+    /// Which way it is mirrored, about its pivot, so that a trimmed frame
+    /// mirrors as its untrimmed cell would: one whose pivot is in the middle
+    /// of its width mirrors in place left to right, and one with its pivot
+    /// at its feet hangs below them when mirrored top to bottom.
     pub flip: Flip,
 }
 

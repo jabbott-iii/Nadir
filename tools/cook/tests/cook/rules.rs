@@ -197,6 +197,6 @@ fn files_no_pipeline_cooks_are_listed_and_nothing_fails_for_them() {
     assert_eq!(skipped, ["readme.md", "sfx/jump.wav"]);
     assert_eq!(
         report.warnings,
-        ["`empty/atlas.jsonc` is in a folder with no image, so it does nothing"]
+        ["`empty/atlas.jsonc` is in a folder with no image, export or font, so it does nothing"]
     );
 }

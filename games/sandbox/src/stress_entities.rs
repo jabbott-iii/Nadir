@@ -16,7 +16,7 @@
 use nadir::prelude::*;
 
 use crate::stress::{PLAYER_TINT, Pace, Walker, facing, heading, stagger, turn_crowd, unit};
-use crate::{Gait, Ground, Sprites, map, spawn_player};
+use crate::{Ground, Sprites, map, spawn_player};
 
 /// How many people jostle.
 pub(crate) const BODIES: usize = 5_000;
@@ -32,7 +32,7 @@ const PACE: f32 = 3.0;
 /// Adds the maze, the people, the player and the systems to `app`.
 pub(crate) fn add(app: App, sprites: &Sprites) -> App {
     let mut app = app.register_component::<Walker>();
-    let gait = Gait::new(&app, &sprites.person);
+    let gait = sprites.gait;
     let (grid, open) = maze();
     let walls = walls(&grid, sprites.tiles);
     let world = app.world_mut();
@@ -66,7 +66,7 @@ pub(crate) fn add(app: App, sprites: &Sprites) -> App {
             .with(Velocity(velocity))
             .with(collider)
             .with(sprite)
-            .with(Animator::starting_at(gait.walk, stagger(index)))
+            .with(Animator::starting_at(gait.walk, stagger(index, gait.cycle)))
             .with(facing(velocity));
     }
     let mut person = sprites.person[0].sprite;
@@ -197,7 +197,14 @@ mod tests {
         for (entity, _) in walkers.iter() {
             let sprite = sprites.get(entity).expect("drawn");
             let frame = walk.iter().position(|&uv| uv == sprite.uv);
-            frames[frame.expect("a frame of the walk")] += 1;
+            let frame = frame.expect("a frame of the walk");
+            frames[frame] += 1;
+            // Each frame drawn in its own trimmed size.
+            let region = &world.resource::<Sprites>().person[1 + frame];
+            assert_eq!(
+                (sprite.size, sprite.pivot),
+                (region.sprite.size, region.sprite.pivot)
+            );
             let velocity = velocities.get(entity).expect("one").0;
             assert_eq!(sprite.flip.x, velocity.x < 0.0, "{entity:?}");
         }

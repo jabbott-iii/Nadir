@@ -23,7 +23,7 @@ mod texture;
 mod tiles;
 mod view;
 
-pub use atlas::{Atlas, AtlasFrame, AtlasPage, AtlasSprite};
+pub use atlas::{Atlas, AtlasClip, AtlasClipFrame, AtlasFrame, AtlasPage, AtlasSprite};
 pub use batcher::SpriteBatcher;
 pub use error::RenderError;
 pub use frame::{Camera2D, Flip, RenderFrame, SortMode, SpriteDraw};

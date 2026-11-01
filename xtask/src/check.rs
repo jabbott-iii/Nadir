@@ -43,7 +43,7 @@ pub(crate) const CHECKS: &[Check] = &[
     // Before `test`: the sandbox's tests draw the cooked sprites (ADR-0033).
     Check {
         name: "cook",
-        about: "Cook assets/ into target/cooked: [--force] cooks every group again",
+        about: "Cook assets/ into target/cooked: [--force] cooks every job again",
         run: |root| pass_through(root, &crate::cook_command(false)),
     },
     Check {

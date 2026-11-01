@@ -4,7 +4,7 @@ use std::fmt;
 
 #[cfg(feature = "png")]
 use crate::png;
-use crate::{atlas, bmfont, inflate, json, kbj, klz, qoi, wav};
+use crate::{aseprite, atlas, bmfont, inflate, json, kbj, klz, qoi, wav};
 
 /// Errors produced by `nadir-codec`.
 ///
@@ -78,6 +78,15 @@ pub enum CodecError {
         /// What is wrong.
         kind: atlas::ErrorKind,
     },
+    /// A JSON file is not an Aseprite export the cook takes
+    /// ([`aseprite::parse`](crate::aseprite::parse)).
+    Aseprite {
+        /// Where the problem is, such as `frames[3].frame.w`; empty for the
+        /// file as a whole.
+        at: String,
+        /// What is wrong.
+        kind: aseprite::ErrorKind,
+    },
     /// A value cannot be encoded as KBJ.
     KbjEncode {
         /// Why not.
@@ -118,6 +127,10 @@ impl fmt::Display for CodecError {
                 write!(f, "atlas error in the file: {kind}")
             }
             Self::Atlas { at, kind } => write!(f, "atlas error at `{at}`: {kind}"),
+            Self::Aseprite { at, kind } if at.is_empty() => {
+                write!(f, "Aseprite export error in the file: {kind}")
+            }
+            Self::Aseprite { at, kind } => write!(f, "Aseprite export error at `{at}`: {kind}"),
             Self::Wav { offset, kind } => write!(f, "WAV error at byte {offset}: {kind}"),
             Self::BmFont { line, column, kind } => {
                 write!(f, "BMFont error at line {line}, column {column}: {kind}")

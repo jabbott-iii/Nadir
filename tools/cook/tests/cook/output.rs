@@ -27,7 +27,7 @@ fn the_atlas_says_where_each_frame_went() {
     tree(&source);
     cook(&source, &out).expect("a cook");
     let atlas = kbj(&out, "atlas/chars.kbj");
-    assert_eq!(atlas.get("version").and_then(Value::as_i64), Some(1));
+    assert_eq!(atlas.get("version").and_then(Value::as_i64), Some(2));
     let pages = atlas.get("pages").and_then(Value::as_array).expect("pages");
     assert_eq!(pages.len(), 1);
     assert_eq!(

@@ -1,16 +1,18 @@
-//! The atlas file, `atlas/<group>.kbj`, version 1: where the cook packed
-//! each sprite's frames (`docs/subsystems/assets-and-codecs.md`, "Atlas
-//! file"). The cook writes it; the game's atlas asset reads it with
-//! [`parse`].
+//! The atlas file, `atlas/<group>.kbj`, version 2: where the cook packed
+//! each sprite's frames, and the clips an Aseprite export's tags make of
+//! them (`docs/subsystems/assets-and-codecs.md`, "Atlas file"). The cook
+//! writes it; the game's atlas asset reads it with [`parse`].
 //!
 //! ```text
-//! { "version": 1,
+//! { "version": 2,
 //!   "pages": [ { "path": "atlas/sprites_0.qoi", "w": 128, "h": 128 } ],
 //!   "sprites": [
 //!     { "name": "sprites/person",
 //!       "frames": [ { "page": 0, "x": 33, "y": 85, "w": 10, "h": 20,
 //!                     "ox": 1, "oy": 0, "sw": 12, "sh": 20 } ],
-//!       "pivot": [6.0, 20.0] },
+//!       "pivot": [6.0, 20.0],
+//!       "clips": [ { "name": "walk", "loop": true,
+//!                    "frames": [[1, 100], [2, 100]] } ] },
 //!     { "name": "sprites/tiles",
 //!       "frames": [ { "page": 1, "x": 0, "y": 0, "w": 128, "h": 64,
 //!                     "ox": 0, "oy": 0, "sw": 128, "sh": 64 } ],
@@ -19,8 +21,9 @@
 //!
 //! It is KBJ, read with the KBJ decoder and its limits, then checked:
 //!
-//! - **Members:** each object has the members above and no others, and the
-//!   version is 1: any other is not supported.
+//! - **Members:** each object has the members above and no others, but
+//!   `clips`, which a sprite may leave out; and the version is 2: any other,
+//!   1 included, is not supported.
 //! - **Pages:** one at least, each with a path and a size of 1 to 4096 on
 //!   each side.
 //! - **Sprites:** each with a name, and the names in byte order with no two
@@ -33,6 +36,11 @@
 //!   at (0, 0) with no offset; a frame of one side 0 is not one.
 //! - **Tile sets:** one frame, which is the whole of its page, untrimmed,
 //!   and a whole number of tiles across and down.
+//! - **Clips:** only a sprite with a pivot has them, one at least if it has
+//!   `clips`; each with a name that is not empty and has no `/`, the names
+//!   in byte order with no two the same; `loop` true or false; one frame at
+//!   least, each a frame of the sprite and a time of 1 ms or more that fits
+//!   32 bits.
 //!
 //! A problem is a [`CodecError::Atlas`], which names where it is, such as
 //! `sprites[2].frames[0].w`.
@@ -42,8 +50,9 @@ use std::fmt;
 use crate::json::Value;
 use crate::{CodecError, Limits, kbj};
 
-/// The version of the atlas file that [`parse`] reads.
-pub const VERSION: i64 = 1;
+/// The version of the atlas file that [`parse`] reads: 2, which added
+/// clips. Version 1 files are not supported: cook them again.
+pub const VERSION: i64 = 2;
 
 /// The largest side of a page, in pixels.
 pub const MAX_PAGE_SIDE: u32 = 4096;
@@ -80,6 +89,31 @@ pub struct SpriteEntry {
     pub frames: Vec<Frame>,
     /// A sprite's pivot, or a tile set's tile size.
     pub kind: SpriteKind,
+    /// Its clips, in byte order of their names: none for a tile set, or for
+    /// a sprite that is not an Aseprite export with tags.
+    pub clips: Vec<ClipEntry>,
+}
+
+/// A clip of a sprite: its frames, one after another, looping or once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ClipEntry {
+    /// Its name within its sprite, such as `walk`: not empty, with no `/`.
+    pub name: String,
+    /// Whether it starts again at its end, or stops on its last frame.
+    pub looping: bool,
+    /// What it shows, in order: one at least.
+    pub frames: Vec<ClipFrameEntry>,
+}
+
+/// One step of a clip: a frame of its sprite, shown for a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ClipFrameEntry {
+    /// The frame, an index into the sprite's frames.
+    pub frame: u32,
+    /// How long it shows, in milliseconds: 1 or more.
+    pub millis: u32,
 }
 
 /// What a sprite is.
@@ -127,7 +161,7 @@ impl Frame {
 /// What is wrong with an atlas file. See [`CodecError::Atlas`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ErrorKind {
-    /// The version is not 1.
+    /// The version is not 2.
     Version {
         /// The version the file gives.
         found: i64,
@@ -161,12 +195,13 @@ pub enum ErrorKind {
         /// How many it needs.
         expected: usize,
     },
-    /// The file has no page, or a sprite no frame.
+    /// The file has no page, a sprite no frame, or a sprite's clips or a
+    /// clip's frames are an empty list.
     Empty,
     /// A name or path is empty.
     EmptyString,
-    /// A sprite's name does not come after the one before it in byte
-    /// order.
+    /// A sprite's or a clip's name does not come after the one before it in
+    /// byte order.
     NotSorted,
     /// A frame's page does not exist.
     NoSuchPage {
@@ -185,6 +220,16 @@ pub enum ErrorKind {
     /// A tile set does not have one frame that is the whole of its page, in
     /// whole tiles.
     BadTileSet,
+    /// A clip shows a frame its sprite does not have.
+    NoSuchFrame {
+        /// The frame.
+        frame: u32,
+    },
+    /// A tile set has clips.
+    ClipsOfTileSet,
+    /// A clip's name has a `/`, which would make its full name
+    /// (`sprites/person/walk`) another sprite's.
+    BadClipName,
 }
 
 impl fmt::Display for ErrorKind {
@@ -204,7 +249,7 @@ impl fmt::Display for ErrorKind {
             Self::EmptyString => write!(f, "must not be an empty string"),
             Self::NotSorted => write!(
                 f,
-                "the sprites must be in byte order of their names, with no two the same"
+                "must come after the one before it in byte order, with no two the same"
             ),
             Self::NoSuchPage { page } => write!(f, "page {page} does not exist"),
             Self::OffPage => write!(f, "the frame runs off its page"),
@@ -218,6 +263,9 @@ impl fmt::Display for ErrorKind {
                 f,
                 "a tile set has one frame, the whole of its page, untrimmed, in whole tiles"
             ),
+            Self::NoSuchFrame { frame } => write!(f, "the sprite has no frame {frame}"),
+            Self::ClipsOfTileSet => write!(f, "a tile set has no clips"),
+            Self::BadClipName => write!(f, "a clip's name has no `/`"),
         }
     }
 }
@@ -229,7 +277,7 @@ impl fmt::Display for ErrorKind {
 ///
 /// [`CodecError::Kbj`] if the bytes are not KBJ, and
 /// [`CodecError::Atlas`], naming where, if they are not an atlas file of
-/// version 1.
+/// version 2.
 pub fn parse(bytes: &[u8], limits: Limits) -> Result<AtlasFile, CodecError> {
     read(&kbj::decode(bytes, limits)?)
 }
@@ -415,7 +463,7 @@ fn page(value: &Value, at: &At<'_>) -> Result<Page, CodecError> {
 }
 
 fn sprite(value: &Value, at: &At<'_>, pages: &[Page]) -> Result<SpriteEntry, CodecError> {
-    let members = Members::of(value, at, &["name", "frames", "pivot", "tiles"])?;
+    let members = Members::of(value, at, &["name", "frames", "pivot", "tiles", "clips"])?;
     let name = string(members.require("name", at)?, &At::Member(at, "name"))?;
 
     let frames_at = At::Member(at, "frames");
@@ -446,7 +494,78 @@ fn sprite(value: &Value, at: &At<'_>, pages: &[Page]) -> Result<SpriteEntry, Cod
         }
         _ => return Err(at.error(ErrorKind::PivotOrTiles)),
     };
-    Ok(SpriteEntry { name, frames, kind })
+
+    let mut clips: Vec<ClipEntry> = Vec::new();
+    if let Some(value) = members.get("clips") {
+        let at = At::Member(at, "clips");
+        if matches!(kind, SpriteKind::Tiles(_)) {
+            return Err(at.error(ErrorKind::ClipsOfTileSet));
+        }
+        let items = array(value, &at)?;
+        if items.is_empty() {
+            return Err(at.error(ErrorKind::Empty));
+        }
+        clips.reserve_exact(items.len());
+        for (index, item) in items.iter().enumerate() {
+            let at = At::Item(&at, index);
+            let clip = clip(item, &at, frames.len())?;
+            if let Some(before) = clips.last()
+                && before.name.as_bytes() >= clip.name.as_bytes()
+            {
+                return Err(At::Member(&at, "name").error(ErrorKind::NotSorted));
+            }
+            clips.push(clip);
+        }
+    }
+    Ok(SpriteEntry {
+        name,
+        frames,
+        kind,
+        clips,
+    })
+}
+
+/// A clip of a sprite of `frame_count` frames.
+fn clip(value: &Value, at: &At<'_>, frame_count: usize) -> Result<ClipEntry, CodecError> {
+    let members = Members::of(value, at, &["name", "loop", "frames"])?;
+    let name_at = At::Member(at, "name");
+    let name = string(members.require("name", at)?, &name_at)?;
+    if name.contains('/') {
+        return Err(name_at.error(ErrorKind::BadClipName));
+    }
+    let looping = match members.require("loop", at)? {
+        Value::Bool(looping) => *looping,
+        _ => {
+            return Err(At::Member(at, "loop").error(ErrorKind::WrongType {
+                expected: "true or false",
+            }));
+        }
+    };
+    let frames_at = At::Member(at, "frames");
+    let items = array(members.require("frames", at)?, &frames_at)?;
+    if items.is_empty() {
+        return Err(frames_at.error(ErrorKind::Empty));
+    }
+    let mut frames = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let at = At::Item(&frames_at, index);
+        let [frame, millis] = pair(item, &at)?;
+        let frame_at = At::Item(&at, 0);
+        let frame = whole(frame, &frame_at, 0, u32::MAX)?;
+        if usize::try_from(frame)
+            .ok()
+            .is_none_or(|frame| frame >= frame_count)
+        {
+            return Err(frame_at.error(ErrorKind::NoSuchFrame { frame }));
+        }
+        let millis = whole(millis, &At::Item(&at, 1), 1, u32::MAX)?;
+        frames.push(ClipFrameEntry { frame, millis });
+    }
+    Ok(ClipEntry {
+        name,
+        looping,
+        frames,
+    })
 }
 
 const FRAME_MEMBERS: [&str; 9] = ["page", "x", "y", "w", "h", "ox", "oy", "sw", "sh"];
@@ -581,7 +700,7 @@ mod tests {
 
     /// An atlas file of `sprites`, a list in JSON, on [`PAGES`].
     fn file(sprites: &str) -> String {
-        format!(r#"{{ "version": 1, "pages": {PAGES}, "sprites": {sprites} }}"#)
+        format!(r#"{{ "version": 2, "pages": {PAGES}, "sprites": {sprites} }}"#)
     }
 
     /// [`file`] with one frame of the person changed: `from` replaced by
@@ -630,10 +749,156 @@ mod tests {
 
     #[test]
     fn a_later_version_is_not_supported_whatever_it_holds() {
-        let later = file("[]").replace(r#""version": 1"#, r#""version": 2, "frames_by_tag": []"#);
+        let later = file("[]").replace(r#""version": 2"#, r#""version": 3, "frames_by_tag": []"#);
         assert_eq!(
             error(&later),
-            ("version".to_string(), ErrorKind::Version { found: 2 })
+            ("version".to_string(), ErrorKind::Version { found: 3 })
+        );
+    }
+
+    #[test]
+    fn a_file_of_version_1_is_not_supported() {
+        // The sandbox's sprites, as M5.9's cook wrote them.
+        let bytes = include_bytes!("../tests/atlas/version_1.kbj");
+        match parse(bytes, Limits::default()) {
+            Err(CodecError::Atlas { at, kind }) => {
+                assert_eq!(
+                    (at.as_str(), kind),
+                    ("version", ErrorKind::Version { found: 1 })
+                );
+            }
+            other => panic!("expected version 1 to be refused, got {other:?}"),
+        }
+        let error = CodecError::Atlas {
+            at: "version".to_string(),
+            kind: ErrorKind::Version { found: 1 },
+        };
+        assert_eq!(
+            error.to_string(),
+            "atlas error at `version`: version 1 is not supported: this build reads version 2"
+        );
+    }
+
+    /// The person with `clips`, a list in JSON.
+    fn person_clips(clips: &str) -> String {
+        person_with(
+            r#""pivot": [6.0, 20.0]"#,
+            &format!(r#""pivot": [6.0, 20.0], "clips": {clips}"#),
+        )
+    }
+
+    const CLIPS: &str = r#"[ { "name": "stand", "loop": true, "frames": [[1, 100]] },
+                            { "name": "wave", "loop": false, "frames": [[0, 40], [1, 60], [0, 40]] } ]"#;
+
+    #[test]
+    fn a_sprite_s_clips_are_read_in_order() {
+        let atlas = parsed(&person_clips(CLIPS)).expect("an atlas");
+        let clips = &atlas.sprites[0].clips;
+        assert_eq!(clips.len(), 2);
+        assert_eq!(clips[0].name, "stand");
+        assert!(clips[0].looping);
+        assert_eq!(
+            clips[0].frames,
+            [ClipFrameEntry {
+                frame: 1,
+                millis: 100
+            }]
+        );
+        assert_eq!(clips[1].name, "wave");
+        assert!(!clips[1].looping);
+        let shown: Vec<(u32, u32)> = clips[1]
+            .frames
+            .iter()
+            .map(|step| (step.frame, step.millis))
+            .collect();
+        assert_eq!(shown, [(0, 40), (1, 60), (0, 40)]);
+        // A sprite may have none.
+        let atlas = parsed(&file(&format!("[{PERSON}]"))).expect("an atlas");
+        assert!(atlas.sprites[0].clips.is_empty());
+    }
+
+    #[test]
+    fn each_rule_of_a_clip_is_checked_and_names_where() {
+        let clip = |text: &str| format!("[{text}]");
+        let cases: [(String, &str, ErrorKind); 11] = [
+            (person_clips("[]"), "sprites[0].clips", ErrorKind::Empty),
+            (
+                person_clips(&clip(r#"{ "name": "a", "loop": true, "frames": [] }"#)),
+                "sprites[0].clips[0].frames",
+                ErrorKind::Empty,
+            ),
+            (
+                person_clips(&clip(r#"{ "name": "a", "loop": true, "frames": [[2, 100]] }"#)),
+                "sprites[0].clips[0].frames[0][0]",
+                ErrorKind::NoSuchFrame { frame: 2 },
+            ),
+            (
+                person_clips(&clip(r#"{ "name": "a", "loop": true, "frames": [[0, 0]] }"#)),
+                "sprites[0].clips[0].frames[0][1]",
+                ErrorKind::OutOfRange {
+                    min: 1,
+                    max: u32::MAX,
+                },
+            ),
+            (
+                person_clips(&clip(r#"{ "name": "a", "loop": true, "frames": [[0]] }"#)),
+                "sprites[0].clips[0].frames[0]",
+                ErrorKind::WrongLength { expected: 2 },
+            ),
+            (
+                person_clips(&clip(r#"{ "name": "a", "loop": 1, "frames": [[0, 1]] }"#)),
+                "sprites[0].clips[0].loop",
+                ErrorKind::WrongType {
+                    expected: "true or false",
+                },
+            ),
+            (
+                person_clips(&clip(r#"{ "name": "a/b", "loop": true, "frames": [[0, 1]] }"#)),
+                "sprites[0].clips[0].name",
+                ErrorKind::BadClipName,
+            ),
+            (
+                person_clips(&clip(r#"{ "name": "", "loop": true, "frames": [[0, 1]] }"#)),
+                "sprites[0].clips[0].name",
+                ErrorKind::EmptyString,
+            ),
+            (
+                person_clips(&clip(r#"{ "name": "a", "loop": true }"#)),
+                "sprites[0].clips[0]",
+                ErrorKind::MissingMember { name: "frames" },
+            ),
+            (
+                person_clips(
+                    r#"[ { "name": "wave", "loop": true, "frames": [[0, 1]] },
+                         { "name": "stand", "loop": true, "frames": [[0, 1]] } ]"#,
+                ),
+                "sprites[0].clips[1].name",
+                ErrorKind::NotSorted,
+            ),
+            (
+                file(&format!(
+                    "[{}]",
+                    TILES.replacen(
+                        r#""tiles": [16, 16]"#,
+                        r#""tiles": [16, 16], "clips": [ { "name": "a", "loop": true, "frames": [[0, 1]] } ]"#,
+                        1
+                    )
+                )),
+                "sprites[0].clips",
+                ErrorKind::ClipsOfTileSet,
+            ),
+        ];
+        for (text, at, kind) in cases {
+            assert_eq!(error(&text), (at.to_string(), kind), "{text}");
+        }
+        // Two clips of one name are out of order too.
+        let twice = person_clips(
+            r#"[ { "name": "a", "loop": true, "frames": [[0, 1]] },
+                 { "name": "a", "loop": true, "frames": [[0, 1]] } ]"#,
+        );
+        assert_eq!(
+            error(&twice),
+            ("sprites[0].clips[1].name".to_string(), ErrorKind::NotSorted)
         );
     }
 
@@ -668,31 +933,31 @@ mod tests {
     fn each_rule_is_checked_and_names_where() {
         let cases: [(String, &str, ErrorKind); 16] = [
             (
-                file("[]").replace(r#""version": 1"#, r#""version": 2"#),
+                file("[]").replace(r#""version": 2"#, r#""version": 3"#),
                 "version",
-                ErrorKind::Version { found: 2 },
+                ErrorKind::Version { found: 3 },
             ),
             (
-                file("[]").replace(r#""version": 1"#, r#""version": "1""#),
+                file("[]").replace(r#""version": 2"#, r#""version": "2""#),
                 "version",
                 ErrorKind::WrongType {
                     expected: "a whole number",
                 },
             ),
             (
-                file("[]").replace(r#""version": 1, "#, ""),
+                file("[]").replace(r#""version": 2, "#, ""),
                 "",
                 ErrorKind::MissingMember { name: "version" },
             ),
             (
-                file("[]").replace(r#""version": 1"#, r#""version": 1, "extra": 0"#),
+                file("[]").replace(r#""version": 2"#, r#""version": 2, "extra": 0"#),
                 "",
                 ErrorKind::UnknownMember {
                     name: "extra".to_string(),
                 },
             ),
             (
-                r#"{ "version": 1, "pages": [], "sprites": [] }"#.to_string(),
+                r#"{ "version": 2, "pages": [], "sprites": [] }"#.to_string(),
                 "pages",
                 ErrorKind::Empty,
             ),

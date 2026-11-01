@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use nadir::prelude::*;
 
-use crate::{Gait, Prop, STEP, Sprites, spawn_player};
+use crate::{Prop, Sprites, spawn_player};
 
 /// How many people walk about.
 pub(crate) const CROWD: usize = 10_000;
@@ -42,7 +42,8 @@ const PROPS: [(Prop, i32, i32); 10] = [
 /// The view, which the crowd stays inside.
 const VIEW: Vec2 = Vec2::new(480.0, 270.0);
 
-/// A person's size, in pixels: the size of their frames in the atlas.
+/// A person's size, in pixels: their cell, each frame's untrimmed size in
+/// the atlas (`AtlasFrame::source_size`).
 pub(crate) const PERSON_SIZE: Vec2 = Vec2::new(12.0, 20.0);
 
 /// The player's tint in a crowd, so that they can be told from it.
@@ -65,7 +66,7 @@ pub(crate) struct Pace(pub(crate) f32);
 /// Adds the stress scene's props, crowd, player and systems to `app`.
 pub(crate) fn add(app: App, sprites: &Sprites) -> App {
     let mut app = app.register_component::<Walker>();
-    let gait = Gait::new(&app, &sprites.person);
+    let gait = sprites.gait;
     let world = app.world_mut();
     let sprite = |region: &crate::Region| {
         let mut sprite = region.sprite;
@@ -92,7 +93,7 @@ pub(crate) fn add(app: App, sprites: &Sprites) -> App {
             .with(Transform::at(start(index)))
             .with(Velocity(velocity))
             .with(walker)
-            .with(Animator::starting_at(gait.walk, stagger(index)))
+            .with(Animator::starting_at(gait.walk, stagger(index, gait.cycle)))
             .with(facing(velocity));
     }
     // Last, and a layer up: the same page right after the crowd, so still
@@ -154,10 +155,10 @@ fn tint(index: u32) -> Color {
     }
 }
 
-/// How far into the walk walker `index` starts, so that the crowd is not
-/// in step.
-pub(crate) fn stagger(index: u32) -> Duration {
-    (STEP * 4).mul_f32(unit(index, 70))
+/// How far into a walk of `cycle` walker `index` starts, so that the crowd
+/// is not in step.
+pub(crate) fn stagger(index: u32, cycle: Duration) -> Duration {
+    cycle.mul_f32(unit(index, 70))
 }
 
 /// The way a walker going at `velocity` faces: the art is drawn from the
@@ -300,13 +301,18 @@ mod tests {
         );
         assert_eq!(out.camera.position, VIEW * 0.5);
         // The crowd walks, out of step: every frame of the walk is drawn,
-        // each by about a quarter of the crowd. The rest are the props.
-        let walk = sprites.person[1..].iter().map(|region| region.frame.uv());
-        let walk: Vec<Rect> = walk.collect();
+        // each by about a quarter of the crowd, in its own trimmed size. The
+        // rest are the props.
+        let walk = &sprites.person[1..];
         let mut frames = [0; 4];
-        for walker in crowd.iter().filter(|sprite| sprite.size == PERSON_SIZE) {
-            let frame = walk.iter().position(|&uv| uv == walker.uv);
-            frames[frame.expect("a frame of the walk")] += 1;
+        for walker in &crowd {
+            if let Some(frame) = walk
+                .iter()
+                .position(|region| region.frame.uv() == walker.uv)
+            {
+                assert_eq!(walker.size, walk[frame].frame.size().as_vec2());
+                frames[frame] += 1;
+            }
         }
         assert_eq!(frames.iter().sum::<usize>(), CROWD);
         assert!(frames.iter().all(|&n| n > CROWD / 5), "{frames:?}");
@@ -369,14 +375,20 @@ mod tests {
     }
 
     #[test]
-    fn the_people_and_props_are_whole_frames_apart_on_one_page() {
+    fn the_people_and_props_are_trimmed_frames_apart_on_one_page() {
         let app = scene(Scene::StressSprites);
         let sprites = app.world().resource::<Sprites>();
-        // The person's frames are whole: they swap on one sprite of
-        // [`PERSON_SIZE`], which a trimmed frame would be stretched to.
+        // The person's frames are trimmed each to its pixels, and drawn
+        // where their cell of [`PERSON_SIZE`] has them.
+        let widths = sprites.person.map(|region| region.frame.size().x);
+        assert_eq!(widths, [10, 12, 10, 12, 10]);
+        let feet = Vec2::new(100.0, 50.0);
         for region in &sprites.person {
-            assert_eq!(region.frame.size().as_vec2(), PERSON_SIZE);
-            assert_eq!(region.frame.offset(), UVec2::ZERO);
+            assert_eq!(region.frame.source_size().as_vec2(), PERSON_SIZE);
+            let drawn = region.sprite.draw(feet);
+            let corner = drawn.position - drawn.pivot * drawn.size;
+            let cell = feet - Vec2::new(PERSON_SIZE.x * 0.5, PERSON_SIZE.y);
+            assert_eq!(corner, cell + region.frame.offset().as_vec2(), "{region:?}");
         }
         let mut regions = sprites.person.to_vec();
         regions.extend([sprites.tree, sprites.rock, sprites.grass]);

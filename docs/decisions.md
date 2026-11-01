@@ -1065,7 +1065,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0024 — Clips live in a store the facade owns; an Animator plays one in a frame stage on the simulation clock; Facing mirrors a sprite that faces left
 
-- **Status:** Accepted
+- **Status:** Accepted; what `nadir::animate` writes (a frame's size and pivot too), the flip about the quad's centre, and clips only by handle, are superseded by ADR-0035
 - **Date:** 2026-10-28
 - **Context:**
   - M4.6 asks for the `Animator` component and clips, hand-defined until
@@ -1979,7 +1979,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0031 — The cook packs each folder's PNGs into an atlas of QOI pages and a KBJ of frames, trimmed, with tile sets as pages of their own; it caches by group, owns `atlas/`, and lists what it does not cook
 
-- **Status:** Accepted
+- **Status:** Accepted; the cook's outputs below `atlas/` alone, a group of PNGs alone, and its report's counts, are superseded by ADR-0035
 - **Date:** 2026-10-31
 - **Context:**
   - M5.4 builds `nadir-cook` and `cargo xtask cook`: a library and a CLI,
@@ -2207,7 +2207,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0033 — The game reads the cooked atlas through a strict reader in codec and an `Atlas` asset in render; `load_now` makes it before the first tick; `cargo xtask ci` cooks before its tests
 
-- **Status:** Accepted
+- **Status:** Accepted; atlas version 1, the person's untrimmed sheet and the sandbox's refusal of trimmed person frames, and `Sprite::from_atlas`'s limits on flipping and animating, are superseded by ADR-0035
 - **Date:** 2026-10-31
 - **Context:**
   - Roadmap M5.9: the game draws cooked atlases. The cook writes
@@ -2375,3 +2375,141 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** the storm test fails in CI with all five runs over the
   limit (then move the check to the benchmarks, or time CPU), or CI moves
   to machines with cores of their own.
+
+## ADR-0035 — Aseprite exports join their folder's atlas, their tags become clips in the atlas file (version 2), and clip frames carry their own size and pivot; flips mirror about the pivot; the cook also writes fonts' glyph files and data as KBJ
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+- **Context:**
+  - Roadmap M5.5: cook Aseprite animations, JSONC data and BMFont fonts,
+    and draw the sandbox's animations from Aseprite exports. Its notes:
+    a `ClipFrame` has no size or pivot, so a trimmed frame is stretched
+    to its sprite's quad (ADR-0024), and the person's sheet was cooked
+    whole (`"trim": false`, ADR-0033); render mirrors a sprite about its
+    quad's centre, wrong for a frame trimmed unevenly; a clip never
+    becomes an asset (ADR-0024); and `bmfont::parse` leaves the pages,
+    their size, their alpha and the fallback to the cook (M5.2).
+  - The spec planned clips in files of their own, `anim/<name>.kbj`,
+    with each frame's page path and region. A clip's frame needs the
+    atlas frame's size, offset and pivot as well, which the atlas file
+    holds.
+  - Aseprite's exporter (`src/app/doc_exporter.cpp`) writes `repeat` as a
+    string, only when it is more than 0, and `meta.image` as a file name;
+    its player (`src/doc/playback.cpp`) counts each one-way pass of a
+    ping-pong tag as a repeat, shows the turning frames once, and shows a
+    one-frame tag again on each repeat. Aseprite is not installed here.
+  - The user decided four points on 2026-11-01: one task across six crates
+    (codec, render, the facade, the cook, the sandbox and xtask); clips in
+    the atlas file, version 2; render's flip mirrors about the pivot; and
+    the sandbox's export written by hand in Aseprite's format. A design
+    critique (33 points, one refuted) led to the rest.
+- **Decision:**
+  - **Aseprite exports:** every `.json` is read as one, by
+    `nadir_codec::aseprite::parse`, a cook-only reader in codec with its
+    fuzz target. It takes `--format json-array` data (frames, `meta.image`,
+    `meta.size`, `meta.frameTags`), ignores the members it does not use,
+    and refuses what would cook wrongly: json-hash, a rotated frame,
+    `--inner-padding`, frames of several canvases, durations and repeats
+    past Aseprite's 16 bits. Its errors are member paths
+    (`CodecError::Aseprite`).
+    - An export joins its folder's atlas group as the sprite named by its
+      path without `.json`. Its sheet is `meta.image`, matched as an asset
+      path beside it, which is then not a sprite of its own. Each frame is
+      placed in its canvas by `spriteSourceSize`, then trimmed as any
+      frame. A sidecar of its name gives `pivot` and `trim` only.
+    - Each tag is a clip of the frames Aseprite plays: with no `repeat` a
+      loop (forward, reverse, a ping-pong cycle without either end
+      twice), with `repeat` N that many passes, then stopped. Each step
+      lasts its frame's duration. The clips of an export have at most
+      `max_entries` frames together: each tag's clip is counted, with
+      those before it, before it is made.
+  - **Atlas file version 2:** a sprite with a pivot may have `clips`, by
+    name: a name with no `/`, `loop`, and `[frame, ms]` steps of its own
+    frames. The reader refuses version 1: the cook writes it again.
+    Render's `AtlasSprite::clips` and `clip(name)` give them.
+  - **Clip frames:** `ClipFrame` gains `placement: Option<Placement>`, a
+    size and a normalized pivot, which `nadir::animate` writes into the
+    Sprite with the texture and uv; `None` leaves the Sprite's as they
+    are. `ClipFrame::from_atlas` places a frame as `Sprite::from_atlas`
+    does. `Clip::try_new` returns a `ClipError` where `Clip::new` panics.
+    `Clips` has names: `add_named`, `find`, `name`, and
+    `add_atlas(&Atlas, pages)`, which adds every sprite's clips as
+    `<sprite>/<clip>` (`sprites/person/walk`), all or none, and returns
+    their handles.
+  - **Flips:** render's `SpriteDraw::flip` mirrors a sprite about its
+    pivot: `1 - pivot.x` for `flip.x`, `1 - pivot.y` for `flip.y`. A
+    sprite with its pivot at the middle of its width mirrors in place left
+    to right, as before; one with its pivot at its feet hangs below them
+    mirrored top to bottom. The snapped corner's offset is rounded to
+    1/256 of a world unit, so that a normalized pivot's `f32` rounding
+    (7/13 × 13 is 7.0000005) never moves a corner on a half-pixel tie to
+    the pixel below.
+  - **Fonts:** every `.fnt` (BMFont text) joins its folder's atlas group.
+    Its pages, matched as asset paths beside it, must be PNGs of the
+    font's page size, with the glyphs in their alpha (`alphaChnl` 0 or 2,
+    or none given) and some pixel clear. Each glyph with a pixel above
+    alpha 0 is a trimmed frame of the sprite named by the font's path
+    without `.fnt`, by id, then BMFont's fallback glyph; the sprite's
+    pivot is (0, 0). The group's job writes `atlas/<font>.font.kbj`
+    (version 1): the face, size, line height and base, the atlas file and
+    sprite, the glyphs by id (a frame if it has pixels, offsets and
+    advance), the kerning pairs sorted, and the glyph a missing character
+    draws: BMFont's fallback, else `?`, which must have pixels. Its reader
+    comes with M7.1.
+  - **Data:** each `.jsonc` below the source's `data/` is a job of its
+    own, written as KBJ to `data/<path>.kbj`. The cook owns `data/` as it
+    owns `atlas/`.
+  - **The cook:** an atlas job's inputs are every file it read: images,
+    sheets, pages, exports, fonts, sidecars and folders' settings.
+    `JobReport::cooked_counts` became `counts: Option<Counts>`
+    (`Atlas { sprites, pages, clips, fonts }` or `Data`), and `CookError`
+    gained `Claimed` and `SpriteNameTaken`. A file name used twice among
+    the outputs is refused, as one that folds alike was.
+  - **The sandbox:** `assets/sprites/person.json` is an export of
+    `person.png` in Aseprite 1.3's json-array format, written by hand, as
+    `aseprite -b person.aseprite --sheet person.png --data person.json
+    --format json-array --list-tags` would write it (its `meta.version` a
+    placeholder), with tags `stand` (frame 0) and `walk` (1 to 4), 100 ms
+    a frame. The person is trimmed again. The sandbox takes its gait from
+    `Clips::add_atlas`, and the crowds' stagger from the walk's length.
+- **Consequences:**
+  - Good:
+    - The game loads one file for a group's frames and clips, and one
+      strict reader checks that every step is a frame of its sprite.
+      M5.8's reload of `atlas/<group>.kbj` reaches both.
+    - Trimmed frames animate and flip as their untrimmed cells would. The
+      person's frames are 10 and 12 wide again, as M5.4 cooked them.
+    - Fonts and data cook now, deterministically, cached like atlases.
+  - Bad:
+    - Version 1 atlas files are refused: an older cook must run again
+      (`cargo xtask ci` cooks before its tests).
+    - A flip with a pivot off the middle draws elsewhere than before, and
+      `flip.y` with a feet pivot hangs a sprite below its feet. No sprite
+      the engine or the sandbox draws did either.
+    - No file Aseprite itself wrote is cooked: the sandbox's export and
+      the codec's vectors are written by hand from its source. Exports
+      with `--split-layers`, `--split-tags`, `--ignore-empty`, `--tag` or
+      `--frame-range` number their frames apart from their tags, which
+      the reader cannot always see.
+    - Every `.json` is read as an Aseprite export: another tool's JSON in
+      the source folder fails the cook. Data must be JSONC below `data/`.
+    - The font file has no reader until M7.1, so the cook cannot check it
+      as it checks the atlas file.
+    - The acceptance covers sprite clips; the field's animated tiles stay
+      in `map.rs` until a level supplies them (M5.6).
+- **Alternatives considered:**
+  - Clips in `anim/<name>.kbj`, as the spec had it: a second format, a
+    reader and an asset type, with the atlas frames' data repeated, and
+    two files for M5.8 to reload together.
+  - Mirroring about the pivot in the facade's `Sprite` only: render's
+    `SpriteDraw::flip` would mean another thing.
+  - Rounding the snapped offset to whole pixels: an odd cell's default
+    pivot is a half pixel, which would move.
+  - Every `.jsonc` as data: a misspelt sidecar would cook silently.
+  - Fonts' files in `fonts/`: a second owned folder, and
+    `fonts/fonts/pixel.kbj` for `assets/fonts/pixel.fnt`.
+- **Revisit when:** a real Aseprite export of the person (or another
+  sprite) is added, which then replaces the hand-written one; a game
+  needs another tool's JSON among its sources; M7.1 reads the font file
+  (then the cook checks its fonts with that reader); or a clip needs
+  frames from two sprites.

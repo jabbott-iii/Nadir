@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use nadir_codec::adler32;
 use nadir_codec::json::Value;
 use nadir_codec::qoi::{self, Image};
-use nadir_codec::{Limits, kbj};
+use nadir_codec::{Limits, atlas, kbj};
 use nadir_cook::{CookError, Options, Report};
 use nadir_core::hash::crc32;
 
@@ -184,6 +184,26 @@ pub(crate) fn frames(sprite: &Value) -> &[Value] {
         .get("frames")
         .and_then(Value::as_array)
         .expect("frames")
+}
+
+/// A clip of a sprite, as the game reads it: its name, whether it loops,
+/// and its frames with their milliseconds.
+pub(crate) type Clip<'a> = (&'a str, bool, Vec<(u32, u32)>);
+
+/// The clips of a sprite of an atlas file the game read.
+pub(crate) fn clips(sprite: &atlas::SpriteEntry) -> Vec<Clip<'_>> {
+    sprite
+        .clips
+        .iter()
+        .map(|clip| {
+            let steps = clip
+                .frames
+                .iter()
+                .map(|step| (step.frame, step.millis))
+                .collect();
+            (clip.name.as_str(), clip.looping, steps)
+        })
+        .collect()
 }
 
 /// The pixel at `(x, y)` of an image.

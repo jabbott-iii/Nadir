@@ -1,7 +1,10 @@
 //! The cook on real folders: what it writes, when it cooks again, and what
 //! it refuses.
 
+mod aseprite;
 mod common;
+mod data;
+mod fonts;
 mod incremental;
 mod output;
 mod rules;

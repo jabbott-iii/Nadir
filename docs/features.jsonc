@@ -204,9 +204,9 @@
     {
       "name": "Asset cooking",
       "area": "Tools",
-      "summary": "An offline pipeline packs each folder's PNG images into an atlas: it trims each image and sheet frame to its pixels, packs them into square pages with padding and extruded edges, keeps tile sets as pages of their own, and writes QOI pages with a file of where each frame went, which it checks with the game's own reader. The same files cook to the same bytes, and an incremental cache cooks again only the groups whose files changed. The game loads an atlas before its first frame and finds its sprites by name, each trimmed frame placed where its whole cell would be: every sprite in the demo is cooked, drawn pixel for pixel as the hand-made images were, with fewer batches. The pipeline will import Aseprite animations, turn data files into KBJ, and prepare bitmap fonts.",
+      "summary": "An offline pipeline packs each folder's PNG images, Aseprite sprite sheet exports and bitmap fonts into an atlas: it trims each frame and glyph to its pixels, packs them into square pages with padding and extruded edges, keeps tile sets as pages of their own, and writes QOI pages with a file of where each frame went and the animation clips of the exports' tags, which it checks with the game's own reader, and a file of each font's glyphs. Data files become KBJ. The same files cook to the same bytes, and an incremental cache cooks again only what changed. The game loads an atlas before its first frame and finds its sprites and clips by name, each trimmed frame placed, and mirrored, where its whole cell would be: the demo's walking person comes from an export in Aseprite's format, written by hand, drawn pixel for pixel as before.",
       "tasks": ["M5.4", "M5.9", "M5.5"],
-      "ticked": ["M5.4", "M5.9"]
+      "ticked": ["M5.4", "M5.9", "M5.5"]
     },
     {
       "name": "Levels and prefabs",

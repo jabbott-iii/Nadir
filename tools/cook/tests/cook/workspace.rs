@@ -1,6 +1,7 @@
 //! The workspace's own `assets/`, which the sandbox draws: each frame the
-//! cook packs is its PNG's cell, pixel for pixel, and the atlas file is one
-//! the game's reader takes.
+//! cook packs is its PNG's cell, pixel for pixel, the person's clips are
+//! their Aseprite export's tags, and the atlas file is one the game's
+//! reader takes.
 
 use std::fs;
 use std::path::Path;
@@ -8,7 +9,9 @@ use std::path::Path;
 use nadir_codec::json::Value;
 use nadir_codec::{Limits, atlas, png};
 
-use crate::common::{cook, dir, files, frame_pixels, frames, int, kbj, qoi as read_qoi, sprite};
+use crate::common::{
+    clips, cook, dir, files, frame_pixels, frames, int, kbj, qoi as read_qoi, sprite,
+};
 
 fn assets() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets"))
@@ -121,14 +124,47 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
             }
         }
     }
-    // The person's frames are whole, as their sidecar asks until a clip's
-    // frame has a size of its own (roadmap M5.5): five of 12 × 20.
+    // The person's five frames of 12 × 20, from their Aseprite export,
+    // trimmed: the standing frame and every other step are 10 wide, a pixel
+    // in.
     let person = frames(sprite(&atlas, "sprites/person"));
     assert_eq!(person.len(), 5);
-    for frame in person {
-        let placed = ["w", "h", "ox", "oy"].map(|key| int(frame, key));
-        assert_eq!(placed, [12, 20, 0, 0]);
-    }
+    let placed: Vec<[u32; 4]> = person
+        .iter()
+        .map(|frame| ["w", "h", "ox", "oy"].map(|key| int(frame, key)))
+        .collect();
+    assert_eq!(
+        placed,
+        [
+            [10, 20, 1, 0],
+            [12, 20, 0, 0],
+            [10, 20, 1, 0],
+            [12, 20, 0, 0],
+            [10, 20, 1, 0]
+        ]
+    );
+    // Its clips, the export's tags: standing, and the walk of four frames,
+    // each 100 ms, looping.
+    let person = parsed
+        .sprites
+        .iter()
+        .find(|sprite| sprite.name == "sprites/person")
+        .expect("the person");
+    let clips = clips(person);
+    assert_eq!(
+        clips,
+        [
+            ("stand", true, vec![(0, 100)]),
+            ("walk", true, vec![(1, 100), (2, 100), (3, 100), (4, 100)])
+        ]
+    );
+    assert!(
+        parsed
+            .sprites
+            .iter()
+            .filter(|sprite| sprite.name != "sprites/person")
+            .all(|sprite| sprite.clips.is_empty())
+    );
     // The tree and the rock are trimmed.
     let tree = &frames(sprite(&atlas, "sprites/tree"))[0];
     assert_eq!((int(tree, "h"), int(tree, "oy")), (44, 4));

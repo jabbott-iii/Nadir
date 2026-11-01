@@ -112,7 +112,8 @@ pub(crate) fn triggers(world: &World, _tick: &Tick) {
 /// `nadir::animate`, first in the frame's `Animate` stage: advances every
 /// [`Animator`] by how long the simulation ran since the last frame (the
 /// change in `RenderFrame::time`), writes the texture and uv of the frame
-/// it shows into its entity's [`Sprite`], and sends [`AnimationFinished`]
+/// it shows into its entity's [`Sprite`], and its size and pivot if the
+/// frame has a placement, and sends [`AnimationFinished`]
 /// for each clip that plays once and ended. Then it mirrors the Sprite of
 /// each entity that faces [`Facing::Left`], and unmirrors the rest that
 /// have a `Facing`.
@@ -149,6 +150,10 @@ pub(crate) fn animate(world: &World, _frame: &Frame) {
             let frame = clip.frames()[index];
             sprite.texture = frame.texture;
             sprite.uv = frame.uv;
+            if let Some(placement) = frame.placement {
+                sprite.size = placement.size;
+                sprite.pivot = placement.pivot;
+            }
         }
     }
     for (entity, &facing) in world.read::<Facing>().iter() {
@@ -221,7 +226,7 @@ mod tests {
     use nadir_render::{Flip, Texture};
 
     use super::*;
-    use crate::{App, Clip, ClipFrame, Config, Playback};
+    use crate::{App, Clip, ClipFrame, Config, Placement, Playback};
 
     /// One tick's length, as a frame: it runs one tick.
     const TICK: Duration = Duration::from_nanos(16_666_667);
@@ -1164,6 +1169,59 @@ mod tests {
     }
 
     #[test]
+    fn a_placed_frame_sets_the_sprite_s_size_and_pivot_and_an_unplaced_one_keeps_them() {
+        let mut app = app();
+        // Two trimmed frames, each its own size and pivot; then a clip of
+        // frames with no placement.
+        let placed = |index: u32, size: Vec2, pivot: Vec2| {
+            let mut frame = ClipFrame::new(sheet(), strip(index), 30 * MS);
+            frame.placement = Some(Placement { size, pivot });
+            frame
+        };
+        let trimmed = app.world().resource_mut::<Clips>().add(Clip::new(
+            vec![
+                placed(0, Vec2::new(10.0, 20.0), Vec2::new(0.5, 1.0)),
+                placed(1, Vec2::new(9.0, 18.0), Vec2::new(4.0 / 9.0, 1.0)),
+            ],
+            Playback::Loop,
+        ));
+        let plain = add_clip(&app, &[30], Playback::Loop);
+        let walker = app
+            .world_mut()
+            .spawn()
+            .with(at(0.0, 0.0))
+            .with(Sprite::new(texture(), Vec2::new(12.0, 20.0)))
+            .with(Animator::new(trimmed))
+            .with(Facing::Left)
+            .id();
+        app.update(10 * MS, &[]);
+        let sprite = sprite_of(&app, walker);
+        assert_eq!(
+            (sprite.size, sprite.pivot),
+            (Vec2::new(10.0, 20.0), Vec2::new(0.5, 1.0))
+        );
+        app.update(30 * MS, &[]);
+        let drawn = app.world().resource::<RenderFrame>().sprites[0];
+        assert_eq!((drawn.uv, drawn.size), (strip(1), Vec2::new(9.0, 18.0)));
+        assert_eq!(drawn.pivot, Vec2::new(4.0 / 9.0, 1.0));
+        // Mirrored about that pivot by render, as its flip says.
+        assert!(drawn.flip.x);
+        // A frame with no placement leaves the last one's.
+        app.world()
+            .write::<Animator>()
+            .get_mut(walker)
+            .expect("an animator")
+            .play(plain);
+        app.update(10 * MS, &[]);
+        let sprite = sprite_of(&app, walker);
+        assert_eq!(sprite.uv, strip(0));
+        assert_eq!(
+            (sprite.size, sprite.pivot),
+            (Vec2::new(9.0, 18.0), Vec2::new(4.0 / 9.0, 1.0))
+        );
+    }
+
+    #[test]
     fn an_animator_whose_clip_was_removed_leaves_its_sprite_as_it_was() {
         let mut app = app();
         let clip = add_clip(&app, &[30, 30], Playback::Loop);
@@ -1427,7 +1485,21 @@ mod tests {
             // Longer than a tick: between two ends of these clips a tick
             // clears the events' tick buffer, which frame sends fill too.
             let once = add_clip(&app, &[20, 20], Playback::Once);
-            let walk = add_clip(&app, &[100, 100, 100, 100], Playback::Loop);
+            // A walk of trimmed frames, each of its own size and pivot.
+            let frames = (0..4)
+                .map(|index| {
+                    let mut frame = ClipFrame::new(sheet(), strip(index), 100 * MS);
+                    frame.placement = Some(Placement {
+                        size: Vec2::new(10.0 + index as f32, 20.0),
+                        pivot: Vec2::new(0.5, 1.0),
+                    });
+                    frame
+                })
+                .collect();
+            let walk = app
+                .world()
+                .resource_mut::<Clips>()
+                .add(Clip::new(frames, Playback::Loop));
             let ways = [Facing::Down, Facing::Up, Facing::Left, Facing::Right];
             let world = app.world_mut();
             let mut start = Vec::with_capacity(ANIMATORS as usize);

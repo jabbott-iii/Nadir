@@ -10,7 +10,8 @@
 //! and systems interpolate, move and collide entities, send trigger
 //! events, and draw sprites (ADR-0022). An [`Animator`] plays a [`Clip`]
 //! from [`Clips`] on its entity's sprite, and [`Facing`] mirrors it
-//! (ADR-0024). [`App::play_replay`] plays recorded actions in place of the
+//! (ADR-0024); a cooked atlas's clips, from Aseprite's tags, come with
+//! [`Clips::add_atlas`] (ADR-0035). [`App::play_replay`] plays recorded actions in place of the
 //! live input, and [`App::world_hash`] hashes the reflected world, for
 //! determinism tests (ADR-0025). [`App::offscreen`] draws the game with
 //! no window, a frame at a time, for recordings such as the demo page's
@@ -56,7 +57,9 @@ pub use {
     nadir_render as render, nadir_scene as scene,
 };
 
-pub use animation::{AnimationFinished, Animator, Clip, ClipFrame, Clips, Playback};
+pub use animation::{
+    AnimationFinished, Animator, Clip, ClipError, ClipFrame, Clips, Placement, Playback,
+};
 pub use app::{App, Config, Offscreen, TICK_HZ};
 pub use collisions::{Collisions, TriggerEnter, TriggerExit};
 pub use components::{
@@ -79,13 +82,14 @@ pub mod prelude {
     };
     pub use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Binding, Input};
     pub use nadir_render::{
-        Atlas, AtlasFrame, AtlasPage, AtlasSprite, Camera2D, Flip, FrameStats, RenderFrame,
-        SortMode, SpriteDraw, Texture, Tile, TileLayer, TileLayerDraw, TileLayers, TileSet,
+        Atlas, AtlasClip, AtlasClipFrame, AtlasFrame, AtlasPage, AtlasSprite, Camera2D, Flip,
+        FrameStats, RenderFrame, SortMode, SpriteDraw, Texture, Tile, TileLayer, TileLayerDraw,
+        TileLayers, TileSet,
     };
 
     pub use crate::{
-        AnimationFinished, Animator, App, Clip, ClipFrame, Clips, Collider, Collisions, Config,
-        Facing, Parent, Playback, Player, PrevTransform, SaveId, Sprite, TickStats, Transform,
-        TriggerEnter, TriggerExit, Velocity,
+        AnimationFinished, Animator, App, Clip, ClipError, ClipFrame, Clips, Collider, Collisions,
+        Config, Facing, Parent, Placement, Playback, Player, PrevTransform, SaveId, Sprite,
+        TickStats, Transform, TriggerEnter, TriggerExit, Velocity,
     };
 }

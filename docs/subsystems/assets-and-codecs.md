@@ -36,7 +36,8 @@ Every decoder:
 | `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (settings, dev data) | Order-preserving objects: `Vec<(String, Value)>` |
 | `kbj` | Below | ✓ | ✓ | yes | Binary form of the JSON value tree for cooked data. See below |
 | `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines. See subset below |
-| `atlas` | The cook's atlas file, version 1, below | — | ✓ | yes | KBJ, then checked strictly; read by render's `Atlas` asset (ADR-0033). See below |
+| `aseprite` | Aseprite's `--format json-array` sprite sheet data | — | ✓ | no (cook only) | Frames, sheet, tags expanded to clips (ADR-0035). See subset below |
+| `atlas` | The cook's atlas file, version 2, below | — | ✓ | yes | KBJ, then checked strictly; read by render's `Atlas` asset (ADR-0033, ADR-0035). See below |
 
 ### Inflate (documented, tested)
 
@@ -456,8 +457,8 @@ interleaved. The cook tool turns them into PCM16 or QOA (M6.6).
 `bmfont::parse(&str, Limits)` reads a font in BMFont's text format into a
 `Font`: its face, size, line height and base, its pages' size and files,
 its glyphs, its kerning pairs, what each channel of the pages holds, and
-its fallback glyph, if it has one. The cook tool turns it into the game's
-font asset (M5.5).
+its fallback glyph, if it has one. The cook turns it into the glyphs'
+frames of an atlas and a font file (M5.5; below, "Font file").
 
 - **Lines:** a tag, then `key=value` pairs, separated by spaces or tabs. A
   value is an integer, a list of integers with commas, or a string in
@@ -489,7 +490,8 @@ font asset (M5.5).
   a number with a fraction, and a `distanceField` line (both from
   distance-field generators).
 - **Not checked here:** that the page files exist, are PNG, are
-  `scaleW × scaleH`, and have safe paths; the cook does that (M5.5).
+  `scaleW × scaleH`, and have safe paths; the cook does that, and checks
+  their alpha (M5.5).
 - **Limits:** `max_string_bytes` for each string the font keeps (the face
   and the page files; the strings of keys it ignores are not copied),
   `max_entries` for the pages, the glyphs and the kerning pairs. Each line
@@ -510,19 +512,84 @@ font asset (M5.5).
   that are not UTF-8 become U+FFFD, so that every input reaches the
   parser.
 
+### Aseprite subset (documented, tested)
+
+`aseprite::parse(&str, Limits)` reads the data file Aseprite writes for a
+sprite sheet, `aseprite -b in.aseprite --sheet out.png --data out.json
+--format json-array --list-tags`, into an `Export`: the sheet's file name
+and size, its `ExportFrame`s, and its `Tag`s, each expanded to the clip it
+makes. Only the cook reads it (M5.5, ADR-0035). Checked against Aseprite's
+exporter (`src/app/doc_exporter.cpp`) and player (`src/doc/playback.cpp`).
+
+- **Text:** read with `json::parse`, so the JSONC leniencies pass, and a
+  raw tab or carriage return in any string fails, as the JSON parser
+  refuses them; Aseprite writes names and user data with only `\`, `"`
+  and the newline escaped.
+- **Members:** those used must be there with their types; the others
+  (`filename`, `trimmed`, `app`, `version`, `format`, `scale`, a tag's
+  `color` and `data`, `layers`, `slices`, and what later versions add) are
+  ignored. `frames` must be a list: the json-hash form is refused, saying
+  to export with `--format json-array`.
+- **Frames:** one at least. Not rotated (Aseprite never rotates). `frame`,
+  the pixels' rectangle, is 1 × 1 or more and inside `meta.size`;
+  `spriteSourceSize` has its size (they differ with `--inner-padding`,
+  refused) and places it inside `sourceSize`, which every frame shares
+  (sprites of other sizes in one export differ, refused; split layers
+  share their sprite's size, and are not seen);
+  `duration` is 1 to 65535 ms, as an `.aseprite` file holds it.
+- **Sheet:** `meta.image` is a file name with no `/` or `\`, as Aseprite
+  writes it; missing, it says to export with `--sheet`.
+- **Tags:** `meta.frameTags` may be left out (no `--list-tags`). Each has
+  a name that is not empty and has no `/`, no two the same (found by
+  sorting); `from <= to <` the frame count; a direction of `forward`,
+  `reverse`, `pingpong` or `pingpong_reverse`; and maybe `repeat`, a
+  string of 1 to 5 ASCII digits of at most 65535, as Aseprite writes it
+  when it is more than 0.
+- **Clips**, the frames Aseprite plays:
+  - no `repeat`, or 0, loops: `forward` is `from` to `to`, `reverse` `to`
+    to `from`, `pingpong` `from` to `to` and back to the frame after
+    `from`, so that each turning frame shows once a cycle, and
+    `pingpong_reverse` the same from `to`;
+  - `repeat` N plays N passes and stops on the last frame shown: a pass of
+    `forward` or `reverse` is the whole tag; of a ping-pong, one way
+    across it, each pass after the first going back without the frame it
+    turned on;
+  - a tag of one frame is that frame, once a cycle, or N times.
+  - All the tags' clips together are at most `max_entries` frames: each
+    tag's clip is counted, with those before it, before it is made, in 64
+    bits, where the count cannot overflow.
+- **Not supported, and not always detectable:** `--split-layers`,
+  `--split-tags`, `--ignore-empty`, `--tag` and `--frame-range`, which
+  number the export's frames apart from its tags' `from` and `to`.
+- **Errors:** after the JSON, `CodecError::Aseprite { at, kind }`, with
+  `at` a member path such as `frames[3].frame.w`, since the JSON tree keeps
+  no line and column; the JSON's own errors keep theirs
+  (`CodecError::Json`).
+- **Vectors:** `crates/codec/tests/aseprite/`, written by hand as the
+  exporter writes them: Aseprite 1.2 with layers and slices, 1.3 with
+  repeats, `pingpong_reverse` and user data, a trimmed packed sheet with
+  merged duplicates, and an export with no tags; and the sandbox's
+  `assets/sprites/person.json`. Error cases and each direction's clips are
+  in the unit tests of `crates/codec/src/aseprite.rs`.
+- **Fuzz target:** `aseprite`, with seeds in `fuzz/corpus/aseprite/`.
+  Bytes that are not UTF-8 become U+FFFD. What it accepts must keep the
+  promises above, which the target asserts.
+
 ### Atlas file reader (documented, tested)
 
 `atlas::parse(bytes, limits)` reads the cook's `atlas/<group>.kbj`
 (below, "Atlas file") into an `AtlasFile` of `Page`s and `SpriteEntry`s,
-each sprite a `SpriteKind::Pivot` or `SpriteKind::Tiles` with its `Frame`s.
-The types are `#[non_exhaustive]`: only the reader makes them. As built in
-M5.9 (ADR-0033):
+each sprite a `SpriteKind::Pivot` or `SpriteKind::Tiles` with its `Frame`s
+and its `ClipEntry`s. The types are `#[non_exhaustive]`: only the reader
+makes them. As built in M5.9 (ADR-0033), and given clips in M5.5
+(version 2, ADR-0035):
 
 - **KBJ first**, with the KBJ decoder and its limits; a file that is not
   KBJ is a `CodecError::Kbj`.
-- **The version first:** any whole number other than 1 is
+- **The version first:** any whole number other than 2, 1 included, is
   `Version { found }`, "not supported", whatever else the file holds, so a
-  later file's new members never read as wrong.
+  later file's new members never read as wrong; a version 1 file is cooked
+  again.
 - **Strict:** each object has its members and no others; one page at
   least, of 1 to 4096 a side, with a non-empty path; sprite names
   non-empty, in byte order, none twice; one frame at least each; a pivot of
@@ -533,15 +600,22 @@ M5.9 (ADR-0033):
   sums). An empty frame is 0 × 0 on page 0 at (0, 0) with no offset; a
   frame of one side 0 is refused.
 - **Tile sets:** one frame, the whole of its page, untrimmed, a whole
-  number of tiles across and down.
+  number of tiles across and down, and no clips.
+- **Clips:** only a sprite with a pivot has `clips`, and then one at
+  least; each a name, not empty and with no `/` (it would make its full
+  name, `sprites/person/walk`, another's), in byte order with no two the
+  same; `loop`, true or false; and one step at least, each a frame of the
+  sprite and a time of 1 ms or more that fits 32 bits.
 - **Errors** name where in the file: `CodecError::Atlas { at, kind }`, with
   `at` a member path such as `sprites[2].frames[0].w`, since a KBJ value
   carries no byte offset; empty for the file as a whole.
 - **Tests:** a rule a test, from hand-written JSON text encoded to KBJ, in
-  `crates/codec/src/atlas.rs`. **Fuzz target:** `atlas`, with seeds in
-  `fuzz/corpus/atlas/` (the sandbox's cooked file, the least a file can be,
-  a tile set, a sheet with an empty frame); what it accepts must keep the
-  promises above, which the target asserts.
+  `crates/codec/src/atlas.rs`, and the sandbox's file as M5.9 cooked it,
+  `crates/codec/tests/atlas/version_1.kbj`, refused. **Fuzz target:**
+  `atlas`, with seeds in `fuzz/corpus/atlas/` (the sandbox's cooked file,
+  with its clips, the least a file can be, a tile set, a sheet with an
+  empty frame, a sprite with clips that loop and do not); what it accepts
+  must keep the promises above, which the target asserts.
 
 ## `nadir-assets`
 
@@ -722,19 +796,20 @@ string table (optional, dev builds and debugging): path strings in TOC order
 
 ## `nadir-cook` (library + CLI)
 
-As built in M5.4 (ADR-0031): the atlas pipeline, the cache, and the CLI.
-The other pipelines below come with M5.5, M5.6 and M6.6.
+As built in M5.4 and M5.5 (ADR-0031, ADR-0035): the atlas pipeline, with
+PNGs, Aseprite exports and BMFont fonts; data; the cache; and the CLI.
+The level and audio pipelines below come with M5.6 and M6.6.
 
 ### Pipelines
 
 | Source | Pipeline | Output |
 | :- | :- | :- |
 | `*.png` (+ optional `*.sprite.jsonc` sidecar: sheet frames, pivot, trim, tile set) | Decode → cut into frames → trim → atlas pack → QOI | Atlas pages `atlas/<group>_<n>.qoi`, tile sets' pages `atlas/<sprite>.tiles.qoi`, and `atlas/<group>.kbj` (where each frame went) |
-| Aseprite export (`aseprite -b in.aseprite --sheet out.png --data out.json --format json-array --list-tags`) | Parse frames and tags → animation clips → join the atlas group. Per clip: a name, loop or once, and frames of an atlas page path, a region and milliseconds; a tag's direction and repeat count expand to the frames Aseprite plays. The facade's loader turns them into `Clip`s with texture handles, in its `Clips` (ADR-0024) | Clips in `anim/<name>.kbj` |
+| `*.json`, an Aseprite export (`aseprite -b in.aseprite --sheet out.png --data out.json --format json-array --list-tags`) | Parse frames and tags (above, "Aseprite subset") → its sheet's frames join the atlas group, placed in their canvas, then trimmed; each tag a clip of them, a tag's direction and repeat count expanded to the frames Aseprite plays. `Clips::add_atlas` makes them `Clip`s (ADR-0024, ADR-0035) | The sprite's frames and clips in `atlas/<group>.kbj` |
 | `*.ldtk` (LDtk project, optionally with external level files) | Tile layers → chunked tile data; IntGrid → collision grid; entities → prefab references + field overrides; tall tiles → sprite list | `levels/<name>.klvl` (KBJ-based) |
 | `*.wav` | Resample policy from the sidecar; long or music → QOA, short SFX → PCM16 | `.qoa` / `.kpcm` |
-| `*.fnt` + pages (BMFont text) | Parse, pack pages into the atlas | `fonts/<name>.kbj` + atlas regions |
-| `*.jsonc` data (prefabs, items, input defaults) | Validate syntax → KBJ (semantic validation happens at game load via reflection) | `data/<name>.kbj` |
+| `*.fnt` + pages (BMFont text) | Parse, check the pages, pack each glyph into the atlas group (below, "Font file") | `atlas/<font>.font.kbj` + the sprite's frames in `atlas/<group>.kbj` |
+| `data/**/*.jsonc` data (prefabs, items, input defaults) | Validate syntax → KBJ (semantic validation happens at game load via reflection) | `data/<path>.kbj` |
 
 A file no pipeline cooks yet is listed once a run, with why, and left
 alone. So are, rather than failing the cook, such files' names that are
@@ -743,14 +818,25 @@ symbolic links. Names starting with `.` are left out.
 
 ### Sources and names
 
-- A file the cook reads (an image, a sidecar, an `atlas.jsonc`) must have
+- What the cook reads, by name: `*.png` images, `*.sprite.jsonc`
+  sidecars, folders' `atlas.jsonc`, every `*.json` as an Aseprite export,
+  `*.fnt` fonts, and every `*.jsonc` below `data/` as data (sidecars and
+  `atlas.jsonc` there are data too). Any other file is listed, not read.
+- A file the cook reads must have
   an asset path (`AssetPath`: lowercased, then checked) and a name that is
   UTF-8, and not be a symbolic link. No other name in a folder above or
   beside it may equal its own once folded: each character uppercased, then
   lowercased, so that `Σ`, `σ` and `ς` are one, as Windows and macOS see
   them. Each is an error naming the file.
-- An image's folder names its **atlas group**: `sprites/hero.png` is in
-  group `sprites`. An image directly in the source folder is an error.
+- An image's, an export's or a font's folder names its **atlas group**:
+  `sprites/hero.png` is in group `sprites`. One directly in the source
+  folder is an error.
+- An export's sheet (`meta.image`) and a font's pages are matched as asset
+  paths beside it, so their case does not matter. Each must be a PNG the
+  cook found, with no sidecar of its own, taken by one export or font
+  only; it is then not a sprite of its own. A sprite is named by its
+  file's path without its extension: an image, an export and a font of
+  one name are an error naming both.
 - A folder's `atlas.jsonc` can put its images, not its subfolders', in
   another group: `{ "group": "characters" }`. The name must be lowercase
   and make asset paths. Several folders may share a group.
@@ -775,12 +861,21 @@ with `tiles`, and `trim` or `pivot` with `tiles`, are errors. A sheet has at
 most `max_entries` frames. Source PNGs decode with any width or height
 PNG allows: `max_decoded_bytes` bounds them.
 
+A sidecar of an Aseprite export's name (`person.sprite.jsonc` beside
+`person.json`) goes with the export, and gives `pivot` and `trim` only:
+the frames are the export's. On an export, `"trim": false` keeps the
+frames as Aseprite cut them, trimmed by Aseprite if it was asked to. A
+font takes no sidecar.
+
 ### Atlas groups
 
-- **Frames:** an image is one frame, or a sheet's cells row by row. Each
-  is trimmed to the box of its pixels whose alpha is above 0, unless its
-  sidecar says `"trim": false`. A frame with no such pixel is empty: it
-  takes no space.
+- **Frames:** an image is one frame, or a sheet's cells row by row. An
+  Aseprite export's are its frames, each its `frame` rectangle of the
+  sheet placed at `spriteSourceSize` in a cell of `sourceSize`. A font's
+  are its glyphs with a pixel above alpha 0, by id, then BMFont's fallback
+  glyph, each its rectangle on its page. Each is trimmed to the box of its
+  pixels whose alpha is above 0, unless its sidecar says `"trim": false`.
+  A frame with no such pixel is empty: it takes no space.
 - **Packing:**
   - MaxRects with the best short-side fit (ties: the shortest long side,
     then the topmost, then the leftmost); of two equal free rectangles
@@ -808,18 +903,21 @@ PNG allows: `max_decoded_bytes` bounds them.
   (`gAMA`, `cHRM`, `iCCP`, `cICP`, `mDCV`, `cLLI`): the cook takes every
   PNG as sRGB.
 
-### Atlas file `atlas/<group>.kbj` (version 1)
+### Atlas file `atlas/<group>.kbj` (version 2)
 
 KBJ, its members in this order:
 
 ```
-{ "version": 1,
+{ "version": 2,
   "pages": [ { "path": "atlas/sprites_0.qoi", "w": 128, "h": 128 }, … ],   // packed pages, then tile sets'
   "sprites": [                                                         // by name
-    { "name": "sprites/person",          // the image's path without .png
+    { "name": "sprites/person",          // the image's, export's or font's path without its extension
       "frames": [ { "page": 0, "x": 33, "y": 85, "w": 10, "h": 20,      // its pixels in the page
                     "ox": 1, "oy": 0, "sw": 12, "sh": 20 }, … ],      // their offset in the untrimmed frame, its size
-      "pivot": [6.0, 20.0] },                                          // floats
+      "pivot": [6.0, 20.0],                                            // floats
+      "clips": [ { "name": "stand", "loop": true, "frames": [[0, 100]] },          // an export's tags, by name
+                 { "name": "walk", "loop": true,
+                   "frames": [[1, 100], [2, 100], [3, 100], [4, 100]] } ] },     // [frame, ms]
     { "name": "sprites/tiles",
       "frames": [ { "page": 1, "x": 0, "y": 0, "w": 128, "h": 64, "ox": 0, "oy": 0, "sw": 128, "sh": 64 } ],
       "tiles": [16, 16] } ] }                                          // a tile set: no pivot
@@ -841,6 +939,50 @@ KBJ, its members in this order:
 - An empty frame is page 0 at (0, 0), of size 0, with offset 0 and its
   cell's `sw`, `sh`.
 - A tile set has one frame: its whole page.
+- `clips` is written only for an Aseprite export with tags, after the
+  pivot: each tag's clip (above, "Aseprite subset"), each step a frame of
+  the sprite and its Aseprite duration. The facade names them
+  `<sprite>/<clip>`, as `sprites/person/walk` (`Clips::add_atlas`), and
+  each frame's quad is its own trimmed size, with the pivot where the cell
+  has it (`ClipFrame::from_atlas`).
+- A font's sprite has the pivot (0, 0): its font file places the glyphs.
+
+### Font file `atlas/<font>.font.kbj` (version 1)
+
+Written by the font's group's job, beside the atlas that holds its glyphs:
+`fonts/pixel.fnt` cooks to `atlas/fonts/pixel.font.kbj`. KBJ, its members
+in this order:
+
+```
+{ "version": 1, "face": "Pixel", "size": 16, "line_height": 18, "base": 14,   // BMFont's info and common
+  "atlas": "atlas/fonts.kbj", "sprite": "fonts/pixel",                       // where the glyphs' frames are
+  "glyphs": [ { "id": 32, "x": 0, "y": 13, "advance": 4 },                    // by id; no pixels: no frame
+              { "id": 65, "frame": 0, "x": 0, "y": 2, "advance": 7 }, … ],   // frame: of the sprite
+  "kerning": [ [65, 86, -1], … ],                                             // first, second, amount; sorted
+  "fallback": { "frame": 9, "x": 0, "y": 2, "advance": 7 } }                 // what a missing character draws
+```
+
+- `x`, `y` are BMFont's offsets of the glyph's rectangle, untrimmed: its
+  frame's `ox`, `oy` place the trimmed pixels in it. `advance` is BMFont's
+  `xadvance`. Ids are code points.
+- A glyph with no pixel above alpha 0 in its rectangle, a space or one of
+  size 0, has no frame.
+- The fallback is BMFont's glyph of id −1, else `?`; it must have pixels,
+  or the cook fails naming the font.
+- The cook checks the pages: each a PNG of the font's `scaleW × scaleH`,
+  with the glyphs in its alpha (`alphaChnl` 0 or 2, or not given, as
+  Hiero writes), and some pixel clear (a page with no alpha channel has
+  none). Each error names the `.fnt`.
+- The game's reader of it comes with M7.1: the cook cannot yet read back
+  what it writes, as it does the atlas file.
+
+### Data `data/<path>.kbj`
+
+Each `.jsonc` below the source's `data/` is a job of its own,
+`data/<path without .jsonc>`: read as JSONC (UTF-8, duplicate keys
+refused, `CodecError::Json` naming the line and column), written as the
+same value in KBJ at `data/<path>.kbj`. What the value means is checked
+where the game loads it.
 
 ### Incremental cache `OUT/.cache.kbj` (version 1)
 
@@ -851,26 +993,32 @@ KBJ, its members in this order:
               "outputs": [["atlas/sprites.kbj", "…"], …] } ] }                    // by path
 ```
 
-- Each atlas group is a job. It is skipped when its files' hashes, the
-  cooker and the options are the cache's, and its outputs are there as
-  written; `--force` skips none. A cook built anew cooks everything once.
-  The options string holds the options that change output: none yet.
+- Each atlas group is a job, and so is each data file. A job is skipped
+  when its files' hashes, the cooker and the options are the cache's, and
+  its outputs are there as written; `--force` skips none. A cook built
+  anew cooks everything once. The options string holds the options that
+  change output: none yet.
+- An atlas job's files are every file it read: its images, its exports
+  and their sheets, its fonts and their pages, the sidecars, and its
+  folders' `atlas.jsonc`.
 - Each file is read once, so its hash and what is cooked come from the same
   bytes.
 - A cache that cannot be read, has another version, or names a path the
   cook would not write (not an asset path as written, or an output not a
-  `.qoi` or `.kbj` below `atlas/`) is not used, with a warning.
+  `.qoi` or `.kbj` below `atlas/`, or a `.kbj` below `data/`) is not used,
+  with a warning.
 - Each output is written through a `.tmp` and a rename, and the cache last.
-  The cook owns `OUT/atlas/`: every file there that no job wrote is
-  removed. The output folder and the source folder may not hold each
-  other.
+  The cook owns `OUT/atlas/` and `OUT/data/`: every file there that no job
+  wrote is removed. The output folder and the source folder may not hold
+  each other. Two outputs of one name, or of names that fold alike, are
+  an error.
 
 ### CLI
 
 - `nadir-cook [--force] SOURCE OUT`: exit 0, 1 for a failed cook, 2 for a
   command line not understood, or with an argument that is not valid
-  Unicode. It prints each job, cooked or up to date, and warns on standard
-  error.
+  Unicode. It prints each job, cooked (an atlas group's sprites, pages,
+  clips and fonts) or up to date, and warns on standard error.
 - `cargo xtask cook [--force]` runs it, built in release mode, on
   `assets/` and `target/cooked/`.
 
@@ -924,8 +1072,8 @@ KBJ, its members in this order:
   - JSON: RFC 8259 examples plus the JSONC extensions; deep nesting hits the
     limit and errors, it doesn't overflow the stack
 - **Fuzz targets** (fuzz smoke): every decoder above, the atlas file reader
-  (`atlas`, M5.9), the pack TOC reader, the level reader and the save
-  reader.
+  (`atlas`, M5.9), the Aseprite reader (`aseprite`, M5.5), the pack TOC
+  reader, the level reader and the save reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   load every cooked asset through `PackSource` and `LooseSource`.
 - **The cook** (`tools/cook`): the scan's rules on lists of names made by
@@ -936,7 +1084,12 @@ KBJ, its members in this order:
   file, a group's pages, a cook into two folders byte for byte, an
   incremental cook against a clean one, what each change cooks again,
   stale files removed, and the workspace's `assets/` cooked to its PNGs'
-  pixels, cell by cell, into a file the game's reader takes.
+  pixels, cell by cell, into a file the game's reader takes, with the
+  person's clips; Aseprite exports placed in their canvas, their clips,
+  their sidecars and their mistakes; fonts' frames and files, their
+  fallbacks and their mistakes; data files; and edits to an export, a
+  font or a page, each cooking its group again to what a clean cook
+  writes.
 - **The asset server** (`crates/assets/tests`): loads that never wait for a
   source held shut, order, budgets and turns, panics, scopes. The load
   storm (`storm.rs`) asks for 1,000 images in one frame, and holds every
