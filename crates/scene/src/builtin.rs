@@ -30,7 +30,15 @@
 //!   `None`, as does a `Some` of anything written as `null`.
 //! - `Vec<T>` is an array. Applying one replaces the list, once every
 //!   element has been read.
+//! - an asset's `Handle<T>` is its asset's path, a string (ADR-0020,
+//!   ADR-0038). Writing one needs the context's asset server
+//!   ([`ReflectContext::with_assets`]); a handle the server does not know
+//!   is written as `null`, with a warning. Reading one needs the server to
+//!   load with ([`ReflectContext::loading`]): the path is checked as an
+//!   asset path of one of `T`'s extensions, and loaded in the context's
+//!   scope, which gives the same handle for the same path.
 
+use nadir_assets::{Asset, AssetPath, Handle};
 use nadir_codec::json::Value;
 use nadir_core::{Color, IVec2, Rect, Vec2};
 
@@ -446,5 +454,77 @@ impl<T: FromValue> FromValue for Vec<T> {
             .enumerate()
             .map(|(index, element)| cx.index(index, |cx| T::from_value(element, cx)))
             .collect()
+    }
+}
+
+impl<T: Asset> Reflect for Handle<T> {
+    fn type_name(&self) -> &'static str {
+        "Handle"
+    }
+
+    fn kind(&self) -> ReflectKind {
+        ReflectKind::Handle
+    }
+
+    fn fields(&self) -> &'static [FieldInfo] {
+        &[]
+    }
+
+    fn field(&self, _index: usize) -> Option<&dyn Reflect> {
+        None
+    }
+
+    fn field_mut(&mut self, _index: usize) -> Option<&mut dyn Reflect> {
+        None
+    }
+
+    fn to_value(&self, cx: &mut ReflectContext<'_>) -> Value {
+        match cx.assets().and_then(|server| server.path(*self)) {
+            Some(path) => Value::String(path.to_string()),
+            None => {
+                cx.warn("an asset handle the asset server does not know is written as null");
+                Value::Null
+            }
+        }
+    }
+
+    fn apply_value(
+        &mut self,
+        value: &Value,
+        cx: &mut ReflectContext<'_>,
+    ) -> Result<(), ReflectError> {
+        *self = Self::from_value(value, cx)?;
+        Ok(())
+    }
+}
+
+impl<T: Asset> FromValue for Handle<T> {
+    const TYPE_NAME: &'static str = "Handle";
+
+    fn from_value(value: &Value, cx: &mut ReflectContext<'_>) -> Result<Self, ReflectError> {
+        let text = value
+            .as_str()
+            .ok_or_else(|| cx.expected("an asset path, a string", value))?;
+        let bad = |cx: &ReflectContext<'_>, reason: String| {
+            cx.error(ReflectErrorKind::BadAssetPath {
+                path: text.to_string(),
+                reason,
+            })
+        };
+        let path = AssetPath::new(text).map_err(|error| bad(cx, error.to_string()))?;
+        if !path
+            .extension()
+            .is_some_and(|extension| T::EXTENSIONS.contains(&extension))
+        {
+            let reason = format!("its file ends in one of {}", T::EXTENSIONS.join(", "));
+            return Err(bad(cx, reason));
+        }
+        if cx.assets_mut().is_none() {
+            return Err(cx.error(ReflectErrorKind::NoContext {
+                needs: "the asset server, to load an asset",
+            }));
+        }
+        let (server, scope) = cx.assets_mut().expect("checked above");
+        Ok(server.load_in(path.as_str(), scope))
     }
 }

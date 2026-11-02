@@ -419,7 +419,9 @@ impl fmt::Debug for Clips {
 /// frames can be skipped, and a clip that plays once and is no longer than
 /// the step ends on its first frame.
 ///
-/// It is not reflected until prefabs and levels (roadmap M5.11, ADR-0024).
+/// It is reflected by hand as its clip's name in the [`Clips`], and a read
+/// one starts its clip: its time and finished flag are left out (ADR-0024,
+/// ADR-0038).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Animator {
     clip: Handle<Clip>,

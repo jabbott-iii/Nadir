@@ -14,7 +14,7 @@
 
 //! [`TypeRegistry`]: the reflected component types, by name.
 
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 
 use nadir_codec::json::Value;
 use nadir_core::FastHashMap;
@@ -26,6 +26,23 @@ use crate::{FromValue, Reflect, ReflectContext, ReflectError};
 type ConstructFn = fn(&Value, &mut ReflectContext<'_>) -> Result<Box<dyn Reflect>, ReflectError>;
 type InsertFn =
     fn(&mut Commands<'_>, Entity, &Value, &mut ReflectContext<'_>) -> Result<(), ReflectError>;
+type LayeredFn = fn(&[Layer<'_>], &mut ReflectContext<'_>) -> Result<Box<dyn Any>, ReflectError>;
+type InsertAnyFn = fn(&mut Commands<'_>, Entity, Box<dyn Any>);
+
+/// One layer of a component's value: a value, and where it was read from,
+/// for messages. A prefab's are its base's, its own and a level's
+/// override, in that order (ADR-0038).
+#[derive(Clone, Debug)]
+pub struct Layer<'v> {
+    /// The file the value came from: `data/prefabs/slime.kbj`.
+    pub source: &'v str,
+    /// Where the value is in that file, as errors give a path:
+    /// `components.Health`, or `entities[1].overrides.Health` in a level.
+    /// Empty for the file's root.
+    pub at: String,
+    /// The value.
+    pub value: &'v Value,
+}
 type InspectFn = fn(&World, Entity, &mut dyn FnMut(&dyn Reflect)) -> bool;
 type InspectMutFn = fn(&World, Entity, &mut dyn FnMut(&mut dyn Reflect)) -> bool;
 type EachFn = fn(&World, &mut dyn FnMut(Entity, &dyn Reflect));
@@ -37,6 +54,8 @@ pub struct Registration {
     construct: ConstructFn,
     register_in: fn(&mut World),
     insert: InsertFn,
+    layered: LayeredFn,
+    insert_any: InsertAnyFn,
     inspect: InspectFn,
     inspect_mut: InspectMutFn,
     each: EachFn,
@@ -80,6 +99,51 @@ impl Registration {
         cx: &mut ReflectContext<'_>,
     ) -> Result<(), ReflectError> {
         (self.insert)(commands, entity, value, cx)
+    }
+
+    /// Makes a value of the type from `layers`, the first made from its
+    /// value and each later one applied onto it, each read under its own
+    /// source and place ([`ReflectContext::with_origin`]); and gives it to
+    /// `entity` through `commands`, as
+    /// [`Registration::insert`] does. No layers is the type's value from
+    /// an empty object.
+    ///
+    /// # Errors
+    ///
+    /// If a layer does not fit the type, naming that layer's source;
+    /// nothing is queued then.
+    pub fn insert_layers(
+        &self,
+        commands: &mut Commands<'_>,
+        entity: Entity,
+        layers: &[Layer<'_>],
+        cx: &mut ReflectContext<'_>,
+    ) -> Result<(), ReflectError> {
+        let value = (self.layered)(layers, cx)?;
+        (self.insert_any)(commands, entity, value);
+        Ok(())
+    }
+
+    /// The value of [`Registration::insert_layers`], made but not given to
+    /// an entity: so that a prefab's every component is made before its
+    /// entity is spawned.
+    pub(crate) fn make_layers(
+        &self,
+        layers: &[Layer<'_>],
+        cx: &mut ReflectContext<'_>,
+    ) -> Result<Box<dyn Any>, ReflectError> {
+        (self.layered)(layers, cx)
+    }
+
+    /// Gives `entity` a value [`Registration::make_layers`] made, through
+    /// `commands`.
+    pub(crate) fn insert_made(
+        &self,
+        commands: &mut Commands<'_>,
+        entity: Entity,
+        value: Box<dyn Any>,
+    ) {
+        (self.insert_any)(commands, entity, value);
     }
 
     /// Calls `f` with `entity`'s component of this type, to read it.
@@ -148,6 +212,8 @@ impl TypeRegistry {
             construct: construct::<T>,
             register_in: World::register::<T>,
             insert: insert::<T>,
+            layered: layered::<T>,
+            insert_any: insert_any::<T>,
             inspect: inspect::<T>,
             inspect_mut: inspect_mut::<T>,
             each: each::<T>,
@@ -299,6 +365,29 @@ fn insert<T: Component + FromValue>(
 ) -> Result<(), ReflectError> {
     commands.insert(entity, T::from_value(value, cx)?);
     Ok(())
+}
+
+fn layered<T: Component + FromValue>(
+    layers: &[Layer<'_>],
+    cx: &mut ReflectContext<'_>,
+) -> Result<Box<dyn Any>, ReflectError> {
+    let Some((first, rest)) = layers.split_first() else {
+        return Ok(Box::new(T::from_value(&Value::Object(Vec::new()), cx)?));
+    };
+    let mut value = cx.with_origin(first.source, &first.at, |cx| T::from_value(first.value, cx))?;
+    for layer in rest {
+        cx.with_origin(layer.source, &layer.at, |cx| {
+            value.apply_value(layer.value, cx)
+        })?;
+    }
+    Ok(Box::new(value))
+}
+
+fn insert_any<T: Component>(commands: &mut Commands<'_>, entity: Entity, value: Box<dyn Any>) {
+    let value = value
+        .downcast::<T>()
+        .expect("the registration made this value, of its own type");
+    commands.insert(entity, *value);
 }
 
 fn inspect<T: Component + Reflect>(

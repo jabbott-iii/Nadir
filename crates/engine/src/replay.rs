@@ -18,7 +18,7 @@
 
 use nadir_ecs::World;
 use nadir_input::{ActionSet, ActionState, Input, InputError, InputPlayer};
-use nadir_scene::{ReflectContext, TypeRegistry};
+use nadir_scene::TypeRegistry;
 
 use crate::app::LatchFn;
 
@@ -36,10 +36,16 @@ use crate::app::LatchFn;
 /// # Panics
 ///
 /// If the world has no [`TypeRegistry`] (every [`App`](crate::App)'s has
-/// one), or a reflected type's components are borrowed mutably elsewhere.
+/// one), or a reflected type's components, the registry, or the
+/// [`AssetServer`](nadir_assets::AssetServer), [`Clips`](crate::Clips) or
+/// [`CollisionLayers`](crate::CollisionLayers) resource are borrowed
+/// mutably elsewhere, as [`reflect_context`](crate::reflect_context)
+/// borrows them.
 pub fn world_hash(world: &World) -> u64 {
     let registry = world.resource::<TypeRegistry>();
-    registry.hash_world(world, &mut ReflectContext::new("nadir::world_hash"))
+    crate::reflect_context(world, "nadir::world_hash", |cx| {
+        registry.hash_world(world, &mut cx.hashing())
+    })
 }
 
 /// How the replay that [`App::play_replay`](crate::App::play_replay) plays

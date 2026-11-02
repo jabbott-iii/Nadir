@@ -110,10 +110,28 @@
 //! | [`SaveId`] | Its id in saves, which come with roadmap M9.4 |
 //! | [`PrevTransform`] | Where it was at the start of the last tick, for drawing between ticks: the engine keeps it |
 //!
-//! [`Transform`], [`Velocity`], [`Player`], [`SaveId`] and [`Facing`] are
-//! reflected. [`Sprite`], [`Collider`] and [`Animator`] are not yet (roadmap
-//! M5.11), nor [`Parent`] (M9.4); [`PrevTransform`] is the engine's own, and
-//! is never in data.
+//! [`Transform`], [`Velocity`], [`Player`], [`SaveId`], [`Facing`],
+//! [`Sprite`], [`Collider`] and [`Animator`] are reflected, so prefabs and
+//! levels can give them; [`Parent`] is not yet (roadmap M9.4), and
+//! [`PrevTransform`] is the engine's own, and is never in data. A
+//! [`Sprite`] is written with its texture's path, and a prefab may name a
+//! frame of a cooked atlas instead, `{"atlas": "atlas/sprites.kbj",
+//! "sprite": "sprites/hero", "frame": 0}`; a [`Collider`]'s layers by the
+//! names [`App::collision_layers`] gives them, `["World", "People"]`; an
+//! [`Animator`] as its clip's name in the [`Clips`]. The world hash leaves
+//! out what `nadir::animate` writes: a sprite's texture, uv, size, pivot
+//! and `flip.x` (ADR-0038).
+//!
+//! # Prefabs
+//!
+//! A prefab is a set of component values, cooked from
+//! `assets/data/prefabs/<name>.jsonc` to `data/prefabs/<name>.kbj`, that
+//! may extend another. The [`PrefabLibrary`](scene::PrefabLibrary)
+//! resource loads prefabs and their bases, and spawns entities of them;
+//! [`loading_context`] gives it a reflect context with what the engine's
+//! components need, the asset server, the clips and the collision layers,
+//! and [`reflect_context`] one for writing them, as a hash or a save
+//! does. Levels' loading comes with roadmap M5.6.
 //!
 //! # Collision
 //!
@@ -337,6 +355,7 @@ mod frame_allocs;
 mod glue;
 mod limiter;
 mod log_file;
+mod reflected;
 mod replay;
 mod tick_stats;
 
@@ -360,6 +379,7 @@ pub use components::{
 pub use error::Error;
 #[cfg(feature = "dev")]
 pub use frame_allocs::FrameAllocs;
+pub use reflected::{CollisionLayers, loading_context, reflect_context};
 pub use replay::{Replay, world_hash};
 pub use tick_stats::TickStats;
 

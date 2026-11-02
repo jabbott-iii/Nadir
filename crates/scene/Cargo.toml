@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+nadir-assets.workspace = true
 nadir-codec.workspace = true
 nadir-core.workspace = true
 nadir-ecs.workspace = true

@@ -46,7 +46,7 @@ use nadir::input::{
 };
 use nadir::log::{error, info};
 use nadir::prelude::*;
-use nadir::scene::{FromValue, ReflectContext, TypeRegistry};
+use nadir::scene::{FromValue, TypeRegistry};
 use nadir::{Event, Replay, SaveId};
 
 /// The seed of the game's random numbers.
@@ -185,9 +185,11 @@ type Line = Vec<u64>;
 /// The steps of the hash: the whole, then each type, in the order the
 /// world's registry has them.
 fn hash_line(world: &World, each: &[TypeRegistry]) -> Line {
-    let mut cx = ReflectContext::new("the determinism test's columns");
     let mut line = vec![nadir::world_hash(world)];
-    line.extend(each.iter().map(|one| one.hash_world(world, &mut cx)));
+    nadir::reflect_context(world, "the determinism test's columns", |cx| {
+        let mut cx = cx.hashing();
+        line.extend(each.iter().map(|one| one.hash_world(world, &mut cx)));
+    });
     line
 }
 
@@ -207,6 +209,9 @@ fn each_type() -> Vec<TypeRegistry> {
         alone::<Player>(),
         alone::<SaveId>(),
         alone::<Facing>(),
+        alone::<Sprite>(),
+        alone::<Collider>(),
+        alone::<Animator>(),
         alone::<Score>(),
         alone::<Dashing>(),
         alone::<Walker>(),

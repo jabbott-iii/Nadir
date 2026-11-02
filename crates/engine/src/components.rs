@@ -63,8 +63,10 @@ nadir_scene::reflect_newtype! {
 /// What an entity looks like: a sprite drawn at its [`Transform`], between
 /// ticks part of the way from its [`PrevTransform`].
 ///
-/// It holds what [`SpriteDraw`] holds but the position. It is not reflected
-/// until prefabs bring the `Handle` encoding (roadmap M5.11, ADR-0020).
+/// It holds what [`SpriteDraw`] holds but the position. It is reflected by
+/// hand, its texture as its page's path, and prefabs may name a frame of a
+/// cooked atlas instead (`crate::reflected`, ADR-0038); a hash leaves out
+/// what `nadir::animate` writes, below.
 ///
 /// On an entity with an [`Animator`](crate::Animator), the system
 /// `nadir::animate` writes its `texture` and `uv` each frame, and its `size`
@@ -168,7 +170,9 @@ impl Sprite {
 /// a layer outside its parent's mask, or make it a trigger, which stops
 /// nothing.
 ///
-/// It is not reflected until prefabs give layers names (roadmap M5.11).
+/// It is reflected by hand, its layers by the names
+/// [`App::collision_layers`](crate::App::collision_layers) gives them
+/// (`crate::reflected`, ADR-0038).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Collider(pub nadir_collision::Collider);
 

@@ -24,9 +24,9 @@ Formats made for the game, which reads them at run time:
   cooked data.
 - **The cook's atlas file**, which says where each sprite's frames are on
   the atlas pages and which clips they make.
-- **The level file and the prefab file**: the readers are built, but the
-  game does not load levels or prefabs from them yet (roadmap M5.6 and
-  M5.11).
+- **The level file and the prefab file**, which nadir-scene loads as
+  assets (`Level`, and prefabs through `PrefabLibrary::load`); loading a
+  whole level into the game waits for roadmap task M5.6.
 - **KLZ**, Nadir's LZ77 block compression, for the entries of pack files,
   which are not built yet (M5.7).
 

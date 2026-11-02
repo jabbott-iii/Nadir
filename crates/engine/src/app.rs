@@ -33,15 +33,15 @@ use nadir_platform::{
     Event, GpuSurface, ModalFrame, Platform, WindowConfig, precise_sleep, show_error_dialog,
 };
 use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, TileLayers};
-use nadir_scene::{FromValue, TypeRegistry};
+use nadir_scene::{FromValue, PrefabLibrary, TypeRegistry};
 
 use crate::animation::AnimationClock;
 use crate::limiter::FrameLimiter;
 use crate::replay::{PlayReplay, ReplayInput};
 use crate::{
-    AnimationFinished, Animator, Clips, Collider, Collisions, Error, Facing, Parent, Player,
-    PrevTransform, Replay, SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit,
-    Velocity, glue, log_file,
+    AnimationFinished, Animator, Clips, Collider, CollisionLayers, Collisions, Error, Facing,
+    Parent, Player, PrevTransform, Replay, SaveId, Sprite, TickStats, Transform, TriggerEnter,
+    TriggerExit, Velocity, glue, log_file,
 };
 
 /// How many times a second the simulation steps.
@@ -374,6 +374,10 @@ impl EngineCore {
 /// - [`Collisions`], the colliders
 /// - [`Clips`], the clips that animators play
 /// - [`TypeRegistry`], the reflected component types
+/// - [`PrefabLibrary`], the prefabs the game loads, none until it loads
+///   them
+/// - [`CollisionLayers`], the names of the game's collision layers, none
+///   until [`App::collision_layers`] gives them
 /// - with [`App::play_replay`], [`Replay`], how far the replay got
 /// - the events [`TriggerEnter`], [`TriggerExit`] and [`AnimationFinished`]
 /// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
@@ -422,9 +426,12 @@ impl App {
     /// feature, a failed asset shows its placeholder; without it, nothing.
     ///
     /// Of the engine's components, [`Transform`], [`Velocity`], [`Player`],
-    /// [`SaveId`] and [`Facing`] are reflected. [`Sprite`], [`Collider`],
-    /// [`Animator`] and [`Parent`] are not yet (roadmap M5.11 and M9.4), and
-    /// [`PrevTransform`] is the engine's own.
+    /// [`SaveId`], [`Facing`], [`Sprite`], [`Collider`] and [`Animator`] are
+    /// reflected, so that prefabs and levels can give them (ADR-0038).
+    /// [`Parent`] is not yet (roadmap M9.4), and [`PrevTransform`] is the
+    /// engine's own. Its resources include a [`PrefabLibrary`] with no
+    /// prefabs, and [`CollisionLayers`] with no names
+    /// ([`App::collision_layers`]).
     pub fn new(config: Config) -> Self {
         let on_failure = if cfg!(feature = "dev") {
             OnFailure::Placeholder
@@ -440,6 +447,8 @@ impl App {
         world.insert_resource(TickStats::default());
         world.insert_resource(Collisions::new());
         world.insert_resource(Clips::new());
+        world.insert_resource(CollisionLayers::default());
+        world.insert_resource(PrefabLibrary::new());
         world.insert_resource(AnimationClock::default());
         #[cfg(feature = "dev")]
         world.insert_resource(crate::FrameAllocs::default());
@@ -453,6 +462,9 @@ impl App {
         registry.register_component::<Player>();
         registry.register_component::<SaveId>();
         registry.register_component::<Facing>();
+        registry.register_component::<Sprite>();
+        registry.register_component::<Collider>();
+        registry.register_component::<Animator>();
         registry.register_components(&mut world);
         world.insert_resource(registry);
         world.register::<PrevTransform>();
@@ -515,6 +527,21 @@ impl App {
             .resource_mut::<TypeRegistry>()
             .register_component::<T>();
         self.world.register::<T>();
+        self
+    }
+
+    /// Names the game's collision layers: bit 0 of a
+    /// [`LayerMask`](nadir_collision::LayerMask) the first, bit 1 the next,
+    /// and so on, as prefabs and levels write a collider's layers
+    /// (`["World", "People"]`). It replaces the [`CollisionLayers`]
+    /// resource, which has no names until then.
+    ///
+    /// # Panics
+    ///
+    /// If there are more than 32 names, one is empty, or two are the same.
+    #[must_use]
+    pub fn collision_layers(self, names: &[&str]) -> Self {
+        *self.world.resource_mut::<CollisionLayers>() = CollisionLayers::new(names);
         self
     }
 
@@ -1088,7 +1115,7 @@ mod tests {
     }
 
     #[test]
-    fn the_engines_components_are_registered_and_five_are_reflected() {
+    fn the_engines_components_are_registered_and_eight_are_reflected() {
         let app = app();
         let world = app.world();
         assert!(world.is_registered::<Transform>());
@@ -1105,8 +1132,20 @@ mod tests {
         let names: Vec<&str> = registry.iter().map(|it| it.name()).collect();
         assert_eq!(
             names,
-            ["Transform", "Velocity", "Player", "SaveId", "Facing"]
+            [
+                "Transform",
+                "Velocity",
+                "Player",
+                "SaveId",
+                "Facing",
+                "Sprite",
+                "Collider",
+                "Animator"
+            ]
         );
+        // The engine's own, and the prefabs a game loads.
+        assert!(world.contains_resource::<CollisionLayers>());
+        assert!(world.contains_resource::<PrefabLibrary>());
     }
 
     nadir_scene::reflect_newtype! {
@@ -1916,14 +1955,25 @@ mod tests {
             .get_mut(walker)
             .expect("drawn")
             .size = Vec2::splat(2.0);
-        assert_eq!(app.world_hash(), start, "a Sprite is not reflected");
+        assert_eq!(
+            app.world_hash(),
+            start,
+            "a Sprite's size is left out, as animators write it"
+        );
+        app.world()
+            .write::<Sprite>()
+            .get_mut(walker)
+            .expect("drawn")
+            .layer = 2;
+        let layered = app.world_hash();
+        assert_ne!(layered, start, "a Sprite's layer is the game's, and hashed");
         app.world()
             .write::<Transform>()
             .get_mut(walker)
             .expect("placed")
             .position
             .x = 1.0;
-        assert_ne!(app.world_hash(), start);
+        assert_ne!(app.world_hash(), layered);
     }
 
     #[test]

@@ -27,6 +27,9 @@ Built:
 - kinematic collision: boxes and circles, a grid of solid tiles,
   move-and-slide, triggers, and queries;
 - sprite animation, from clips made in code or from Aseprite's tags;
+- prefabs, which extend one another, spawned through the
+  `PrefabLibrary`, with the engine's sprites, colliders and animators
+  reflected for them;
 - assets loaded on worker threads, and an offline cook that packs images,
   Aseprite exports and bitmap fonts into atlases;
 - a world hash, to check that a replay gives the same simulation.
@@ -36,7 +39,7 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7);
 - audio (M6), text (M7.1), the debug tools (M7), gamepads (M8);
-- levels and prefabs (M5.6, M5.11), pack files (M5.7), hot reload (M5.8);
+- levels from LDtk (M5.12, M5.6), pack files (M5.7), hot reload (M5.8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 

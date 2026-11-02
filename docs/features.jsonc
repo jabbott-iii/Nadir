@@ -155,7 +155,7 @@
     {
       "name": "Reflection",
       "area": "Simulation",
-      "summary": "Macros describe structs and enums as dynamic values and back, with a registry of types and warnings for unknown fields. The determinism tests hash worlds through it.",
+      "summary": "Macros describe structs and enums as dynamic values and back, with a registry of types and warnings for unknown fields. Asset handles are written as their files' paths and loaded again when read, and the engine's sprites, colliders and animators are reflected too: a sprite can name a frame of a cooked atlas, a collider its layers by name, an animator its clip. The determinism tests hash worlds through it.",
       "tasks": ["M4.2"],
       "ticked": ["M4.2"]
     },
@@ -183,7 +183,7 @@
     {
       "name": "Deterministic replays",
       "area": "Quality",
-      "summary": "The input is recorded tick by tick and played back with no window. A test replays a stored recording and compares a hash of the reflected world with the stored sequence, so a change that makes the simulation nondeterministic fails it.",
+      "summary": "The input is recorded tick by tick and played back with no window. A test replays a stored recording and compares a hash of the reflected world with the stored sequence, so a change that makes the simulation nondeterministic fails it. The hash leaves out what animation rewrites each frame, a sprite's frame and the way it faces.",
       "tasks": ["M4.7"],
       "ticked": ["M4.7"]
     },
@@ -211,9 +211,9 @@
     {
       "name": "Levels and prefabs",
       "area": "Content",
-      "summary": "The engine reads LDtk 1.5.3's projects and level files, and its own level and prefab files, strictly and under the fuzzer: a project saved by another version of LDtk is refused with the version to save it with, and every refusal names where in the file it is. Levels will be authored in LDtk and cooked into level files, prefabs will inherit from one another, and both will be loaded into the world.",
+      "summary": "Prefabs inherit from one another: a prefab's components apply over its base's, and a level's overrides over both, onto one value, and a cycle, a chain of more than 16, an unknown component or a value that does not fit is refused, naming the file and the field, with no entity left behind. A level's entities spawn through their prefabs. The engine reads LDtk 1.5.3's projects and level files, and its own level and prefab files, strictly and under the fuzzer: a project saved by another version of LDtk is refused with the version to save it with, and every refusal names where in the file it is. Levels will be authored in LDtk, cooked into level files and loaded into the world, their tiles drawn and their walls collided with.",
       "tasks": ["M5.10", "M5.11", "M5.12", "M5.6"],
-      "ticked": ["M5.10"]
+      "ticked": ["M5.10", "M5.11"]
     },
     {
       "name": "Pack files",

@@ -18,17 +18,19 @@
 //! This is the scene layer of Nadir, and its own replacement for serde and
 //! runtime reflection (ADR-0007): declarative macros define a type and its
 //! impls together, with no procedural macros. So far it has reflection
-//! (roadmap M4.2) and the world hash (M4.7). Asset handles in data, prefabs
-//! and a level's entities come with M5.11; entity references and saves with
-//! M9.4; game states with M9.1. `docs/subsystems/scene.md` has the design.
+//! (roadmap M4.2), the world hash (M4.7), and asset handles in data,
+//! prefabs with `extends` and a level's entities (M5.11, ADR-0038).
+//! Entity references and saves come with M9.4, and game states with M9.1.
+//! `docs/subsystems/scene.md` has the design.
 //!
 //! The facade crate, `nadir_engine`, re-exports this crate as
 //! `nadir::scene`. Every `App` keeps a [`TypeRegistry`] as a world
 //! resource, with the engine's reflected components in it (`Transform`,
-//! `Velocity`, `Player`, `SaveId` and `Facing`); `App::register_component`
-//! adds a game's, and `App::world_hash` is [`TypeRegistry::hash_world`]
-//! of that registry. This crate depends on `nadir-core`, `nadir-codec` and
-//! `nadir-ecs`.
+//! `Velocity`, `Player`, `SaveId`, `Facing`, `Sprite`, `Collider` and
+//! `Animator`), and a [`PrefabLibrary`]; `App::register_component` adds a
+//! game's, and `App::world_hash` is [`TypeRegistry::hash_world`] of that
+//! registry, with a context for a hash. This crate depends on `nadir-core`,
+//! `nadir-codec`, `nadir-ecs` and `nadir-assets`.
 //!
 //! # The parts
 //!
@@ -44,14 +46,21 @@
 //!   [`reflect_newtype!`] a struct that wraps one value. Each writes the
 //!   type and both impls.
 //! - **The built-in impls:** `bool`, `i8` to `i64`, `isize`, `u8` to `u64`,
-//!   `usize`, `f32`, `f64`, `String`, `Option<T>`, `Vec<T>`, and
-//!   `nadir-core`'s `Vec2`, `IVec2`, `Color` and `Rect`.
+//!   `usize`, `f32`, `f64`, `String`, `Option<T>`, `Vec<T>`,
+//!   `nadir-core`'s `Vec2`, `IVec2`, `Color` and `Rect`, and an asset's
+//!   `Handle<T>`, written as its asset's path.
 //! - **The context.** [`ReflectContext`] goes with every read and write:
 //!   it names the source, keeps the path to the field at hand, and
-//!   collects the [`ReflectWarning`]s ([`ReflectContext::warnings`]).
-//!   [`ReflectContext::field`], [`ReflectContext::index`],
-//!   [`ReflectContext::expected`] and [`ReflectContext::unknown_field`]
-//!   are for impls written by hand.
+//!   collects the [`ReflectWarning`]s ([`ReflectContext::warnings`]). It
+//!   may hold the asset server, to write handles
+//!   ([`ReflectContext::with_assets`]) or to read them, loading each in a
+//!   scope ([`ReflectContext::loading`]); resources a type needs, such as
+//!   the facade's clips ([`ReflectContext::with_resource`]); and whether
+//!   the values are for a hash ([`ReflectContext::hashing`]).
+//!   [`ReflectContext::field`], [`ReflectContext::key`],
+//!   [`ReflectContext::index`], [`ReflectContext::with_source`],
+//!   [`ReflectContext::expected`], [`ReflectContext::unknown_field`] and
+//!   [`ReflectContext::warn`] are for impls written by hand.
 //! - **Errors.** [`ReflectError`], with a [`ReflectErrorKind`].
 //! - **The registry.** [`TypeRegistry`] holds component types by name:
 //!   [`TypeRegistry::register_component`], [`TypeRegistry::get`],
@@ -61,7 +70,22 @@
 //!   gives it to an entity through commands ([`Registration::insert`]),
 //!   reads or changes an entity's ([`Registration::inspect`],
 //!   [`Registration::inspect_mut`]), and walks every one in a world
-//!   ([`Registration::each`]).
+//!   ([`Registration::each`]). [`Registration::insert_layers`] makes one
+//!   value of several [`Layer`]s, a prefab's base's, its own and an
+//!   override, applied in order.
+//! - **Prefabs.** [`PrefabLibrary`] loads prefabs, cooked to
+//!   `data/prefabs/<name>.kbj`, with the prefabs they extend
+//!   ([`PrefabLibrary::load`], at most [`MAX_EXTENDS`] of them, with no
+//!   cycle, each component a type of the registry), and spawns entities of
+//!   them through commands
+//!   ([`PrefabLibrary::spawn`]): each component's value is its base's,
+//!   then its own, then the override's. A spawn that fails leaves no
+//!   entity; [`PrefabError`] says why, naming the file.
+//! - **Levels.** [`Level`] is the cooked level file as an asset
+//!   ([`level`] re-exports its types), and
+//!   [`PrefabLibrary::spawn_level`] spawns its entities, each with its
+//!   position, after [`PrefabLibrary::load_level`] loads their prefabs.
+//!   Its tile layers and grid are the facade's (roadmap M5.6).
 //! - **[`Value`]** is `nadir-codec`'s JSON tree, re-exported. `nadir-codec`
 //!   reads JSONC text and KBJ into one.
 //!
@@ -174,7 +198,9 @@
 //!   saving, tools and tests, not for every frame.
 
 mod builtin;
+pub mod level;
 mod macros;
+pub mod prefab;
 mod reflect;
 mod registry;
 #[cfg(test)]
@@ -185,9 +211,11 @@ mod tests;
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
+pub use level::Level;
 pub use nadir_codec::json::Value;
+pub use prefab::{MAX_EXTENDS, Prefab, PrefabAsset, PrefabError, PrefabLibrary};
 pub use reflect::{
     FieldInfo, FromValue, Reflect, ReflectContext, ReflectError, ReflectErrorKind, ReflectKind,
     ReflectWarning,
 };
-pub use registry::{Registration, TypeRegistry};
+pub use registry::{Layer, Registration, TypeRegistry};

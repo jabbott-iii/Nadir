@@ -15,9 +15,12 @@
 //! [`Reflect`] and [`FromValue`]: walking a value's fields by name, and
 //! turning it into a [`Value`] and back.
 
+use std::any::Any;
+use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
 
+use nadir_assets::{AssetServer, Scope};
 use nadir_codec::json::Value;
 use nadir_core::log::warn;
 
@@ -94,7 +97,7 @@ pub enum ReflectKind {
     List,
     /// An `Option<T>`.
     Option,
-    /// An asset handle, written as the asset's path (roadmap M5.11).
+    /// An asset handle, written as the asset's path (ADR-0020, ADR-0038).
     Handle,
 }
 
@@ -112,35 +115,162 @@ pub struct FieldInfo {
 }
 
 /// One step of the path to a field, for messages.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Segment {
     Field(&'static str),
+    /// A member whose name the data gives, such as a prefab's component.
+    Key(String),
     Index(usize),
+    /// A place given as text, where a value begins in its source:
+    /// `components.Health`.
+    Origin(String),
+}
+
+/// The asset server a context reads handles with, if it has one.
+enum Assets<'a> {
+    None,
+    /// To write handles as their paths: hashing and saving never load.
+    Shared(&'a AssetServer),
+    /// To read them too, each loaded in the scope.
+    Loading(&'a mut AssetServer, Scope),
 }
 
 /// What reading or writing reflected values needs besides the values:
 /// the name of the source, for messages, the path to the field at hand,
-/// and the warnings so far.
+/// and the warnings so far; and what some types need to read or write
+/// themselves (ADR-0038):
+///
+/// - the asset server, which an asset [`Handle`](nadir_core::Handle) is
+///   written and read through, as its asset's path:
+///   [`ReflectContext::with_assets`] to write handles,
+///   [`ReflectContext::loading`] to read them too;
+/// - resources of the types that need them, such as the facade's clips and
+///   collision layers: [`ReflectContext::with_resource`];
+/// - whether the values are for a hash, which leaves out what changes each
+///   frame: [`ReflectContext::hashing`].
 pub struct ReflectContext<'a> {
-    source: &'a str,
+    source: Cow<'a, str>,
     path: Vec<Segment>,
     warnings: Vec<ReflectWarning>,
+    assets: Assets<'a>,
+    resources: Vec<&'a dyn Any>,
+    hashing: bool,
 }
 
 impl<'a> ReflectContext<'a> {
     /// A context for reading or writing `source`: a file's path, or any
-    /// name that tells the reader where the data came from.
+    /// name that tells the reader where the data came from. It has no asset
+    /// server and no resources, and is not for a hash.
     pub fn new(source: &'a str) -> Self {
         Self {
-            source,
+            source: Cow::Borrowed(source),
             path: Vec::new(),
             warnings: Vec::new(),
+            assets: Assets::None,
+            resources: Vec::new(),
+            hashing: false,
         }
+    }
+
+    /// This context with `server`, to write asset handles as their paths.
+    /// Reading a handle needs [`ReflectContext::loading`].
+    pub fn with_assets(mut self, server: &'a AssetServer) -> Self {
+        self.assets = Assets::Shared(server);
+        self
+    }
+
+    /// This context with `server`, to read asset handles, each loaded in
+    /// `scope`, as well as to write them.
+    pub fn loading(mut self, server: &'a mut AssetServer, scope: Scope) -> Self {
+        self.assets = Assets::Loading(server, scope);
+        self
+    }
+
+    /// This context with `resource`, for the types whose values need it:
+    /// [`ReflectContext::resource`] finds it by its type. One of a type
+    /// given before is replaced.
+    pub fn with_resource<T: Any>(mut self, resource: &'a T) -> Self {
+        self.resources.retain(|known| !known.is::<T>());
+        self.resources.push(resource);
+        self
+    }
+
+    /// This context for a hash: [`ReflectContext::is_hashing`] is true, so
+    /// that a type leaves out what the engine rewrites each frame, such as
+    /// the facade's `Sprite` frame an animator shows. A context for a hash
+    /// never loads an asset.
+    pub fn hashing(mut self) -> Self {
+        self.hashing = true;
+        self
+    }
+
+    /// Whether the values are for a hash: see [`ReflectContext::hashing`].
+    pub fn is_hashing(&self) -> bool {
+        self.hashing
+    }
+
+    /// The asset server, to write a handle as its asset's path, if the
+    /// context has one.
+    pub fn assets(&self) -> Option<&AssetServer> {
+        match &self.assets {
+            Assets::None => None,
+            Assets::Shared(server) => Some(server),
+            Assets::Loading(server, _) => Some(server),
+        }
+    }
+
+    /// The asset server, to load an asset, and the scope to load it in, if
+    /// the context is [`ReflectContext::loading`].
+    pub fn assets_mut(&mut self) -> Option<(&mut AssetServer, Scope)> {
+        match &mut self.assets {
+            Assets::Loading(server, scope) => Some((server, *scope)),
+            Assets::None | Assets::Shared(_) => None,
+        }
+    }
+
+    /// The resource of type `T` given with [`ReflectContext::with_resource`],
+    /// if there is one.
+    pub fn resource<T: Any>(&self) -> Option<&T> {
+        self.resources
+            .iter()
+            .find_map(|resource| resource.downcast_ref::<T>())
     }
 
     /// The name of the source.
     pub fn source(&self) -> &str {
-        self.source
+        &self.source
+    }
+
+    /// Runs `f` with `source` as the source, for a value read from another
+    /// file than the rest, such as a prefab's base, and puts the source
+    /// back again, whatever `f` returns. The path is kept.
+    pub fn with_source<R>(&mut self, source: &str, f: impl FnOnce(&mut Self) -> R) -> R {
+        let outer = std::mem::replace(&mut self.source, Cow::Owned(source.to_string()));
+        let result = f(self);
+        self.source = outer;
+        result
+    }
+
+    /// Runs `f` with `source` as the source and `at` as the path, for a
+    /// value read from where it is in another file, such as a prefab's
+    /// `components.Health`, and puts both back again, whatever `f` returns.
+    /// An empty `at` is the source's root.
+    pub fn with_origin<R>(&mut self, source: &str, at: &str, f: impl FnOnce(&mut Self) -> R) -> R {
+        let path = if at.is_empty() {
+            Vec::new()
+        } else {
+            vec![Segment::Origin(at.to_string())]
+        };
+        let outer_path = std::mem::replace(&mut self.path, path);
+        let result = self.with_source(source, f);
+        self.path = outer_path;
+        result
+    }
+
+    /// The path to the field at hand, as text, as errors give it:
+    /// `entities[2].overrides`.
+    pub fn at(&self) -> String {
+        self.path()
     }
 
     /// The warnings so far, in order.
@@ -152,6 +282,15 @@ impl<'a> ReflectContext<'a> {
     /// again, whatever `f` returns.
     pub fn field<R>(&mut self, name: &'static str, f: impl FnOnce(&mut Self) -> R) -> R {
         self.path.push(Segment::Field(name));
+        let result = f(self);
+        self.path.pop();
+        result
+    }
+
+    /// Runs `f` with member `key`, whose name the data gives, added to the
+    /// path, as [`ReflectContext::field`]: a prefab's component, say.
+    pub fn key<R>(&mut self, key: &str, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.path.push(Segment::Key(key.to_string()));
         let result = f(self);
         self.path.pop();
         result
@@ -172,6 +311,18 @@ impl<'a> ReflectContext<'a> {
             source: self.source.to_string(),
             path: self.path(),
             kind,
+        }
+    }
+
+    /// Logs a warning about the value at the current path, which writing it
+    /// could not avoid: a handle the asset server does not know, say,
+    /// written as `null`.
+    pub fn warn(&self, message: &str) {
+        let path = self.path();
+        if path.is_empty() {
+            warn!("{}: {message}", self.source);
+        } else {
+            warn!("{}: at `{path}`: {message}", self.source);
         }
     }
 
@@ -202,6 +353,12 @@ impl<'a> ReflectContext<'a> {
         for segment in &self.path {
             match segment {
                 Segment::Field(name) => {
+                    if !path.is_empty() {
+                        path.push('.');
+                    }
+                    path.push_str(name);
+                }
+                Segment::Key(name) | Segment::Origin(name) => {
                     if !path.is_empty() {
                         path.push('.');
                     }
@@ -272,7 +429,11 @@ pub struct ReflectError {
 }
 
 /// What is wrong with a value: see [`ReflectError`].
+///
+/// Non-exhaustive (ADR-0038): types that need more of the context than a
+/// value, such as handles, brought more ways to fail.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum ReflectErrorKind {
     /// The value is of another sort.
     Expected {
@@ -306,6 +467,32 @@ pub enum ReflectErrorKind {
         /// How many there are.
         found: usize,
     },
+    /// An object lacks a member the type needs.
+    MissingField {
+        /// The member.
+        field: &'static str,
+    },
+    /// Reading the value needs what the context does not have, such as the
+    /// asset server.
+    NoContext {
+        /// What it needs: "the asset server, to load an asset".
+        needs: &'static str,
+    },
+    /// A path that is not an asset path, or not one of the type's.
+    BadAssetPath {
+        /// The path the data gave.
+        path: String,
+        /// Why not.
+        reason: String,
+    },
+    /// A name the context knows nothing of, such as a clip's or a
+    /// collision layer's.
+    UnknownName {
+        /// What it should name: "clip".
+        what: &'static str,
+        /// The name the data gave.
+        name: String,
+    },
 }
 
 impl fmt::Display for ReflectError {
@@ -335,6 +522,19 @@ impl fmt::Display for ReflectError {
             }
             ReflectErrorKind::WrongLength { expected, found } => {
                 write!(f, "expected {expected} elements, found {found}")
+            }
+            ReflectErrorKind::MissingField { field } => write!(f, "`{field}` is missing"),
+            ReflectErrorKind::NoContext { needs } => {
+                write!(
+                    f,
+                    "reading this needs {needs}, which the reader was not given"
+                )
+            }
+            ReflectErrorKind::BadAssetPath { path, reason } => {
+                write!(f, "`{path}` is not an asset path for this: {reason}")
+            }
+            ReflectErrorKind::UnknownName { what, name } => {
+                write!(f, "there is no {what} named `{name}`")
             }
         }
     }

@@ -633,7 +633,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0020 — Reflection takes a context argument, writes compact encodings, and leaves Handle and Entity to prefabs and saves
 
-- **Status:** Accepted
+- **Status:** Accepted; ADR-0038 builds `Handle<T>` as its asset's path, through the context's asset server (M5.11)
 - **Date:** 2026-10-25
 - **Context:**
   - `docs/subsystems/scene.md` sketched `Reflect::to_value(&self)` and
@@ -800,7 +800,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0022 — The facade runs the game in a World of staged systems; the engine owns interpolation, movement, triggers, parents and sprite drawing
 
-- **Status:** Accepted
+- **Status:** Accepted; that `Sprite` and `Collider` are registered with the world only is superseded by ADR-0038, which reflects both and registers them in the `TypeRegistry` (M5.11)
 - **Date:** 2026-10-26
 - **Context:**
   - ADR-0019 gave the facade an interim `Resources` map, closure systems
@@ -1065,7 +1065,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0024 — Clips live in a store the facade owns; an Animator plays one in a frame stage on the simulation clock; Facing mirrors a sprite that faces left
 
-- **Status:** Accepted; what `nadir::animate` writes (a frame's size and pivot too), the flip about the quad's centre, and clips only by handle, are superseded by ADR-0035
+- **Status:** Accepted; what `nadir::animate` writes (a frame's size and pivot too), the flip about the quad's centre, and clips only by handle, are superseded by ADR-0035; ADR-0038 reflects `Animator` as its clip's name (M5.11)
 - **Date:** 2026-10-28
 - **Context:**
   - M4.6 asks for the `Animator` component and clips, hand-defined until
@@ -1178,7 +1178,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0025 — The facade plays replays a tick ahead in place of the live input; the world hash is FNV-1a of the reflected components; the determinism test runs a game of its own against one hash file for every system
 
-- **Status:** Accepted
+- **Status:** Accepted; ADR-0038 has the hash leave out what `nadir::animate` writes of every `Sprite`, through a context for a hash (M5.11)
 - **Date:** 2026-10-28
 - **Context:**
   - M4.7 asks for a headless run mode, input recording in the sandbox, a
@@ -2865,7 +2865,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0038 — M5.6 split into four tasks; LDtk 1.5.3 and its conventions; the level file `.klvl` (version 1) and the prefab file; how prefabs, reflection and `load_level` behave
 
-- **Status:** Accepted
+- **Status:** Accepted; as built in M5.11, a handle the asset server does not know, and an `Animator`'s clip with no name, are written as `null` with a warning, since `to_value` cannot fail (ADR-0020), and reading them back is an error; for a hash, a nameless clip is written as its handle
 - **Date:** 2026-11-01
 - **Context:**
   - Roadmap task M5.6 ("cook: LDtk importer; scene: prefabs and level

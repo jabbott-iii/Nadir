@@ -25,11 +25,18 @@ Built today:
 - errors and warnings that name the source and the path to the field;
 - `TypeRegistry`: component types by name, to make, insert and inspect
   them from data, and a 64-bit hash of every reflected component in a
-  world, for determinism tests.
+  world, for determinism tests;
+- asset handles in data, written as their assets' paths, and loaded in a
+  scope when read;
+- prefabs: `PrefabLibrary` loads `data/prefabs/<name>.kbj` and the prefabs
+  each extends (at most 16, with no cycle), and spawns entities of them,
+  each component's value its base's, then its own, then an override's;
+- `Level`, the cooked level file as an asset, whose entities
+  `PrefabLibrary::spawn_level` spawns through their prefabs.
 
-Not yet: asset handles in data, and prefabs and a level's entities, come with
-roadmap task M5.11; entity references and saves with M9.4; game states with
-M9.1.
+Not yet: loading a whole level, its tile layers and grid, which is the
+facade's (roadmap task M5.6); entity references and saves with M9.4; game
+states with M9.1.
 
 ## Usage
 
@@ -117,6 +124,51 @@ assert_ne!(registry.hash_world(&world, &mut cx), before);
 `Value` is nadir-codec's JSON tree, re-exported here. nadir-codec's
 `json::parse` reads JSONC text into one, and its `kbj` module reads and
 writes the binary form.
+
+A prefab's components apply over its base's. A game's prefabs come from the
+asset server (`PrefabLibrary::load`); these two are read from JSON, which
+needs `nadir-codec = "0.1"` too:
+
+```rust
+use nadir_codec::{Limits, json, prefab};
+use nadir_ecs::{Component, World};
+use nadir_scene::{PrefabLibrary, ReflectContext, TypeRegistry};
+
+nadir_scene::reflect_struct! {
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct Health {
+        pub current: i32,
+        pub max: i32,
+    }
+}
+impl Component for Health {}
+
+let mut registry = TypeRegistry::new();
+registry.register_component::<Health>();
+let mut world = World::new();
+registry.register_components(&mut world);
+
+let file = |text: &str| prefab::read(&json::parse(text, Limits::default()).expect("JSON"));
+let mut library = PrefabLibrary::new();
+library.insert(
+    "prefabs/enemy.jsonc",
+    file(r#"{ "name": "enemy", "components": { "Health": { "current": 5, "max": 5 } } }"#)
+        .expect("a prefab"),
+);
+library.insert(
+    "prefabs/slime.jsonc",
+    file(r#"{ "name": "slime", "extends": "enemy", "components": { "Health": { "max": 12 } } }"#)
+        .expect("a prefab"),
+);
+
+let mut cx = ReflectContext::new("example");
+let slime = library
+    .spawn("slime", &[], &registry, &mut world.commands(), &mut cx)
+    .expect("a slime");
+world.apply_commands();
+let health = world.read::<Health>().get(slime).cloned();
+assert_eq!(health, Some(Health { current: 5, max: 12 }));
+```
 
 ## Documentation
 

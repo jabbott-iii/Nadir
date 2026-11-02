@@ -2861,7 +2861,7 @@ by the batched sprite renderer.
     no finding, about 9,700 `ldtk` inputs a second (the 33 KB project
     seed), 660,000 `level` and 1,300,000 `prefab`.
 
-- [ ] **M5.11 — scene: handles, prefabs with `extends`, a level's entities; the facade reflects `Sprite`, `Collider` and `Animator`**
+- [x] **M5.11 — scene: handles, prefabs with `extends`, a level's entities; the facade reflects `Sprite`, `Collider` and `Animator`**
   - Note (from M4.2): reflect `Handle<T>` as its asset path here
     (ADR-0020).
     - Give `ReflectContext` the asset server: `AssetServer::path` writes
@@ -2952,6 +2952,43 @@ by the batched sprite renderer.
     `NADIR_BLESS=1 cargo test -p nadir_engine --test determinism`, then
     `cargo test -p nadir_engine`; `cargo xtask cook`; `cargo test -p sandbox`;
     `cargo xtask site`; `cargo xtask ci`
+  - Built (2026-11-01, ADR-0038):
+    - nadir-scene: `ReflectContext` with the asset server (`with_assets`,
+      `loading`), resources (`with_resource`), `hashing`, `with_source`,
+      `with_origin`, `key`, `at` and `warn`; `Handle<T>` reflected as its
+      asset's path; `Registration::insert_layers` of `Layer`s;
+      `PrefabLibrary` (`load` and `load_level`, which check the registry,
+      `chain`, `check`, `spawn`, `spawn_level`), `PrefabAsset`, `Level`
+      (with `nadir_codec::level`'s types) and `PrefabError`.
+      `ReflectErrorKind` is `#[non_exhaustive]`, with `MissingField`,
+      `NoContext`, `BadAssetPath` and `UnknownName`.
+    - The facade (`crates/engine/src/reflected.rs`): `Sprite`, `Collider`
+      and `Animator` reflected by hand and registered;
+      `CollisionLayers` and `App::collision_layers`; `reflect_context`
+      and `loading_context`; `App::new` adds a `PrefabLibrary`.
+  - As built, where ADR-0038 left room: `to_value` cannot fail, so a
+    handle the server does not know, and an animator's clip with no name,
+    are written as `null` with a warning, and reading them back is an
+    error; for a hash, a nameless clip is its handle's index and
+    generation, with no warning. A sprite's `frame` or `sprite` without its
+    `atlas` is an error, as a sprite keeps no atlas. Errors name each
+    layer's own file and place: `components.<Type>` of a prefab's file,
+    `entities[<i>].overrides.<Type>` of a level's.
+  - `hashes.txt` blessed again, for three more registered types
+    (`Sprite`, `Collider`, `Animator`), hashed without what
+    `nadir::animate` writes: the whole-world hash changed at all 601
+    ticks, and each of the nine earlier types' columns, matched by name in
+    the `types` line, kept its value at every tick.
+  - The captures (`sandbox --capture`, release, on llvmpipe, against HEAD
+    21751b4): each scene's 600 frames the same byte for byte (SHA-256 of
+    `frames.rgba`); its world hash changed for the same reason: field
+    `9912a04b202a07fc` → `8587378f99a52c1a`, stress-sprites
+    `a1f04a806ac57d1e` → `c47e62a4e2bb26d6`, stress-entities
+    `9a1fddda443950b8` → `28e943b7c2b0247e`.
+  - For M5.6: `loading_context(world, level_path, Scope::Level, …)` gives
+    `PrefabLibrary::spawn_level` what the engine's components need, and
+    `spawn_level` returns each entity with its position, for its
+    `Transform` and for `load_level` to despawn later.
 
 - [ ] **M5.12 — cook: LDtk to `levels/<name>.klvl`; the sandbox's field as an LDtk project, and its props as prefabs**
   - Note (from M5.5, ADR-0035): every `.json` the cook finds is read as an
