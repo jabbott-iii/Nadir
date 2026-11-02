@@ -16,7 +16,7 @@
 //! the hashes of the files it read and of those it wrote.
 //!
 //! ```text
-//! { "version": 1, "cooker": "nadir-cook 0.1.0 …", "options": "",
+//! { "version": 1, "cooker": "nadir-cook 0.2.0 …", "options": "",
 //!   "jobs": [ { "job": "atlas/sprites",
 //!               "inputs": [["sprites/person.png", "<fnv1a64, 16 hex digits>"], …],
 //!               "outputs": [["atlas/sprites.kbj", "…"], …] } ] }

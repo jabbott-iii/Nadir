@@ -14,7 +14,7 @@ a `TypeRegistry` in its world, and a game adds its own components to it with
 
 ## Status
 
-Version 0.1: the API will change before 1.0.
+Version 0.2: the API will change before 1.0.
 
 Built today:
 
@@ -42,9 +42,9 @@ states with M9.1.
 
 ```toml
 [dependencies]
-nadir-scene = "0.1"
+nadir-scene = "0.2"
 # For `Component` and `World`, to use the registry.
-nadir-ecs = "0.1"
+nadir-ecs = "0.2"
 ```
 
 A reflected struct is made from its `Default` with the data applied, so the
@@ -127,7 +127,7 @@ writes the binary form.
 
 A prefab's components apply over its base's. A game's prefabs come from the
 asset server (`PrefabLibrary::load`); these two are read from JSON, which
-needs `nadir-codec = "0.1"` too:
+needs `nadir-codec = "0.2"` too:
 
 ```rust
 use nadir_codec::{Limits, json, prefab};

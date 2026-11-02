@@ -12,7 +12,7 @@ third-party crates. Games use it through
 
 ## Status
 
-Version 0.1: the API will change before 1.0.
+Version 0.2: the API will change before 1.0.
 
 Built:
 
@@ -42,7 +42,7 @@ The engine's asset types are in nadir-render: `Texture` (`.qoi`) and `Atlas`
 
 ```toml
 [dependencies]
-nadir-assets = "0.1"
+nadir-assets = "0.2"
 ```
 
 An asset type, and a server that loads it from loose files:

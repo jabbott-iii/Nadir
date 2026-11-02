@@ -16,7 +16,7 @@ write OS code of your own on top of the same declarations.
 
 ## Status
 
-Version 0.1: the API will change before 1.0. Only what the engine calls is
+Version 0.2: the API will change before 1.0. Only what the engine calls is
 declared, so each module is far from a full binding of its API.
 
 Declared today:
@@ -40,7 +40,7 @@ and X input methods for typed text (M7.2).
 
 ```toml
 [dependencies]
-nadir-sys = "0.1"
+nadir-sys = "0.2"
 ```
 
 GL functions are never linked. A program looks each one up through the

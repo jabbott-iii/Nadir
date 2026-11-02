@@ -14,7 +14,7 @@ tick after `App::add_actions`.
 
 ## Status
 
-Version 0.1: the API will change before 1.0.
+Version 0.2: the API will change before 1.0.
 
 Built today:
 
@@ -35,10 +35,10 @@ with M9.3, and typed text with M7.2.
 
 ```toml
 [dependencies]
-nadir-input = "0.1"
+nadir-input = "0.2"
 # For `Key`, `MouseButton` and `Vec2`, and for the window's `Event`.
-nadir-core = "0.1"
-nadir-platform = "0.1"
+nadir-core = "0.2"
+nadir-platform = "0.2"
 ```
 
 The game names its actions with an enum, binds keys and buttons to them,

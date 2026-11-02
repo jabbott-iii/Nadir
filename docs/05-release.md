@@ -162,7 +162,7 @@ sudo apt update && sudo apt install nadir-cook nadir-sandbox
 docker run --rm --user "$(id -u):$(id -g)" --volume "$PWD:/work" \
   ghcr.io/jabbott-iii/nadir-cook assets cooked
 
-# crates.io: the engine in Cargo.toml as `nadir_engine = "0.1"`, used as
+# crates.io: the engine in Cargo.toml as `nadir_engine = "0.2"`, used as
 # `nadir::…`; and the cook as a command
 cargo install nadir-cook
 ```

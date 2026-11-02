@@ -14,7 +14,7 @@ today and has a Linux download of the sandbox game.
 
 ## Status
 
-Nadir is early (version 0.1), and its APIs will change. It is built one task
+Nadir is early (version 0.2), and its APIs will change. It is built one task
 of the [roadmap](https://github.com/jabbott-iii/Nadir/blob/main/docs/roadmap.md)
 at a time, alongside the game in `games/sandbox`, which pulls each feature in.
 
@@ -177,7 +177,7 @@ releases"; ADR-0036). Each one has:
 
   ```toml
   [dependencies]
-  nadir_engine = "0.1"
+  nadir_engine = "0.2"
   ```
 
   ```rust

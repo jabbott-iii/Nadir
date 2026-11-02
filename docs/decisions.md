@@ -3072,7 +3072,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0039 — The facade's package is `nadir_engine`; each crate for crates.io has a README of its own, whose examples are tested; the crates go to 0.1.1
 
-- **Status:** Accepted
+- **Status:** Accepted; its version, 0.1.1, is superseded by ADR-0040 (0.2.0)
 - **Date:** 2026-11-01
 - **Context:**
   - Release v0.1.0 (ADR-0036) put twelve of the thirteen crates on
@@ -3141,3 +3141,44 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - a crate is added for crates.io (it gets a README in this shape);
   - crates.io's trusted publishing replaces the token (then its scopes no
     longer matter).
+
+## ADR-0040 — The crates go to 0.2.0, as M5.11 and M5.12 broke public enums
+
+- **Status:** Accepted
+- **Date:** 2026-11-02
+- **Context:**
+  - ADR-0039 set every crate at 0.1.1, ready for crates.io, where twelve
+    are at 0.1.0 (ADR-0036). 0.1.1 was never published.
+  - Since then, M5.11 made nadir-scene's `ReflectErrorKind`
+    `#[non_exhaustive]`, with the variants `MissingField`, `NoContext`,
+    `BadAssetPath` and `UnknownName`, and M5.12 made nadir-cook's `Counts`
+    `#[non_exhaustive]`, with `Levels` (ADR-0038). Code that matches either
+    exhaustively, as 0.1.0 allowed, does not compile against them.
+  - Cargo takes a 0.x version's second number as its major one: a crate
+    that asks for `0.1` takes 0.1.1 as compatible, so the breaks published
+    as 0.1.1 would break builds that `cargo update` reaches. The user asked
+    on 2026-11-02 for the crates to go to 0.2.0 for publishing.
+- **Decision:**
+  - **Every crate goes to 0.2.0**, `[workspace.package]`'s version and each
+    of `[workspace.dependencies]`, as `cargo xtask crates` checks. 0.1.1 is
+    not published.
+  - The crates' READMEs, the repository's README, `AGENTS.md`'s status,
+    the facade's crate docs and `docs/05-release.md` name 0.2
+    (`nadir_engine = "0.2"`). The roadmap's notes and the earlier ADRs keep
+    0.1, as history.
+  - This supersedes only ADR-0039's version.
+- **Consequences:**
+  - Good: a game on 0.1 is not broken by `cargo update`, and the breaks
+    are a new version as Cargo reads one.
+  - Bad: crates with no break, `nadir-sys` say, go to 0.2.0 too, as the
+    workspace keeps one version (ADR-0036); and the 0.1 line ends at 0.1.0,
+    with no facade on crates.io (ADR-0039).
+- **Alternatives considered:**
+  - 0.1.1 with the breaks: Cargo would offer it to code it breaks.
+  - 0.1.1 from before M5.11 (`21751b4`), then 0.2.0: two releases where
+    the user asked for one.
+  - Only nadir-scene and nadir-cook at 0.2.0: the workspace's one version
+    (ADR-0036) and `cargo xtask crates` require all of them to agree.
+- **Revisit when:**
+  - the crates reach 1.0, when a break needs a major version;
+  - or the crates stop sharing one version.

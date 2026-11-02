@@ -12,7 +12,7 @@ third-party crates. Games use it through
 
 ## Status
 
-Version 0.1: the API will change before 1.0.
+Version 0.2: the API will change before 1.0.
 
 Built today:
 
@@ -32,9 +32,9 @@ they run in stage order, then in the order they were added.
 
 ```toml
 [dependencies]
-nadir-ecs = "0.1"
+nadir-ecs = "0.2"
 # Systems take nadir-core's `Tick` or `Frame`.
-nadir-core = "0.1"
+nadir-core = "0.2"
 ```
 
 Components are plain types that implement `Component`. A system is a
