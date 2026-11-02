@@ -27,7 +27,7 @@ crates its row in the dependency matrix allows.
 | Layer | Crates |
 | :- | :- |
 | 6 — applications | `games/sandbox`, `tools/cook`, `xtask`, `bench` |
-| 5 — facade | `nadir` (App, plugins, main loop, components, ECS glue systems) |
+| 5 — facade | `nadir` (App, main loop, components, ECS glue systems) |
 | 4 — tooling inside the engine | `debug` |
 | 3 — composed subsystems | `render`, `audio`, `scene` |
 | 2 — base subsystems | `gfx`, `ecs`, `assets`, `input`, `collision` |
@@ -55,20 +55,20 @@ approves it.
 | `nadir-collision` | `core` |
 | `nadir-scene` | `core`, `ecs`, `assets`, `codec` |
 | `nadir-debug` | `core`, `ecs`, `scene`, `render`, `input` |
-| `NadirGE` (facade, `nadir` in code; ADR-0036) | all crates above |
+| `nadir_engine` (facade, `nadir` in code; ADR-0036, ADR-0039) | all crates above |
 | `nadir-cook` | `core`, `codec`, `assets`, `scene` |
 | `xtask` | `core`, `codec` |
 | `nadir-bench` | any workspace crate |
-| `sandbox` | `NadirGE`, `nadir-debug` (behind `dev` feature) |
+| `sandbox` | `nadir_engine`, `nadir-debug` (behind `dev` feature) |
 
 ## Workspace layout
 
 ```
 .
-├── Cargo.toml                # [workspace], [workspace.lints], [workspace.package], profiles
+├── Cargo.toml                # [workspace], [workspace.package], [workspace.dependencies], [workspace.lints], profiles
 ├── rust-toolchain.toml       # pinned stable toolchain + rustfmt, clippy
 ├── clippy.toml               # allow-unwrap-in-tests = true, allow-expect-in-tests = true
-├── .cargo/config.toml        # aliases: xtask, dev
+├── .cargo/config.toml        # aliases: xtask, dev; static C runtime on Windows MSVC (ADR-0036)
 ├── crates/{core,sys,platform,gfx,codec,ecs,input,render,audio,assets,collision,scene,debug,engine}/
 ├── tools/cook/
 ├── xtask/
@@ -86,6 +86,10 @@ approves it.
 [alias]
 xtask = "run --profile xtask --package xtask --"
 dev   = "run --package sandbox --features dev --"
+
+# Windows: every executable links the C runtime in (ADR-0036).
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
 ```
 
 Workspace lints (`Cargo.toml`); every member uses `[lints] workspace = true`:
@@ -118,39 +122,46 @@ There is one main thread. It owns the window, the GL context (or Metal
 layer), the ECS world and rendering.
 
 ```rust
+// App::run (crates/engine/src/app.rs), with App::update inlined and
+// condensed: error handling, the modal frames and the `dev` allocation
+// counter are left out.
 pub fn run(mut app: App) -> Result<(), Error> {
-    let mut platform = Platform::new(&app.config.window)?;
-    let mut gfx = gfx::Device::new(platform.gpu_surface())?;  // keeps no borrow (ADR-0016)
-    let mut renderer = Renderer::new(&mut gfx, &app.config.render)?;
-    let mut clock = FixedClock::new(TICK_HZ /* 60 */, MAX_FRAME /* 0.25 s */);
+    log_file::start(&app.config.studio, &app.config.game);  // nadir.log, the last three kept
+    let mut platform = Platform::new(&app.config.window())?;
+    let mut gfx = Device::new(platform.gpu_surface())?;     // keeps no borrow (ADR-0016)
+    let render = RenderConfig { virtual_resolution: app.config.virtual_resolution };
+    let mut renderer = Renderer::new(&mut gfx, &render)?;
+    let mut limiter = FrameLimiter::new(app.config.frame_rate_limit, Instant::now());
     let mut stopwatch = Stopwatch::start();
     let mut events = Vec::with_capacity(256);
 
     loop {
         platform.pump_events(&mut events);                   // non-blocking
-        if app.handle_window_events(&events) == Flow::Quit { break; }
-        for event in &events { app.input.handle(event); }    // edges accumulate here
-        events.clear();
+        if events.contains(&Event::CloseRequested) { break; }
 
-        let frame = clock.begin_frame(stopwatch.lap());      // clamps hitches
-        while let Some(tick) = clock.consume_tick() {
-            app.input.latch(&app.action_map, &mut app.actions); // edges -> this tick; or a replay's (ADR-0025)
+        // App::update(elapsed, events): everything a frame does but draw.
+        for event in &events { input.handle(event); }        // the Input resource: edges accumulate here
+        let frame = app.clock.begin_frame(stopwatch.lap());  // clamps hitches
+        while let Some(tick) = app.clock.consume_tick() {
+            latch(&mut input, &app.world);                   // edges -> this tick's actions; or a replay's (ADR-0025)
             app.schedule.run_fixed(&mut app.world, &tick);   // snapshot first; then its commands (ecs.md)
         }
         draw.clear();                                        // the RenderFrame resource
-        draw.time = simulated_time(&clock);                  // ticks + alpha: animated tiles (ADR-0023)
+        draw.time = simulated_time(&app.clock);              // ticks + alpha: animated tiles (ADR-0023)
         app.schedule.run_frame(&mut app.world, &frame);      // frame.dt, frame.alpha; Extract fills `draw`
 
         gfx.begin_frame(platform.gpu_surface())?;
-        renderer.render(&mut gfx, &app.assets, &app.tiles, &draw,   // the TileLayers resource
+        renderer.render(&mut gfx, &assets, &tiles, &draw,    // the AssetServer and TileLayers resources
                         Output { target: PassTarget::Surface, size: platform.window_size() })?;
-        gfx.end_frame(platform.gpu_surface())?;              // present: GL swap or Metal drawable
-
-        if app.assets.has_pending() {                        // GPU uploads on main thread
-            app.assets.finish_completed_loads(&mut FinalizeCtx::new().with(&mut gfx));
+        gfx.end_frame(platform.gpu_surface())?;              // present: the GL swap
+        if assets.has_pending() {                            // GPU uploads on the main thread, within a budget
+            assets.finish_completed_loads(&mut FinalizeCtx::new().with(&mut gfx));
         }
-        app.dev_hooks();                                     // hot reload, profiler (dev)
-        if platform.is_minimized() { std::thread::sleep(MINIMIZED_SLEEP); }
+        events.clear();
+
+        if let Some(due) = limiter.end_of_frame(Instant::now()) {
+            precise_sleep(due);                              // the frame limiter: "Pacing", below
+        }
     }
     Ok(())
 }
@@ -158,7 +169,9 @@ pub fn run(mut app: App) -> Result<(), Error> {
 
 As built (ADR-0022), `App::update(elapsed, events)` is everything from
 feeding the events to the frame stages, and `App::run` calls it once a
-frame before drawing. The snapshot and the extract are the engine's own
+frame before drawing. If `Device::new` fails, `App::run` logs it and runs
+the loop without drawing; any other error ends the loop, and is shown to
+the player (`nadir_platform::show_error_dialog`) before `run` returns it. The snapshot and the extract are the engine's own
 systems, `nadir::snapshot` and `nadir::extract_sprites` (see "Stages").
 `App::offscreen(size)` runs the same frames with no window: each
 `Offscreen::frame` updates, draws into a render target on an offscreen
@@ -192,11 +205,16 @@ Rules:
     it ended, so no frames hurry to make up for it.
   - On Windows the sleep uses a high-resolution waitable timer; see
     `docs/03-platforms.md`.
-- **Minimized windows** sleep instead of spinning, because some drivers stop
-  blocking on swap when the window is hidden.
+- **Minimized windows** are paced like any other window. Some drivers stop
+  blocking on swap when the window is hidden; with `Config::frame_rate_limit`
+  set (60 by default), the limiter still holds the rate, and with no limit a
+  hidden window runs unpaced. The loop does not ask whether the window is
+  minimized, because `Platform` cannot tell yet.
 - **Window modal loops** (Windows title-bar drag/resize, macOS live resize)
-  are handled in `platform` so the game keeps rendering. See
-  `docs/03-platforms.md`.
+  are handled in `platform`, which calls back into the loop
+  (`Platform::set_modal_frame_callback`), so the ticks and frame stages keep
+  running. Those frames are unpaced, and are not drawn until `ModalFrame`
+  can present (M2.6, M2.7). See `docs/03-platforms.md`.
 
 ## Stages
 
@@ -224,35 +242,92 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
   frame stages, never mid-iteration. The one exception is the engine's
   `nadir::snapshot`, first in the tick: it adds a missing `PrevTransform` at
   once, so that a system can write it in an entity's first tick (ADR-0022).
-- Events are double-buffered per tick (see `docs/subsystems/ecs.md`).
+- Each event goes into two buffers (see `docs/subsystems/ecs.md`). The
+  tick's is cleared as each tick starts, so a tick system sees what its own
+  tick sent before it ran; the frame's holds everything sent since the last
+  frame, across its ticks, and is cleared after the frame stages.
 
 ## Public API sketch (game-facing)
 
 ```rust
 use nadir::prelude::*;
 
-fn main() -> Result<(), nadir::Error> {
-    App::new(Config {
-        title: "Sandbox".into(),
-        virtual_resolution: Some(UVec2::new(480, 270)),
-        ..Config::default()
-    })
-    .add_plugin(DefaultPlugins)
-    .add_fixed_system(FixedStage::Gameplay, "player_move", player_move)
-    .add_fixed_system(FixedStage::Gameplay, "enemy_ai", enemy_ai)
-    .add_frame_system(FrameStage::Camera, "camera_follow", camera_follow)
-    .run()
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Action {
+    Move,
 }
 
-fn player_move(world: &World, tick: &Tick) {
+impl ActionSet for Action {
+    const ALL: &'static [Self] = &[Action::Move];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn name(self) -> &'static str {
+        "move"
+    }
+
+    fn kind(self) -> ActionKind {
+        ActionKind::Axis2
+    }
+}
+
+const PLAYER_SPEED: f32 = 120.0;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut actions = ActionMap::<Action>::new()?;
+    actions.bind(
+        Action::Move,
+        0,
+        Binding::KeyComposite2 { up: Key::W, down: Key::S, left: Key::A, right: Key::D },
+    )?;
+
+    let mut app = App::new(Config {
+        title: "Sandbox".into(),
+        virtual_resolution: UVec2::new(480, 270),
+        ..Config::default()
+    })
+    .add_actions(actions)
+    .add_fixed_system(FixedStage::Gameplay, "player_move", player_move)
+    .add_frame_system(FrameStage::Camera, "camera_follow", camera_follow);
+
+    let world = app.world_mut();
+    let hero = world.resource_mut::<AssetServer>().load::<Texture>("hero.qoi");
+    world
+        .spawn()
+        .with(Player)
+        .with(Transform::at(Vec2::new(240.0, 135.0)))
+        .with(Velocity::default())
+        // Drawn, so the engine keeps a PrevTransform for it too.
+        .with(Sprite::new(hero, Vec2::new(16.0, 16.0)));
+
+    app.run()?;
+    Ok(())
+}
+
+fn player_move(world: &World, _tick: &Tick) {
     let input = world.resource::<ActionState<Action>>();
     let players = world.read::<Player>();
-    let mut vel = world.write::<Velocity>();
-    for (e, _) in players.iter() {
-        if let Some(v) = vel.get_mut(e) {
-            v.0 = input.axis2(Action::Move) * PLAYER_SPEED;
+    let mut velocities = world.write::<Velocity>();
+    for (player, _) in players.iter() {
+        if let Some(velocity) = velocities.get_mut(player) {
+            velocity.0 = input.axis2(Action::Move) * PLAYER_SPEED;
         }
     }
+}
+
+fn camera_follow(world: &World, frame: &Frame) {
+    let Some(player) = world.read::<Player>().entities().first().copied() else {
+        return;
+    };
+    let Some(now) = world.read::<Transform>().get(player).map(|it| it.position) else {
+        return;
+    };
+    // Where the last tick started: the camera moves between ticks, as the
+    // sprite is drawn.
+    let then = world.read::<PrevTransform>().get(player).map_or(now, |it| it.0.position);
+    world.resource_mut::<RenderFrame>().camera.position = then.lerp(now, frame.alpha);
 }
 ```
 
@@ -261,13 +336,16 @@ Systems are plain functions `fn(&World, &Tick)` (fixed) or
 borrow checks (see the ECS spec). Borrow conflicts panic with the system name
 and component type, so they are caught on the first run in tests.
 
-As built in M4.4 (ADR-0022), there are no plugins yet: `App::new` adds the
-engine's systems and resources itself. A game's actions come from
-`App::add_actions`, its reflected components from
-`app.register_component::<T>()`, and its entities from `app.world_mut()`
-during setup. `Config::virtual_resolution` is a plain `UVec2`. Closures that
-capture nothing coerce to the system type; systems keep their state in
-resources.
+There are no plugins (ADR-0022): `App::new` adds the engine's systems and
+resources itself, `nadir::movement` among them, which moves the player by
+the `Velocity` that `player_move` sets. A game adds its actions with
+`App::add_actions`, its reflected components with
+`App::register_component::<T>()`, and its entities through
+`App::world_mut()` during setup. Closures that capture nothing coerce to the
+system type; systems keep their state in resources. The facade's README
+(`crates/engine/README.md`) has a fuller game, with sprites, tiles and
+collision, and the sandbox (`games/sandbox/src/main.rs`) is the engine's
+own.
 
 ## Data flow per frame
 
@@ -307,8 +385,8 @@ OS events ─► platform::Event ─► input (device state, edge accumulation)
 
 | Feature | Crates | Enables |
 | :- | :- | :- |
-| `dev` | `nadir`, `debug`, `assets`, `platform`, `sandbox` | Debug UI, profiler, console, hot reload, loose-file VFS, allocation counter, extra assertions |
-| (none) | — | Release behavior: pack-file VFS, no debug code compiled in |
+| `dev` | `nadir`, `platform`, `sandbox` | A failed asset shows its placeholder; the allocation counter is the global allocator, read through `FrameAllocs` (and `thread_alloc_counts`, `process_alloc_counts`). Still to join it: the debug UI, profiler and console (M7), and hot reload (M5.8) |
+| (none) | — | Release behavior: a failed asset shows nothing, there is no allocation counter, and no debug code is compiled in. Assets load from loose files until pack files (M5.7) |
 
 Run dev builds with `cargo dev` (the alias above). Release builds never
 include `dev`. `cargo xtask release-no-dev` checks this: `nadir-debug` must
@@ -333,7 +411,8 @@ rule yet: `release-no-dev` looks only for `nadir-debug`.
 - Logs: `nadir.log` plus 3 rotated copies, in the user data directory
   (on macOS, in `~/Library/Logs`). Each run starts a new file. If none can
   be opened, the game runs without one, after a warning.
-- The folders are named after `Config::studio` and `Config::game`, which
+- The folders are named after `Config::game`; on Windows they sit inside a
+  folder named after `Config::studio` (`nadir_platform::user_dirs`). Both
   must be valid folder names on every OS.
 - Crash reports: the `crashes/` directory in user data (see
   `docs/05-release.md`).

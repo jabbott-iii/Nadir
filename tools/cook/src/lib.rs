@@ -12,24 +12,122 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Offline asset pipeline for the Nadir engine. This library does the
-//! cooking; the `nadir-cook` binary is its command-line interface.
+//! The offline asset pipeline of the Nadir engine, as a library: [`cook`]
+//! turns a folder of source assets into the files the game loads.
+//!
+//! It is the cook of [Nadir](https://github.com/jabbott-iii/Nadir). The
+//! `nadir-cook` command is its command-line interface,
+//! `nadir-cook [--force] SOURCE OUT`, and in Nadir's workspace
+//! `cargo xtask cook` runs that on `assets/` and `target/cooked/`. A game
+//! does not link this crate: it loads what the cook wrote, from the folder
+//! that `nadir_engine`'s `Config::assets` names. Embed the library to cook
+//! from a tool, an editor or a build step of your own.
+//!
+//! # What it cooks
 //!
 //! So far (roadmap M5.4, M5.5), [`cook`] reads a source folder and writes,
 //! into an output folder:
 //!
-//! - each atlas group's QOI pages and a KBJ of where each frame went, from
-//!   its folder's PNG images, Aseprite exports (whose tags become clips)
-//!   and BMFont fonts, with a file of each font's glyphs;
-//! - each data file below `data/`, JSONC, as KBJ;
-//! - and a cache that lets the next cook skip the jobs whose files did not
-//!   change.
+//! - each atlas group's QOI pages, `atlas/<group>_<n>.qoi`, and a KBJ of
+//!   where each frame went, `atlas/<group>.kbj`, from its folder's PNG
+//!   images (each cut into frames, or made a tile set, by a
+//!   `<name>.sprite.jsonc` sidecar), Aseprite exports (whose tags become
+//!   clips) and BMFont fonts, with a file of each font's glyphs,
+//!   `atlas/<font>.font.kbj`;
+//! - each data file below `data/`, JSONC, as KBJ, `data/<path>.kbj`;
+//! - and a cache, [`CACHE`], that lets the next cook skip the jobs whose
+//!   files did not change.
 //!
-//! Files no pipeline cooks yet are listed and left alone. The formats are
-//! in `docs/subsystems/assets-and-codecs.md`, "`nadir-cook`".
+//! An image's folder names its atlas group, unless the folder's
+//! `atlas.jsonc` names another. Files no pipeline cooks yet are listed in
+//! the [`Report`] and left alone. LDtk levels come with roadmap M5.12, and
+//! audio with M6.6. The rules and formats are in
+//! [`docs/subsystems/assets-and-codecs.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/subsystems/assets-and-codecs.md),
+//! "`nadir-cook` (library + CLI)".
 //!
-//! The output depends only on the source files: the same files cook to the
-//! same bytes on every run and every system.
+//! # The API
+//!
+//! - [`cook`] takes the source folder, the output folder and the
+//!   [`Options`]: whether to [force](Options::force) every job, and the
+//!   [cooker](Options::cooker) that the cache records.
+//! - It gives a [`Report`]: each job, a [`JobReport`] with what it made
+//!   ([`Counts`]) when it was cooked; the files not cooked, with why; and
+//!   the warnings.
+//! - Or a [`CookError`], saying which file is wrong, or could not be read
+//!   or written.
+//!
+//! # Example
+//!
+//! A data file cooks to KBJ, the same value, and a second cook of the same
+//! files leaves it as it is:
+//!
+//! ```
+//! use std::fs;
+//!
+//! use nadir_codec::{Limits, json, kbj};
+//! use nadir_cook::{CookError, Counts, Options, cook};
+//!
+//! let root = std::env::temp_dir().join(format!("nadir-cook-doc-{}", std::process::id()));
+//! # let _ = fs::remove_dir_all(&root);
+//! let (source, out) = (root.join("assets"), root.join("cooked"));
+//! let items = "// What each item does.\n{ \"sword\": { \"damage\": 3 }, }";
+//! fs::create_dir_all(source.join("data"))?;
+//! fs::write(source.join("data/items.jsonc"), items)?;
+//! fs::write(source.join("notes.txt"), "not an asset")?;
+//!
+//! let options = Options {
+//!     force: false,
+//!     cooker: "my-tool 1.0".to_string(),
+//! };
+//! let report = cook(&source, &out, &options)?;
+//! assert_eq!(report.jobs[0].name, "data/items");
+//! assert_eq!(report.jobs[0].counts, Some(Counts::Data));
+//! assert_eq!(report.skipped[0].0, "notes.txt");
+//! let cooked = kbj::decode(&fs::read(out.join("data/items.kbj"))?, Limits::default())?;
+//! assert_eq!(cooked, json::parse(items, Limits::default())?);
+//!
+//! // Nothing changed, so nothing is cooked.
+//! let again = cook(&source, &out, &options)?;
+//! assert!(!again.jobs[0].cooked);
+//!
+//! // The output folder may not be in the source folder.
+//! let error = cook(&source, &source.join("cooked"), &options).unwrap_err();
+//! assert!(matches!(error, CookError::Overlap { .. }));
+//! # fs::remove_dir_all(&root)?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! # Using it well
+//!
+//! - **The cooker:** set [`Options::cooker`] to something that changes
+//!   whenever your cook does, such as your tool's version. A cache another
+//!   cooker wrote is not used, so a new build cooks everything once. The
+//!   `nadir-cook` command gives its version and a hash of its executable.
+//! - **What it owns:** the cook removes every file below the output's
+//!   `atlas/` and `data/` that no job wrote; keep nothing of your own
+//!   there. The output folder and the source folder may not hold each
+//!   other.
+//! - **Errors:** [`cook`]'s `# Errors` says what a failure leaves in the
+//!   output folder. Each output is written through a `.tmp` beside it and
+//!   a rename, so none is left half written. A file not cooked, or a
+//!   warning, such as a PNG with color chunks that the cook ignores, taking
+//!   it as sRGB, is not an error: show [`Report::skipped`] and
+//!   [`Report::warnings`] to whoever made the files.
+//! - **Limits:** sources are decoded within nadir-codec's default
+//!   `Limits`, but for an image's width and height, which only its decoded
+//!   size bounds, since a sheet is cut up. A frame larger than a page of
+//!   4096 pixels, with its edge extrusion, is an error
+//!   ([`CookError::TooBig`]).
+//! - **Determinism:** the output depends only on the source files: the
+//!   same files cook to the same bytes on every run and every system.
+//!   Sources are taken in sorted order, never in the order the system
+//!   lists them, and nothing records a time.
+//! - **Threads:** [`cook`] runs on the calling thread, and starts none.
+
+// The README's examples are compiled as doc tests too.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 mod atlas;
 mod cache;

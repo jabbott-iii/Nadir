@@ -33,7 +33,7 @@
 //!
 //! The fixtures come from a live run of a scripted input, in frames of
 //! mixed lengths, which records its replay. To write them anew:
-//! `NADIR_BLESS=1 cargo test -p NadirGE --test determinism`. That checks the
+//! `NADIR_BLESS=1 cargo test -p nadir_engine --test determinism`. That checks the
 //! run twice, and its replay at three other pacings, before it writes.
 
 use std::fs;
@@ -688,7 +688,7 @@ fn stored() -> (Vec<u8>, Vec<Line>) {
         let path = fixtures().join(name);
         fs::read(&path).unwrap_or_else(|error| {
             panic!(
-                "{}: {error}. Write it with NADIR_BLESS=1 cargo test -p NadirGE --test determinism",
+                "{}: {error}. Write it with NADIR_BLESS=1 cargo test -p nadir_engine --test determinism",
                 path.display()
             )
         })

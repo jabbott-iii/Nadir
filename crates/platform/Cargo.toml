@@ -5,11 +5,16 @@ edition.workspace = true
 license.workspace = true
 description = "OS layer of the Nadir engine: windows, the event loop, input devices, GL surfaces and paths."
 authors.workspace = true
-readme.workspace = true
+readme = "README.md"
 homepage.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
+
+# docs.rs documents each system's windows, and the `dev` allocation counter too (ADR-0039).
+[package.metadata.docs.rs]
+features = ["dev"]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
 
 [dependencies]
 nadir-core.workspace = true

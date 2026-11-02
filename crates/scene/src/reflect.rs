@@ -94,7 +94,7 @@ pub enum ReflectKind {
     List,
     /// An `Option<T>`.
     Option,
-    /// An asset handle, written as the asset's path (roadmap M5.6).
+    /// An asset handle, written as the asset's path (roadmap M5.11).
     Handle,
 }
 

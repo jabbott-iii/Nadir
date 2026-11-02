@@ -71,7 +71,7 @@ Other ways to run it:
 
 ## Use it in a game
 
-Add the `NadirGE` crate (see [Releases](#releases)); code names it `nadir`. A
+Add the `nadir_engine` crate (see [Releases](#releases)); code names it `nadir`. A
 game needs only this crate:
 
 ```rust
@@ -172,12 +172,12 @@ releases"; ADR-0036). Each one has:
     ghcr.io/jabbott-iii/nadir-cook assets cooked
   ```
 
-- **Crates** on crates.io. The engine is `NadirGE`, since `nadir` was
+- **Crates** on crates.io. The engine is `nadir_engine`, since `nadir` was
   taken, and code names it `nadir`:
 
   ```toml
   [dependencies]
-  NadirGE = "0.1"
+  nadir_engine = "0.1"
   ```
 
   ```rust

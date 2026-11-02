@@ -40,7 +40,7 @@
 //!                                       "entityInstances": [], … } ], … } ] }
 //! ```
 //!
-//! It is read with [`json::parse`](crate::json::parse), then checked:
+//! It is read with [`json::parse`], then checked:
 //!
 //! - **The version first:** `jsonVersion` is 1.5.x, as LDtk 1.5.3
 //!   ([`VERSION`]) writes; any other is refused with a note to save the

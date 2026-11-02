@@ -54,7 +54,7 @@ pub fn check_sized<T: std::fmt::Debug>(
   drawing, and its offscreen-frame tests (`App::offscreen`, ADR-0029)
   return early, but only while the variable is unset.
   - The facade's tests are behind its `dev` feature, not `headless-test`,
-    so `cargo test -p NadirGE --features dev` on Linux needs EGL and an
+    so `cargo test -p nadir_engine --features dev` on Linux needs EGL and an
     OpenGL 3.3 driver.
 - A nightly job, once there is one, runs the property tests with random
   seeds and prints the seeds it used.
@@ -171,7 +171,7 @@ pub fn check_sized<T: std::fmt::Debug>(
     (`App::play_replay`).
 - The runs are headless: `App::update` with no window. Every frame stage
   runs, logs go to the standard error, and no asset load finishes.
-- `NADIR_BLESS=1 cargo test -p NadirGE --test determinism` writes the
+- `NADIR_BLESS=1 cargo test -p nadir_engine --test determinism` writes the
   fixtures, after it checks two live runs alike and their replay at three
   pacings.
 - Scope: the same build. One hash file serves Linux, Windows and macOS for
@@ -265,7 +265,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 - Tests assert **0 allocations** in steady state:
   - the facade's unit test `steady_frames` in `crates/engine/src/app.rs`
     draws 10,000 sprite entities of its own through the real loop,
-    offscreen, for 100 frames (`cargo test -p NadirGE --features dev`), and
+    offscreen, for 100 frames (`cargo test -p nadir_engine --features dev`), and
     checks `FrameAllocs` against its own count frame by frame. Since M4.5
     the ground is a tile layer of 64 × 64 cells, a quarter of them
     animated, whose view moves in the warm-up to where four chunks meet:
@@ -346,7 +346,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 | `test` | `cargo test --workspace --all-features` |
 | `deps` | `cargo metadata --format-version 1`, parsed with `nadir-codec::json`; every package with a non-null `source` must appear in `xtask/deps-allowlist.txt` with its exact version. A path package from outside the workspace also fails (vendored code) |
 | `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |
-| `crates` | Same metadata (ADR-0036). Each workspace member that crates.io gets (no `publish = false`) must have a description, a license and a repository, and copies of the root's `LICENSE` and `NOTICE` in its folder, byte for byte, as cargo leaves them out of its package otherwise (ADR-0037); be at `NadirGE`'s version; and depend on workspace crates only if crates.io gets them too, by the requirement `^<version>`. Notes the crates it checked |
+| `crates` | Same metadata (ADR-0036). Each workspace member that crates.io gets (no `publish = false`) must have a description, a license and a repository, and copies of the root's `LICENSE` and `NOTICE` in its folder, byte for byte, as cargo leaves them out of its package otherwise (ADR-0037); be at `nadir_engine`'s version; and depend on workspace crates only if crates.io gets them too, by the requirement `^<version>`. Notes the crates it checked |
 | `unsafe-audit` | Scans `*.rs`, ignoring comments and string literals: no `unsafe` outside `sys`/`platform`/`gfx`; `allow`, `expect` or `warn(unsafe_code)` only in those three crate roots; every `unsafe {` / `unsafe impl` preceded by a `// SAFETY:` comment that ends at most 3 lines above it; prints a per-crate `unsafe` count (reviewed if it grows) |
 | `headers` | Walks the workspace (not the top-level `target`, nor hidden folders but `.github`) for source files, by extension or name: `.rs`, `.glsl`, `.metal`, `.py`, `.sh`, `.js`, `.css`, `.html`, `Makefile`, `Dockerfile` and `.github/workflows/*.yml`. Each must start with the Apache-2.0 header of `LICENSE`'s appendix in its comment syntax, then a blank line: on line 1, or after a GLSL `#version` line, a `#!` line or an HTML doctype. Names the first line that differs and what it should be (ADR-0037) |
 | `workflows` | Reads each file of `.github/workflows` line by line (ADR-0032). Fails a workflow with no row in its table of the actions each may use and the jobs that may grant `write`, with the permissions each may; an action not in its row, not pinned by a full commit SHA, or with no `# v…` tag comment on its line (a list item is read however it is spaced); top-level permissions other than `{}` or `contents: read`, or none; a job's `write` on any permission its row does not name, or permissions written on one line (`write-all`, `read-all`, `{ … }`); `pull_request_target`; and an `actions/checkout` without `persist-credentials: false` |

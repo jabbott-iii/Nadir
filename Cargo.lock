@@ -3,8 +3,118 @@
 version = 4
 
 [[package]]
-name = "NadirGE"
-version = "0.1.0"
+name = "nadir-assets"
+version = "0.1.1"
+dependencies = [
+ "nadir-codec",
+ "nadir-core",
+]
+
+[[package]]
+name = "nadir-audio"
+version = "0.1.1"
+
+[[package]]
+name = "nadir-bench"
+version = "0.1.1"
+dependencies = [
+ "nadir-codec",
+ "nadir-collision",
+ "nadir-core",
+ "nadir-ecs",
+ "nadir-render",
+ "nadir_engine",
+]
+
+[[package]]
+name = "nadir-codec"
+version = "0.1.1"
+dependencies = [
+ "nadir-core",
+]
+
+[[package]]
+name = "nadir-collision"
+version = "0.1.1"
+dependencies = [
+ "nadir-core",
+]
+
+[[package]]
+name = "nadir-cook"
+version = "0.1.1"
+dependencies = [
+ "nadir-assets",
+ "nadir-codec",
+ "nadir-core",
+]
+
+[[package]]
+name = "nadir-core"
+version = "0.1.1"
+
+[[package]]
+name = "nadir-debug"
+version = "0.1.1"
+
+[[package]]
+name = "nadir-ecs"
+version = "0.1.1"
+dependencies = [
+ "nadir-core",
+]
+
+[[package]]
+name = "nadir-gfx"
+version = "0.1.1"
+dependencies = [
+ "nadir-core",
+ "nadir-platform",
+ "nadir-sys",
+]
+
+[[package]]
+name = "nadir-input"
+version = "0.1.1"
+dependencies = [
+ "nadir-core",
+ "nadir-platform",
+]
+
+[[package]]
+name = "nadir-platform"
+version = "0.1.1"
+dependencies = [
+ "nadir-core",
+ "nadir-sys",
+]
+
+[[package]]
+name = "nadir-render"
+version = "0.1.1"
+dependencies = [
+ "nadir-assets",
+ "nadir-codec",
+ "nadir-core",
+ "nadir-gfx",
+]
+
+[[package]]
+name = "nadir-scene"
+version = "0.1.1"
+dependencies = [
+ "nadir-codec",
+ "nadir-core",
+ "nadir-ecs",
+]
+
+[[package]]
+name = "nadir-sys"
+version = "0.1.1"
+
+[[package]]
+name = "nadir_engine"
+version = "0.1.1"
 dependencies = [
  "nadir-assets",
  "nadir-codec",
@@ -19,125 +129,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "nadir-assets"
-version = "0.1.0"
-dependencies = [
- "nadir-codec",
- "nadir-core",
-]
-
-[[package]]
-name = "nadir-audio"
-version = "0.1.0"
-
-[[package]]
-name = "nadir-bench"
-version = "0.1.0"
-dependencies = [
- "NadirGE",
- "nadir-codec",
- "nadir-collision",
- "nadir-core",
- "nadir-ecs",
- "nadir-render",
-]
-
-[[package]]
-name = "nadir-codec"
-version = "0.1.0"
-dependencies = [
- "nadir-core",
-]
-
-[[package]]
-name = "nadir-collision"
-version = "0.1.0"
-dependencies = [
- "nadir-core",
-]
-
-[[package]]
-name = "nadir-cook"
-version = "0.1.0"
-dependencies = [
- "nadir-assets",
- "nadir-codec",
- "nadir-core",
-]
-
-[[package]]
-name = "nadir-core"
-version = "0.1.0"
-
-[[package]]
-name = "nadir-debug"
-version = "0.1.0"
-
-[[package]]
-name = "nadir-ecs"
-version = "0.1.0"
-dependencies = [
- "nadir-core",
-]
-
-[[package]]
-name = "nadir-gfx"
-version = "0.1.0"
-dependencies = [
- "nadir-core",
- "nadir-platform",
- "nadir-sys",
-]
-
-[[package]]
-name = "nadir-input"
-version = "0.1.0"
-dependencies = [
- "nadir-core",
- "nadir-platform",
-]
-
-[[package]]
-name = "nadir-platform"
-version = "0.1.0"
-dependencies = [
- "nadir-core",
- "nadir-sys",
-]
-
-[[package]]
-name = "nadir-render"
-version = "0.1.0"
-dependencies = [
- "nadir-assets",
- "nadir-codec",
- "nadir-core",
- "nadir-gfx",
-]
-
-[[package]]
-name = "nadir-scene"
-version = "0.1.0"
-dependencies = [
- "nadir-codec",
- "nadir-core",
- "nadir-ecs",
-]
-
-[[package]]
-name = "nadir-sys"
-version = "0.1.0"
-
-[[package]]
 name = "sandbox"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
- "NadirGE",
+ "nadir_engine",
 ]
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nadir-codec",
  "nadir-core",

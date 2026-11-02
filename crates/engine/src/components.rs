@@ -64,7 +64,7 @@ nadir_scene::reflect_newtype! {
 /// ticks part of the way from its [`PrevTransform`].
 ///
 /// It holds what [`SpriteDraw`] holds but the position. It is not reflected
-/// until prefabs bring the `Handle` encoding (roadmap M5.6, ADR-0020).
+/// until prefabs bring the `Handle` encoding (roadmap M5.11, ADR-0020).
 ///
 /// On an entity with an [`Animator`](crate::Animator), the system
 /// `nadir::animate` writes its `texture` and `uv` each frame, and its `size`
@@ -168,7 +168,7 @@ impl Sprite {
 /// a layer outside its parent's mask, or make it a trigger, which stops
 /// nothing.
 ///
-/// It is not reflected until prefabs give layers names (roadmap M5.6).
+/// It is not reflected until prefabs give layers names (roadmap M5.11).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Collider(pub nadir_collision::Collider);
 

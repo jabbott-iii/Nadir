@@ -84,9 +84,10 @@ const MATRIX: &[(&str, Allowed)] = &[
         ]),
     ),
     // The facade: every crate above it. Code calls it `nadir`; its package
-    // is NadirGE, as crates.io has another `nadir` (ADR-0036).
+    // is nadir_engine, as crates.io has another `nadir` (ADR-0036,
+    // ADR-0039).
     (
-        "NadirGE",
+        "nadir_engine",
         Allowed::Only(&[
             "nadir-core",
             "nadir-sys",
@@ -111,7 +112,7 @@ const MATRIX: &[(&str, Allowed)] = &[
     ("nadir-bench", Allowed::AnyWorkspaceCrate),
     // `nadir-debug` only behind the `dev` feature: `release-no-dev` checks
     // that part.
-    ("sandbox", Allowed::Only(&["NadirGE", "nadir-debug"])),
+    ("sandbox", Allowed::Only(&["nadir_engine", "nadir-debug"])),
 ];
 
 impl fmt::Display for Allowed {
@@ -270,8 +271,8 @@ mod tests {
             ("nadir-platform", "nadir-gfx"),
             ("nadir-codec", "nadir-assets"),
             ("nadir-scene", "nadir-debug"),
-            ("nadir-debug", "NadirGE"),
-            ("NadirGE", "sandbox"),
+            ("nadir-debug", "nadir_engine"),
+            ("nadir_engine", "sandbox"),
         ] {
             assert_eq!(
                 violations(vec![
@@ -317,10 +318,10 @@ mod tests {
         assert_eq!(
             violations(vec![
                 member("nadir-bench")
-                    .path_dep("NadirGE", Kind::Normal)
+                    .path_dep("nadir_engine", Kind::Normal)
                     .path_dep("nadir-cook", Kind::Normal)
                     .path_dep("left-pad", Kind::Normal),
-                member("NadirGE"),
+                member("nadir_engine"),
                 member("nadir-cook"),
                 vendored,
             ]),
@@ -362,9 +363,9 @@ mod tests {
                 .skip(1)
                 .step_by(2)
                 // The document shortens `nadir-core` to `core` in the
-                // right-hand column, and names the facade `NadirGE`.
+                // right-hand column, and names the facade `nadir_engine`.
                 .map(|name| {
-                    if name.starts_with("nadir") || name == "NadirGE" {
+                    if name.starts_with("nadir") {
                         name.to_string()
                     } else {
                         format!("nadir-{name}")

@@ -100,7 +100,7 @@ before its roadmap task is ticked: check before assuming.
 | `crates/collision` | `nadir-collision` | Shapes, spatial hash, move-and-slide, queries, A*, flow fields | deny |
 | `crates/scene` | `nadir-scene` | Reflection macros, prefabs, levels, saves, game states | deny |
 | `crates/debug` | `nadir-debug` | Immediate-mode debug UI, inspector, console, profiler, trace export (feature `dev`) | deny |
-| `crates/engine` | `NadirGE` (`nadir` in code; ADR-0036) | Facade: `App`, plugins, main loop, re-exports | deny |
+| `crates/engine` | `nadir_engine` (`nadir` in code; ADR-0036, ADR-0039) | Facade: `App`, main loop, components, re-exports | deny |
 | `tools/cook` | `nadir-cook` | Offline asset pipeline (library + CLI) | deny |
 | `xtask` | `xtask` | Build automation: CI checks, goldens, packaging | deny |
 | `games/sandbox` | `sandbox` | The game that drives requirements | deny |
@@ -113,7 +113,7 @@ before its roadmap task is ticked: check before assuming.
 | `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), `cook`, tests, `deps`, `layers`, `crates`, `unsafe-audit`, `headers`, `workflows`, `release-no-dev`, `features`: the full PR gate |
 | `cargo xtask deps` | Fails if `Cargo.lock` contains any non-workspace package not approved in the policy |
 | `cargo xtask layers` | Fails if a crate depends on a crate the dependency matrix forbids |
-| `cargo xtask crates` | Fails if a crate that crates.io gets lacks a description, license or repository, or copies of the root's `LICENSE` and `NOTICE` in its folder; is at another version than `NadirGE`; or depends on a workspace crate crates.io does not get or by another version (ADR-0036, ADR-0037) |
+| `cargo xtask crates` | Fails if a crate that crates.io gets lacks a description, license or repository, or copies of the root's `LICENSE` and `NOTICE` in its folder; is at another version than `nadir_engine`; or depends on a workspace crate crates.io does not get or by another version (ADR-0036, ADR-0037) |
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the allowed crates or lacks a `SAFETY:` comment |
 | `cargo xtask headers` | Fails if a source file lacks the Apache-2.0 header of `LICENSE`'s appendix, or has it altered or out of place (ADR-0037) |
 | `cargo xtask workflows` | Fails if a GitHub workflow uses an action it is not allowed, pins one by anything but a commit SHA, or gives its token more than it may (ADR-0032) |
@@ -161,7 +161,9 @@ ADR-0029).
   syntax. It goes after a shebang, an HTML doctype or a GLSL
   `#version 330 core`, which nadir-gfx requires on line 1. A new file gets
   it too (`cargo xtask headers` checks). A new crate for crates.io gets
-  copies of `LICENSE` and `NOTICE` in its folder (`cargo xtask crates`).
+  copies of `LICENSE` and `NOTICE` in its folder (`cargo xtask crates`), and a
+  `README.md` of its own, in the shape the others have, whose examples
+  `src/lib.rs` tests (ADR-0039).
   `NOTICE` holds only what a license requires there; anything else not
   ours keeps its own license and notice beside it, as the RFC 8259
   examples do in `crates/codec/tests/json.rs` (ADR-0037).

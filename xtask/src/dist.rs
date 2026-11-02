@@ -402,7 +402,7 @@ Run them from this directory:
 
 {commands}
 {sandbox}{system}
-The engine is a library on crates.io, https://crates.io/crates/NadirGE,
+The engine is a library on crates.io, https://crates.io/crates/nadir_engine,
 and its source is at {repository}.
 
 Licensed under the Apache License 2.0: see LICENSE and NOTICE.
@@ -850,7 +850,7 @@ mod tests {
             "    ./sandbox --scene stress-sprites",
             "EGL. Its log is ~/.local/share/Sandbox/nadir.log.",
             "The programs need glibc 2.34 or newer.",
-            "https://crates.io/crates/NadirGE,\nand its source is at https://github.com/jabbott-iii/Nadir.",
+            "https://crates.io/crates/nadir_engine,\nand its source is at https://github.com/jabbott-iii/Nadir.",
         ] {
             assert!(linux.contains(line), "`{line}` is not in:\n{linux}");
         }

@@ -1,18 +1,22 @@
 [package]
-name = "NadirGE"
+name = "nadir_engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description.workspace = true
 authors.workspace = true
-readme.workspace = true
+readme = "README.md"
 homepage.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+# docs.rs documents the `dev` feature's items too (ADR-0039).
+[package.metadata.docs.rs]
+features = ["dev"]
+
 # Code names the crate `nadir`. crates.io has a crate of that name already,
-# so the package is NadirGE there (ADR-0036).
+# so the package is nadir_engine there (ADR-0036, ADR-0039).
 [lib]
 name = "nadir"
 

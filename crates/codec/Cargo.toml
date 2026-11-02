@@ -5,11 +5,15 @@ edition.workspace = true
 license.workspace = true
 description = "File-format codecs for the Nadir engine: inflate, PNG, QOI, WAV, KLZ, JSON(C), KBJ, BMFont, Aseprite, LDtk, levels, prefabs."
 authors.workspace = true
-readme.workspace = true
+readme = "README.md"
 homepage.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
+
+# docs.rs documents the cook's PNG decoder too (ADR-0039).
+[package.metadata.docs.rs]
+features = ["png"]
 
 [features]
 # The PNG decoder, which only the cook tool needs.

@@ -2949,8 +2949,8 @@ by the batched sprite renderer.
       (`cargo xtask site` on llvmpipe), and their new world hashes are
       recorded, with the reason, in this task's notes.
   - Verify: `cargo test -p nadir-scene`;
-    `NADIR_BLESS=1 cargo test -p NadirGE --test determinism`, then
-    `cargo test -p NadirGE`; `cargo xtask cook`; `cargo test -p sandbox`;
+    `NADIR_BLESS=1 cargo test -p nadir_engine --test determinism`, then
+    `cargo test -p nadir_engine`; `cargo xtask cook`; `cargo test -p sandbox`;
     `cargo xtask site`; `cargo xtask ci`
 
 - [ ] **M5.12 — cook: LDtk to `levels/<name>.klvl`; the sandbox's field as an LDtk project, and its props as prefabs**
@@ -3065,7 +3065,7 @@ by the batched sprite renderer.
       the field.
     - The time `load_level` takes for the field is measured and noted.
   - Verify: `cargo xtask cook`; `cargo test -p nadir-cook -p nadir-scene`;
-    `cargo test -p NadirGE`; `cargo test -p sandbox`; `cargo xtask dist`;
+    `cargo test -p nadir_engine`; `cargo test -p sandbox`; `cargo xtask dist`;
     `cargo xtask site`; `cargo xtask ci`; `cargo dev` (manual)
 
 - [ ] **M5.7 — pack files**
@@ -3412,7 +3412,7 @@ by the batched sprite renderer.
     asset scope.
   - Accept: the state tests in the scene spec pass; no transition happens
     mid-tick.
-  - Verify: `cargo test -p nadir-scene -p NadirGE`
+  - Verify: `cargo test -p nadir-scene -p nadir_engine`
 
 - [ ] **M9.2 — menu kit and game UI**
   - Depends: M7.1, M8.4
@@ -3424,7 +3424,7 @@ by the batched sprite renderer.
     settings (display, audio, controls with rebinding).
   - Accept: focus-navigation unit tests; manual: every menu is fully usable
     with gamepad only and with mouse only.
-  - Verify: `cargo test -p NadirGE`; `cargo dev` (manual)
+  - Verify: `cargo test -p nadir_engine`; `cargo dev` (manual)
 
 - [ ] **M9.3 — settings file**
   - Note (from M4.2): apply settings field by field (`fields()` and
@@ -3438,7 +3438,7 @@ by the batched sprite renderer.
   - Do: `settings.jsonc` load, validate and save; unknown keys preserved;
     invalid values fall back to defaults with a warning; fuzz target.
   - Accept: a test for each fallback rule; the fuzz target is registered.
-  - Verify: `cargo test -p NadirGE`;
+  - Verify: `cargo test -p nadir_engine`;
     `cargo xtask fuzz-smoke --target settings --secs 120`
 
 - [ ] **M9.4 — saves**
@@ -3492,7 +3492,7 @@ by the batched sprite renderer.
     the next launch.
   - Accept: a forced panic (`--debug-panic` flag, dev only) produces a
     complete report.
-  - Verify: `cargo test -p NadirGE`;
+  - Verify: `cargo test -p nadir_engine`;
     `cargo dev -- --debug-panic`, then inspect the report (manual)
 
 - [ ] **M9.7 — content: one complete level of the real game**

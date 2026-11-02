@@ -42,7 +42,7 @@ use crate::unsafe_audit::relative;
 
 /// The facade, whose version is the release's. Its package name, as
 /// crates.io has another `nadir`.
-pub(crate) const FACADE: &str = "NadirGE";
+pub(crate) const FACADE: &str = "nadir_engine";
 
 /// The files at the workspace's root that each crate for crates.io keeps
 /// a copy of. From outside a crate's folder, cargo packages only
@@ -243,9 +243,9 @@ mod tests {
         assert_eq!(
             report.notes,
             [format!(
-                "crates for crates.io, at {}: NadirGE, nadir-assets, nadir-codec, \
-                 nadir-collision, nadir-cook, nadir-core, nadir-ecs, nadir-gfx, nadir-input, \
-                 nadir-platform, nadir-render, nadir-scene, nadir-sys",
+                "crates for crates.io, at {}: nadir-assets, nadir-codec, nadir-collision, \
+                 nadir-cook, nadir-core, nadir-ecs, nadir-gfx, nadir-input, nadir-platform, \
+                 nadir-render, nadir-scene, nadir-sys, nadir_engine",
                 env!("CARGO_PKG_VERSION")
             )]
         );
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(
             violations(vec![crate_("nadir-core", "0.1.0"), crate_(FACADE, "0.2.0")]),
             [
-                "`nadir-core` is at 0.1.0, but `NadirGE` is at 0.2.0: the crates for crates.io \
+                "`nadir-core` is at 0.1.0, but `nadir_engine` is at 0.2.0: the crates for crates.io \
               share the workspace's version"
             ]
         );
@@ -371,7 +371,7 @@ mod tests {
                     crate_(FACADE, "0.2.0").requiring("nadir-core", requirement, kind),
                 ]),
                 [format!(
-                    "`NadirGE` depends on `nadir-core` by `{requirement}`, not `^0.2.0`: give it \
+                    "`nadir_engine` depends on `nadir-core` by `{requirement}`, not `^0.2.0`: give it \
                      the release's version in `[workspace.dependencies]`"
                 )],
                 "{requirement}"
@@ -388,7 +388,7 @@ mod tests {
                     crate_(FACADE, "0.1.0").requiring("nadir-debug", "^0.1.0", kind),
                 ]),
                 [
-                    "`NadirGE` depends on `nadir-debug`, which crates.io does not get \
+                    "`nadir_engine` depends on `nadir-debug`, which crates.io does not get \
                   (`publish = false`)"
                 ]
             );
@@ -403,7 +403,7 @@ mod tests {
         ] {
             assert_eq!(
                 violations(packages),
-                ["`NadirGE`, the facade, is not a workspace member that crates.io gets"]
+                ["`nadir_engine`, the facade, is not a workspace member that crates.io gets"]
             );
         }
     }

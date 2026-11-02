@@ -2516,7 +2516,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0036 — Releases from a tag: six targets on GitHub Releases, a signed apt repository beside them, the cook's image on ghcr.io, and the crates on crates.io with the facade as NadirGE
 
-- **Status:** Accepted; ADR-0037 adds `NOTICE` beside `LICENSE` in its archives and image, beside the `copyright` file in its `.deb`s, and both to its crates
+- **Status:** Accepted; ADR-0037 adds `NOTICE` beside `LICENSE` in its archives and image, beside the `copyright` file in its `.deb`s, and both to its crates; the facade's package name NadirGE is superseded by ADR-0039 (`nadir_engine`)
 - **Date:** 2026-11-01
 - **Context:**
   - The user asked for a release pipeline that a pushed version tag
@@ -3069,3 +3069,75 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - the debug-build prefab check at startup is wanted (a `Source` listing
     or an index the cook writes);
   - M9.4's `saved` flag gives the reflect macros a per-field marker.
+
+## ADR-0039 — The facade's package is `nadir_engine`; each crate for crates.io has a README of its own, whose examples are tested; the crates go to 0.1.1
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+- **Context:**
+  - Release v0.1.0 (ADR-0036) put twelve of the thirteen crates on
+    crates.io at 0.1.0, from `nadir-core` to `nadir-cook`; on 2026-11-01,
+    `NadirGE`, the facade, was not there. A version once published cannot
+    be published again.
+  - The user asked for the facade's package to be named `nadir_engine`, for
+    every crate's documentation to serve the developers who would use it,
+    and for the crates to go to 0.1.1, ready for crates.io. Neither
+    `nadir_engine` nor `nadir-engine`, which crates.io takes for the same
+    name, was taken.
+  - Every crate's crates.io page showed the repository's README
+    (`readme.workspace = true`), which is about the whole engine; most
+    crates' own docs were a few lines with no example.
+  - The release workflow's token is limited to the crates `nadir-*` and
+    `NadirGE` (`docs/05-release.md`), a pattern that may not match the
+    underscore of `nadir_engine`.
+- **Decision:**
+  - **The facade's package is `nadir_engine`**, its library still `nadir`,
+    so a game writes `nadir_engine = "0.1"` and `use nadir::prelude::*`.
+    The workspace's dependency key stays `nadir` (`package =
+    "nadir_engine"`), so no crate's code changes. The name is the user's,
+    with an underscore, though the other crates use hyphens.
+  - **Every crate goes to 0.1.1**, `[workspace.package]`'s version and each
+    of `[workspace.dependencies]`, as `cargo xtask crates` checks.
+  - **Each of the 13 crates has a `README.md` of its own** (`readme =
+    "README.md"`), its crates.io page, in one shape: what it is, how it
+    fits in Nadir and how a game reaches it, its status, how to use it with
+    an example, its features and platforms where they apply, links to its
+    API reference, its design and the engine, and its license.
+  - **Each crate's docs** (`//!` in `src/lib.rs`), its docs.rs page, say
+    what it is, how it fits, its main items by purpose, and what matters
+    to use it well, with examples that are doc tests.
+  - **A README's examples are doc tests too:** each `src/lib.rs` has a
+    `#[cfg(doctest)]` item whose doc is the README, so that the examples on
+    crates.io compile as the API changes.
+  - **docs.rs** documents the crates' optional features (`profile`, `png`,
+    `dev`), and `nadir-sys`, `nadir-platform` and `nadir-gfx` for Linux,
+    Windows and macOS (`[package.metadata.docs.rs]`).
+  - The repository's README stays the repository's.
+- **Consequences:**
+  - Good:
+    - Each crate's page says what that crate is for and how to start; the
+      facade's is the engine's guide.
+    - An example that stops compiling fails `cargo test`, as the crate docs'
+      do.
+  - Bad:
+    - Thirteen READMEs to keep true as the crates change, beside the crate
+      docs they partly repeat.
+    - `NadirGE`, never published, leaves nothing to point users from; the
+      twelve crates at 0.1.0 stay there, with no facade of that version.
+    - The facade's name breaks the workspace's hyphenated naming.
+  - Follow-up, for a maintainer: give the crates.io token `nadir_engine`
+    in its crate scopes, or a pattern that matches it, before the next
+    release, as `publish-new` must reach the new name.
+- **Alternatives considered:**
+  - `nadir-engine`: matches the other crates and the token's `nadir-*`,
+    but not the name the user chose.
+  - Keeping `NadirGE`: the user asked for the change.
+  - One README for every crate, the repository's: it says nothing of the
+    crate a reader is looking at.
+  - `#![doc = include_str!("../README.md")]` as the crate docs: one text to
+    keep, but the README's shape is a landing page's, and the crate docs
+    that already reference the design would be lost.
+- **Revisit when:**
+  - a crate is added for crates.io (it gets a README in this shape);
+  - crates.io's trusted publishing replaces the token (then its scopes no
+    longer matter).

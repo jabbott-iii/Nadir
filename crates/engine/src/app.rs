@@ -423,7 +423,7 @@ impl App {
     ///
     /// Of the engine's components, [`Transform`], [`Velocity`], [`Player`],
     /// [`SaveId`] and [`Facing`] are reflected. [`Sprite`], [`Collider`],
-    /// [`Animator`] and [`Parent`] are not yet (roadmap M5.6 and M9.4), and
+    /// [`Animator`] and [`Parent`] are not yet (roadmap M5.11 and M9.4), and
     /// [`PrevTransform`] is the engine's own.
     pub fn new(config: Config) -> Self {
         let on_failure = if cfg!(feature = "dev") {

@@ -30,7 +30,7 @@
 //!                              "repeat": "2", "color": "#000000ff" } ] } }
 //! ```
 //!
-//! It is read with [`json::parse`](crate::json::parse), so the JSONC
+//! It is read with [`json::parse`], so the JSONC
 //! leniencies pass, and so does a raw tab or carriage return nowhere: the
 //! JSON parser refuses those in strings, and Aseprite writes a name's or
 //! its user data's unescaped. Then it is checked:
