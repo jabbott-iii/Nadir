@@ -2,8 +2,8 @@
 
 The offline asset pipeline of Nadir: the `nadir-cook` command, and the
 library it is built on. It cooks the files artists make (PNG images,
-Aseprite exports, BMFont fonts and JSONC data) into the few formats the
-game loads: QOI atlas pages and KBJ files.
+Aseprite exports, BMFont fonts, LDtk levels and JSONC data) into the few
+formats the game loads: QOI atlas pages, KBJ files and level files.
 
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine
 for top-down games on Windows, macOS and Linux, written in Rust with no
@@ -18,10 +18,9 @@ Version 0.1: the API will change before 1.0, and so may the formats it
 writes.
 
 The cook reads PNG images with their sidecars, Aseprite exports, BMFont
-fonts and JSONC data, and keeps a cache so that the next cook does only
-what changed. Not yet:
+fonts, LDtk 1.5.3 projects and JSONC data, and keeps a cache so that the
+next cook does only what changed. Not yet:
 
-- LDtk levels (roadmap M5.12);
 - audio (roadmap M6.6);
 - a reader for the font files in the game (roadmap M7.1): the cook writes
   them, but the game does not read them yet.
@@ -56,7 +55,9 @@ It prints each job, cooked or up to date, to standard output:
 ```text
 cook: atlas/sprites: 5 sprites on 1 page, 2 clips
 cook: data/items: cooked
-cook: 2 jobs cooked, 0 up to date, into target/cooked
+cook: data/prefabs/rock: cooked
+cook: ldtk/levels/field: 1 level, 16 entities
+cook: 4 jobs cooked, 0 up to date, into target/cooked
 ```
 
 Warnings, and the files it did not cook with why, go to standard error.
@@ -75,7 +76,8 @@ group `sprites`. A group's sprites are packed into its pages.
 | `*.png` with a `<name>.sprite.jsonc` sidecar | A sheet of frames, or a tile set, as the sidecar says |
 | `*.json`, an Aseprite export, and its sheet | A sprite of its frames, with each tag a clip |
 | `*.fnt`, a BMFont font in the text format, and its pages | A sprite of its glyphs, and a font file |
-| `data/**/*.jsonc` | The same value, in KBJ |
+| `data/**/*.jsonc` | The same value, in KBJ; `data/prefabs/<name>.jsonc` is read as a prefab too |
+| `*.ldtk`, an LDtk 1.5.3 project, and its `.ldtkl` level files | A level file of each level: its tile layers, collision grid, tall tiles and entities |
 
 For example:
 
@@ -91,7 +93,10 @@ assets/                          target/cooked/
     pixel.fnt                        fonts/pixel.font.kbj
     pixel_0.png                    data/
   data/                              items.kbj
-    items.jsonc
+    items.jsonc                      prefabs/rock.kbj
+    prefabs/rock.jsonc             levels/
+  levels/                            field.klvl
+    field.ldtk
 ```
 
 - **Pages:** `atlas/<group>_<n>.qoi`, squares of 64 to 4096 pixels. A
@@ -120,7 +125,17 @@ assets/                          target/cooked/
   Every `.json` file is read as one.
 - **Data** below `data/` keeps its path: `data/items.jsonc` cooks to
   `data/items.kbj`. What the value means is checked where the game loads
-  it.
+  it. A prefab, `data/prefabs/<name>.jsonc`, must be a prefab file of that
+  name: `{ "name": "rock", "components": { … } }`.
+- **LDtk projects** cook each level to `levels/<its name in
+  snake_case>.klvl`, by the conventions of the engine's ADR-0038: a tile
+  set's tile is animated by custom data `{"frames": 4, "ms": 250}`, or the
+  top of a tall sprite by `{"tall": [1, 2]}`; the IntGrid layer
+  `Collision` is the grid; each entity spawns the prefab of its name in
+  snake_case, its fields `Component__field` overriding the prefab's. A
+  tile set's image must be a tile set the cook cooks, and what the
+  conventions cannot hold, a layer's opacity or two tiles in one cell,
+  say, is an error naming the file and the member.
 
 Any other file is listed as not cooked and left alone. Names starting
 with `.` are left out. A file the cook reads must have a path that is an
@@ -131,14 +146,14 @@ outputs' are lowercase.
 
 ## The output and the cache
 
-- Each atlas group is a job, and so is each data file. A job is left as it
-  is when its files have not changed since the last cook into the same
+- Each atlas group is a job, and so is each data file and each LDtk
+  project. A job is left as it is when its files have not changed since the last cook into the same
   output folder, by their hashes, and its outputs are still there as the
   cook wrote them. `--force` cooks every job.
 - The cache is `.cache.kbj` in the output folder. A cook of another
   version, or built anew, cooks everything once.
-- The cook owns the output's `atlas/` and `data/`: it removes every file
-  there that no job wrote.
+- The cook owns the output's `atlas/`, `data/` and `levels/`: it removes
+  every file there that no job wrote.
 - Each file is written to a `.tmp` beside it and then renamed, and the
   cache last, so a cook stopped halfway leaves no file half written.
 - The same source files cook to the same bytes on every run and every

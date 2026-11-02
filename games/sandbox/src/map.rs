@@ -181,7 +181,21 @@ pub(crate) fn tall_wall(set: TileSet) -> Sprite {
 
 #[cfg(test)]
 mod tests {
+    use nadir::assets::Scope;
+    use nadir::scene::level::{Level, LevelFile};
+    use nadir::scene::{PrefabLibrary, TypeRegistry};
+
     use super::*;
+
+    /// The field as the cook writes it from `assets/levels/field.ldtk`:
+    /// `levels/field.klvl`, read as the game reads it.
+    fn cooked(app: &App) -> LevelFile {
+        let mut server = app.world().resource_mut::<AssetServer>();
+        let level = server
+            .load_now::<Level>("levels/field.klvl", &mut FinalizeCtx::new())
+            .unwrap_or_else(|error| panic!("the field's level: {error}; run `cargo xtask cook`"));
+        server.get(level).expect("the level").file().clone()
+    }
 
     #[test]
     fn the_map_is_its_size_and_walled_all_round() {
@@ -236,5 +250,143 @@ mod tests {
             Rect::new(Vec2::new(0.5, 0.0), Vec2::new(0.625, 0.5))
         );
         assert_eq!((wall.size, wall.layer), (Vec2::new(16.0, 32.0), 1));
+    }
+
+    #[test]
+    fn the_cooked_level_is_the_map_cell_for_cell() {
+        let app = crate::tests::scene(crate::Scene::Field);
+        let set = app.world().resource::<crate::Sprites>().tiles;
+        let map = build(set);
+        let level = cooked(&app);
+        assert_eq!(level.size, [WIDTH * 16, HEIGHT * 16]);
+        // The sandbox's clear colour, which M5.6 takes from the level.
+        assert_eq!(level.background, [84, 84, 96]);
+        assert_eq!(level.assets, ["atlas/sprites.kbj"]);
+
+        // The tile set, with its water and flowers animated as `build`
+        // animates them.
+        let [tiles] = level.tilesets.as_slice() else {
+            panic!("one tile set: {:?}", level.tilesets);
+        };
+        assert_eq!(
+            (tiles.atlas.as_str(), tiles.sprite.as_str()),
+            ("atlas/sprites.kbj", "sprites/tiles")
+        );
+        assert_eq!((tiles.columns, tiles.rows), (COLUMNS, ROWS));
+        let animations: Vec<(u16, u16, u16)> = tiles
+            .animations
+            .iter()
+            .map(|animation| (animation.tile, animation.frames, animation.millis))
+            .collect();
+        assert_eq!(animations, [(FLOWERS, 2, 600), (WATER, 4, 250)]);
+
+        // One tile layer, the ground: each cell's tile is the map's.
+        let [ground] = level.layers.as_slice() else {
+            panic!("one tile layer: {:?}", level.layers.len());
+        };
+        assert_eq!(
+            (ground.tileset, ground.size, ground.cell),
+            (0, [WIDTH, HEIGHT], 16)
+        );
+        assert_eq!((ground.origin, ground.layer, ground.depth), ([0, 0], 0, 0));
+        let grid = level.grid.as_ref().expect("the field's grid");
+        assert_eq!(
+            (grid.size, grid.cell, grid.origin),
+            ([WIDTH, HEIGHT], 16, [0, 0])
+        );
+        assert_eq!(grid.layer, "World");
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let place = (y * WIDTH + x) as usize;
+                let cell = IVec2::new(x as i32, y as i32);
+                let at = ground.cells[place].unwrap_or_else(|| panic!("({x}, {y}) has no tile"));
+                let mut tile = match tiles.animation(at.tile) {
+                    Some(animation) => Tile::animated(at.tile, animation.frames, animation.millis),
+                    None => Tile::new(at.tile),
+                };
+                tile.flip = Flip {
+                    x: at.flip_x,
+                    y: at.flip_y,
+                };
+                assert_eq!(Some(tile), map.ground.get(cell), "({x}, {y})");
+                assert_eq!(grid.solid[place], map.grid.is_solid(cell), "({x}, {y})");
+            }
+        }
+
+        // The tall walls, in the map's order: its top and its face, with
+        // their feet at the bottom middle of the wall's cell.
+        let walls: Vec<Vec2> = level
+            .tall
+            .iter()
+            .map(|wall| {
+                assert_eq!((wall.tileset, wall.tile, wall.size), (0, TALL_WALL, [1, 2]));
+                assert_eq!(wall.layer, 1);
+                Vec2::new(wall.feet[0] as f32, wall.feet[1] as f32)
+            })
+            .collect();
+        assert_eq!(walls, map.walls);
+
+        // The trees and rocks, in the map's order, as prefabs at their
+        // feet.
+        let props: Vec<(&str, Vec2)> = level
+            .entities
+            .iter()
+            .map(|entity| {
+                assert!(entity.overrides.is_empty(), "{entity:?}");
+                let [x, y] = entity.position;
+                (entity.prefab.as_str(), Vec2::new(x as f32, y as f32))
+            })
+            .collect();
+        let made: Vec<(&str, Vec2)> = map
+            .props
+            .iter()
+            .map(|&(prop, feet)| match prop {
+                Prop::Tree => ("tree", feet),
+                Prop::Rock => ("rock", feet),
+            })
+            .collect();
+        assert_eq!(props, made);
+    }
+
+    #[test]
+    fn the_field_s_prefabs_are_the_trees_and_rocks_it_makes_by_hand() {
+        let mut app =
+            crate::tests::scene(crate::Scene::Field).collision_layers(&["World", "People"]);
+        let world = app.world();
+        let registry = world.resource::<TypeRegistry>();
+        let mut library = PrefabLibrary::new();
+        for name in ["tree", "rock"] {
+            // Loading checks each component against the registry.
+            let mut server = world.resource_mut::<AssetServer>();
+            library
+                .load(&mut server, &registry, name, Scope::Global)
+                .unwrap_or_else(|error| panic!("the prefab `{name}`: {error}"));
+        }
+        let mut commands = world.commands();
+        let spawned = nadir::loading_context(world, "test", Scope::Global, |mut cx| {
+            ["tree", "rock"].map(|name| {
+                library
+                    .spawn(name, &[], &registry, &mut commands, &mut cx)
+                    .unwrap_or_else(|error| panic!("a `{name}`: {error}"))
+            })
+        });
+        drop((commands, registry));
+        app.world_mut().apply_commands();
+
+        let world = app.world();
+        let sprites = world.resource::<crate::Sprites>();
+        let made = [
+            (sprites.tree, Vec2::new(4.0, 3.0)),
+            (sprites.rock, Vec2::new(7.0, 4.0)),
+        ];
+        for (entity, (region, half)) in spawned.into_iter().zip(made) {
+            let mut sprite = region.sprite;
+            sprite.layer = 1;
+            assert_eq!(world.read::<Sprite>().get(entity), Some(&sprite));
+            assert_eq!(
+                world.read::<Collider>().get(entity),
+                Some(&crate::at_feet(half, WORLD, WORLD))
+            );
+        }
     }
 }

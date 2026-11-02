@@ -38,9 +38,9 @@ Formats only the cook reads:
 - **Aseprite** sprite sheet data (`--format json-array`), its tags expanded
   into clips.
 - **BMFont** fonts, in the text format.
-- **LDtk 1.5.3** projects and level files, and **WAV** sounds (PCM of 16 and
-  24 bits, float of 32): the readers are built, but the cook does not call
-  them yet (M5.12 and M6.6).
+- **LDtk 1.5.3** projects and level files, which the cook reads.
+- **WAV** sounds (PCM of 16 and 24 bits, float of 32): the reader is built,
+  but the cook does not call it yet (M6.6).
 
 **JSON** (RFC 8259) with the JSONC extensions, comments and trailing
 commas, is read and written: the cook reads its data files and sidecars

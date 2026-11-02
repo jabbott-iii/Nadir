@@ -34,6 +34,11 @@ const FOLDER_CONFIG: &str = "atlas.jsonc";
 pub(crate) const EXPORT: &str = ".json";
 /// The extension of a BMFont font, in the text format.
 pub(crate) const FONT: &str = ".fnt";
+/// The extension of an LDtk project.
+pub(crate) const PROJECT: &str = ".ldtk";
+/// The extension of a level file of an LDtk project that saves its levels
+/// apart.
+pub(crate) const LDTK_LEVEL: &str = ".ldtkl";
 /// The folder of the data files, below the source folder: each `.jsonc` in
 /// it, or below it, is data.
 const DATA_FOLDER: &str = "data/";
@@ -77,6 +82,10 @@ pub(crate) struct Plan {
     pub(crate) exports: Vec<(Source, Option<Source>)>,
     /// The BMFont fonts, by path.
     pub(crate) fonts: Vec<Source>,
+    /// The LDtk projects, by path.
+    pub(crate) projects: Vec<Source>,
+    /// The level files of LDtk projects, by path.
+    pub(crate) ldtk_levels: Vec<Source>,
     /// The data files, by path.
     pub(crate) data: Vec<Source>,
     /// The folders' `atlas.jsonc` files, by path.
@@ -142,6 +151,8 @@ enum Role {
     Config,
     Export,
     Font,
+    Project,
+    LdtkLevel,
     Data,
     Other,
 }
@@ -161,6 +172,10 @@ fn role(path: &str) -> Role {
         Role::Export
     } else if name.ends_with(FONT) {
         Role::Font
+    } else if name.ends_with(PROJECT) {
+        Role::Project
+    } else if name.ends_with(LDTK_LEVEL) {
+        Role::LdtkLevel
     } else {
         Role::Other
     }
@@ -185,7 +200,8 @@ pub(crate) fn fold(name: &str) -> String {
 /// Applies the rules to what [`walk`] found, in any order.
 ///
 /// - A file the cook reads (an image, a sidecar, an `atlas.jsonc`, an
-///   Aseprite export, a font, a data file) must have an asset path and a
+///   Aseprite export, a font, an LDtk project or level file, a data file)
+///   must have an asset path and a
 ///   name that is UTF-8, and not be a symbolic link; and no other name in a
 ///   folder that holds it, or in its folders, may equal its own once
 ///   [`fold`]ed. Other files with such names are skipped, and say why.
@@ -255,6 +271,8 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
     let mut configs = Vec::new();
     let mut exports = Vec::new();
     let mut fonts = Vec::new();
+    let mut projects = Vec::new();
+    let mut ldtk_levels = Vec::new();
     let mut data = Vec::new();
     for entry in &entries {
         let read = role(&entry.path) != Role::Other;
@@ -312,6 +330,8 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
             Role::Image => images.push(source),
             Role::Export => exports.push(source),
             Role::Font => fonts.push(source),
+            Role::Project => projects.push(source),
+            Role::LdtkLevel => ldtk_levels.push(source),
             Role::Data => data.push(source),
             Role::Sidecar => sidecars.push(source),
             Role::Config => configs.push(source),
@@ -359,6 +379,8 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
         images,
         exports,
         fonts,
+        projects,
+        ldtk_levels,
         data,
         configs,
         skipped: skipped.into_iter().collect(),
@@ -491,6 +513,30 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn ldtk_projects_and_their_level_files_are_read_and_never_as_exports() {
+        let found = plan(&[
+            file("field.ldtk"),
+            folder("levels"),
+            file("levels/Cave.LDTK"),
+            folder("levels/cave"),
+            file("levels/cave/0000-Entry.ldtkl"),
+            file("levels/cave/notes.ldtk.txt"),
+            folder("sprites"),
+            file("sprites/person.json"),
+        ])
+        .expect("a plan");
+        // A project needs no folder: no atlas group is named by it.
+        assert_eq!(
+            found.projects,
+            [source("field.ldtk"), source("levels/Cave.LDTK")]
+        );
+        assert_eq!(found.ldtk_levels, [source("levels/cave/0000-Entry.ldtkl")]);
+        assert_eq!(found.exports, [(source("sprites/person.json"), None)]);
+        assert_eq!(found.skipped.len(), 1);
+        assert_eq!(found.skipped[0].0, "levels/cave/notes.ldtk.txt");
     }
 
     #[test]

@@ -2990,7 +2990,7 @@ by the batched sprite renderer.
     `spawn_level` returns each entity with its position, for its
     `Transform` and for `load_level` to despawn later.
 
-- [ ] **M5.12 — cook: LDtk to `levels/<name>.klvl`; the sandbox's field as an LDtk project, and its props as prefabs**
+- [x] **M5.12 — cook: LDtk to `levels/<name>.klvl`; the sandbox's field as an LDtk project, and its props as prefabs**
   - Note (from M5.5, ADR-0035): every `.json` the cook finds is read as an
     Aseprite export: LDtk's own JSON must keep its `.ldtk` and `.ldtkl`
     extensions, or the scan must learn them first.
@@ -3041,6 +3041,73 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-cook`; `cargo xtask cook`;
     `cargo test -p sandbox`; `cargo xtask fuzz-smoke --target level --secs 20`;
     `cargo xtask ci`
+  - Built (2026-11-02, ADR-0038):
+    - nadir-cook: the scan reads `.ldtk` projects and `.ldtkl` level files,
+      never as exports. Each project is a job, `ldtk/<its path without
+      .ldtk>`, that writes each level as `levels/<name>.klvl`
+      (`tools/cook/src/level.rs`) and reads it back with
+      `nadir_codec::level::parse`. The data job reads each
+      `data/prefabs/<name>.jsonc` with `prefab::read` and checks its name.
+      `Counts::Levels`, with `Counts` now `#[non_exhaustive]`, a break
+      recorded in ADR-0038's status. The cook owns `OUT/levels/`.
+    - `assets/levels/field.ldtk` (262 KB), written once from map.rs's `MAP`
+      by a scratch script that takes LDtk's members from
+      `crates/codec/tests/ldtk/make_vectors.py`; it is not committed, and no
+      LDtk editor opened the file. It holds the ground's 3,072 tiles, the
+      `Collision` IntGrid, the 40 tall walls on a `Walls` layer, and the 16
+      trees and rocks as entities, with the sandbox's clear colour,
+      `#545460`, as the background. `assets/data/prefabs/tree.jsonc` and
+      `rock.jsonc` hold an atlas frame's sprite on sort layer 1 and a
+      collider at the feet, in M5.11's encodings.
+    - Tests:
+      - `tools/cook/tests/cook/ldtk.rs`: 12 tests on projects made by hand.
+      - The workspace's cook: its four jobs, and the field and prefabs read
+        by the game's readers.
+      - `games/sandbox/src/map.rs`: the cooked `levels/field.klvl` is `MAP`,
+        cell for cell (tiles, frames, solid cells, walls and props in
+        map.rs's order), and the prefabs spawn the `Sprite` and `Collider`
+        the field builds by hand.
+      - The cooked field, 15 KB, is a seed in `fuzz/corpus/level/`.
+  - As built, where ADR-0038 left room:
+    - Only the tile sets of the layers the cook draws (shown, with tiles)
+      are read, and each image is read and decoded once.
+    - A layer whose tiles are all tall is no tile layer: the depths count
+      the layers written, from the bottom. Tall sprites go by cell, row by
+      row.
+    - An entity's field with no value is left out, but its type and name
+      are checked all the same; overrides are in name order.
+    - A level's own fields are not cooked, with a warning.
+    - Custom data other than the two conventions is an error.
+    - A level's tile layers and grid hold at most 2^23 cells together,
+      checked before any is made.
+  - Measured: `cargo xtask fuzz-smoke --target level --secs 20` ran 4 seeds
+    and 1,531,016 inputs with no finding. `cargo xtask cook --force` wrote
+    the field byte for byte as before.
+  - One review round confirmed 13 points, all fixed:
+    - A small crafted project of many large layers made the cook abort out
+      of memory. It is now refused before any cell is made.
+    - An image named by many tile sets was read and decoded once for each.
+    - An offset only in Y, a height or a row count was reported at the
+      member for X, the width or the columns.
+    - LDtk jobs were reported in the order the scan found them, not by
+      name.
+    - A project whose name, without `.ldtk`, ended in a dot or a space gave
+      a job name the cache refuses.
+    - Tests: no auto-layer, an unreached iid check, no hidden layer, no
+      layer offset on tall tiles or entities.
+    - Docs: the feature's summary, the README's example output, the
+      `Counts` break left unrecorded, the tall tiles' wording, and two lists
+      of the cook's jobs.
+    A 14th point, that an unset Point field skipped the type check, was
+    refuted as the rule written down. The check runs on unset fields too
+    anyway, so the cook refuses a field it cannot write as soon as it is
+    defined.
+  - For M5.6:
+    - `levels/field.klvl` has one tile layer (the ground), the 40 walls as
+      tall tiles, and the 16 entities, in map.rs's order.
+    - The prefabs name their colliders' layers, so the sandbox calls
+      `App::collision_layers(&["World", "People"])` before it spawns them.
+    - A prefab's sprite loads its atlas in the context's scope.
 
 - [ ] **M5.6 — facade: `load_level`; the sandbox's field is an LDtk level**
   - Note (from M4.5, ADR-0023):

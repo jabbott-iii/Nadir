@@ -51,7 +51,7 @@ const COLOR_CHUNKS: [&str; 6] = ["gAMA", "cHRM", "iCCP", "cICP", "mDCV", "cLLI"]
 
 /// The limits a source image is decoded with: any width or height PNG
 /// allows, since a sheet is cut up, and the default bytes.
-fn source_limits() -> Limits {
+pub(crate) fn source_limits() -> Limits {
     Limits {
         max_texture_dimension: 0x7fff_ffff,
         ..Limits::default()

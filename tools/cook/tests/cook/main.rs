@@ -20,6 +20,7 @@ mod common;
 mod data;
 mod fonts;
 mod incremental;
+mod ldtk;
 mod output;
 mod rules;
 mod workspace;

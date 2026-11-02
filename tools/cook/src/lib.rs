@@ -25,8 +25,8 @@
 //!
 //! # What it cooks
 //!
-//! So far (roadmap M5.4, M5.5), [`cook`] reads a source folder and writes,
-//! into an output folder:
+//! So far (roadmap M5.4, M5.5, M5.12), [`cook`] reads a source folder and
+//! writes, into an output folder:
 //!
 //! - each atlas group's QOI pages, `atlas/<group>_<n>.qoi`, and a KBJ of
 //!   where each frame went, `atlas/<group>.kbj`, from its folder's PNG
@@ -34,14 +34,19 @@
 //!   `<name>.sprite.jsonc` sidecar), Aseprite exports (whose tags become
 //!   clips) and BMFont fonts, with a file of each font's glyphs,
 //!   `atlas/<font>.font.kbj`;
-//! - each data file below `data/`, JSONC, as KBJ, `data/<path>.kbj`;
+//! - each data file below `data/`, JSONC, as KBJ, `data/<path>.kbj`, the
+//!   prefabs of `data/prefabs/` checked as prefab files;
+//! - each level of each LDtk 1.5.3 project, `.ldtk`, and of its level files,
+//!   `.ldtkl`, as a level file, `levels/<name>.klvl`: its tile layers, its
+//!   `Collision` grid, its tall tiles and its entities, which spawn the
+//!   prefabs of their names;
 //! - and a cache, [`CACHE`], that lets the next cook skip the jobs whose
 //!   files did not change.
 //!
 //! An image's folder names its atlas group, unless the folder's
 //! `atlas.jsonc` names another. Files no pipeline cooks yet are listed in
-//! the [`Report`] and left alone. LDtk levels come with roadmap M5.12, and
-//! audio with M6.6. The rules and formats are in
+//! the [`Report`] and left alone; audio comes with roadmap M6.6. The rules,
+//! formats and LDtk conventions (ADR-0038) are in
 //! [`docs/subsystems/assets-and-codecs.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/subsystems/assets-and-codecs.md),
 //! "`nadir-cook` (library + CLI)".
 //!
@@ -104,8 +109,8 @@
 //!   cooker wrote is not used, so a new build cooks everything once. The
 //!   `nadir-cook` command gives its version and a hash of its executable.
 //! - **What it owns:** the cook removes every file below the output's
-//!   `atlas/` and `data/` that no job wrote; keep nothing of your own
-//!   there. The output folder and the source folder may not hold each
+//!   `atlas/`, `data/` and `levels/` that no job wrote; keep nothing of
+//!   your own there. The output folder and the source folder may not hold each
 //!   other.
 //! - **Errors:** [`cook`]'s `# Errors` says what a failure leaves in the
 //!   output folder. Each output is written through a `.tmp` beside it and
@@ -134,6 +139,7 @@ mod cache;
 mod config;
 mod error;
 mod image;
+mod level;
 mod pack;
 mod scan;
 
@@ -142,12 +148,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use nadir_assets::AssetPath;
-use nadir_codec::{Limits, aseprite, bmfont, json, kbj};
+use nadir_codec::ldtk::{self, ImageExport};
+use nadir_codec::{Limits, aseprite, bmfont, json, kbj, png, prefab};
 use nadir_core::hash::fnv1a64;
 
 use crate::cache::{Cache, Hashes, Job};
 use crate::config::{Layout, Sprite};
-use crate::scan::Source;
+use crate::scan::{Plan, Source};
 
 pub use error::CookError;
 
@@ -161,6 +168,18 @@ const ATLAS: &str = "atlas";
 /// The folder of the output folder that the data pipeline owns, as the
 /// atlas pipeline owns [`ATLAS`].
 const DATA: &str = "data";
+
+/// The folder of the output folder that the level pipeline owns, as the
+/// atlas pipeline owns [`ATLAS`].
+const LEVELS: &str = "levels";
+
+/// What the names of the level pipeline's jobs start with: an LDtk
+/// project's job is `ldtk/<its path without .ldtk>`.
+const LDTK: &str = "ldtk";
+
+/// The folder of the prefabs, below the source folder: each
+/// `data/prefabs/<name>.jsonc` is a prefab, checked as a prefab file.
+const PREFABS: &str = "data/prefabs/";
 
 /// What the options that change output say, in the cache. None does yet.
 const OPTIONS: &str = "";
@@ -180,7 +199,8 @@ pub struct Options {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobReport {
     /// Its name: `atlas/<group>` for an atlas group, `data/<path>` for a
-    /// data file.
+    /// data file, `ldtk/<path>` for an LDtk project (each without its
+    /// extension).
     pub name: String,
     /// Whether it was cooked; otherwise its files were up to date.
     pub cooked: bool,
@@ -192,6 +212,7 @@ pub struct JobReport {
 
 /// What a cooked job made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Counts {
     /// An atlas group.
     Atlas {
@@ -206,6 +227,13 @@ pub enum Counts {
     },
     /// A data file.
     Data,
+    /// An LDtk project.
+    Levels {
+        /// Its level files.
+        levels: usize,
+        /// The entities they spawn.
+        entities: usize,
+    },
 }
 
 /// What a cook did.
@@ -271,6 +299,51 @@ struct Group<'p> {
     configs: Vec<Source>,
 }
 
+/// An LDtk project, read, with its levels and the tile sets they draw.
+struct ProjectFile<'p> {
+    file: &'p Source,
+    /// Its tile sets, as it defines them.
+    tilesets: Vec<ldtk::TilesetDef>,
+    /// Its levels, each with its layers, from the project or its level file.
+    levels: Vec<level::LevelSource>,
+    /// The tile sets its levels draw.
+    images: Vec<TileImage<'p>>,
+    /// Their images' bytes, by path, each read once for its hash and its
+    /// size, however many tile sets take it.
+    pngs: BTreeMap<String, Vec<u8>>,
+    /// Every file its job reads, with its hash, by path.
+    inputs: Hashes,
+}
+
+/// A tile set that a project's levels draw, and its image.
+struct TileImage<'p> {
+    uid: i64,
+    /// Its place in its project's tile sets.
+    def: usize,
+    image: &'p Source,
+    /// The atlas file and the sprite the image cooks to.
+    atlas: String,
+    sprite: String,
+    /// Its sidecar's tiles.
+    tiles: (u32, u32),
+}
+
+/// What the cook found that the LDtk projects' levels draw from or spawn,
+/// by asset path.
+struct Found<'a, 'p> {
+    source: &'a Path,
+    images: &'a BTreeMap<&'p str, &'p (Source, Option<Source>)>,
+    /// The images an export or a font takes, and which.
+    claims: &'a BTreeMap<String, String>,
+    sprites: &'a BTreeMap<String, Sprite>,
+    /// Which group each folder's images join, if not its own.
+    joins: &'a BTreeMap<String, String>,
+    /// Each folder's `atlas.jsonc`.
+    configs: &'a BTreeMap<String, Source>,
+    /// The prefabs, by name.
+    prefabs: &'a BTreeMap<String, &'p Source>,
+}
+
 /// What a file of a folder makes: a sprite of an image, an export or a font.
 #[derive(Clone, Copy)]
 enum Made<'p> {
@@ -281,12 +354,13 @@ enum Made<'p> {
 
 /// Cooks the files below `source` into `out`, which it makes if needed.
 ///
-/// Each atlas group is a job, and so is each data file. A job is skipped
+/// Each atlas group is a job, and so is each data file and each LDtk
+/// project. A job is skipped
 /// when the cache in `out` says the same cooker cooked the same files (by
 /// their hashes) into files still there as it wrote them, unless
 /// [`Options::force`] says to cook everything. Then every file below
-/// `out/atlas` or `out/data` that no job wrote is removed, and the cache is
-/// written.
+/// `out/atlas`, `out/data` or `out/levels` that no job wrote is removed,
+/// and the cache is written.
 ///
 /// # Errors
 ///
@@ -476,6 +550,28 @@ pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, Cook
     let data_files: Vec<String> = data.iter().map(|(job, _)| format!("{job}.kbj")).collect();
     check_names(&groups, &sprites, &font_names, &data_files)?;
 
+    // The LDtk projects, their level files, and what their levels draw and
+    // spawn.
+    let prefabs: BTreeMap<String, &Source> = plan
+        .data
+        .iter()
+        .filter_map(|file| prefab_name(&file.path).map(|name| (name.to_string(), file)))
+        .collect();
+    let found = Found {
+        source: &source,
+        images: &images,
+        claims: &claims,
+        sprites: &sprites,
+        joins: &joins,
+        configs: &configs,
+        prefabs: &prefabs,
+    };
+    let mut projects = projects(&found, &plan, &mut reads)?;
+    // In name order, as the other jobs are; the scan refused names that
+    // differ only in case, so no two are one.
+    projects.sort_by(|a, b| stem(&a.file.path).cmp(stem(&b.file.path)));
+    let prefab_names: BTreeSet<String> = prefabs.keys().cloned().collect();
+
     fs::create_dir_all(&resolved).map_err(|error| CookError::io(&resolved, "create", &error))?;
     let out =
         fs::canonicalize(&resolved).map_err(|error| CookError::io(&resolved, "open", &error))?;
@@ -623,6 +719,21 @@ pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, Cook
                 error,
             }
         })?;
+        if let Some(name) = prefab_name(&file.path) {
+            let read = prefab::read(&value).map_err(|error| CookError::Decode {
+                path: file.path.clone(),
+                error,
+            })?;
+            if read.name != name {
+                return Err(CookError::Config {
+                    path: file.found.clone(),
+                    reason: format!(
+                        "the prefab `{}` is in the file of the prefab `{name}`: a prefab's file is named for it",
+                        read.name
+                    ),
+                });
+            }
+        }
         let encoded =
             kbj::encode(&value, Limits::default()).map_err(|error| CookError::Encode {
                 path: output.clone(),
@@ -644,12 +755,71 @@ pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, Cook
         );
     }
 
+    // Each LDtk project: its levels, each written as a level file.
+    for project in &projects {
+        let job = format!("{LDTK}/{}", stem(&project.file.path));
+        if let Some(kept) = kept(&previous, &job, &project.inputs, &out, fresh) {
+            report.jobs.push(JobReport {
+                name: job.clone(),
+                cooked: false,
+                files: kept.outputs.len(),
+                counts: None,
+            });
+            cache.jobs.insert(job, kept.clone());
+            continue;
+        }
+        let mut sizes: BTreeMap<&str, (u32, u32)> = BTreeMap::new();
+        for (path, bytes) in &project.pngs {
+            let pixels =
+                png::decode(bytes, atlas::source_limits()).map_err(|error| CookError::Decode {
+                    path: path.clone(),
+                    error,
+                })?;
+            sizes.insert(path, (pixels.width, pixels.height));
+        }
+        let mut tilesets = BTreeMap::new();
+        for image in &project.images {
+            let set = level::tileset(
+                &project.file.found,
+                image.def,
+                &project.tilesets[image.def],
+                (image.atlas.clone(), image.sprite.clone()),
+                sizes[image.image.path.as_str()],
+                image.tiles,
+            )?;
+            tilesets.insert(image.uid, set);
+        }
+        let cooked = level::cook(&project.levels, &tilesets, &prefab_names)?;
+        report.warnings.extend(cooked.warnings);
+        let mut outputs = Vec::with_capacity(cooked.files.len());
+        for (path, bytes) in &cooked.files {
+            write(&out, path, bytes)?;
+            outputs.push((path.clone(), fnv1a64(bytes)));
+        }
+        report.jobs.push(JobReport {
+            name: job.clone(),
+            cooked: true,
+            files: outputs.len(),
+            counts: Some(Counts::Levels {
+                levels: cooked.files.len(),
+                entities: cooked.entities,
+            }),
+        });
+        cache.jobs.insert(
+            job,
+            Job {
+                inputs: project.inputs.clone(),
+                outputs,
+            },
+        );
+    }
+
     let written: BTreeSet<String> = cache
         .jobs
         .values()
         .flat_map(|job| job.outputs.iter().map(|(path, _)| path.clone()))
         .collect();
-    for owned in [ATLAS, DATA] {
+    for owned in [ATLAS, DATA, LEVELS] {
         remove_others(&out, owned, &written)?;
     }
     let bytes = cache.write().map_err(|error| CookError::Encode {
@@ -732,6 +902,327 @@ fn claim<'p>(
         });
     }
     Ok(image)
+}
+
+/// The name of the prefab of the data file `path`, an asset path: its stem,
+/// if it is directly in `data/prefabs/`.
+fn prefab_name(path: &str) -> Option<&str> {
+    path.strip_prefix(PREFABS)
+        .and_then(|name| name.strip_suffix(scan::DATA))
+        .filter(|name| !name.contains('/'))
+}
+
+/// An error at the member `at` of `file`'s.
+fn fault(file: &Source, at: &str, reason: impl std::fmt::Display) -> CookError {
+    level::fault(&file.found, at, reason)
+}
+
+/// Reads the LDtk projects of `plan` and the level files they save their
+/// levels in, checks what the cook refuses before it cooks, and finds what
+/// each project's job reads: its level files, the images, sidecars and
+/// folders' settings of the tile sets its levels draw, and the prefabs its
+/// entities spawn.
+///
+/// # Errors
+///
+/// [`CookError::Decode`] for a project or level file the LDtk reader
+/// refuses; [`CookError::Config`] for a project that saves files beside
+/// itself, a level whose name cannot name its file or names another's, a
+/// path that leaves the source folder or names a file the cook did not
+/// find, a tile set that a level draws whose image is not a tile set, a
+/// level file of the wrong level, of two levels, or of none.
+fn projects<'p>(
+    found: &Found<'_, 'p>,
+    plan: &'p Plan,
+    reads: &mut BTreeMap<String, Read>,
+) -> Result<Vec<ProjectFile<'p>>, CookError> {
+    let apart: BTreeMap<&str, &Source> = plan
+        .ldtk_levels
+        .iter()
+        .map(|file| (file.path.as_str(), file))
+        .collect();
+    // Each level file's project, as found, and each level file's level.
+    let mut owners: BTreeMap<String, String> = BTreeMap::new();
+    let mut outputs: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let mut projects = Vec::with_capacity(plan.projects.len());
+    for file in &plan.projects {
+        // Its job's name is an asset path, as the cache keeps it.
+        let job = format!("{LDTK}/{}", stem(&file.path));
+        if !AssetPath::new(&job).is_ok_and(|checked| checked.as_str() == job) {
+            return Err(CookError::BadPath {
+                path: file.found.clone(),
+                reason: "its name without `.ldtk` ends in a dot or a space",
+            });
+        }
+        let mut project = {
+            let bytes = &take(found.source, reads, file)?.bytes;
+            ldtk::parse_project(utf8(bytes, file)?, Limits::default()).map_err(|error| {
+                CookError::Decode {
+                    path: file.path.clone(),
+                    error,
+                }
+            })?
+        };
+        // What LDtk would save beside the project, the cook would find.
+        for (on, member, what, fix) in [
+            (
+                project.backup_on_save,
+                "backupOnSave",
+                "backups",
+                "turn it off",
+            ),
+            (
+                project.simplified_export,
+                "simplifiedExport",
+                "a simplified export",
+                "turn it off",
+            ),
+            (
+                project.image_export != ImageExport::None,
+                "imageExportMode",
+                "images of its layers or levels",
+                "set it to `None`",
+            ),
+            (
+                project.export_tiled,
+                "exportTiled",
+                "a Tiled export",
+                "turn it off",
+            ),
+        ] {
+            if on {
+                return Err(fault(
+                    file,
+                    member,
+                    format!(
+                        "it saves {what} beside itself, which the cook would find among the sources: {fix}"
+                    ),
+                ));
+            }
+        }
+        let mut inputs: BTreeMap<String, u64> = BTreeMap::new();
+        inputs.insert(file.path.clone(), reads[&file.path].hash);
+
+        let mut levels = Vec::with_capacity(project.levels.len());
+        for (index, known) in project.levels.iter().enumerate() {
+            let identifier = &known.identifier;
+            let Some(output) = level::file_name(identifier) else {
+                return Err(fault(
+                    file,
+                    &format!("levels[{index}].identifier"),
+                    format!(
+                        "the level `{identifier}` would be `levels/{}.klvl`: a level's name in snake_case is lowercase letters, digits and `_`, and names a file",
+                        level::snake_case(identifier)
+                    ),
+                ));
+            };
+            if let Some((other, theirs)) =
+                outputs.insert(output.clone(), (file.found.clone(), identifier.clone()))
+            {
+                return Err(fault(
+                    file,
+                    &format!("levels[{index}].identifier"),
+                    format!(
+                        "the level `{identifier}` would be `{output}`, as the level `{theirs}` of `{other}` would"
+                    ),
+                ));
+            }
+            let source = match &known.external_path {
+                None => level::LevelSource {
+                    found: file.found.clone(),
+                    at: format!("levels[{index}]."),
+                    output,
+                    level: known.clone(),
+                },
+                Some(relative) => {
+                    let at = format!("levels[{index}].externalRelPath");
+                    let path = level::resolve(folder(&file.path), relative)
+                        .map_err(|why| fault(file, &at, why))?;
+                    let Some(&level_file) = apart.get(path.as_str()) else {
+                        return Err(fault(
+                            file,
+                            &at,
+                            format!(
+                                "the level `{identifier}` is saved in `{relative}`, which is not a level file the cook found"
+                            ),
+                        ));
+                    };
+                    if let Some(first) = owners.insert(level_file.path.clone(), file.found.clone())
+                    {
+                        let reason = if first == file.found {
+                            format!(
+                                "two levels of `{first}` are saved here: a level file holds one level"
+                            )
+                        } else {
+                            format!(
+                                "`{first}` saves a level here, and so does `{}`: a level file holds one level",
+                                file.found
+                            )
+                        };
+                        return Err(fault(level_file, "", reason));
+                    }
+                    let read = take(found.source, reads, level_file)?;
+                    inputs.insert(level_file.path.clone(), read.hash);
+                    let level = ldtk::parse_level(
+                        utf8(&read.bytes, level_file)?,
+                        &project,
+                        Limits::default(),
+                    )
+                    .map_err(|error| CookError::Decode {
+                        path: level_file.path.clone(),
+                        error,
+                    })?;
+                    if level.iid != known.iid {
+                        return Err(fault(
+                            level_file,
+                            "iid",
+                            format!(
+                                "it is the level of iid {:?}, and `{}` saves its level `{identifier}`, of iid {:?}, here",
+                                level.iid, file.found, known.iid
+                            ),
+                        ));
+                    }
+                    level::LevelSource {
+                        found: level_file.found.clone(),
+                        at: String::new(),
+                        output,
+                        level,
+                    }
+                }
+            };
+            levels.push(source);
+        }
+
+        // The tile sets the levels draw, and their images.
+        let places: BTreeMap<i64, usize> = project
+            .tilesets
+            .iter()
+            .enumerate()
+            .map(|(index, tileset)| (tileset.uid, index))
+            .collect();
+        let drawn: BTreeSet<i64> = levels
+            .iter()
+            .flat_map(|source| source.level.layers.iter().flatten())
+            .filter(|layer| level::drawn(layer))
+            .filter_map(|layer| layer.tileset)
+            .collect();
+        let mut images = Vec::with_capacity(drawn.len());
+        let mut pngs: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        for uid in drawn {
+            // The reader checked that each layer's tile set is defined.
+            let Some(&def) = places.get(&uid) else {
+                continue;
+            };
+            let tileset = &project.tilesets[def];
+            let named = &tileset.identifier;
+            let at = format!("defs.tilesets[{def}].relPath");
+            let relative = match &tileset.rel_path {
+                Some(relative) if !tileset.embedded => relative,
+                _ => {
+                    return Err(fault(
+                        file,
+                        &at,
+                        format!(
+                            "the tile set `{named}` has no image of the project's, and a layer the cook draws takes tiles of it"
+                        ),
+                    ));
+                }
+            };
+            let path = level::resolve(folder(&file.path), relative)
+                .map_err(|why| fault(file, &at, why))?;
+            let Some((image, sidecar)) = found.images.get(path.as_str()).map(|e| (&e.0, &e.1))
+            else {
+                return Err(fault(
+                    file,
+                    &at,
+                    format!(
+                        "the image `{relative}` of the tile set `{named}` is not a PNG the cook found"
+                    ),
+                ));
+            };
+            if let Some(by) = found.claims.get(&image.path) {
+                return Err(fault(
+                    file,
+                    &at,
+                    format!(
+                        "the image `{}` of the tile set `{named}` is the sheet or page of `{by}`, not a tile set",
+                        image.found
+                    ),
+                ));
+            }
+            let tiles = match found.sprites.get(&image.path).map(|sprite| sprite.layout) {
+                Some(Layout::Tiles(w, h)) => (w, h),
+                _ => {
+                    return Err(fault(
+                        file,
+                        &at,
+                        format!(
+                            "the image `{}` of the tile set `{named}` is not cooked as a tile set: give it a sidecar, `{}.sprite.jsonc`, of `{{ \"tiles\": [{size}, {size}] }}`",
+                            image.found,
+                            stem(&image.found),
+                            size = tileset.tile_size
+                        ),
+                    ));
+                }
+            };
+            let here = folder(&image.path);
+            let group = found
+                .joins
+                .get(here)
+                .cloned()
+                .unwrap_or_else(|| here.to_string());
+            if !pngs.contains_key(&image.path) {
+                let png = read(&found.source.join(&image.found))?;
+                inputs.insert(image.path.clone(), fnv1a64(&png));
+                pngs.insert(image.path.clone(), png);
+            }
+            for file in sidecar.iter().chain(found.configs.get(here)) {
+                inputs.insert(file.path.clone(), reads[&file.path].hash);
+            }
+            images.push(TileImage {
+                uid,
+                def,
+                image,
+                atlas: format!("{ATLAS}/{group}.kbj"),
+                sprite: stem(&image.path).to_string(),
+                tiles,
+            });
+        }
+
+        // The prefabs the entities spawn, so that the level is cooked again
+        // when one goes; the cook says which is missing.
+        let spawned: BTreeSet<String> = levels
+            .iter()
+            .flat_map(|source| source.level.layers.iter().flatten())
+            .flat_map(|layer| &layer.entities)
+            .map(|entity| level::snake_case(&entity.identifier))
+            .collect();
+        for name in &spawned {
+            if let Some(prefab) = found.prefabs.get(name) {
+                let hash = take(found.source, reads, prefab)?.hash;
+                inputs.insert(prefab.path.clone(), hash);
+            }
+        }
+
+        projects.push(ProjectFile {
+            file,
+            tilesets: std::mem::take(&mut project.tilesets),
+            levels,
+            images,
+            pngs,
+            inputs: inputs.into_iter().collect(),
+        });
+    }
+    for level_file in &plan.ldtk_levels {
+        if !owners.contains_key(&level_file.path) {
+            return Err(fault(
+                level_file,
+                "",
+                "no LDtk project the cook found saves a level here: a level file is cooked with its project",
+            ));
+        }
+    }
+    Ok(projects)
 }
 
 /// A file's path without its extension: the name of the sprite it makes.

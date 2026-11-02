@@ -1,0 +1,16 @@
+// A rock of the field (assets/levels/field.ldtk), standing on its feet:
+// y-sorted among the people (sort layer 1), with a box of 14 × 8 at its
+// feet stopping what walks into it, as games/sandbox/src/main.rs's `field`
+// makes one by hand.
+{
+  "name": "rock",
+  "components": {
+    "Sprite": { "atlas": "atlas/sprites.kbj", "sprite": "sprites/rock", "frame": 0, "layer": 1 },
+    "Collider": {
+      "shape": { "Aabb": { "half": [7, 4] } },
+      "offset": [0, -4],
+      "layer": ["World"],
+      "mask": ["World"]
+    }
+  }
+}

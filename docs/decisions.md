@@ -2865,7 +2865,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0038 — M5.6 split into four tasks; LDtk 1.5.3 and its conventions; the level file `.klvl` (version 1) and the prefab file; how prefabs, reflection and `load_level` behave
 
-- **Status:** Accepted; as built in M5.11, a handle the asset server does not know, and an `Animator`'s clip with no name, are written as `null` with a warning, since `to_value` cannot fail (ADR-0020), and reading them back is an error; for a hash, a nameless clip is written as its handle
+- **Status:** Accepted; as built in M5.11, a handle the asset server does not know, and an `Animator`'s clip with no name, are written as `null` with a warning, since `to_value` cannot fail (ADR-0020), and reading them back is an error; for a hash, a nameless clip is written as its handle; as built in M5.12, the cook's `Counts` is `#[non_exhaustive]`, with `Levels { levels, entities }` (a break), a project's job is `ldtk/<its path>`, only the tile sets of the layers it draws are read, a layer whose tiles are all tall is no tile layer, an entity's field with no value is left out and its overrides are in name order, a level's own fields are not cooked, with a warning, a level's tile layers and grid hold at most 2^23 cells together, and the data job reads each prefab of `data/prefabs/` with `prefab::read` and checks its name
 - **Date:** 2026-11-01
 - **Context:**
   - Roadmap task M5.6 ("cook: LDtk importer; scene: prefabs and level

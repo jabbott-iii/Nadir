@@ -144,7 +144,18 @@ fn describe(report: &Report, out: &str) -> (String, String) {
                 }
                 format!("cook: {}: {made}\n", job.name)
             }
-            Some(Counts::Data) => format!("cook: {}: cooked\n", job.name),
+            Some(Counts::Levels { levels, entities }) => {
+                let entities = match entities {
+                    1 => "1 entity".to_string(),
+                    n => format!("{n} entities"),
+                };
+                format!(
+                    "cook: {}: {}, {entities}\n",
+                    job.name,
+                    count(levels, "level")
+                )
+            }
+            Some(_) => format!("cook: {}: cooked\n", job.name),
             None => format!("cook: {}: up to date\n", job.name),
         };
         if job.counts.is_some() {
@@ -226,6 +237,15 @@ mod tests {
                     files: 1,
                     counts: Some(Counts::Data),
                 },
+                JobReport {
+                    name: "ldtk/levels/world".to_string(),
+                    cooked: true,
+                    files: 2,
+                    counts: Some(Counts::Levels {
+                        levels: 2,
+                        entities: 1,
+                    }),
+                },
             ],
             skipped: vec![(
                 "sprites/atlas.qoi".to_string(),
@@ -240,7 +260,8 @@ mod tests {
              cook: atlas/sprites: 5 sprites on 1 page, 2 clips\n\
              cook: atlas/ui: up to date\n\
              cook: data/items: cooked\n\
-             cook: 3 jobs cooked, 1 up to date, into target/cooked\n"
+             cook: ldtk/levels/world: 2 levels, 1 entity\n\
+             cook: 4 jobs cooked, 1 up to date, into target/cooked\n"
         );
         assert_eq!(
             warnings,

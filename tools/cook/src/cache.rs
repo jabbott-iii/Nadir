@@ -24,8 +24,8 @@
 //!
 //! Jobs are in name order, and their files in path order. Every path must
 //! be an asset path as [`AssetPath`] writes it, and every output a `.qoi`
-//! or `.kbj` below `atlas/`, or a `.kbj` below `data/`: a cache that says
-//! anything else is not used.
+//! or `.kbj` below `atlas/`, a `.kbj` below `data/`, or a `.klvl` below
+//! `levels/`: a cache that says anything else is not used.
 
 use std::collections::BTreeMap;
 
@@ -73,11 +73,12 @@ fn asset_path(path: &str) -> bool {
 }
 
 /// Whether `path` is a file the cook may write: a `.qoi` or `.kbj` below
-/// `atlas/`, or a `.kbj` below `data/`.
+/// `atlas/`, a `.kbj` below `data/`, or a `.klvl` below `levels/`.
 pub(crate) fn output_path(path: &str) -> bool {
     asset_path(path)
         && ((path.starts_with("atlas/") && (path.ends_with(".qoi") || path.ends_with(".kbj")))
-            || (path.starts_with("data/") && path.ends_with(".kbj")))
+            || (path.starts_with("data/") && path.ends_with(".kbj"))
+            || (path.starts_with("levels/") && path.ends_with(".klvl")))
 }
 
 fn read_files(value: Option<&Value>, check: fn(&str) -> bool) -> Result<Hashes, String> {
@@ -255,6 +256,9 @@ mod tests {
             "data/X.kbj",
             "fonts/x.kbj",
             "x.kbj",
+            "levels/x.kbj",
+            "levels/Field.klvl",
+            "data/x.klvl",
         ] {
             let bytes = changed(|value| *first_output(value) = Value::String(path.to_string()));
             let result = Cache::read(&bytes);
@@ -263,12 +267,13 @@ mod tests {
     }
 
     #[test]
-    fn outputs_are_the_atlas_s_and_the_data_s() {
+    fn outputs_are_the_atlas_s_the_data_s_and_the_levels() {
         for path in [
             "atlas/sprites.kbj",
             "atlas/sprites_0.qoi",
             "atlas/fonts/pixel.font.kbj",
             "data/items/sword.kbj",
+            "levels/field.klvl",
         ] {
             assert!(output_path(path), "{path}");
         }

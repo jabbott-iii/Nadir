@@ -64,8 +64,8 @@
 //! | [`ldtk`] | LDtk 1.5.3 projects (`.ldtk`) and level files (`.ldtkl`) | [`ldtk::parse_project`], [`ldtk::parse_level`] |
 //! | [`wav`] | WAV sounds: PCM of 16 and 24 bits, float of 32, mono or stereo, to `f32` samples | [`wav::decode`] |
 //!
-//! The cook does not call the LDtk and WAV readers yet: its level pipeline
-//! comes with M5.12, and its audio pipeline with M6.6.
+//! The cook does not call the WAV reader yet: its audio pipeline comes with
+//! M6.6.
 //!
 //! [`json`] reads JSON (RFC 8259) with the JSONC extensions, `//` and
 //! `/* */` comments and trailing commas, into a [`json::Value`]

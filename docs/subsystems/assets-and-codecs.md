@@ -658,7 +658,7 @@ their `TileInstance`s and `EntityInstance`s, and fields as
   (`__tilesetDefUid`), which a layer with tiles must have; its `f` 0 to 3;
   its `a` 0 to 1. An entity's `defUid` is a definition the project has.
   Two tiles in one cell are kept, in the order they are drawn: the cook
-  refuses them (M5.12).
+  refuses them (below, "LDtk levels").
 - **Level files:** one level, with its layers, checked against the
   project's definitions; its `iid` one of the project's levels saved
   apart.
@@ -700,7 +700,9 @@ their `TileInstance`s and `EntityInstance`s, and fields as
   `fuzz/corpus/level/`, cooked from JSONC by the cook's data pipeline: a
   level of every member, the least a level can be (a size and a
   background, and empty lists), and one of two tile sets and layers, mirrored
-  every way; the target asserts the promises above.
+  every way; and the sandbox's field, `field.klvl`, as the cook writes it
+  from `assets/levels/field.ldtk` (M5.12). The target asserts the promises
+  above.
 
 ### Prefab file reader (documented, tested)
 
@@ -906,10 +908,10 @@ string table (optional, dev builds and debugging): path strings in TOC order
 
 ## `nadir-cook` (library + CLI)
 
-As built in M5.4 and M5.5 (ADR-0031, ADR-0035): the atlas pipeline, with
-PNGs, Aseprite exports and BMFont fonts; data; the cache; and the CLI.
-The level pipeline below comes with M5.12 (ADR-0038), and the audio
-pipeline with M6.6.
+As built in M5.4, M5.5 and M5.12 (ADR-0031, ADR-0035, ADR-0038): the
+atlas pipeline, with PNGs, Aseprite exports and BMFont fonts; data, its
+prefabs checked; LDtk projects' levels; the cache; and the CLI. The audio
+pipeline comes with M6.6.
 
 ### Pipelines
 
@@ -917,10 +919,10 @@ pipeline with M6.6.
 | :- | :- | :- |
 | `*.png` (+ optional `*.sprite.jsonc` sidecar: sheet frames, pivot, trim, tile set) | Decode → cut into frames → trim → atlas pack → QOI | Atlas pages `atlas/<group>_<n>.qoi`, tile sets' pages `atlas/<sprite>.tiles.qoi`, and `atlas/<group>.kbj` (where each frame went) |
 | `*.json`, an Aseprite export (`aseprite -b in.aseprite --sheet out.png --data out.json --format json-array --list-tags`) | Parse frames and tags (above, "Aseprite subset") → its sheet's frames join the atlas group, placed in their canvas, then trimmed; each tag a clip of them, a tag's direction and repeat count expanded to the frames Aseprite plays. `Clips::add_atlas` makes them `Clip`s (ADR-0024, ADR-0035) | The sprite's frames and clips in `atlas/<group>.kbj` |
-| `*.ldtk` (LDtk 1.5.3 project, and its `.ldtkl` level files) | Read (above, "LDtk subset") → by ADR-0038's conventions: tile layers → a level's layers of cells; the IntGrid `Collision` → its grid; tall tiles → its tall sprites; entities → prefab names and field overrides (M5.12) | `levels/<name>.klvl` (below, "Level file") |
+| `*.ldtk` (LDtk 1.5.3 project, and its `.ldtkl` level files) | Read (above, "LDtk subset") → by ADR-0038's conventions (below, "LDtk levels"): tile layers → a level's layers of cells; the IntGrid `Collision` → its grid; tall tiles → its tall sprites; entities → prefab names and field overrides | `levels/<name>.klvl` (below, "Level file"), one a level |
 | `*.wav` | Resample policy from the sidecar; long or music → QOA, short SFX → PCM16 | `.qoa` / `.kpcm` |
 | `*.fnt` + pages (BMFont text) | Parse, check the pages, pack each glyph into the atlas group (below, "Font file") | `atlas/<font>.font.kbj` + the sprite's frames in `atlas/<group>.kbj` |
-| `data/**/*.jsonc` data (prefabs, items, input defaults) | Validate syntax → KBJ (semantic validation happens at game load via reflection) | `data/<path>.kbj` |
+| `data/**/*.jsonc` data (prefabs, items, input defaults) | Validate syntax → KBJ; each `data/prefabs/<name>.jsonc` read as a prefab file too (below, "Prefab file"); what the values mean is checked at game load, by reflection | `data/<path>.kbj` |
 
 A file no pipeline cooks yet is listed once a run, with why, and left
 alone. So are, rather than failing the cook, such files' names that are
@@ -931,8 +933,10 @@ symbolic links. Names starting with `.` are left out.
 
 - What the cook reads, by name: `*.png` images, `*.sprite.jsonc`
   sidecars, folders' `atlas.jsonc`, every `*.json` as an Aseprite export,
-  `*.fnt` fonts, and every `*.jsonc` below `data/` as data (sidecars and
-  `atlas.jsonc` there are data too). Any other file is listed, not read.
+  `*.fnt` fonts, `*.ldtk` LDtk projects and `*.ldtkl` their level files
+  (never read as exports), and every `*.jsonc` below `data/` as data
+  (sidecars and `atlas.jsonc` there are data too). Any other file is
+  listed, not read.
 - A file the cook reads must have
   an asset path (`AssetPath`: lowercased, then checked) and a name that is
   UTF-8, and not be a symbolic link. No other name in a folder above or
@@ -1095,6 +1099,85 @@ refused, `CodecError::Json` naming the line and column), written as the
 same value in KBJ at `data/<path>.kbj`. What the value means is checked
 where the game loads it.
 
+### LDtk levels
+
+Each `.ldtk` the cook finds is a job, `ldtk/<its path without .ldtk>`, that
+writes each of its levels as a level file (below, "Level file"), by
+ADR-0038's conventions. A project whose name without `.ldtk` ends in a dot
+or a space, which would make a job's name the cache cannot keep, is an
+error. As built in M5.12:
+
+- **Names:** a level is `levels/<its identifier in snake_case>.klvl`
+  (`Field` → `levels/field.klvl`, `CaveEntry` → `levels/cave_entry.klvl`):
+  an uppercase letter starts a word after a lowercase letter or a digit,
+  or before a lowercase letter after an uppercase one. The name must be
+  lowercase letters, digits and `_`, and name a file; two levels of one
+  name, in one project or two, are an error naming both.
+- **Paths** that LDtk writes, a tile set's `relPath` and a level's
+  `externalRelPath`, are relative to the project's folder, matched as asset
+  paths, and may use `..` only to stay inside the source folder.
+- **Level files:** a level saved apart is read from the `.ldtkl` its
+  `externalRelPath` names, which must be one the cook found, of that level
+  (its `iid`), and saved by no other level. An `.ldtkl` that no project
+  saves a level in is an error. A mistake in it is named in it.
+- **Tile sets:** those of the layers the cook draws. Each must have an
+  image of the project's (not LDtk's own icons), a PNG the cook found and
+  cooks as a tile set (a sidecar of `{"tiles": [n, n]}`, `n` its
+  `tileGridSize`), of the size the project gives it, with no spacing or
+  padding, and at most 65535 tiles. Its atlas is its image's group's, and
+  its sprite its image's path without `.png`. Its tiles' `customData` is
+  `{"frames": N, "ms": M}`, an animation of N tiles from that one (N of 2
+  or more, inside the set, M of 1 to 65535, two animations apart), or
+  `{"tall": [C, R]}`, a block of C × R tiles from that one, inside the
+  set; any other custom data is an error.
+- **Tile layers:** a layer that is shown and has tiles (`gridTiles`, or
+  the `autoLayerTiles` of an IntGrid or an auto-layer) is drawn. Layers are
+  taken from the bottom of LDtk's list up, and each one with a tile that is
+  not tall is a layer of the level file, of sort layer 0, its depth its
+  place among them from the bottom (0, 1, …), its origin its offset. A
+  drawn layer's opacity is 1, its cells are its tiles' size, and each of
+  its tiles is opaque, on a corner of one of its cells, and alone in its
+  cell.
+- **Tall tiles:** a tile whose custom data is `{"tall": [C, R]}`, the
+  top-left tile of its block, is a tall sprite of sort layer 1, not
+  flipped, its feet the bottom middle of the block whose bottom-left cell
+  is the tile's, with its layer's offset, in pixels: a block an odd number
+  of pixels wide is an error. The block's other tiles, placed in a cell,
+  are cells as any tile is. Tall sprites go row by row in each layer,
+  layer by layer from the bottom.
+- **The grid:** the layer `Collision`, an IntGrid with no offset, one a
+  level: each cell that is not 0 is solid, in the collision layer
+  `"World"`. A level without one has no grid.
+- **Entities:** each entity, layer by layer from the bottom, in LDtk's
+  order, spawns the prefab of its identifier in snake_case (`BigRock` →
+  `big_rock`), which must be a `data/prefabs/<name>.jsonc` the cook found;
+  its position is its pivot's, `px`, with its layer's offset. Its fields
+  named `Component__field`, with more `__` for nested fields, are its
+  overrides, `{"Component": {"field": value}}`, components and fields in
+  name order. Int, Float, Bool, String, Multilines, FilePath and enum
+  fields are written as their values, and one with no value (`null`) is
+  left out; any other type, and a field named otherwise, are errors even
+  with no value, as are two fields of which one overrides what the other
+  does (`Health__max` and `Health__max__x`).
+- **Refused too:** a project that saves backups, a simplified export,
+  images of its layers or levels, or a Tiled export beside itself, which
+  the cook would find among the sources; and a level whose tile layers and
+  grid hold more than 2^23 cells together, before any is made, as the
+  reader bounds each layer but not their sum. `worldX` and `worldY` are
+  not used; a level's own fields are not cooked, with a warning.
+- **Errors** name the file, as found, and the member:
+  ``levels/field.ldtk`: at `levels[0].layerInstances[3].gridTiles[5].a`:
+  a tile's opacity must be 1: the cook draws every tile opaque``. What the
+  LDtk reader refuses is its error (above, "LDtk subset"), with the file.
+- **Its files** are the project, its level files, the image, sidecar and
+  folder's `atlas.jsonc` of each tile set it draws, and the prefab of each
+  name its entities spawn, so that an edit to any, or a prefab that goes,
+  cooks it again. Each image is read, and decoded, once however many tile
+  sets take it.
+- **`Counts::Levels`**, a project's levels and their entities, is what the
+  job reports; `Counts` became `#[non_exhaustive]` for it in M5.12, a
+  break (ADR-0038).
+
 ### Level file `levels/<name>.klvl` (version 1)
 
 KBJ, its members in this order (ADR-0038):
@@ -1125,8 +1208,9 @@ KBJ, its members in this order (ADR-0038):
   bottom middle of the block.
 - Positions are whole pixels that fit an `i32`.
 - The game reads it with `nadir_codec::level::parse` (above, "Level file
-  reader"); the cook writes it (M5.12), and reads each it writes the same
-  way. The version is the reader's `level::VERSION`.
+  reader"); the cook writes it (above, "LDtk levels"), and reads each it
+  writes the same way, so that it never writes one that reader refuses.
+  The version is the reader's `level::VERSION`.
 
 ### Prefab file `data/prefabs/<name>.kbj`
 
@@ -1139,7 +1223,10 @@ data file does (above, "Data"):
   "components": { "Health": { "current": 12, "max": 12 } } }   // type names; no null
 ```
 
-The game reads it with `nadir_codec::prefab::parse` (above, "Prefab file
+The cook reads each prefab directly in `data/prefabs/` with
+`nadir_codec::prefab::read` before it writes it, and checks that its name
+is its file's stem; a `.jsonc` in a folder below is data, not a prefab. The
+game reads it with `nadir_codec::prefab::parse` (above, "Prefab file
 reader"); what the values mean, and the chain of bases, nadir-scene checks
 (M5.11).
 
@@ -1152,23 +1239,24 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
               "outputs": [["atlas/sprites.kbj", "…"], …] } ] }                    // by path
 ```
 
-- Each atlas group is a job, and so is each data file. A job is skipped
+- Each atlas group is a job, and so is each data file and each LDtk
+  project. A job is skipped
   when its files' hashes, the cooker and the options are the cache's, and
   its outputs are there as written; `--force` skips none. A cook built
   anew cooks everything once. The options string holds the options that
   change output: none yet.
 - An atlas job's files are every file it read: its images, its exports
   and their sheets, its fonts and their pages, the sidecars, and its
-  folders' `atlas.jsonc`.
+  folders' `atlas.jsonc`. An LDtk job's are as above, "LDtk levels".
 - Each file is read once, so its hash and what is cooked come from the same
   bytes.
 - A cache that cannot be read, has another version, or names a path the
   cook would not write (not an asset path as written, or an output not a
-  `.qoi` or `.kbj` below `atlas/`, or a `.kbj` below `data/`) is not used,
-  with a warning.
+  `.qoi` or `.kbj` below `atlas/`, a `.kbj` below `data/`, or a `.klvl`
+  below `levels/`) is not used, with a warning.
 - Each output is written through a `.tmp` and a rename, and the cache last.
-  The cook owns `OUT/atlas/` and `OUT/data/`: every file there that no job
-  wrote is removed. The output folder and the source folder may not hold
+  The cook owns `OUT/atlas/`, `OUT/data/` and `OUT/levels/`: every file
+  there that no job wrote is removed. The output folder and the source folder may not hold
   each other. Two outputs of one name, or of names that fold alike, are
   an error.
 
@@ -1177,7 +1265,8 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
 - `nadir-cook [--force] SOURCE OUT`: exit 0, 1 for a failed cook, 2 for a
   command line not understood, or with an argument that is not valid
   Unicode. It prints each job, cooked (an atlas group's sprites, pages,
-  clips and fonts) or up to date, and warns on standard error.
+  clips and fonts; a project's levels and their entities) or up to date,
+  and warns on standard error.
 - `cargo xtask cook [--force]` runs it, built in release mode, on
   `assets/` and `target/cooked/`.
 
@@ -1251,9 +1340,16 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
   pixels, cell by cell, into a file the game's reader takes, with the
   person's clips; Aseprite exports placed in their canvas, their clips,
   their sidecars and their mistakes; fonts' frames and files, their
-  fallbacks and their mistakes; data files; and edits to an export, a
-  font or a page, each cooking its group again to what a clean cook
-  writes.
+  fallbacks and their mistakes; data files and prefabs; and edits to an
+  export, a font or a page, each cooking its group again to what a clean
+  cook writes. LDtk projects made by hand (`tests/cook/ldtk.rs`): each
+  layer type, tall and animated tiles, entities and their fields, a level
+  saved apart, two cooks byte for byte, an edit to a level file, a tile
+  set's image, sidecar or group cooking the level again to what a clean
+  cook writes, and each mistake ADR-0038 names refused with its file and
+  member. The sandbox's tests read the cooked field, `levels/field.klvl`,
+  and find `games/sandbox/src/map.rs`'s map in it, cell for cell, and its
+  prefabs the trees and rocks it makes by hand.
 - **The asset server** (`crates/assets/tests`): loads that never wait for a
   source held shut, order, budgets and turns, panics, scopes. The load
   storm (`storm.rs`) asks for 1,000 images in one frame, and holds every

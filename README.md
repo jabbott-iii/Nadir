@@ -30,12 +30,12 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
     determinism;
   - assets loaded on worker threads;
   - an offline cook that packs PNG images, Aseprite exports and bitmap fonts
-    into atlases.
+    into atlases, and turns LDtk levels into level files.
 - **On Windows and macOS,** everything builds and passes the tests, but the
   window stays empty until the OpenGL contexts land (roadmap tasks M2.6 and
   M2.7).
-- **Not built yet:** audio, text, the debug tools, gamepads, LDtk levels, pack
-  files, hot reload, saves and the Metal backend.
+- **Not built yet:** audio, text, the debug tools, gamepads, loading levels
+  in the game, pack files, hot reload, saves and the Metal backend.
 
 ## Build and run
 

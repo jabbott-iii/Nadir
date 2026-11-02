@@ -31,7 +31,8 @@ Built:
   `PrefabLibrary`, with the engine's sprites, colliders and animators
   reflected for them;
 - assets loaded on worker threads, and an offline cook that packs images,
-  Aseprite exports and bitmap fonts into atlases;
+  Aseprite exports and bitmap fonts into atlases, and makes level files of
+  LDtk projects;
 - a world hash, to check that a replay gives the same simulation.
 
 Not built yet:
@@ -39,7 +40,8 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7);
 - audio (M6), text (M7.1), the debug tools (M7), gamepads (M8);
-- levels from LDtk (M5.12, M5.6), pack files (M5.7), hot reload (M5.8);
+- loading levels, which the cook makes of LDtk projects (M5.6), pack files
+  (M5.7), hot reload (M5.8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 
@@ -536,11 +538,17 @@ nadir-cook assets cooked
   its tags become the sprite's clips.
 - A sidecar `<name>.sprite.jsonc` beside an image can cut it into frames,
   set its pivot, or make it a tile set: `{ "tiles": [16, 16] }`.
-- Each JSONC file below `data/` becomes `data/<name>.kbj`.
+- Each JSONC file below `data/` becomes `data/<name>.kbj`; a prefab,
+  `data/prefabs/<name>.jsonc`, is checked as one.
+- Each LDtk 1.5.3 project, `.ldtk`, with its `.ldtkl` level files, becomes
+  a level file of each level, `levels/<name>.klvl`, whose entities spawn
+  the prefabs of their names.
 
 A job whose files did not change since the last cook into `OUT` is skipped,
-unless `--force`. Point `Config::assets` at `OUT`. The engine has no asset
-type for the cooked fonts and data files yet: text comes with roadmap task
+unless `--force`. Point `Config::assets` at `OUT`. Prefabs and level files
+are `nadir::scene`'s `PrefabAsset` and `Level`, and loading a level into
+the world comes with roadmap task M5.6. The engine has no asset type for
+the cooked fonts and other data files yet: text comes with roadmap task
 M7.1.
 
 ## Features

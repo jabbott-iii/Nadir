@@ -1,0 +1,16 @@
+// A tree of the field (assets/levels/field.ldtk), standing on its feet:
+// y-sorted among the people (sort layer 1), with its trunk, a box of 8 × 6
+// at its feet, stopping what walks into it, as games/sandbox/src/main.rs's
+// `field` makes one by hand.
+{
+  "name": "tree",
+  "components": {
+    "Sprite": { "atlas": "atlas/sprites.kbj", "sprite": "sprites/tree", "frame": 0, "layer": 1 },
+    "Collider": {
+      "shape": { "Aabb": { "half": [4, 3] } },
+      "offset": [0, -3],
+      "layer": ["World"],
+      "mask": ["World"]
+    }
+  }
+}

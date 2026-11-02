@@ -15,13 +15,15 @@
 //! The workspace's own `assets/`, which the sandbox draws: each frame the
 //! cook packs is its PNG's cell, pixel for pixel, the person's clips are
 //! their Aseprite export's tags, and the atlas file is one the game's
-//! reader takes.
+//! reader takes; the field's LDtk project cooks to its level file, and its
+//! prefabs to theirs. The sandbox's tests check the level against its map.
 
 use std::fs;
 use std::path::Path;
 
 use nadir_codec::json::Value;
-use nadir_codec::{Limits, atlas, png};
+use nadir_codec::{Limits, atlas, level, png, prefab};
+use nadir_cook::Counts;
 
 use crate::common::{
     clips, cook, dir, files, frame_pixels, frames, int, kbj, qoi as read_qoi, sprite,
@@ -58,10 +60,38 @@ fn crop(image: &png::Image, x: u32, y: u32, w: u32, h: u32) -> Vec<u8> {
 fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
     let out = dir("workspace");
     let report = cook(assets(), &out).expect("a cook");
-    assert_eq!(report.jobs.len(), 1);
-    assert_eq!(report.jobs[0].name, "atlas/sprites");
+    let names: Vec<&str> = report.jobs.iter().map(|job| job.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "atlas/sprites",
+            "data/prefabs/rock",
+            "data/prefabs/tree",
+            "ldtk/levels/field"
+        ]
+    );
     assert!(report.skipped.is_empty(), "{:?}", report.skipped);
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+    // The field: one level, whose trees and rocks are its 16 entities, which
+    // the game's reader takes; and its prefabs, which the prefab reader
+    // takes.
+    assert_eq!(
+        report.jobs[3].counts,
+        Some(Counts::Levels {
+            levels: 1,
+            entities: 16
+        })
+    );
+    let field = fs::read(out.join("levels/field.klvl")).expect("the field's level file");
+    let field = level::parse(&field, Limits::default()).expect("a level the game reads");
+    assert_eq!(field.size, [1024, 768]);
+    for name in ["rock", "tree"] {
+        let path = format!("data/prefabs/{name}.kbj");
+        let bytes = fs::read(out.join(&path)).expect("the prefab file");
+        let file = prefab::parse(&bytes, Limits::default()).expect("a prefab the game reads");
+        assert_eq!(file.name, name);
+    }
 
     // The game's reader takes it.
     let bytes = fs::read(out.join("atlas/sprites.kbj")).expect("the atlas file");
@@ -187,7 +217,10 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
     // a second cook still finds it up to date, and changes nothing.
     let first = files(&out);
     let again = cook(assets(), &out).expect("a cook");
-    assert!(!again.jobs[0].cooked, "the group was cooked again");
+    assert!(
+        again.jobs.iter().all(|job| !job.cooked),
+        "a job was cooked again"
+    );
     assert!(again.warnings.is_empty(), "{:?}", again.warnings);
     assert_eq!(files(&out), first);
 }
