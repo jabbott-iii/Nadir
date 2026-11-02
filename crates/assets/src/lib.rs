@@ -67,7 +67,7 @@
 //!   [`AssetServer::with_source`] through any [`Source`].
 //! - **Freeing:** [`AssetServer::unload_scope`].
 //!
-//! Not built yet: pack files and their `PackSource` (roadmap M5.7), and hot
+//! Not built yet: pack files and their `PackSource` (roadmap M5.14), and hot
 //! reload (M5.8). [`Source::modified`] already tells when a loose file
 //! changed, but nothing watches it.
 //!

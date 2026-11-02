@@ -41,6 +41,7 @@ Every decoder:
 | `ldtk` | LDtk 1.5.3's project `.ldtk` and level `.ldtkl` JSON | — | ✓ | no (cook only) | The members the cook uses, checked against the project's definitions (ADR-0038). See subset below |
 | `level` | The cook's level file, version 1, below | — | ✓ | yes | KBJ, then checked strictly (ADR-0038). See below |
 | `prefab` | The prefab file, below | — | ✓ | yes | KBJ, or its source's JSON, then checked strictly (ADR-0038). See below |
+| `kpak` | The pack file, version 1, below | — | ✓ | yes | Header, TOC and string table checked strictly; each entry's CRC before its KLZ (ADR-0041). See below |
 
 ### Inflate (documented, tested)
 
@@ -727,6 +728,73 @@ built in M5.10 (ADR-0038):
   target:** `prefab`, with seeds in `fuzz/corpus/prefab/`: a prefab with a
   base, its base, and one with no components.
 
+### Pack file reader (documented, tested)
+
+`kpak::header(start, file_size, limits)` reads a pack's first 32 bytes,
+`kpak::toc(&header, bytes, limits)` its TOC from the `toc_size` bytes at
+`toc_offset`, and `Toc::decode(index, stored, limits)` an entry from its
+stored bytes, so that a reader of a file takes only the parts it needs;
+`kpak::parse` and `Toc::read` do the same for a pack in memory.
+`Toc::find(path)` is a binary search of the path hashes; with a string
+table, an entry of another path is not found. The format is below
+(`nadir-assets`, "Pack file `.kpak` (version 1)"). As built in M5.13
+(ADR-0041):
+
+The checks run in the order below, and the first that fails is the error:
+
+- **The header:** the magic, then the version (any other is not
+  supported), the flags (bit 0 only) and the reserved field; at most
+  `max_entries` entries, the 1,000,000 pack entries of "Limits"; the TOC at
+  a multiple of 16 after the header, with room for its entries (exactly,
+  without a string table), at most `max_decoded_bytes`, and ending where
+  the file does.
+- **The TOC:** its size, the header's, and its CRC-32; at most
+  `max_entries` entries; then each entry in turn: its codec, 0 or 1, its
+  reserved bytes, its stored bytes between the header and the TOC at a
+  multiple of 16, both sizes at most `max_decoded_bytes`, a stored entry's
+  two sizes equal, and its path hash greater than the one before it (so
+  none twice); then entries that share bytes only as one blob (the same
+  offset, sizes, codec and CRC); then each path of the string table UTF-8,
+  not empty, and of its entry's hash; nothing after the last.
+- **An entry:** the CRC-32 of its stored bytes, before they are
+  decompressed, so that a damaged entry is `ErrorKind::Damaged`, which
+  names its path; a KLZ stream that cannot be read under a right CRC is
+  `BadStream`, which names it too.
+- **Not checked:** the bytes between entries (the writer's padding), and
+  whether a path is an asset path, which nadir-assets checks of the paths
+  it asks for.
+- **Errors** say where: `CodecError::Kpak { offset, kind }`, at the byte in
+  the file of the field that is wrong, or of the entry's bytes.
+- **Test vectors:** `crates/codec/tests/kpak/`, written field by field by
+  `make_vectors.py`, which shares no code with the reader, and read by
+  `crates/codec/tests/kpak.rs`: 6 packs that read (no entries; two; two
+  with no string table; blobs shared and an empty file; 42 entries, one
+  with a path of 300 bytes; a KLZ entry larger than its data), 31 that
+  each break a rule of the format, with the error and its byte, and 3
+  whose TOC reads but one entry does not (damaged, with and without a
+  string table, and a bad KLZ stream). Each broken pack breaks only its
+  rule, its checksums right, where it can; one whose rule cannot be
+  broken alone, such as an entry count no file of its size could hold,
+  breaks rules checked after it too, and is refused by its own.
+  Every prefix of three of them, and each with a bit changed, reads or is
+  refused without a panic.
+- **Fuzz target:** `kpak`, with seeds in `fuzz/corpus/kpak/`: the 5 packs
+  that read, the damaged one and the bad stream. Its TOCs and entries are
+  at most 1 MiB, as `klz`'s streams are. It reads each input, then a
+  repaired copy: the header's magic, version, reserved field and unknown
+  flags restored; the TOC found again from the end when its offset is
+  lost, moved to a multiple of 16 by zeros before it; its size and its
+  entry count mended; each entry's path hash taken from its path, and the
+  entries put back in order; every CRC rewritten. It asserts what
+  `PackSource` relies on: the TOC of the header, the same read whole or in
+  parts; its entries in order of their hashes, inside the data region at a
+  multiple of 16, a stored one of its raw size; each path of its entry's
+  hash, and found by it; each entry read to its raw size, its stored bytes
+  if stored, or refused as damaged or a bad stream, and nothing else. Of
+  the first 20,000 inputs a run with the default seed mutates from the
+  seeds, 487 read as they are and 3,368 once repaired; 303 reach an
+  entry's KLZ stream as they are, and 1,639 repaired.
+
 ## `nadir-assets`
 
 ### Handles and storage
@@ -873,9 +941,10 @@ pub trait Source: Send + Sync {
 ```
 
 - **`LooseSource`** reads files under a root directory: in development,
-  `target/cooked/`. It is in every build until release builds read the
-  pack (M5.7, ADR-0030).
-- **`PackSource`** (release, M5.7) reads from `game.kpak`.
+  `target/cooked/`. It stays in every build (ADR-0041); release builds
+  read the pack from M5.7.
+- **`PackSource`** (M5.14) reads from `game.kpak`, through
+  `nadir_codec::kpak`.
 - **Paths are normalized** as `AssetPath`s, above: lowercase, forward
   slashes, no `..`. The cook tool rejects source paths that differ only in
   case, so Windows/macOS (case-insensitive) and Linux (case-sensitive)
@@ -883,19 +952,26 @@ pub trait Source: Send + Sync {
 
 ### Pack file `.kpak` (version 1)
 
+Numbers are little-endian; ADR-0041 filled in what the TOC's and the
+entries' CRCs cover, the string table and where the TOC ends. Read by
+`nadir_codec::kpak` (M5.13, above).
+
 ```
 header (32 bytes):
-  magic "KPAK" | version u16 | flags u16 | entry_count u32 | toc_offset u64 | toc_size u32 | toc_crc32 u32 | reserved u32
+  magic "KPAK" | version u16 (1) | flags u16 | entry_count u32 | toc_offset u64 | toc_size u32 | toc_crc32 u32 | reserved u32 (0)
 data region: entries, each 16-byte aligned, identical blobs stored once (dedup by content hash)
-toc (sorted by path_hash for binary search):
-  path_hash u64 (fnv1a64 of normalized path) | offset u64 | stored_size u32 | raw_size u32 | codec u8 (0 none, 1 klz) | reserved [u8;3] | crc32 u32
-string table (optional, dev builds and debugging): path strings in TOC order
+toc (toc_size bytes at toc_offset, a multiple of 16, to the end of the file; toc_crc32 is their CRC-32):
+  entries, sorted by path_hash for binary search, none twice:
+    path_hash u64 (fnv1a64 of normalized path) | offset u64 | stored_size u32 | raw_size u32 | codec u8 (0 none, 1 klz) | reserved [u8;3] (0) | crc32 u32 (of the stored bytes)
+  string table, if flags bit 0: for each entry in TOC order, its path's length u16 and its bytes
 ```
 
 - Hash collisions between distinct paths are detected at cook time, which
-  fails the build.
-- At runtime, an entry's CRC is verified on first read. A mismatch is a
-  corruption error naming the path, if the string table is present.
+  fails the build (M5.14).
+- At runtime, each read of an entry checks the CRC-32 of its stored bytes
+  before it decompresses them. A mismatch is a corruption error naming the
+  path, from the string table, which the cook always writes (ADR-0041), or
+  the entry's index in a pack without one.
 
 ### Hot reload (dev)
 
@@ -1278,7 +1354,7 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
 - there are no timestamps
 - map iteration uses ordered maps or the deterministic hasher
 - the same inputs always produce byte-identical output, and so a
-  byte-identical `game.kpak` (M5.7). Checked by cooking into two folders,
+  byte-identical `game.kpak` (M5.14). Checked by cooking into two folders,
   and an incremental cook against a clean one, in `cargo test -p
   nadir-cook`, and by `cargo xtask cook --force` against the cook before
   it.
@@ -1300,7 +1376,7 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
 | Max JSON/KBJ nesting depth (`max_depth`) | 64 |
 | Max string length | 1 MiB |
 | Max array or object entries | 1,000,000 |
-| Max pack entries | 1,000,000 |
+| Max pack entries (`max_entries`, as for an array) | 1,000,000 |
 
 ## Tests
 
@@ -1323,12 +1399,15 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
     `crates/codec/tests/bmfont/`
   - LDtk: projects and level files of LDtk 1.5.3, from its JSON schema, in
     `crates/codec/tests/ldtk/` with the script that wrote them
+  - The pack file: packs assembled field by field, each rule broken once,
+    in `crates/codec/tests/kpak/` with the script that wrote them
   - JSON: RFC 8259 examples plus the JSONC extensions; deep nesting hits the
     limit and errors, it doesn't overflow the stack
 - **Fuzz targets** (fuzz smoke): every decoder above, the atlas file reader
   (`atlas`, M5.9), the Aseprite reader (`aseprite`, M5.5), the LDtk reader
   (`ldtk`), the level file reader (`level`) and the prefab file reader
-  (`prefab`, all three M5.10), the pack TOC reader and the save reader.
+  (`prefab`, all three M5.10), the pack file reader (`kpak`, M5.13) and
+  the save reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   load every cooked asset through `PackSource` and `LooseSource`.
 - **The cook** (`tools/cook`): the scan's rules on lists of names made by

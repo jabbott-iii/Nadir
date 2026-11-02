@@ -32,7 +32,7 @@ Built:
 - The `Source` trait, and `LooseSource`, which reads files under a folder.
 - Placeholders for failed loads, when the server is asked to show them.
 
-Not built yet: pack files, read through a `PackSource` (roadmap M5.7), and
+Not built yet: pack files, read through a `PackSource` (roadmap M5.14), and
 hot reload (M5.8).
 
 The engine's asset types are in nadir-render: `Texture` (`.qoi`) and `Atlas`

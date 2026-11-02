@@ -18,7 +18,9 @@ use std::fmt;
 
 #[cfg(feature = "png")]
 use crate::png;
-use crate::{aseprite, atlas, bmfont, inflate, json, kbj, klz, ldtk, level, prefab, qoi, wav};
+use crate::{
+    aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, ldtk, level, prefab, qoi, wav,
+};
 
 /// Errors produced by `nadir-codec`.
 ///
@@ -64,6 +66,14 @@ pub enum CodecError {
         offset: usize,
         /// What is wrong.
         kind: klz::ErrorKind,
+    },
+    /// A pack file is malformed, damaged or exceeds a limit
+    /// ([`kpak`](crate::kpak)).
+    Kpak {
+        /// The byte offset of the problem in the pack file.
+        offset: u64,
+        /// What is wrong.
+        kind: kpak::ErrorKind,
     },
     /// A KBJ file is malformed or exceeds a limit.
     Kbj {
@@ -163,6 +173,7 @@ impl fmt::Display for CodecError {
             Self::QoiEncode { kind } => write!(f, "cannot encode as QOI: {kind}"),
             Self::Inflate { offset, kind } => write!(f, "inflate error at byte {offset}: {kind}"),
             Self::Klz { offset, kind } => write!(f, "KLZ error at byte {offset}: {kind}"),
+            Self::Kpak { offset, kind } => write!(f, "pack error at byte {offset}: {kind}"),
             Self::Kbj { offset, kind } => write!(f, "KBJ error at byte {offset}: {kind}"),
             Self::KbjEncode { kind } => write!(f, "cannot encode as KBJ: {kind}"),
             Self::Atlas { at, kind } if at.is_empty() => {

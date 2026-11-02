@@ -3182,3 +3182,101 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:**
   - the crates reach 1.0, when a break needs a major version;
   - or the crates stop sharing one version.
+
+## ADR-0041 — M5.7 split into three tasks; the pack's reader in codec; every cook writes `game.kpak`, which release builds read
+
+- **Status:** Accepted: the split, and release builds reading `<assets>/game.kpak`, which the user chose on 2026-11-02; proposed with them, for review: the format's details, and every cook writing the pack; as built in M5.13, the reader's checks run in the order its docs list, two entries may share bytes only as one blob (the same offset, sizes, codec and CRC), and every read of an entry checks its CRC, not only the first
+- **Date:** 2026-11-02
+- **Context:**
+  - Roadmap task M5.7 ("pack files") asks for the `.kpak` writer in the
+    cook, `PackSource` in nadir-assets with its TOC fuzzed, and release
+    builds that read the pack. That changes nadir-codec, xtask,
+    nadir-cook, nadir-assets and the facade: more than the three packages
+    `CLAUDE.md` allows a task. The user chose on 2026-11-02 to split it
+    in three, as ADR-0038 split M5.6.
+  - A parser must have a fuzz target (`.claude/rules/parsers.md`), and
+    `xtask`, which runs the fuzzer, may link only `nadir-core` and
+    `nadir-codec` (the dependency matrix), so the TOC reader goes in
+    `nadir-codec`, as ADR-0038 put the level and prefab readers there.
+  - The format of `docs/subsystems/assets-and-codecs.md` ("Pack file
+    `.kpak` (version 1)") leaves open what the TOC's CRC covers, what an
+    entry's CRC covers, how the string table is laid out, and where the
+    TOC ends.
+  - The cook's outputs are loose files below `atlas/`, `data/` and
+    `levels/`, listed in its cache (ADR-0031); dev builds will reload them
+    as they change (M5.8); release builds, without `dev`, read loose files
+    too, until now (ADR-0030).
+- **Decision:**
+  - **The split**, run in this order, each at most three packages:
+    1. **M5.13** (nadir-codec, xtask): `nadir_codec::kpak`, the pack's
+       reader: the header, the TOC and its string table checked, an
+       entry found by a binary search of the path hashes, and an entry's
+       bytes checked against its CRC and decompressed; hand-made vectors;
+       the `kpak` fuzz target and its seeds; this ADR and the roadmap's
+       split.
+    2. **M5.14** (nadir-cook, nadir-assets): the cook writes the pack, and
+       `PackSource` reads it, with the round trip and a damaged entry
+       tested.
+    3. **M5.7** (the facade, xtask, the sandbox): release builds read the
+       pack, and the release files and the demo page's download ship it.
+       It keeps M5.7's number. New numbers rather than `M5.7a`, which
+       `cargo xtask features` refuses.
+  - **The format** fills in what the design left open, at version 1, all
+    numbers little-endian:
+    - The header is the design's 32 bytes. Bit 0 of `flags` says a string
+      table follows the TOC entries; the other bits, and `reserved`, are
+      0.
+    - The TOC is at `toc_offset`, a multiple of 16, and runs to the end of
+      the file: `toc_size` bytes, the `entry_count` entries of 32 bytes,
+      then the string table if there is one. `toc_crc32` is the CRC-32
+      (`nadir_core::hash::crc32`) of those `toc_size` bytes.
+    - The string table is, for each entry in TOC order, its path's length
+      as a `u16` and the path's bytes. The reader checks that each path
+      hashes to its entry's `path_hash`.
+    - An entry's `crc32` is the CRC-32 of its stored bytes, checked before
+      they are decompressed, so that a damaged entry is a checksum error
+      that names its path, from the string table, not a KLZ error.
+    - The entries are in ascending `path_hash` order, no hash twice; each
+      starts at a multiple of 16 between the header and the TOC, and two
+      may share bytes (dedup); codec 0 stores `raw_size` bytes as they
+      are, codec 1 as KLZ. `entry_count` is at most `Limits::max_entries`,
+      the design's 1,000,000 pack entries, and each size at most
+      `Limits::max_decoded_bytes`.
+  - **Where the pack is:** every cook writes `OUT/game.kpak`, of the
+    outputs its cache lists, with the string table, so the pack and the
+    loose files are always one cook; the cook owns that file as it owns
+    `atlas/`, `data/` and `levels/` (M5.14).
+  - **Who reads it:** the facade, without `dev`, reads
+    `<Config::assets>/game.kpak` through a `PackSource` when that file is
+    there, and the loose files otherwise; with `dev` it reads the loose
+    files, which hot reload watches (M5.8). `LooseSource` stays in every
+    build. The release files and the download ship `game.kpak` in
+    `assets/` in place of the loose folders (M5.7).
+- **Consequences:**
+  - Good: each task is reviewable alone, and the reader is fuzzed before
+    anything writes a pack; a damaged entry names its path; the game's
+    tests, which run without `dev`, read the pack wherever `cargo xtask
+    cook` wrote one, and the loose files in folders that have none.
+  - Bad: every cook packs every output again, even when no job changed,
+    which costs time in proportion to the game's assets (M5.14 measures
+    it; M5.8's 1 s may need a cook that skips it, with the option in the
+    cache's `options`, ADR-0031); and `target/cooked` holds each output
+    twice, loose and packed.
+- **Alternatives considered:**
+  - M5.7 whole, across five packages: against `CLAUDE.md`'s limit.
+  - Two tasks, the reader with the cook's writer, then `PackSource` with
+    the facade: `PackSource`'s tests would need the cook's packs from a
+    task already done, and the reader's fuzzing would wait on the writer.
+  - The TOC reader in nadir-assets: `xtask` cannot link it, so it could
+    not be fuzzed.
+  - The entry's CRC over its raw bytes: a damaged KLZ stream would be a
+    KLZ error, or a wrong decode, before the CRC could name it.
+  - A pack only when asked (`--pack`): a pack left from an earlier cook
+    would be read by a release build after a cook without it, older than
+    the loose files beside it.
+  - `LooseSource` compiled out of release builds: the facade's tests, and
+    a game that ships loose files, read them without `dev`.
+- **Revisit when:** packing every output takes more than a few hundred
+  milliseconds of a cook, which M5.8's 1 s reload cannot afford; a game
+  needs files from outside its pack in a release build, such as mods; or a
+  second pack version is written.

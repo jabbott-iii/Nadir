@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(
             usage_error(&["fuzz-smoke", "--target", "nope"]),
             "unknown fuzz target `nope`; the targets are: json, qoi, inflate, png, klz, kbj, bmfont, wav, \
-             atlas, aseprite, ldtk, level, prefab"
+             atlas, aseprite, ldtk, level, prefab, kpak"
         );
         assert_eq!(
             usage_error(&["fuzz-smoke", "--secs"]),

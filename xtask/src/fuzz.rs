@@ -33,8 +33,8 @@ use std::time::Duration;
 
 use nadir_codec::inflate::ErrorKind as InflateError;
 use nadir_codec::{
-    CodecError, Limits, adler32, aseprite, atlas, bmfont, inflate, json, kbj, klz, ldtk, level,
-    png, prefab, qoi, wav,
+    CodecError, Limits, adler32, aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, ldtk,
+    level, png, prefab, qoi, wav,
 };
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
@@ -106,6 +106,10 @@ const TARGETS: &[Target] = &[
     Target {
         name: "prefab",
         run: parse_prefab,
+    },
+    Target {
+        name: "kpak",
+        run: parse_pack,
     },
 ];
 
@@ -694,6 +698,218 @@ fn parse_prefab(input: &[u8]) {
             .all(|(name, value)| prefab::is_component_name(name) && !value.is_null()),
         "a component of no type's name, or null"
     );
+}
+
+/// The most bytes the `kpak` target lets a TOC, or an entry, be, as
+/// [`KLZ_LIMIT`] bounds a stream: a 64 KiB input of KLZ can give 16 MiB.
+const KPAK_LIMIT: usize = 1 << 20;
+
+/// The limits the `kpak` target reads with: the game's, with
+/// [`KPAK_LIMIT`].
+fn kpak_limits() -> Limits {
+    Limits {
+        max_decoded_bytes: KPAK_LIMIT,
+        ..Limits::default()
+    }
+}
+
+/// The `kpak` target: `nadir_codec::kpak::parse`, then each entry read, on
+/// the input and on a copy with its TOC's size and its checksums mended
+/// ([`repaired_pack`]), so that mutations get past the CRCs to the entries,
+/// the paths and the KLZ streams.
+fn parse_pack(input: &[u8]) {
+    check_pack(input);
+    if let Some(repaired) = repaired_pack(input)
+        && repaired != input
+    {
+        check_pack(&repaired);
+    }
+}
+
+/// Reads `input` as a pack. What it accepts must keep the promises
+/// nadir-assets' `PackSource` relies on: the TOC of the header, the same
+/// read whole or in parts; its entries in ascending order of their path
+/// hashes, each between the header and the TOC at a multiple of 16, a
+/// stored one of its raw size; each path of its entry's hash, and found by
+/// it; and each entry read to its raw size, its stored bytes if stored, or
+/// refused as damaged or as a bad stream, and nothing else.
+fn check_pack(input: &[u8]) {
+    let limits = kpak_limits();
+    let Ok(toc) = kpak::parse(input, limits) else {
+        return;
+    };
+    let header = kpak::header(input, input.len() as u64, limits);
+    let header = header.expect("a pack that reads has a header that reads");
+    let start = header.toc_offset as usize;
+    assert!(
+        kpak::toc(&header, &input[start..], limits).as_ref() == Ok(&toc),
+        "the TOC read in parts is not the TOC read whole"
+    );
+    assert!(
+        toc.len() == header.entry_count as usize && toc.has_names() == header.names,
+        "a TOC of {} entries, names {}, for a header of {}, names {}",
+        toc.len(),
+        toc.has_names(),
+        header.entry_count,
+        header.names
+    );
+    assert!(
+        toc.entries()
+            .windows(2)
+            .all(|pair| pair[0].path_hash < pair[1].path_hash),
+        "entries out of order, or one twice"
+    );
+    for (index, entry) in toc.entries().iter().enumerate() {
+        let end = entry.offset + u64::from(entry.stored_size);
+        assert!(
+            entry.offset >= kpak::HEADER_SIZE as u64
+                && entry.offset.is_multiple_of(kpak::ALIGN)
+                && end <= header.toc_offset,
+            "an entry of {} bytes at byte {} of a pack whose TOC is at {}",
+            entry.stored_size,
+            entry.offset,
+            header.toc_offset
+        );
+        assert!(
+            entry.codec == kpak::Codec::Klz || entry.stored_size == entry.raw_size,
+            "a stored entry of {} bytes, {} raw",
+            entry.stored_size,
+            entry.raw_size
+        );
+        if let Some(name) = toc.name(index) {
+            assert!(
+                !name.is_empty() && fnv1a64(name.as_bytes()) == entry.path_hash,
+                "a path of {} bytes that is not its entry's",
+                name.len()
+            );
+            assert!(
+                toc.find(name) == Some(index),
+                "a path the TOC does not find"
+            );
+        }
+        match toc.read(input, index, limits) {
+            Ok(bytes) => assert!(
+                bytes.len() == entry.raw_size as usize
+                    && (entry.codec == kpak::Codec::Klz
+                        || bytes[..] == input[entry.offset as usize..end as usize]),
+                "an entry of {} raw bytes read as {}",
+                entry.raw_size,
+                bytes.len()
+            ),
+            Err(CodecError::Kpak {
+                kind: kpak::ErrorKind::Damaged { .. } | kpak::ErrorKind::BadStream { .. },
+                ..
+            }) => {}
+            Err(error) => panic!("an entry of a pack that reads gives: {error}"),
+        }
+    }
+}
+
+/// A copy of `input` with what a mutation most often breaks mended, or
+/// `None` if it is shorter than a header, or its TOC cannot be found:
+///
+/// - the header's magic, version, reserved field and unknown flags, as a
+///   pack has them;
+/// - the TOC: where the header says, if that is inside the input at a
+///   multiple of 16, or else the header's TOC size back from the end,
+///   moved to the next multiple of 16 by zeros before it; its size, to the
+///   end; and its entry count, to the entries it has room for;
+/// - each entry's path hash, of its path, when every path can be read, and
+///   the entries, with their paths, put back in order of their hashes;
+/// - each entry's CRC-32, of its stored bytes where they are in the input,
+///   and the TOC's.
+fn repaired_pack(input: &[u8]) -> Option<Vec<u8>> {
+    const SIZE: usize = kpak::ENTRY_SIZE;
+    let u32_at = |bytes: &[u8], at: usize| {
+        u32::from_le_bytes(bytes[at..at + 4].try_into().expect("4 bytes"))
+    };
+    let u64_at = |bytes: &[u8], at: usize| {
+        u64::from_le_bytes(bytes[at..at + 8].try_into().expect("8 bytes"))
+    };
+    let mut pack = input.to_vec();
+    if pack.len() < kpak::HEADER_SIZE {
+        return None;
+    }
+    pack[..4].copy_from_slice(&kpak::MAGIC);
+    pack[4..6].copy_from_slice(&kpak::VERSION.to_le_bytes());
+    let names = pack[6] & 1 != 0;
+    pack[6..8].copy_from_slice(&u16::from(names).to_le_bytes());
+    pack[28..32].fill(0);
+
+    let aligned = |at: usize| at >= kpak::HEADER_SIZE && at.is_multiple_of(kpak::ALIGN as usize);
+    let toc = match usize::try_from(u64_at(&pack, 12)) {
+        Ok(toc) if toc <= pack.len() && aligned(toc) => toc,
+        _ => {
+            let toc = pack.len().checked_sub(u32_at(&pack, 20) as usize)?;
+            if toc < kpak::HEADER_SIZE {
+                return None;
+            }
+            let padding = toc.next_multiple_of(kpak::ALIGN as usize) - toc;
+            pack.splice(toc..toc, std::iter::repeat_n(0, padding));
+            toc + padding
+        }
+    };
+    pack[12..20].copy_from_slice(&(toc as u64).to_le_bytes());
+    let toc_size = u32::try_from(pack.len() - toc).ok()?;
+    pack[20..24].copy_from_slice(&toc_size.to_le_bytes());
+    let per_entry = SIZE + if names { 2 } else { 0 };
+    let count = (u32_at(&pack, 8) as usize).min(toc_size as usize / per_entry);
+    pack[8..12].copy_from_slice(&(count as u32).to_le_bytes());
+
+    // The entries and their paths, put back in order of their hashes.
+    let table = toc + count * SIZE;
+    let mut entries: Vec<([u8; SIZE], Option<Vec<u8>>)> = pack[toc..table]
+        .as_chunks::<SIZE>()
+        .0
+        .iter()
+        .map(|&entry| (entry, None))
+        .collect();
+    let mut end = table;
+    if names {
+        for (entry, path) in &mut entries {
+            let Some(length) = pack.get(end..end + 2) else {
+                break;
+            };
+            let length = usize::from(u16::from_le_bytes([length[0], length[1]]));
+            let Some(name) = pack.get(end + 2..end + 2 + length) else {
+                break;
+            };
+            entry[..8].copy_from_slice(&fnv1a64(name).to_le_bytes());
+            *path = Some(name.to_vec());
+            end += 2 + length;
+        }
+    }
+    if !names || entries.iter().all(|(_, path)| path.is_some()) {
+        entries.sort_by_key(|(entry, _)| u64_at(entry, 0));
+        let mut at = toc;
+        for (entry, _) in &entries {
+            pack[at..at + SIZE].copy_from_slice(entry);
+            at += SIZE;
+        }
+        for (_, path) in &entries {
+            if let Some(path) = path {
+                let length = path.len() as u16;
+                pack[at..at + 2].copy_from_slice(&length.to_le_bytes());
+                pack[at + 2..at + 2 + path.len()].copy_from_slice(path);
+                at += 2 + path.len();
+            }
+        }
+    }
+
+    for index in 0..count {
+        let at = toc + index * SIZE;
+        let (offset, stored) = (u64_at(&pack, at + 8), u32_at(&pack, at + 16));
+        let stored = usize::try_from(offset)
+            .ok()
+            .and_then(|start| pack.get(start..start.checked_add(stored as usize)?));
+        if let Some(stored) = stored {
+            let crc = crc32(stored);
+            pack[at + 28..at + 32].copy_from_slice(&crc.to_le_bytes());
+        }
+    }
+    let crc = crc32(&pack[toc..]);
+    pack[24..28].copy_from_slice(&crc.to_le_bytes());
+    Some(pack)
 }
 
 /// The most bytes of pixels the `png` target decodes to: a 2048 × 2048
@@ -1506,6 +1722,117 @@ mod tests {
         ));
     }
 
+    /// The seed of two entries, with paths, both whole.
+    fn two_entries() -> Vec<u8> {
+        let limits = kpak_limits();
+        seeds_of("kpak")
+            .into_iter()
+            .find(|seed| {
+                kpak::parse(seed, limits).is_ok_and(|toc| {
+                    toc.len() == 2
+                        && toc.has_names()
+                        && (0..2).all(|index| toc.read(seed, index, limits).is_ok())
+                })
+            })
+            .expect("a seed of two entries")
+    }
+
+    #[test]
+    fn the_kpak_target_takes_any_bytes() {
+        let two = &two_entries();
+        let mut huge = two.clone();
+        // A million entries and a TOC of 4 GiB, past the end.
+        huge[8..12].copy_from_slice(&1_000_000u32.to_le_bytes());
+        huge[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
+        let mut past = two.clone();
+        // A TOC that starts past the end.
+        past[12..20].copy_from_slice(&u64::MAX.to_le_bytes());
+        for input in [&b""[..], b"KPAK", &two[..40], &huge, &past, &[0xff; 3000]] {
+            parse_pack(input);
+        }
+        assert_eq!(repaired_pack(&two[..31]), None);
+        // A TOC size past the start: no TOC to be found.
+        let mut lost = past.clone();
+        lost[20..24].copy_from_slice(&200u32.to_le_bytes());
+        assert_eq!(repaired_pack(&lost), None);
+    }
+
+    #[test]
+    fn a_pack_repair_mends_the_toc_size_and_the_checksums() {
+        let limits = kpak_limits();
+        let two = &two_entries();
+        assert_eq!(repaired_pack(two).as_ref(), Some(two));
+        let header = kpak::header(two, two.len() as u64, limits).unwrap();
+        let toc = kpak::parse(two, limits).unwrap();
+        let first = toc.entries()[0];
+        let start = first.offset as usize;
+        // A byte of an entry changed, and the TOC's checksum: both mended.
+        let mut damaged = two.clone();
+        damaged[start] ^= 1;
+        damaged[24] ^= 1;
+        assert!(kpak::parse(&damaged, limits).is_err());
+        let none_damaged = |pack: &[u8]| {
+            let toc = kpak::parse(pack, limits).unwrap();
+            (0..toc.len()).all(|index| {
+                !matches!(
+                    toc.read(pack, index, limits),
+                    Err(CodecError::Kpak {
+                        kind: kpak::ErrorKind::Damaged { .. },
+                        ..
+                    })
+                )
+            })
+        };
+        let repaired = repaired_pack(&damaged).unwrap();
+        assert_ne!(
+            kpak::parse(&repaired, limits).unwrap().entries()[0].crc32,
+            first.crc32
+        );
+        assert!(none_damaged(&repaired));
+        // The TOC's start lost, and the header's magic, version, unknown
+        // flags and reserved field: found again, and restored.
+        let mut lost = two.clone();
+        lost[12..20].copy_from_slice(&u64::MAX.to_le_bytes());
+        lost[..8].copy_from_slice(b"KPAX\x02\x00\x07\x00");
+        lost[28..32].copy_from_slice(b"\x01\x00\x00\x80");
+        assert!(kpak::parse(&lost, limits).is_err());
+        assert_eq!(repaired_pack(&lost).as_ref(), Some(two));
+        // A byte added before the TOC: the TOC found from the end, moved to
+        // a multiple of 16, and the CRC of the entry whose bytes moved
+        // mended.
+        let mut shifted = two.clone();
+        shifted.insert(toc.entries()[1].offset as usize, b'!');
+        shifted[12..20].copy_from_slice(&u64::MAX.to_le_bytes());
+        let repaired = repaired_pack(&shifted).unwrap();
+        assert_eq!(repaired.len(), two.len() + 16);
+        assert!(none_damaged(&repaired));
+        // The two entries and their paths swapped, and a byte of a path
+        // hash changed: the hash taken from its path, and the order mended.
+        let at = header.toc_offset as usize;
+        let names = at + 2 * kpak::ENTRY_SIZE;
+        let length = usize::from(u16::from_le_bytes([two[names], two[names + 1]]));
+        let (first_name, second_name) = two[names..].split_at(2 + length);
+        let mut reordered = two[..at].to_vec();
+        reordered.extend_from_slice(&two[at + kpak::ENTRY_SIZE..names]);
+        reordered.extend_from_slice(&two[at..at + kpak::ENTRY_SIZE]);
+        reordered.extend_from_slice(second_name);
+        reordered.extend_from_slice(first_name);
+        reordered[at + 3] ^= 0x40;
+        assert!(kpak::parse(&reordered, limits).is_err());
+        assert_eq!(repaired_pack(&reordered).as_ref(), Some(two));
+        // A byte added after the TOC: its size mended.
+        let mut longer = two.clone();
+        longer.push(0);
+        let repaired = repaired_pack(&longer).unwrap();
+        assert!(kpak::parse(&repaired, limits).is_err_and(|error| matches!(
+            error,
+            CodecError::Kpak {
+                kind: kpak::ErrorKind::TrailingBytes,
+                ..
+            }
+        )));
+    }
+
     #[test]
     fn the_kbj_target_takes_any_bytes() {
         for input in [
@@ -1988,6 +2315,39 @@ mod tests {
             .unwrap();
         assert!(prefabs.iter().any(|file| file.extends.is_some()));
         assert!(prefabs.iter().any(|file| file.components.is_empty()));
+    }
+
+    #[test]
+    fn the_kpak_seeds_are_packs_the_codec_reads() {
+        let limits = kpak_limits();
+        let packs: Vec<(Vec<u8>, kpak::Toc)> = seeds_of("kpak")
+            .into_iter()
+            .map(|seed| {
+                let toc = kpak::parse(&seed, limits).unwrap();
+                (seed, toc)
+            })
+            .collect();
+        // Among them, a pack of no entries, one with no string table, a blob
+        // shared, a KLZ entry, and a damaged entry.
+        assert!(packs.iter().any(|(_, toc)| toc.is_empty()));
+        assert!(packs.iter().any(|(_, toc)| !toc.has_names()));
+        assert!(packs.iter().any(|(_, toc)| {
+            let entries = toc.entries();
+            entries.iter().enumerate().any(|(index, entry)| {
+                entry.stored_size > 0
+                    && entries[index + 1..]
+                        .iter()
+                        .any(|other| other.offset == entry.offset)
+            })
+        }));
+        assert!(packs.iter().any(|(_, toc)| {
+            toc.entries()
+                .iter()
+                .any(|entry| entry.codec == kpak::Codec::Klz)
+        }));
+        assert!(packs.iter().any(|(seed, toc)| {
+            (0..toc.len()).any(|index| toc.read(seed, index, limits).is_err())
+        }));
     }
 
     #[test]

@@ -21,7 +21,7 @@ use std::{fs, io};
 use crate::{AssetError, AssetPath};
 
 /// Where an [`AssetServer`](crate::AssetServer) reads its files: loose
-/// files under a directory ([`LooseSource`]), or a pack file (roadmap M5.7).
+/// files under a directory ([`LooseSource`]), or a pack file (roadmap M5.14).
 ///
 /// The server's workers call it, from several threads at once.
 pub trait Source: Send + Sync {

@@ -1,0 +1,40 @@
+empty ok
+two ok
+no_names ok
+dedup ok
+many ok
+klz_literals ok
+short error UnexpectedEnd 20
+magic error NotKpak 0
+version_0 error Version 4
+version_2 error Version 4
+flags error UnknownFlags 6
+header_reserved error Reserved 28
+too_many error TooManyEntries 8
+toc_in_header error TocOffset 12
+toc_misaligned error TocOffset 12
+toc_small error TocSize 20
+toc_size_no_names error TocSize 20
+toc_large error TocTooLarge 20
+toc_not_at_end error TocPlace 12
+toc_cut error TocPlace 12
+toc_crc error TocChecksum 64
+order error OutOfOrder 96
+twice error OutOfOrder 96
+codec_2 error UnknownCodec 88
+entry_reserved error Reserved 89
+entry_in_header error EntryOutside 72
+entry_misaligned error Misaligned 72
+entry_past_toc error EntryOutside 72
+entry_too_large error EntryTooLarge 116
+size_mismatch error SizeMismatch 84
+overlap error Overlap 104
+overlap_shorter error Overlap 120
+name_empty error BadName 128
+name_utf8 error BadName 130
+name_hash error NameHash 128
+names_cut error UnexpectedEnd 162
+trailing error TrailingBytes 163
+damaged entry notes/greeting.txt Damaged 32
+damaged_no_names entry notes/greeting.txt Damaged 32
+bad_stream entry notes/greeting.txt BadStream 40

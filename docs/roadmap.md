@@ -3243,40 +3243,146 @@ by the batched sprite renderer.
       `PrefabLibrary`, even after a failed load. Taking them out needs
       nadir-scene, a fourth package for this task; it is noted for M5.8.
 
-- [ ] **M5.7 — pack files**
-  - Depends: M5.4
+- [x] **M5.13 — codec: the pack file's reader**
+  - Note (from M5.7, ADR-0041): M5.7 was split into M5.13, M5.14 and
+    M5.7, each of at most three packages, run in that order. ADR-0041
+    records the split, what the pack format's design left open, where the
+    cook writes the pack, and which builds read it.
+  - Note (from M5.2): an entry of codec 1 is
+    `klz::decompress(stored, raw_size as usize, limits)`, which checks the
+    size against the limit and the stream before it allocates.
+  - Depends: M5.2
+  - Do:
+    - ADR-0041; this split in the roadmap and in `docs/features.jsonc`;
+      the forward references to M5.7 in the docs pointed at the task that
+      now does the work.
+    - `nadir_codec::kpak`: the header, and the TOC with its string table,
+      read and checked strictly, version first; an entry found by a binary
+      search of the path hashes; an entry's stored bytes checked against
+      its CRC, then decompressed.
+    - Hand-made vectors in `crates/codec/tests/kpak/`, with the script that
+      wrote them, and a test for each rule of the format.
+    - The fuzz target `kpak`, asserting what the reader promises, on the
+      input and on a copy with its checksums repaired, with seeds in
+      `fuzz/corpus/kpak/`.
+    - The format as built in `docs/subsystems/assets-and-codecs.md`.
+  - Accept: every vector reads as its script says; each rule of the format
+    is refused by a test, with its byte offset; a damaged entry is detected
+    and named by its path; the TOC reader is fuzzed.
+  - Verify: `cargo test -p nadir-codec`; `cargo test -p xtask`;
+    `cargo xtask fuzz-smoke --target kpak --secs 300`; `cargo xtask ci`
+  - Built (2026-11-02, ADR-0041):
+    - nadir-codec: `kpak`, with `header` (the first 32 bytes, and the
+      file's size), `toc` (the TOC's bytes), `parse` (a pack in memory),
+      `Toc` (`find`, `decode`, `read`, `name`, `entries`, `has_names`),
+      `Entry`, `Codec`, `Header`, `ErrorKind`, and
+      `CodecError::Kpak { offset, kind }`; the constants `MAGIC`,
+      `VERSION`, `HEADER_SIZE`, `ENTRY_SIZE`, `ALIGN` and `NAMES`, for the
+      writer.
+    - Vectors: `crates/codec/tests/kpak/make_vectors.py` and its 40 packs:
+      6 that read, 31 refused, each with its error and byte, and 3 whose
+      TOC reads but one entry does not; `crates/codec/tests/kpak.rs` reads
+      them, and every prefix of three, and each with a bit changed.
+    - xtask: the fuzz target `kpak`, on each input and a repaired copy
+      (`repaired_pack`), with 7 seeds in `fuzz/corpus/kpak/`.
+    - The docs: the format and the reader as built in
+      `docs/subsystems/assets-and-codecs.md`, the fuzz targets in
+      `docs/04-quality.md`, the codec's README, crate docs and description,
+      `AGENTS.md`'s workspace map; the forward references to M5.7 that are
+      now M5.14's (`crates/assets`).
+  - As built:
+    - The checks run in the order the module's docs list them, and the
+      first that fails is the error, at the byte of the field that is wrong.
+    - Two entries may share bytes only as one blob (the same offset, sizes,
+      codec and CRC); an empty entry shares none.
+    - Every read checks its entry's CRC, not only the first, as the design
+      had it: the reader keeps no state between reads.
+    - `toc` checks the entry count against its own limits too, at byte 8,
+      for a caller that reads the header and the TOC with different ones.
+  - Measured:
+    - `cargo xtask fuzz-smoke --target kpak --secs 300`: 90,177,919 inputs
+      (300,593 a second), the slowest 1.2 ms, no finding; after the review's
+      fixes, again: 88,547,381 (295,158 a second, beside `cargo xtask ci`),
+      the slowest 1.2 ms, no finding.
+    - Of the first 20,000 inputs a run with the default seed mutates, 487
+      read as they are and 3,368 once repaired; 303 reach a KLZ stream as
+      they are, 1,639 repaired.
+  - Review: one adversarial round, 12 findings confirmed (11 distinct), 1
+    refuted. Fixed:
+    - The docs listed the header's and the entries' checks in another
+      order than the code runs them; the docs now give the code's.
+    - `toc` reported a count past its limits at the TOC, not at byte 8.
+    - Vectors that broke a second rule (entries moved into the header, off
+      16, past the file; paths empty or not UTF-8), or whose moved entry
+      kept its old CRC: rebuilt to break only theirs, where they can.
+    - No test reached the limit on an entry's stored size: a vector of a
+      KLZ entry larger than its data, and a test at its field.
+    - The repair's tests: a reordering that was never out of order, a
+      reserved field not set, a shifted pack whose CRCs were not checked.
+    - The reach figures, measured with more mutations than a run makes:
+      measured again as the fuzzer makes its inputs.
+
+- [ ] **M5.14 — cook: the pack writer; assets: `PackSource`**
+  - Note (from M5.4, ADR-0031): pack the outputs `target/cooked/.cache.kbj`
+    lists, not a walk of the folder. An option that changes output goes in
+    the cache's `options` string, or a forced cook is the only way the
+    cache sees it.
+  - Note (from M5.5, ADR-0035): the cook's outputs are `atlas/` (pages,
+    atlas files, fonts' `.font.kbj`), `data/` and, from M5.12, `levels/`,
+    each job's listed in the cache: pack those.
+  - Note (from M5.3): `PackSource` implements `Source` (`read`, with
+    `modified` left at `None`), and `AssetServer::with_source` takes it.
+    The workers call `read` from several threads at once
+    (`Source: Send + Sync`).
+  - Note (from M5.2): store an entry with codec 0 when KLZ does not make it
+    smaller: noise grows by up to `n / 255 + 2` bytes. What `klz::compress`
+    writes is not part of the format (ADR-0028), so changing it changes the
+    cook's output, not the pack version.
+  - Note (from M5.13): `nadir_codec::kpak` has the format's constants
+    (`MAGIC`, `VERSION`, `HEADER_SIZE`, `ENTRY_SIZE`, `ALIGN`, `NAMES`),
+    and the cook can check the pack it wrote with `kpak::parse` and
+    `Toc::read`, as the atlas and level pipelines check theirs with the
+    game's readers. The reader refuses entries that share bytes unless they
+    are one blob, so dedup shares whole blobs. `PackSource` reads the
+    header from the file's first 32 bytes (`kpak::header`, with the file's
+    size), then the TOC's bytes (`kpak::toc`, its size checked against the
+    limits), then an entry's stored bytes (`Toc::decode`), whose CRC each
+    read checks.
+  - Depends: M5.13, M5.4
+  - Do: every cook writes `OUT/game.kpak` (ADR-0041), of the outputs its
+    cache lists, identical blobs stored once, each entry 16-byte aligned,
+    KLZ where it is smaller, with the string table; two paths of one hash
+    fail the cook; `PackSource` opens a pack, finds an entry by the TOC's
+    binary search, and checks its CRC.
+  - Accept: the round-trip test passes: every file the cook wrote reads
+    the same through `PackSource` as through `LooseSource`; two cooks write
+    the same pack byte for byte; a corrupted entry is detected and named.
+  - Verify: `cargo test -p nadir-assets -p nadir-cook`; `cargo xtask cook`;
+    `cargo xtask ci`
+
+- [ ] **M5.7 — release builds read the pack**
+  - Note (from M5.7, ADR-0041): split into M5.13, M5.14 and this task,
+    which keeps M5.7's number.
   - Note (from M3.2): `AssetServer::new(root, ..)` reads loose files. If
     the `dev` feature compiles loose reading out of release builds, the
     facade's release path changes with it, as this task's Do says.
+    ADR-0041 keeps `LooseSource` in every build.
   - Note (from M5.9, ADR-0033): the sandbox reads `target/cooked`, or
     `assets` beside its executable, as the demo page's download has it;
     `cargo xtask ci` cooks before its tests. Release builds reading the
     pack change both.
-  - Note (from M5.5, ADR-0035): the cook's outputs are `atlas/` (pages,
-    atlas files, fonts' `.font.kbj`) and `data/`, each job's listed in the
-    cache: pack those.
-  - Note (from M5.4, ADR-0031): pack the outputs `target/cooked/.cache.kbj`
-    lists, not a walk of the folder. An option that changes output, such
-    as the release build's string table, goes in the cache's `options`
-    string, or a forced cook is the only way the cache sees it.
-  - Note (from M5.3): `PackSource` implements `Source` (`read`, with
-    `modified` left at `None`), and `AssetServer::with_source` takes it.
-    `LooseSource` is in every build until then (ADR-0030). The workers call
-    `read` from several threads at once (`Source: Send + Sync`).
-  - Note (from M5.2): an entry of codec 1 is
-    `klz::decompress(stored, raw_size as usize, limits)`, which checks the
-    size against the limit and the stream before it allocates. Store an
-    entry with codec 0 when KLZ does not make it smaller: noise grows by up
-    to `n / 255 + 2` bytes. What `klz::compress` writes is not part of the
-    format (ADR-0028), so changing it changes the cook's output, not the
-    pack version.
-  - Do: the `.kpak` writer (cook) with dedup and alignment; `PackSource`
-    with TOC binary search and CRC verification; release builds use the
-    pack.
-  - Accept: the round-trip test passes; a corrupted entry is detected and
-    named; the TOC reader is fuzzed.
-  - Verify: `cargo test -p nadir-assets -p nadir-cook`;
-    `cargo xtask fuzz-smoke --target kpak --secs 300`
+  - Depends: M5.14
+  - Do: the facade, without `dev`, reads `<Config::assets>/game.kpak`
+    through a `PackSource` when it is there, and the loose files otherwise
+    (ADR-0041); `cargo xtask dist` and `cargo xtask site` ship
+    `assets/game.kpak` in place of the loose folders, and dist checks it
+    byte for byte against the laid-out cook's.
+  - Accept: a release build of the sandbox runs from the pack alone, its
+    captures' frames byte for byte those of before; the release files and
+    the download hold the pack and no loose folders; a dev build reads the
+    loose files.
+  - Verify: `cargo xtask cook`; `cargo test -p nadir_engine -p sandbox`;
+    `cargo xtask dist`; `cargo xtask site`; `cargo xtask ci`
 
 - [ ] **M5.8 — hot reload**
   - Note (from M5.6, ADR-0038): `PrefabLibrary` keeps every prefab a level

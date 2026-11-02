@@ -14,8 +14,8 @@
 
 //! File-format codecs for the Nadir engine: Adler-32, inflate, PNG, QOI, WAV,
 //! KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite's
-//! sprite sheet data, LDtk's projects, and the cook's atlas, level and
-//! prefab files.
+//! sprite sheet data, LDtk's projects, the cook's atlas, level and prefab
+//! files, and the pack file.
 //!
 //! # Where it fits
 //!
@@ -45,11 +45,14 @@
 //! | [`atlas`] | The cook's atlas file, `atlas/<group>.kbj`: each sprite's frames on the pages, and its clips | [`atlas::parse`] |
 //! | [`level`] | The level file, `levels/<name>.klvl`: tile layers, a collision grid, tall tiles, entities | [`level::parse`] |
 //! | [`prefab`] | The prefab file, `data/prefabs/<name>.kbj`: a prefab's base and its components' values | [`prefab::parse`], [`prefab::read`] |
+//! | [`kpak`] | The pack file, `game.kpak`: its header, its table of contents, and each entry checked against its CRC-32 | [`kpak::header`], [`kpak::toc`], [`kpak::parse`] |
 //! | [`klz`] | KLZ, an LZ77 block compression of Nadir's own, for pack entries | [`klz::decompress`], [`klz::compress`] |
 //!
 //! Today the game reads QOI textures, atlas files, prefab files and level
-//! files, which the engine's `load_level` loads into the world; pack
-//! files, whose entries KLZ compresses, wait for roadmap M5.7.
+//! files, which the engine's `load_level` loads into the world. The pack
+//! file's reader is built (roadmap M5.13); the cook will write packs, and
+//! nadir-assets read them (M5.14), and release builds will read their
+//! assets from them (M5.7).
 //!
 //! Read only by the cook:
 //!
@@ -126,8 +129,9 @@
 //! names the format, and says where the problem is:
 //!
 //! - a byte offset in a binary format: [`CodecError::Qoi`],
-//!   [`CodecError::Kbj`], [`CodecError::Klz`], [`CodecError::Inflate`],
-//!   [`CodecError::Wav`] and, with `png`, `CodecError::Png`;
+//!   [`CodecError::Kbj`], [`CodecError::Klz`], [`CodecError::Kpak`],
+//!   [`CodecError::Inflate`], [`CodecError::Wav`] and, with `png`,
+//!   `CodecError::Png`;
 //! - a line and a column, counted in characters from 1, in text:
 //!   [`CodecError::Json`] and [`CodecError::BmFont`];
 //! - a member path, such as `sprites[2].frames[0].w`, in a file checked
@@ -209,6 +213,7 @@ pub mod inflate;
 pub mod json;
 pub mod kbj;
 pub mod klz;
+pub mod kpak;
 pub mod ldtk;
 pub mod level;
 mod limits;

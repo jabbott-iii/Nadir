@@ -218,8 +218,9 @@
     {
       "name": "Pack files",
       "area": "Content",
-      "summary": "Cooked assets will ship in pack files, deduplicated and aligned, read through the same virtual file system as loose files, with a damaged entry detected and reported.",
-      "tasks": ["M5.7"]
+      "summary": "The engine reads pack files strictly and under the fuzzer: a header and a table of contents checked against their CRC-32 and the limits before anything is allocated, each file found by a binary search of its path's hash, and each file's bytes checked against their CRC-32 before they are decompressed, so that a damaged one is refused, naming its path. The cook will write the game's cooked assets into a pack, deduplicated and aligned, read through the same virtual file system as loose files, and release builds will ship it.",
+      "tasks": ["M5.13", "M5.14", "M5.7"],
+      "ticked": ["M5.13"]
     },
     {
       "name": "Hot reload",

@@ -91,7 +91,7 @@ before its roadmap task is ticked: check before assuming.
 | `crates/sys` | `nadir-sys` | Hand-written raw FFI declarations (Win32, Cocoa/objc, X11, EGL, GL, ALSA, CoreAudio, WASAPI, XInput, evdev) | allowed |
 | `crates/platform` | `nadir-platform` | Windows, event loop, input devices, GL/Metal surfaces, audio device output, paths, dynamic loading | allowed |
 | `crates/gfx` | `nadir-gfx` | Small render hardware interface (RHI) with an OpenGL 3.3 core backend and, from M10, a Metal backend | allowed |
-| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite exports and LDtk projects (cook only), the cook's atlas and level files, prefab files | deny |
+| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite exports and LDtk projects (cook only), the cook's atlas and level files, prefab files, pack files | deny |
 | `crates/ecs` | `nadir-ecs` | Generational entities, sparse-set storage, resources, events, commands, schedule | deny |
 | `crates/input` | `nadir-input` | Physical keys, device state, action maps, per-tick latching, bindings | deny |
 | `crates/render` | `nadir-render` | Sprite batching, y-sort, tilemap chunks, camera, bitmap text, debug draw, passes | deny |
