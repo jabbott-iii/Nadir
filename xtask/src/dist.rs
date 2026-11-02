@@ -1,3 +1,17 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! `cargo xtask dist [--out DIR]`: builds the release files for the target
 //! this runs on, into `target/dist` or `DIR`. The release workflow runs it
 //! on each of the six targets and publishes what it writes (ADR-0036).
@@ -6,9 +20,9 @@
 //!    and builds `nadir-cook` and the sandbox in release, `--locked`.
 //! 2. Lays out `nadir-<version>-<target>/`: the two executables, the
 //!    sandbox's cooked atlases in `assets/` beside it, where it reads them
-//!    (ADR-0033), a `README.txt` and the `LICENSE`. On Windows and macOS
-//!    the sandbox shows an empty window until the engine draws there,
-//!    which its README says ([`Target::drawing_task`]).
+//!    (ADR-0033), a `README.txt`, and the `LICENSE` and `NOTICE`. On
+//!    Windows and macOS the sandbox shows an empty window until the engine
+//!    draws there, which its README says ([`Target::drawing_task`]).
 //! 3. Runs what it laid out. `nadir-cook --version` must print the
 //!    workspace's version; the laid-out cook must cook `assets/` into the
 //!    atlases `target/cooked` has, byte for byte; and the sandbox must
@@ -152,6 +166,7 @@ pub(crate) fn command(mut args: Args, root: &Path, out: &mut dyn Write) -> Resul
     site::copy(&sandbox, &dir.join(target.executable("sandbox")))?;
     site::copy_cooked(&root.join(COOKED), &dir.join("assets"))?;
     site::copy(&root.join("LICENSE"), &dir.join("LICENSE"))?;
+    site::copy(&root.join("NOTICE"), &dir.join("NOTICE"))?;
     // The newer of the two programs' floors.
     let glibc = site::glibc_floor(&[read(&cook)?, read(&sandbox)?].concat());
     site::write(
@@ -390,7 +405,7 @@ Run them from this directory:
 The engine is a library on crates.io, https://crates.io/crates/NadirGE,
 and its source is at {repository}.
 
-Licensed under the Apache License 2.0: see LICENSE.
+Licensed under the Apache License 2.0: see LICENSE and NOTICE.
 ",
         version = release.version,
         underline = "=".repeat("Nadir ".len() + release.version.len()),
@@ -578,6 +593,8 @@ fn debian(
         &doc.join("copyright"),
         copyright(&release.about)?.as_bytes(),
     )?;
+    // Debian keeps the license's text, but not the release's NOTICE.
+    site::copy(&dir.join("NOTICE"), &doc.join("NOTICE"))?;
     // Whatever the umask made: folders and executables 0755, files 0644.
     site::run(Command::new("chmod").args(["-R", "u=rwX,go=rX"]).arg(&root))?;
     let control = control(deb, release, &depends.join(", "), installed_kib(&root)?)?;

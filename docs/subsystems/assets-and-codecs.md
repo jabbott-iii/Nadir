@@ -38,6 +38,9 @@ Every decoder:
 | `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines. See subset below |
 | `aseprite` | Aseprite's `--format json-array` sprite sheet data | — | ✓ | no (cook only) | Frames, sheet, tags expanded to clips (ADR-0035). See subset below |
 | `atlas` | The cook's atlas file, version 2, below | — | ✓ | yes | KBJ, then checked strictly; read by render's `Atlas` asset (ADR-0033, ADR-0035). See below |
+| `ldtk` | LDtk 1.5.3's project `.ldtk` and level `.ldtkl` JSON | — | ✓ | no (cook only) | The members the cook uses, checked against the project's definitions (ADR-0038). See subset below |
+| `level` | The cook's level file, version 1, below | — | ✓ | yes | KBJ, then checked strictly (ADR-0038). See below |
+| `prefab` | The prefab file, below | — | ✓ | yes | KBJ, or its source's JSON, then checked strictly (ADR-0038). See below |
 
 ### Inflate (documented, tested)
 
@@ -617,6 +620,111 @@ makes them. As built in M5.9 (ADR-0033), and given clips in M5.5
   empty frame, a sprite with clips that loop and do not); what it accepts
   must keep the promises above, which the target asserts.
 
+### LDtk subset (documented, tested)
+
+`ldtk::parse_project(&str, Limits)` reads a project `.ldtk`, and
+`ldtk::parse_level(&str, &Project, Limits)` one of its level files,
+`.ldtkl`, as LDtk 1.5.3 saves them, into a `Project` of `TilesetDef`s,
+`LayerDef`s, `EntityDef`s and `Level`s, each level's `LayerInstance`s with
+their `TileInstance`s and `EntityInstance`s, and fields as
+`FieldInstance`s: a type's name and the JSON value. The types are
+`#[non_exhaustive]`. As built in M5.10 (ADR-0038), for the cook only:
+
+- **JSON first**, with the JSON parser and its limits; its errors keep
+  their line and column.
+- **The version first:** a `jsonVersion` of 1.5.x, three numbers, the first
+  two 1 and 5; any other, whatever else the file holds, is
+  `Version { found }`: "LDtk 2.0.0 is not supported: save the project with
+  LDtk 1.5.3" (`ldtk::VERSION`).
+- **Members:** those the types hold, with their types; one that may be
+  `null` may be left out too, as LDtk's schema allows; the others LDtk
+  writes, or adds later, are ignored. A non-empty `worlds`, Multi-Worlds,
+  is refused. `imageExportMode` is one of LDtk's four values. No check is
+  quadratic: definitions are found by their uids sorted, and IntGrid values
+  among their layer's sorted.
+- **Definitions:** tile sets, layers and entities each of a uid of their
+  own; a tile set's grid of `__cWid` × `__cHei` at most `max_entries`
+  tiles, and its `customData` of tiles it has; a layer definition's
+  `tilesetDefUid`, if any, a tile set the project has; IntGrid values of
+  1 or more.
+- **Levels:** a size of 1 pixel or more a side; `__bgColor` `#rrggbb`. In a
+  project, a level has an `externalRelPath` exactly when its
+  `layerInstances` is `null`, and every level does when `externalLevels`
+  is true, none otherwise.
+- **Layers:** of a definition the project has, and of its type; a grid of at
+  most `max_entries` cells; an IntGrid's `intGridCsv` one value a cell, row
+  by row, each 0 or one of its definition's, and any other layer's empty.
+  A tile (`gridTiles`, `autoLayerTiles`) is of the layer's tile set
+  (`__tilesetDefUid`), which a layer with tiles must have; its `f` 0 to 3;
+  its `a` 0 to 1. An entity's `defUid` is a definition the project has.
+  Two tiles in one cell are kept, in the order they are drawn: the cook
+  refuses them (M5.12).
+- **Level files:** one level, with its layers, checked against the
+  project's definitions; its `iid` one of the project's levels saved
+  apart.
+- **Errors** name where in the file: `CodecError::Ldtk { at, kind }`, with
+  `at` a member path such as `levels[0].layerInstances[2].gridTiles[5].t`.
+- **Tests:** `crates/codec/tests/ldtk.rs`, on projects that
+  `crates/codec/tests/ldtk/make_vectors.py` writes from LDtk 1.5.3's JSON
+  schema, with every member it requires (no LDtk editor wrote them): one
+  level of each layer type, with an entity's field of each type, tiles by
+  rules and by hand, two in one cell; a project that saves its two levels
+  apart, and their level files; each rule broken on a copy, and other
+  versions. **Fuzz target:** `ldtk`, each input read as a project and as a
+  level file of the seed `external.ldtk`, with seeds in
+  `fuzz/corpus/ldtk/`; what it accepts must keep the promises above, which
+  the target asserts.
+
+### Level file reader (documented, tested)
+
+`level::parse(bytes, limits)` reads the cook's `levels/<name>.klvl`
+(below, "Level file") into a `LevelFile` of `TilesetEntry`s (with their
+`Animation`s), `LayerEntry`s (with their `Cell`s), a `GridEntry`,
+`TallEntry`s, `EntityEntry`s and `Bounds`. The types are
+`#[non_exhaustive]`. As built in M5.10 (ADR-0038):
+
+- **KBJ first**; a file that is not KBJ is a `CodecError::Kbj`.
+- **The version first:** any whole number other than 1 is `Version
+  { found }`, "not supported", whatever else the file holds.
+- **Strict:** each object has its members and no others; `grid`, `music`,
+  `ambience` and `camera` may be left out.
+- **The rules** are the format's, below: sizes, channels, assets in byte
+  order, each tile set's atlas among them, at most 65535 tiles a set,
+  animations in order and apart, one cell for each of a layer's and the
+  grid's, each cell's tile of its set and its flips 0 to 3, tall blocks
+  inside their set, prefab and component names, no `null` override.
+- **Errors** name where: `CodecError::Level { at, kind }`, such as
+  `layers[0].cells[130]` or `entities[2].overrides.Health`.
+- **Tests:** a rule a test, from hand-written JSON text encoded to KBJ, in
+  `crates/codec/src/level.rs`. **Fuzz target:** `level`, with seeds in
+  `fuzz/corpus/level/`, cooked from JSONC by the cook's data pipeline: a
+  level of every member, the least a level can be (a size and a
+  background, and empty lists), and one of two tile sets and layers, mirrored
+  every way; the target asserts the promises above.
+
+### Prefab file reader (documented, tested)
+
+`prefab::parse(bytes, limits)` reads a cooked prefab,
+`data/prefabs/<name>.kbj` (below, "Prefab file"), and `prefab::read(&Value)`
+the same from a value, so that the cook can check a prefab's JSONC before
+it writes it, into a `PrefabFile`: its name, the one it extends, and its
+components' values in the file's order, which nadir-scene reflects. As
+built in M5.10 (ADR-0038):
+
+- **Strict:** `name` and `components`, `extends` if it has a base, no
+  other member.
+- **Names:** a prefab's, and its base's, lowercase ASCII letters, digits and
+  `_` (`prefab::is_name`), the base not its own; a component's, an ASCII
+  letter then letters, digits and `_` (`prefab::is_component_name`), as a
+  type's `TYPE_NAME` is.
+- **No `null`:** a component's value is not `null`, as version 1 has no way
+  to remove a base's component.
+- **Errors** name where: `CodecError::Prefab { at, kind }`, such as
+  `components.Health`.
+- **Tests:** beside the reader, in `crates/codec/src/prefab.rs`. **Fuzz
+  target:** `prefab`, with seeds in `fuzz/corpus/prefab/`: a prefab with a
+  base, its base, and one with no components.
+
 ## `nadir-assets`
 
 ### Handles and storage
@@ -748,8 +856,10 @@ pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no al
     `Failed`, and `get` gives the placeholder.
   - A failed sound becomes silence.
   - Failures log with the path and the error.
-- **Release:** a missing asset is a hard error at level load, with a dialog
-  (M5.6). Until then, with `OnFailure::Nothing`, it is `Failed` and logged.
+- **Release:** a missing level file or prefab is an error from `load_level`
+  (M5.6), and a missing texture a hard error with a dialog in M9.1's
+  loading state (ADR-0038). Until then, with `OnFailure::Nothing`, it is
+  `Failed` and logged.
 
 ### Virtual file system
 
@@ -798,7 +908,8 @@ string table (optional, dev builds and debugging): path strings in TOC order
 
 As built in M5.4 and M5.5 (ADR-0031, ADR-0035): the atlas pipeline, with
 PNGs, Aseprite exports and BMFont fonts; data; the cache; and the CLI.
-The level and audio pipelines below come with M5.6 and M6.6.
+The level pipeline below comes with M5.12 (ADR-0038), and the audio
+pipeline with M6.6.
 
 ### Pipelines
 
@@ -806,7 +917,7 @@ The level and audio pipelines below come with M5.6 and M6.6.
 | :- | :- | :- |
 | `*.png` (+ optional `*.sprite.jsonc` sidecar: sheet frames, pivot, trim, tile set) | Decode → cut into frames → trim → atlas pack → QOI | Atlas pages `atlas/<group>_<n>.qoi`, tile sets' pages `atlas/<sprite>.tiles.qoi`, and `atlas/<group>.kbj` (where each frame went) |
 | `*.json`, an Aseprite export (`aseprite -b in.aseprite --sheet out.png --data out.json --format json-array --list-tags`) | Parse frames and tags (above, "Aseprite subset") → its sheet's frames join the atlas group, placed in their canvas, then trimmed; each tag a clip of them, a tag's direction and repeat count expanded to the frames Aseprite plays. `Clips::add_atlas` makes them `Clip`s (ADR-0024, ADR-0035) | The sprite's frames and clips in `atlas/<group>.kbj` |
-| `*.ldtk` (LDtk project, optionally with external level files) | Tile layers → chunked tile data; IntGrid → collision grid; entities → prefab references + field overrides; tall tiles → sprite list | `levels/<name>.klvl` (KBJ-based) |
+| `*.ldtk` (LDtk 1.5.3 project, and its `.ldtkl` level files) | Read (above, "LDtk subset") → by ADR-0038's conventions: tile layers → a level's layers of cells; the IntGrid `Collision` → its grid; tall tiles → its tall sprites; entities → prefab names and field overrides (M5.12) | `levels/<name>.klvl` (below, "Level file") |
 | `*.wav` | Resample policy from the sidecar; long or music → QOA, short SFX → PCM16 | `.qoa` / `.kpcm` |
 | `*.fnt` + pages (BMFont text) | Parse, check the pages, pack each glyph into the atlas group (below, "Font file") | `atlas/<font>.font.kbj` + the sprite's frames in `atlas/<group>.kbj` |
 | `data/**/*.jsonc` data (prefabs, items, input defaults) | Validate syntax → KBJ (semantic validation happens at game load via reflection) | `data/<path>.kbj` |
@@ -984,6 +1095,54 @@ refused, `CodecError::Json` naming the line and column), written as the
 same value in KBJ at `data/<path>.kbj`. What the value means is checked
 where the game loads it.
 
+### Level file `levels/<name>.klvl` (version 1)
+
+KBJ, its members in this order (ADR-0038):
+
+```
+{ "version": 1,
+  "size": [1024, 768],                       // pixels, 1 to 2^24 a side
+  "background": [64, 70, 91],                // red, green, blue: 0 to 255
+  "assets": ["atlas/sprites.kbj"],           // what it uses, in byte order, no two the same
+  "tilesets": [ { "atlas": "atlas/sprites.kbj", "sprite": "sprites/tiles",   // a tile set of an atlas among the assets
+                  "columns": 8, "rows": 4,                                   // 1 or more, at most 65535 tiles
+                  "animations": [ { "tile": 8, "frames": 4, "ms": 250 } ] } ],  // by first tile, apart; 2+ frames, 1+ ms
+  "layers": [ { "tileset": 0, "size": [64, 48], "cell": 16, "origin": [0, 0],  // cells; a cell's pixels, 1 to 4096
+                "layer": 0, "depth": 0,                                      // sort layer 0 to 255; a fixed depth
+                "cells": [4, 4, 9, …] } ],          // row by row: 0 none, else 1 + tile + 65536 × flip (1 x, 2 y)
+  "grid": { "size": [64, 48], "cell": 16, "origin": [0, 0], "layer": "World",   // optional
+            "solid": [1, 1, 0, …] },                                          // row by row: 0 or 1
+  "tall": [ { "tileset": 0, "tile": 4, "size": [1, 2], "feet": [104, 336], "layer": 1 } ],  // a block from its top-left tile
+  "entities": [ { "prefab": "tree", "position": [392, 112],
+                  "overrides": { "Health": { "max": 3 } } } ],              // component names; no null
+  "music": "audio/field.qoa", "ambience": "audio/wind.qoa",                 // optional asset paths
+  "camera": [0, 0, 1024, 768] }                                             // optional bounds: x, y, w, h
+```
+
+- Layers are drawn in their order, the first beneath; a cell that starts
+  one of its set's animations is animated (`render::Tile::animated`).
+- A tall tile is a sprite of the block (`TileSet::block_uv`), its feet the
+  bottom middle of the block.
+- Positions are whole pixels that fit an `i32`.
+- The game reads it with `nadir_codec::level::parse` (above, "Level file
+  reader"); the cook writes it (M5.12), and reads each it writes the same
+  way. The version is the reader's `level::VERSION`.
+
+### Prefab file `data/prefabs/<name>.kbj`
+
+A prefab's source, `assets/data/prefabs/<name>.jsonc`, cooks to KBJ as any
+data file does (above, "Data"):
+
+```
+{ "name": "slime",                 // lowercase letters, digits and `_`: its file's stem
+  "extends": "enemy_base",         // optional: another prefab
+  "components": { "Health": { "current": 12, "max": 12 } } }   // type names; no null
+```
+
+The game reads it with `nadir_codec::prefab::parse` (above, "Prefab file
+reader"); what the values mean, and the chain of bases, nadir-scene checks
+(M5.11).
+
 ### Incremental cache `OUT/.cache.kbj` (version 1)
 
 ```
@@ -1035,9 +1194,11 @@ where the game loads it.
 
 ### LDtk version
 
-- pin the LDtk version the team uses and record it in `assets/README.md`
-- the importer checks the project's `jsonVersion`; an unknown major
-  version is an error with an upgrade note
+- **LDtk 1.5.3** (ADR-0038), recorded here and in the reader's
+  `ldtk::VERSION`, not in `assets/README.md`, which the cook would list as
+  a file it skips.
+- The reader takes a `jsonVersion` of 1.5.x only; any other is an error
+  that names the version to save the project with.
 
 ## Limits (runtime defaults, configurable for tools)
 
@@ -1069,11 +1230,14 @@ where the game loads it.
     the same samples, in `crates/codec/tests/wav/`
   - BMFont: hand-written files in each generator's dialect, in
     `crates/codec/tests/bmfont/`
+  - LDtk: projects and level files of LDtk 1.5.3, from its JSON schema, in
+    `crates/codec/tests/ldtk/` with the script that wrote them
   - JSON: RFC 8259 examples plus the JSONC extensions; deep nesting hits the
     limit and errors, it doesn't overflow the stack
 - **Fuzz targets** (fuzz smoke): every decoder above, the atlas file reader
-  (`atlas`, M5.9), the Aseprite reader (`aseprite`, M5.5), the pack TOC
-  reader, the level reader and the save reader.
+  (`atlas`, M5.9), the Aseprite reader (`aseprite`, M5.5), the LDtk reader
+  (`ldtk`), the level file reader (`level`) and the prefab file reader
+  (`prefab`, all three M5.10), the pack TOC reader and the save reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   load every cooked asset through `PackSource` and `LooseSource`.
 - **The cook** (`tools/cook`): the scan's rules on lists of names made by

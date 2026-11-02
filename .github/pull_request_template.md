@@ -35,7 +35,7 @@ Closes #
 you could not run, and why: a check that needs Windows or macOS, a GPU,
 or GStreamer, for example. -->
 
-- [ ] `cargo xtask ci` (fmt, clippy `-D warnings`, `cook`, tests, `deps`, `layers`, `unsafe-audit`, `workflows`, `release-no-dev`, `features`)
+- [ ] `cargo xtask ci` (fmt, clippy `-D warnings`, `cook`, tests, `deps`, `layers`, `crates`, `unsafe-audit`, `headers`, `workflows`, `release-no-dev`, `features`)
 - [ ] `cargo xtask golden`, for changes to `gfx`, `render`, `platform` or the scenes (Linux on llvmpipe; see `docs/04-quality.md`)
 - [ ] `cargo xtask fuzz-smoke`, for changes to a parser: `codec`, `assets`, `scene` or the cook
 - [ ] `cargo xtask bench <filter>`, for performance work (paste the numbers before and after)

@@ -52,10 +52,7 @@ Requested task: `$ARGUMENTS` (empty means "pick the next unblocked task").
 ## 4. Verify honestly
 
 - Run every command in the task's `Verify` line.
-- Then run `cargo xtask ci`. If `xtask` doesn't exist yet (before M0.6),
-  run `cargo fmt --all -- --check`,
-  `cargo clippy --workspace --all-targets -- -D warnings` and
-  `cargo test --workspace` instead.
+- Then run `cargo xtask ci`.
 - Fix failures by fixing the code. **Never** weaken a lint, delete or
   `#[ignore]` a test, raise a tolerance, or re-bless golden images to make
   a check pass, unless the user explicitly agrees.

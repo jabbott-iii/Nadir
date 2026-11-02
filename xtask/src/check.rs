@@ -1,3 +1,17 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! The checks behind `cargo xtask ci`, and the code that runs and reports
 //! them.
 
@@ -7,7 +21,9 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::error::Error;
-use crate::{cargo, crates, deps, features, layers, release_no_dev, unsafe_audit, workflows};
+use crate::{
+    cargo, crates, deps, features, headers, layers, release_no_dev, unsafe_audit, workflows,
+};
 
 /// What a check found.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -63,13 +79,18 @@ pub(crate) const CHECKS: &[Check] = &[
     },
     Check {
         name: "crates",
-        about: "The crates for crates.io have their metadata, one version and published dependencies",
+        about: "The crates for crates.io have their metadata, license text, one version and published dependencies",
         run: crates::run,
     },
     Check {
         name: "unsafe-audit",
         about: "`unsafe` only in sys, platform and gfx, each use with a SAFETY comment",
         run: unsafe_audit::run,
+    },
+    Check {
+        name: "headers",
+        about: "Every source file starts with the Apache-2.0 header of LICENSE's appendix",
+        run: headers::run,
     },
     Check {
         name: "workflows",
@@ -391,6 +412,7 @@ mod tests {
                 "layers",
                 "crates",
                 "unsafe-audit",
+                "headers",
                 "workflows",
                 "release-no-dev",
                 "features"

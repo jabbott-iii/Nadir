@@ -205,8 +205,9 @@ pub enum FixedStage { Input, Gameplay, Movement, PostMovement, Cleanup }
 pub enum FrameStage { Animate, Camera, Ui, Extract }
 ```
 
-- Systems run in stage order, then insertion order within a stage. The order
-  is printed by the debug console (`schedule`).
+- Systems run in stage order, then insertion order within a stage. The main
+  loop logs the order at debug level when it starts (`Schedule::describe`),
+  and the debug console's `schedule` command will print it (M7.5).
 - `App::new` adds the engine's systems first in their stages (ADR-0022), so a
   game's systems in the same stage run after them:
 

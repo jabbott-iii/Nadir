@@ -2207,7 +2207,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0033 — The game reads the cooked atlas through a strict reader in codec and an `Atlas` asset in render; `load_now` makes it before the first tick; `cargo xtask ci` cooks before its tests
 
-- **Status:** Accepted; atlas version 1, the person's untrimmed sheet and the sandbox's refusal of trimmed person frames, and `Sprite::from_atlas`'s limits on flipping and animating, are superseded by ADR-0035
+- **Status:** Accepted; atlas version 1, the person's untrimmed sheet and the sandbox's refusal of trimmed person frames, and `Sprite::from_atlas`'s limits on flipping and animating, are superseded by ADR-0035; ADR-0037 adds `LICENSE` and `NOTICE` to its download
 - **Date:** 2026-10-31
 - **Context:**
   - Roadmap M5.9: the game draws cooked atlases. The cook writes
@@ -2516,7 +2516,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0036 — Releases from a tag: six targets on GitHub Releases, a signed apt repository beside them, the cook's image on ghcr.io, and the crates on crates.io with the facade as NadirGE
 
-- **Status:** Accepted
+- **Status:** Accepted; ADR-0037 adds `NOTICE` beside `LICENSE` in its archives and image, beside the `copyright` file in its `.deb`s, and both to its crates
 - **Date:** 2026-11-01
 - **Context:**
   - The user asked for a release pipeline that a pushed version tag
@@ -2746,3 +2746,326 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - apt users need an older version than the newest;
   - `nadir-audio` or `nadir-debug` gains code that the facade uses (then
     crates.io gets it).
+
+## ADR-0037 — The Apache-2.0 header on every source file; NOTICE at the root and in every release file, the demo download and the crates; third-party notices kept beside their material
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+- **Context:**
+  - The user asked for an Apache-2.0 `NOTICE` at the root and the
+    license's headers on all source files, then approved the rest below:
+    `NOTICE` in every release file, the RFC 8259 notice beside the
+    examples, both files in each crate for crates.io, and a check of the
+    headers. `LICENSE`'s appendix already
+    names the holder: "Copyright 2026 Joseph Anthony Abbott III".
+  - The license's section 4(d) binds a redistributor to a NOTICE only "if
+    the Work includes a "NOTICE" text file as part of its distribution". A
+    `NOTICE` in the repository alone does not reach ADR-0036's archives,
+    packages and image, or the demo page's download (ADR-0029, ADR-0033).
+  - Some files cannot start with a comment: nadir-gfx refuses a GLSL
+    source whose first line is not `#version 330 core`
+    (`crates/gfx/src/validate.rs`), a script needs its `#!` first, and an
+    HTML page its doctype.
+  - A review of the repository found one piece of third-party material:
+    `crates/codec/tests/json/rfc8259_image.json` and
+    `rfc8259_locations.json` are the examples of IETF RFC 8259, section
+    13, with copies in `fuzz/corpus/json` and KBJ encodings in
+    `fuzz/corpus/kbj`. The IETF Trust's Legal Provisions (TLP 5.0) count
+    JSON as a Code Component, under the Revised BSD License, whose notice
+    must go with it: the license's text, or the section 6.d legend "in the
+    program or other file that includes the Code Component". `cargo
+    package` ships the examples in nadir-codec.
+  - Everything else is the project's own: the sprites, the other fixtures
+    (`make_vectors.py` regenerates its vectors byte for byte), the
+    corpora, the shaders and the site. The inflate decoder, `Pcg32` and the
+    site's GitHub mark were checked and need no notice.
+- **Decision:**
+  - **The header:** the appendix's boilerplate, word for word, in each
+    file's comment syntax and followed by a blank line, on every source
+    file: Rust, GLSL, the Python and shell scripts, the site's HTML, CSS
+    and JS, the `Makefile`, the Dockerfile and the workflows (279 files on
+    2026-11-01). It goes first, or after a `#!` line, an HTML doctype or a
+    GLSL `#version 330 core`. Configuration and data carry none: TOML,
+    Markdown, JSON(C), test vectors, corpora, assets, goldens, the issue
+    templates and `dependabot.yml`.
+  - **`NOTICE`** holds the project's name and copyright line, and nothing
+    else a license does not require there, as the ASF's guidance has it.
+  - **It ships beside `LICENSE`** in each release archive and in the demo
+    page's download, whose READMEs say "see LICENSE and NOTICE", and at
+    `/NOTICE` in the image. In each `.deb` it goes in
+    `/usr/share/doc/<package>/`, beside the `copyright` file, which points
+    to the license's text in `/usr/share/common-licenses/Apache-2.0`;
+    Debian keeps no NOTICE.
+  - **Each crate for crates.io keeps copies of both** in its folder, as
+    cargo leaves them out of its package otherwise: from outside the folder
+    it takes only `Cargo.lock` and the files that `readme` and
+    `license-file` name. They are `crates/*/LICENSE` and `NOTICE`, and
+    `tools/cook`'s, for the 13 crates without `publish = false`.
+    `cargo xtask crates` fails a crate without them, or with copies that
+    differ from the root's.
+  - **`cargo xtask headers`**, in `cargo xtask ci` after `unsafe-audit`,
+    fails a source file whose header is missing, altered or out of place,
+    and names the line and what it should be. It knows the kinds above by
+    extension or name, and `.metal` too, for M10's shaders. Its text is
+    the appendix's, which a test compares with `LICENSE`.
+  - **Third-party notices stay with their material:** the RFC 8259
+    examples keep the IETF Trust's section 6.d legend, with the credit to
+    the IETF and the RFC that its section 4.d asks for, in
+    `crates/codec/tests/json.rs`, which reads them and ships beside them.
+    A file beside the copies in `fuzz/corpus` would be read as a seed.
+- **Consequences:**
+  - Good:
+    - Whoever passes on a release archive, the image, the download or a
+      crate's package has the license and the notice to pass on with it
+      (sections 4(a) and 4(d)). A `.deb` carries the notice, and its
+      `copyright` file points to the license's text, which every Debian
+      system keeps.
+    - The header is the same text in every file; `cargo xtask headers`
+      keeps it so, and `AGENTS.md` and `CONTRIBUTING.md` say where it goes
+      in a new one.
+  - Bad:
+    - Each source file is 14 lines longer (16 in CSS and HTML, whose
+      comment opens and closes on lines of its own), and the lines below
+      its header moved down as many.
+    - 26 copies to keep: a change to `LICENSE` or `NOTICE` is copied to
+      each crate (`cargo xtask crates` names the ones that differ). Git
+      keeps one copy of identical files, so they cost no space.
+    - A new kind of source file (another extension) is unchecked until
+      `kind` in `xtask/src/headers.rs` knows it.
+    - `cargo xtask dist`, `cargo xtask site` and the image job read
+      `NOTICE`, so a checkout without it fails them.
+  - Follow-up: whether the image's static cook and the archives should
+    carry the notices of what they link statically (musl in the image,
+    Rust's standard library everywhere) was not reviewed.
+- **Alternatives considered:**
+  - An `SPDX-License-Identifier: Apache-2.0` line alone: shorter, but not
+    the appendix's boilerplate.
+  - The RFC 8259 notice in `NOTICE`: everyone who passes on a release file
+    would carry it, though none of them holds the examples.
+  - JSON written here in place of the RFC 8259 examples: no third-party
+    material at all, but the tests, corpora and docs that use them
+    rewritten, beyond the request.
+  - `license-file = "LICENSE"`, inherited: cargo copies the file into
+    each package from outside its folder, and crates.io still shows
+    `license`, but with both fields set cargo 1.99 warns "only one of
+    `license` or `license-file` is necessary" once for each crate, 13
+    times, on commands that build, such as `cargo clippy` (not on
+    `cargo metadata`). It would carry no `NOTICE` either.
+  - Symbolic links to the root's files: no copies to keep, but Git for
+    Windows checks links out as text files naming their target, and CI
+    runs on Windows.
+  - No copies at all: section 4 asks this of redistributors, not of the
+    licensor, but a redistributor of a crate would have no license text
+    to pass on.
+- **Revisit when:**
+  - a file that is not the project's own enters the repository;
+  - cargo stops warning when `license` and `license-file` are both set
+    (then `license-file` can replace the `LICENSE` copies);
+  - an outside contributor's file needs its own copyright line.
+
+## ADR-0038 — M5.6 split into four tasks; LDtk 1.5.3 and its conventions; the level file `.klvl` (version 1) and the prefab file; how prefabs, reflection and `load_level` behave
+
+- **Status:** Accepted
+- **Date:** 2026-11-01
+- **Context:**
+  - Roadmap task M5.6 ("cook: LDtk importer; scene: prefabs and level
+    loading") changes `nadir-cook`, `nadir-scene`, the facade, the
+    sandbox, and `xtask` to ship the levels: more than the three crates
+    `CLAUDE.md` allows a task. A scoping pass mapped its work and its
+    notes, and the user accepted a split and a recommended answer to
+    each open question on 2026-11-01. LDtk's editor cannot run where the
+    work is done.
+  - LDtk has no notion of animated tiles, tall tiles, collision, prefabs
+    or component fields, so the cook needs conventions for them. Its JSON
+    schema, version 1.5.3 (`https://ldtk.io/files/JSON_SCHEMA.json`), is
+    the latest release found; its member names are used below.
+  - A new parser must have a fuzz target (`.claude/rules/parsers.md`), and
+    `xtask`, which runs the fuzzer, may link only `nadir-core` and
+    `nadir-codec` (the dependency matrix): every reader the cook or the
+    game takes from a file goes in `nadir-codec`.
+- **Decision:**
+  - **The split**, run in this order, each at most three packages:
+    1. **M5.10** (nadir-codec, xtask): the LDtk reader, the level file
+       reader, the prefab file reader, their fuzz targets, this ADR and
+       the roadmap's split.
+    2. **M5.11** (nadir-scene, the facade): `Handle` reflection, the
+       context's slots, `PrefabLibrary` with `extends`, a level's entity
+       spawn, and the facade's `Sprite`, `Collider` and `Animator`
+       reflected.
+    3. **M5.12** (nadir-cook, the sandbox): LDtk to `levels/<name>.klvl`,
+       and the sandbox's field and props as an LDtk project and prefabs.
+    4. **M5.6** (the facade, the sandbox, xtask): `load_level`, the
+       sandbox's field drawn from its level, and `levels/` and `data/`
+       shipped. It keeps M5.6's number, so M5.8 and M9.1 still depend on
+       levels loading. New numbers rather than `M5.6a`, which
+       `cargo xtask features` refuses. All four are the feature "Levels
+       and prefabs", which each ticks itself into.
+  - **LDtk version:** 1.5.3, recorded here and in
+    `docs/subsystems/assets-and-codecs.md` ("LDtk version"), not in
+    `assets/README.md`, which the cook would list as a file it skips. The
+    reader takes a `jsonVersion` of 1.5.x only; any other is refused with
+    a note to save the project with LDtk 1.5.3. A project with
+    Multi-Worlds (a non-empty `worlds`) is refused.
+  - **The LDtk reader** (`nadir_codec::ldtk`, cook only): reads the
+    members it needs and ignores the rest. It checks: an `intGridCsv` of
+    `__cWid` × `__cHei` entries in an IntGrid layer; a tile's `f` of 0 to
+    3 and its `t` a tile of its layer's tile set; every tile set, layer
+    and entity definition a uid refers to; a level external (an
+    `externalRelPath`) exactly when its `layerInstances` is `null`; and an
+    external level's `.ldtkl` naming a level of its project. Errors name
+    the member path.
+  - **Conventions** (M5.12 applies them):
+    - **Animated tiles:** a tile set tile whose `customData` is
+      `{"frames": N, "ms": M}` starts an animation of the N tiles from it,
+      each shown M ms, as `render::Tile::animated`.
+    - **Tall tiles:** a tile whose `customData` is `{"tall": [C, R]}` is
+      the top-left tile of a block of C × R tiles. Placed in a cell, it is
+      not a cell's tile but a sprite of the block, whose bottom-left cell
+      is that cell and whose feet are the bottom middle of the block, as
+      the sandbox's tall walls are (`TileSet::block_uv`).
+    - **Collision:** the IntGrid layer named `Collision`; every non-zero
+      value is solid, in the collision layer "World".
+    - **Prefabs:** an entity spawns the prefab of its identifier in
+      snake_case (`EnemyBase` → `enemy_base`).
+    - **Overrides:** an entity field named `Component__field` (more `__`
+      for nested fields) overrides that field of that component. Int,
+      Float, Bool, String, Multilines, FilePath and enum fields map to
+      their JSON value; Point, Color, Tile, EntityRef and array fields are
+      refused in version 1.
+    - **Placement:** a level's top left is at (0, 0); `worldX` and
+      `worldY` are not used, as one level loads at a time. A layer's
+      `__pxTotalOffsetX` and `Y` apply to its tiles and entities, and an
+      offset on the `Collision` layer is refused. Each level of a project
+      is a `.klvl` of its own, `levels/<its identifier in
+      snake_case>.klvl`, and two of one name in a cook are an error.
+    - **Drawing:** tile layers (Tiles, AutoLayer, and an IntGrid's auto
+      tiles) are drawn from the bottom of LDtk's list up, each in sort
+      layer 0 at a depth of its place from the bottom (0, 1, …), behind
+      every y-sorted sprite; a layer that is not `visible` is left out.
+      Tall tiles are y-sorted sprites in sort layer 1, the sandbox's. A
+      layer's opacity below 1, a tile's alpha below 1, two tiles in one
+      cell, and a tile set with `spacing` or `padding` are refused.
+    - **Side outputs:** a project that turns on backups, the simplified
+      export, an image export or the Tiled export is refused, with the
+      setting to turn off. An `.ldtkl` no project claims is an error.
+  - **The level file** `levels/<name>.klvl`, version 1, is KBJ, read with
+    `nadir_codec::level::parse`, which checks the version first (any
+    other is not supported) and refuses an unknown member. Its members:
+    `version` (1); `size`, the level's `[w, h]` in pixels;
+    `background`, `[r, g, b]`; `assets`, the paths it uses in byte order,
+    each tile set's atlas among them; `tilesets`, each
+    `{atlas, sprite, columns, rows, animations: [{tile, frames, ms}]}`;
+    `layers`, drawn first to last, each
+    `{tileset, size: [columns, rows], cell, origin: [x, y], layer, depth,
+    cells}`, with one integer a cell, row by row: 0 for none, otherwise
+    1 + the tile + 65536 × its flip (1 for x, 2 for y); an optional
+    `grid`, `{size, cell, origin, layer, solid}`, with `solid` one 0 or 1
+    a cell; `tall`, each `{tileset, tile, size: [c, r], feet: [x, y],
+    layer}`; `entities`, each `{prefab, position: [x, y], overrides}`,
+    with `overrides` an object of component names; and the optional
+    `music`, `ambience` (asset paths) and `camera` (`[x, y, w, h]`).
+    Positions are whole pixels. The cook writes it, as it writes the
+    atlas file; the game reads it.
+  - **The prefab file** `data/prefabs/<name>.kbj`, cooked from
+    `assets/data/prefabs/<name>.jsonc`, is read with
+    `nadir_codec::prefab::parse` (or `prefab::read` from a JSON value, for
+    the cook to check its source): `{name, extends?, components}`, no
+    other member. A prefab's name is lowercase letters, digits and `_`,
+    and equals its file's stem (nadir-scene checks that). `extends` names
+    another prefab. `components` maps component type names to values,
+    none `null`: a derived prefab cannot remove a base's component in
+    version 1.
+  - **Fuzz targets:** `ldtk` (each input as a project, and as an external
+    level of a fixed project), `level` and `prefab`, with seeds in
+    `fuzz/corpus/<target>/`.
+  - **Prefabs** (M5.11): base, then derived, then a level's per-instance
+    overrides apply onto one value per component; an override may add a
+    component the prefab lacks. An `extends` chain stops at 16, and a
+    cycle is an error naming it (`slime -> enemy_base -> slime`), as is a
+    missing base. An unknown component at spawn is an error naming the
+    prefab's cooked path, the prefab and the component, and the failed
+    spawn leaves no entity; the cook's errors name the `.jsonc`. Each
+    prefab is checked against the registry when it loads, and the cook
+    checks that each LDtk entity's prefab exists; the debug-build check of
+    every prefab file at startup is deferred, as listing a `Source` would
+    add nadir-assets to M5.11. `spawn` takes the library, the registry and
+    the server as arguments, so nadir-ecs needs no change, and returns
+    each entity with its position, for the facade to give it its
+    `Transform`.
+  - **Reflection** (M5.11): `ReflectContext` holds the asset server
+    shared while hashing, so a hash never loads, and exclusive with a
+    `Scope` while loading; a handle the server does not know is an error,
+    not a panic. While hashing (`is_hashing()`), every `Sprite` leaves out
+    its texture, uv, size, pivot and `flip.x`, which `nadir::animate`
+    writes, as a flag cannot tell which sprites have an `Animator` or a
+    `Facing` (a departure from M4.6's note: the fields are the game's on
+    other sprites); a per-field marker waits for M9.4's `saved` flag. A
+    prefab writes a sprite as `{"atlas": <path>, "sprite": <name>,
+    "frame": <index>}`; written back it gives the texture's path and uv;
+    the texture is required. The game declares its collision-layer names
+    (`App::collision_layers(&["World", "People"])`); `LayerMask::ALL` is
+    `"all"`, an unnamed bit its number, and an empty `{}` collider an
+    error. An `Animator` whose clip has no name cannot be written.
+    `ReflectErrorKind`, `FieldInfo`, the cook's `Counts` and `CookError`,
+    and the facade's `Error` become `#[non_exhaustive]` in the task that
+    first adds to them, a break recorded then.
+  - **`load_level`** (M5.6): reads the `.klvl` and its prefabs before it
+    returns, while textures stream in as they do now; despawns only the
+    entities the previous level spawned; takes its clear colour from the
+    level; gives no grid when the level has none; and skips the clips of
+    an atlas the game already added (`Clips` tracks them), so the
+    sandbox's global atlas is no `NameTaken`. A missing `.klvl` or prefab
+    is an error from `load_level`; the release dialog for a missing
+    texture moves to M9.1's loading state. M5.6 measures the 500 ms
+    level-load budget, which M11.5 enforces. The sandbox's person is
+    still spawned in code; its walls, trees and rocks come from the
+    level in map.rs's order, so that the captures' frames stay those of
+    M5.9. The world hashes change once, in M5.11 (three more registered
+    types), which records them; M5.6 compares with M5.11's.
+  - **The sandbox's level** (M5.12): `assets/levels/field.ldtk`, written
+    once in 1.5.3's format by a scratch script from map.rs's `MAP` (not
+    committed), never opened in LDtk; `MAP` stays as the reference that a
+    test compares the cooked level with. A tile set's `relPath` may use
+    `..` only to stay inside `assets/`.
+- **Consequences:**
+  - Good:
+    - Each task can be finished and checked on Linux alone, and each new
+      reader is fuzzed where `xtask` can reach it.
+    - The level and prefab formats are checked as strictly as the atlas
+      file, and an LDtk project from another version is refused before
+      it is misread.
+  - Bad:
+    - Four tasks where there was one, and the roadmap's M5.6 notes are
+      spread over them.
+    - The conventions are ours: a project made in LDtk needs the tile
+      sets' custom data, the `Collision` layer and the field names written
+      as above, and nothing in the editor checks them; the cook does.
+    - `field.ldtk` was not saved by LDtk, so the reader is tested on files
+      written from the schema, not on the editor's own output, until
+      someone opens and saves it in LDtk 1.5.3.
+    - Leaving the animated sprite fields out of every sprite's hash
+      leaves out the fields of sprites the game moves by hand too.
+  - Follow-up: M5.11 sets the status lines of ADR-0020 (`Handle`
+    reflection), ADR-0024 (`Animator` reflected) and ADR-0025 (what the
+    hash leaves out) when it builds them.
+- **Alternatives considered:**
+  - M5.6 in one task: past the three-crate limit.
+  - `M5.6a` to `M5.6d`: `cargo xtask features` reads only `M<n>.<n>`,
+    and teaching it suffixes changes xtask for a name.
+  - Any 1.x `jsonVersion`: LDtk changes members between minor versions.
+  - LDtk's enum tags for animated and tall tiles: they carry no numbers.
+  - Chunked tile indices in the level file: chunking is the renderer's
+    job, and a 256 × 256 level is 65,536 entries, far under KBJ's cap.
+  - The level writer in nadir-codec: the atlas file's precedent puts the
+    writer in the cook, and the reader's tests encode JSON text.
+  - The prefab reader in nadir-scene: it would have no fuzz target.
+  - A committed generator of `field.ldtk`: a second source of the level
+    to keep beside `MAP`.
+- **Revisit when:**
+  - LDtk releases a version whose `jsonVersion` is not 1.5.x and the
+    project is saved with it;
+  - a level needs a convention above that it cannot meet (a flipped tall
+    tile, an offset collision layer, a Point or array field);
+  - the debug-build prefab check at startup is wanted (a `Source` listing
+    or an index the cook writes);
+  - M9.4's `saved` flag gives the reflect macros a per-field marker.

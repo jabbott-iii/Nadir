@@ -1,3 +1,17 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! Build automation for the Nadir workspace: CI checks, goldens, the
 //! release files and the demo page.
 //!
@@ -17,6 +31,7 @@ mod error;
 mod features;
 mod fuzz;
 mod golden;
+mod headers;
 mod layers;
 mod metadata;
 mod release_no_dev;
@@ -199,6 +214,7 @@ mod tests {
             "layers",
             "crates",
             "unsafe-audit",
+            "headers",
             "workflows",
             "release-no-dev",
             "features",
@@ -290,7 +306,7 @@ mod tests {
         assert_eq!(
             usage_error(&["fuzz-smoke", "--target", "nope"]),
             "unknown fuzz target `nope`; the targets are: json, qoi, inflate, png, klz, kbj, bmfont, wav, \
-             atlas, aseprite"
+             atlas, aseprite, ldtk, level, prefab"
         );
         assert_eq!(
             usage_error(&["fuzz-smoke", "--secs"]),

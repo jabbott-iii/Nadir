@@ -1,3 +1,17 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! `cargo xtask crates`: the crates that crates.io gets can be published as
 //! they are, all at one version (ADR-0036).
 //!
@@ -5,6 +19,9 @@
 //!
 //! - has the description, license and repository that crates.io shows,
 //!   and that it refuses a crate without (the first two);
+//! - keeps copies of the workspace's [`COPIES`], `LICENSE` and `NOTICE`, in
+//!   its folder, as cargo leaves them out of its package otherwise
+//!   (ADR-0037);
 //! - is at the facade's version, [`FACADE`]'s: a release publishes them
 //!   all at the version of its tag;
 //! - depends on a workspace crate only if crates.io gets that crate too,
@@ -16,18 +33,81 @@
 //! which leaves out the others and orders the rest by their dependencies.
 
 use std::path::Path;
+use std::{fs, io};
 
 use crate::check::Report;
 use crate::error::Error;
 use crate::metadata::{self, Metadata, Package};
+use crate::unsafe_audit::relative;
 
 /// The facade, whose version is the release's. Its package name, as
 /// crates.io has another `nadir`.
 pub(crate) const FACADE: &str = "NadirGE";
 
+/// The files at the workspace's root that each crate for crates.io keeps
+/// a copy of. From outside a crate's folder, cargo packages only
+/// `Cargo.lock` and the files that `readme` and `license-file` name. These
+/// give whoever passes the crate on the license and the notice to pass on
+/// with it (the license's sections 4(a) and 4(d)).
+const COPIES: [&str; 2] = ["LICENSE", "NOTICE"];
+
 /// Runs the check on the workspace at `root`.
 pub(crate) fn run(root: &Path) -> Result<Report, Error> {
-    Ok(check(&metadata::load(root)?))
+    let metadata = metadata::load(root)?;
+    let mut report = check(&metadata);
+    report.violations.extend(copies(root, &metadata)?);
+    Ok(report)
+}
+
+/// Where a member of `metadata` that crates.io gets lacks a copy of one of
+/// [`COPIES`], or keeps one that differs from the workspace's at `root`.
+fn copies(root: &Path, metadata: &Metadata) -> Result<Vec<String>, Error> {
+    let mut violations = Vec::new();
+    let mut originals = Vec::new();
+    for file in COPIES {
+        match read(&root.join(file))? {
+            Some(bytes) => originals.push((file, bytes)),
+            None => violations.push(format!("the workspace has no `{file}` at its root")),
+        }
+    }
+    let published = metadata
+        .packages
+        .iter()
+        .filter(|package| package.is_member && package.to_crates_io);
+    for package in published {
+        let name = &package.name;
+        let Some(dir) = &package.dir else {
+            violations.push(format!("cargo did not say where `{name}` is"));
+            continue;
+        };
+        let folder = relative(root, dir);
+        for (file, original) in &originals {
+            match read(&dir.join(file))? {
+                None => violations.push(format!(
+                    "`{name}` has no `{folder}/{file}`: cargo would leave it out of the \
+                     package, so copy the workspace's `{file}` there"
+                )),
+                Some(copy) if copy != *original => violations.push(format!(
+                    "`{name}`'s `{folder}/{file}` differs from the workspace's `{file}`: copy \
+                     it again"
+                )),
+                Some(_) => {}
+            }
+        }
+    }
+    Ok(violations)
+}
+
+/// The bytes of the file at `path`, or `None` if there is none.
+fn read(path: &Path) -> Result<Option<Vec<u8>>, Error> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(Error::Read {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 /// Checks the members of `metadata` that crates.io gets.
@@ -168,6 +248,60 @@ mod tests {
                  nadir-platform, nadir-render, nadir-scene, nadir-sys",
                 env!("CARGO_PKG_VERSION")
             )]
+        );
+    }
+
+    #[test]
+    fn each_crate_for_crates_io_keeps_copies_of_license_and_notice() {
+        let root =
+            std::env::temp_dir().join(format!("nadir-xtask-crates-copies-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for folder in ["crates/a", "crates/b", "crates/c", "xtask"] {
+            fs::create_dir_all(root.join(folder)).unwrap();
+        }
+        let write = |path: &str, text: &str| fs::write(root.join(path), text).unwrap();
+        write("LICENSE", "Apache License\n");
+        write("NOTICE", "Nadir\n");
+        write("crates/a/LICENSE", "Apache License\n");
+        write("crates/a/NOTICE", "Nadir\n");
+        write("crates/b/LICENSE", "Apache License\n");
+        write("crates/c/LICENSE", "An older license\n");
+        write("crates/c/NOTICE", "Nadir\n");
+        let at = |mut package: Package, folder: &str| {
+            package.dir = Some(root.join(folder));
+            package
+        };
+        let metadata = Metadata {
+            packages: vec![
+                at(crate_("a", "0.1.0"), "crates/a"),
+                at(crate_("b", "0.1.0"), "crates/b"),
+                at(crate_("c", "0.1.0"), "crates/c"),
+                // Not one crates.io does not get, nor a third-party crate.
+                at(unpublished("xtask"), "xtask"),
+                third_party("left-pad", "1.0.3"),
+                crate_("nowhere", "0.1.0"),
+            ],
+        };
+        let violations = copies(&root, &metadata).unwrap();
+        fs::remove_file(root.join("NOTICE")).unwrap();
+        let without_notice = copies(&root, &metadata).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            violations,
+            [
+                "`b` has no `crates/b/NOTICE`: cargo would leave it out of the package, so \
+                 copy the workspace's `NOTICE` there",
+                "`c`'s `crates/c/LICENSE` differs from the workspace's `LICENSE`: copy it again",
+                "cargo did not say where `nowhere` is",
+            ]
+        );
+        assert_eq!(
+            without_notice,
+            [
+                "the workspace has no `NOTICE` at its root",
+                "`c`'s `crates/c/LICENSE` differs from the workspace's `LICENSE`: copy it again",
+                "cargo did not say where `nowhere` is",
+            ]
         );
     }
 

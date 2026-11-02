@@ -1,10 +1,24 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! The error type for `nadir-codec`.
 
 use std::fmt;
 
 #[cfg(feature = "png")]
 use crate::png;
-use crate::{aseprite, atlas, bmfont, inflate, json, kbj, klz, qoi, wav};
+use crate::{aseprite, atlas, bmfont, inflate, json, kbj, klz, ldtk, level, prefab, qoi, wav};
 
 /// Errors produced by `nadir-codec`.
 ///
@@ -87,6 +101,34 @@ pub enum CodecError {
         /// What is wrong.
         kind: aseprite::ErrorKind,
     },
+    /// A JSON file is not an LDtk project or level file the cook takes
+    /// ([`ldtk::parse_project`](crate::ldtk::parse_project),
+    /// [`ldtk::parse_level`](crate::ldtk::parse_level)).
+    Ldtk {
+        /// Where the problem is, such as `levels[0].layerInstances[2].gridTiles[5].t`;
+        /// empty for the file as a whole.
+        at: String,
+        /// What is wrong.
+        kind: ldtk::ErrorKind,
+    },
+    /// A KBJ file is not a level file the game can read
+    /// ([`level::parse`](crate::level::parse)).
+    Level {
+        /// Where the problem is, such as `layers[0].cells[130]`; empty for
+        /// the file as a whole.
+        at: String,
+        /// What is wrong.
+        kind: level::ErrorKind,
+    },
+    /// A value is not a prefab file
+    /// ([`prefab::parse`](crate::prefab::parse)).
+    Prefab {
+        /// Where the problem is, such as `components.Health`; empty for the
+        /// file as a whole.
+        at: String,
+        /// What is wrong.
+        kind: prefab::ErrorKind,
+    },
     /// A value cannot be encoded as KBJ.
     KbjEncode {
         /// Why not.
@@ -131,6 +173,18 @@ impl fmt::Display for CodecError {
                 write!(f, "Aseprite export error in the file: {kind}")
             }
             Self::Aseprite { at, kind } => write!(f, "Aseprite export error at `{at}`: {kind}"),
+            Self::Ldtk { at, kind } if at.is_empty() => {
+                write!(f, "LDtk error in the file: {kind}")
+            }
+            Self::Ldtk { at, kind } => write!(f, "LDtk error at `{at}`: {kind}"),
+            Self::Level { at, kind } if at.is_empty() => {
+                write!(f, "level file error in the file: {kind}")
+            }
+            Self::Level { at, kind } => write!(f, "level file error at `{at}`: {kind}"),
+            Self::Prefab { at, kind } if at.is_empty() => {
+                write!(f, "prefab error in the file: {kind}")
+            }
+            Self::Prefab { at, kind } => write!(f, "prefab error at `{at}`: {kind}"),
             Self::Wav { offset, kind } => write!(f, "WAV error at byte {offset}: {kind}"),
             Self::BmFont { line, column, kind } => {
                 write!(f, "BMFont error at line {line}, column {column}: {kind}")

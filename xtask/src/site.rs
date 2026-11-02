@@ -1,3 +1,17 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! `cargo xtask site [--out DIR]`: builds the demo page that CI publishes
 //! at <https://jabbott.dev/Nadir/> (ADR-0029), into `target/site` or
 //! `DIR`.
@@ -10,8 +24,9 @@
 //! 3. Encodes each capture with GStreamer (`gst-launch-1.0`) into a VP9
 //!    WebM and a PNG poster, at twice the size: every pixel of the game a
 //!    square of four.
-//! 4. Packs the sandbox and its cooked atlases, `target/cooked/atlas`, into
-//!    `downloads/`, with `tar`, and takes its SHA-256 with `sha256sum`.
+//! 4. Packs the sandbox and its cooked atlases, `target/cooked/atlas`, with
+//!    `LICENSE` and `NOTICE`, into `downloads/`, with `tar`, and takes its
+//!    SHA-256 with `sha256sum`.
 //! 5. Fills `site/index.html` from the commit (`git`), the workspace, the
 //!    roadmap, the features and the captures, and `site/llms.txt`, the
 //!    same as plain text for language models, and copies `site/nadir.css`
@@ -373,8 +388,8 @@ fn read_frame(path: &Path, offset: u64, length: u64) -> Result<Vec<u8>, Error> {
 }
 
 /// Packs the sandbox's executable and its cooked atlases
-/// (`target/cooked/atlas`, as `assets/atlas`), with a note, into a
-/// `.tar.gz` in `downloads`, by way of `work`.
+/// (`target/cooked/atlas`, as `assets/atlas`), with a note, `LICENSE` and
+/// `NOTICE`, into a `.tar.gz` in `downloads`, by way of `work`.
 fn package(
     root: &Path,
     sandbox: &Path,
@@ -393,6 +408,8 @@ fn package(
     let glibc = glibc_floor(&executable);
     copy(sandbox, &dir.join("sandbox"))?;
     copy_cooked(&root.join(COOKED), &dir.join("assets"))?;
+    copy(&root.join("LICENSE"), &dir.join("LICENSE"))?;
+    copy(&root.join("NOTICE"), &dir.join("NOTICE"))?;
     write(
         &dir.join("README.txt"),
         package_note(build, glibc.as_deref()).as_bytes(),
@@ -499,6 +516,8 @@ It needs Linux on x86_64 with an X11 server (or XWayland), OpenGL 3.3
 through EGL{glibc}.
 
 Its log is in ~/.local/share/Sandbox/nadir.log.
+
+Licensed under the Apache License 2.0: see LICENSE and NOTICE.
 ",
         commit = build.commit,
         date = build.date,
@@ -994,6 +1013,7 @@ mod tests {
         );
         let note = package_note(&build(), None);
         assert!(note.contains("through EGL.\n\nIts log"), "{note}");
+        assert!(note.ends_with("see LICENSE and NOTICE.\n"), "{note}");
         assert!(
             note.contains(
                 "from\ncommit 0123456789abcdef of 2026-10-31:\n\

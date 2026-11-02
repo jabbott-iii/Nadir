@@ -211,8 +211,9 @@
     {
       "name": "Levels and prefabs",
       "area": "Content",
-      "summary": "Levels will be authored in LDtk, and prefabs will inherit from one another, both cooked and loaded into the world.",
-      "tasks": ["M5.6"]
+      "summary": "The engine reads LDtk 1.5.3's projects and level files, and its own level and prefab files, strictly and under the fuzzer: a project saved by another version of LDtk is refused with the version to save it with, and every refusal names where in the file it is. Levels will be authored in LDtk and cooked into level files, prefabs will inherit from one another, and both will be loaded into the world.",
+      "tasks": ["M5.10", "M5.11", "M5.12", "M5.6"],
+      "ticked": ["M5.10"]
     },
     {
       "name": "Pack files",

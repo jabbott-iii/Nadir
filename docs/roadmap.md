@@ -2801,7 +2801,67 @@ by the batched sprite renderer.
       vectors are written by hand from its source. A real export of the
       person can replace `person.json` without other changes.
 
-- [ ] **M5.6 — cook: LDtk importer; scene: prefabs and level loading**
+- [x] **M5.10 — codec: LDtk, level file and prefab file readers**
+  - Note (from M5.6, ADR-0038): M5.6 was split into M5.10, M5.11, M5.12
+    and M5.6, each of at most three crates, run in that order. ADR-0038
+    records the split, the LDtk version (1.5.3), the conventions for what
+    LDtk has no notion of, the level file's format, the prefab file's, and
+    the answers to the questions the split raised.
+  - Note (from M4.5, ADR-0023): a level file holds tile layers, the grid
+    from the IntGrid, with `grid.layer` the layer the prefabs call "World"
+    (the sandbox's `map::WORLD`), and tall tiles, each a block of its tile
+    set (`TileSet::block_uv`) with its feet at the bottom of its cell, as
+    the sandbox's tall walls are (`games/sandbox/src/map.rs`).
+  - Depends: M5.5
+  - Do:
+    - ADR-0038; this split in the roadmap and in `docs/features.jsonc`;
+      the forward references to M5.6 in the docs pointed at the task that
+      now does the work.
+    - `nadir_codec::ldtk`, for the cook: `parse_project` reads a `.ldtk`
+      of `jsonVersion` 1.5.x, and `parse_level` an external `.ldtkl`
+      against its project, the members ADR-0038 lists, with the checks it
+      lists, and errors that name the member path.
+    - `nadir_codec::level`: `parse` reads `levels/<name>.klvl`, version 1
+      (KBJ), strictly, version first.
+    - `nadir_codec::prefab`: `parse` reads `data/prefabs/<name>.kbj`, and
+      `read` the same from a JSON value.
+    - Fuzz targets `ldtk` (as a project, and as an external level of a
+      fixed project), `level` and `prefab`, each asserting what its reader
+      promises, with seeds in `fuzz/corpus/<target>/`.
+    - Test vectors written from LDtk 1.5.3's JSON schema in
+      `crates/codec/tests/ldtk/`, with `crates/codec/tests/ldtk.rs`: a
+      project of each layer type, an external level, entities with each
+      field type, stacked tiles, other `jsonVersion`s; a test for each
+      rule of the level and prefab files.
+    - The subsets and formats in `docs/subsystems/assets-and-codecs.md`;
+      the codec's crate doc and description.
+  - Accept:
+    - ADR-0038 records the version, the conventions, the formats and the
+      split; the roadmap and `docs/features.jsonc` name the four tasks.
+    - The LDtk reader reads every vector; a `jsonVersion` of 0.9, 1.4 or
+      2.0 is refused with a note naming 1.5.3, and every refusal names its
+      member path.
+    - The level reader refuses a version other than 1 as not supported,
+      before it reads further, and refuses an unknown member, a tile
+      outside its tile set, a layer whose cells do not fill its size, and
+      an animated tile of 0 ms.
+    - Each reader has a fuzz target and seeds, runs 20 s with no finding,
+      and has its subset documented.
+  - Verify: `cargo test -p nadir-codec`; `cargo test -p xtask`;
+    `cargo xtask fuzz-smoke --target ldtk --secs 20`, and the same for
+    `level` and `prefab`; `cargo xtask ci`
+  - Built (2026-11-01, ADR-0038): `nadir_codec::ldtk` (`parse_project`,
+    `parse_level`), `nadir_codec::level` (version 1) and
+    `nadir_codec::prefab` (`parse`, `read`), with `CodecError::Ldtk`,
+    `Level` and `Prefab`. The LDtk vectors are written by
+    `crates/codec/tests/ldtk/make_vectors.py` from LDtk 1.5.3's schema; no
+    LDtk editor wrote them. The LDtk reader finds definitions by their uids
+    sorted, so that no check is quadratic in a crafted project.
+  - Measured on an i7-11800H: 20 s of each fuzz target with
+    no finding, about 9,700 `ldtk` inputs a second (the 33 KB project
+    seed), 660,000 `level` and 1,300,000 `prefab`.
+
+- [ ] **M5.11 — scene: handles, prefabs with `extends`, a level's entities; the facade reflects `Sprite`, `Collider` and `Animator`**
   - Note (from M4.2): reflect `Handle<T>` as its asset path here
     (ADR-0020).
     - Give `ReflectContext` the asset server: `AssetServer::path` writes
@@ -2815,18 +2875,6 @@ by the batched sprite renderer.
     so its `Reflect` is hand-written. Prefabs never list `PrevTransform`:
     the engine gives one to every entity with a `Sprite`.
     `app.register_component::<T>()` adds a game's reflected component.
-  - Note (from M4.5, ADR-0023):
-    - nadir-scene may not depend on nadir-render, so the facade turns a
-      level's tile layers into `TileLayer`s in its `TileLayers` resource,
-      and draws them with `TileLayerDraw`s from an engine system in
-      `Extract`.
-    - A tall tile is a `Sprite` whose `uv` is `TileSet::block_uv`, with
-      its feet at the bottom of its cell, as the sandbox's tall walls are
-      (`games/sandbox/src/map.rs`).
-    - The grid comes from the IntGrid, with `grid.layer` the layer the
-      prefabs call "World" (the sandbox's `map::WORLD`).
-    - A layer replaced in place on reload is drawn anew: revisions are
-      unique to the process.
   - Note (from M4.6, ADR-0024): reflect `Animator` by hand.
     - It writes only its clip's name, looked up in the facade's `Clips`,
       which `AssetServer::path` cannot see: `ReflectContext` needs a way to
@@ -2838,7 +2886,8 @@ by the batched sprite renderer.
       each frame by `nadir::animate`, and its size and pivot when the frame
       has a placement, as an atlas's clips' frames do (M5.5, ADR-0035); on
       one with a `Facing`, its `flip.x`. The other fields, and these on
-      entities without the component, are the game's.
+      entities without the component, are the game's. (ADR-0038: while
+      hashing, every sprite leaves them out.)
   - Note (from M4.7, ADR-0025): registering `Sprite`, `Collider` or
     `Animator` changes every world hash in
     `crates/engine/tests/determinism/hashes.txt`: bless it again. The hash
@@ -2853,30 +2902,171 @@ by the batched sprite renderer.
     alone; the test's `each_type` must list the new types.
   - Note (from M5.3, ADR-0030): `load` loads in `Scope::Global`, so a
     level's handles, read back from their paths, are loaded with
-    `load_in(path, Scope::Level)`, and `load_level` unloads the previous
-    level with `unload_scope(Scope::Level)`. `Clips` and `TileLayers` are
+    `load_in(path, Scope::Level)`: the context carries the scope.
+  - Note (from M5.5, ADR-0035): prefabs and other data are `.jsonc` below
+    `assets/data/`, which the cook writes as KBJ at `data/<path>.kbj`
+    (`assets/data/prefabs/slime.jsonc` → `data/prefabs/slime.kbj`), which
+    `nadir_codec::prefab::parse` reads (M5.10).
+  - Depends: M5.10, M4.4, M4.6, M4.7
+  - Do:
+    - `ReflectContext`: the asset server, shared while hashing and
+      exclusive with a `Scope` while loading; a slot for the facade's
+      `Clips` and collision-layer names; `is_hashing()`; the source of
+      each prefab layer for its errors. `ReflectContext::new(source)`
+      stays.
+    - `Handle<T>` reflected as its asset path (ADR-0020).
+    - `Registration::insert_layers`: base, derived and per-instance
+      override applied onto one value, then one insert.
+    - `PrefabLibrary` with `extends`, as ADR-0038 has it, and a level's
+      entity spawn that returns each entity with its position; `Level`, an
+      asset of the level file, readable through `nadir::scene`.
+    - The facade's `Sprite`, `Collider` and `Animator` reflected by hand
+      and registered; `App::collision_layers`; `nadir::world_hash` and the
+      determinism test's columns built with the engine's context.
+    - The docs: scene.md (the context, the built-ins, the engine's
+      components, Prefabs, the entity half of Levels); the lines in
+      `components.rs`, `animation.rs`, `app.rs` (`App::new`) and
+      `reflect.rs` that say "M5.6"; the status lines of ADR-0020, ADR-0024
+      and ADR-0025; the features "Reflection" and "Deterministic replays".
+  - Accept:
+    - Prefab inheritance tests pass: base, derived and override apply in
+      that order onto one value; a cycle, or a chain past 16, is an error
+      naming the chain; a missing base is an error.
+    - An unknown component name, `PrevTransform` among them, is reported
+      with the prefab's file, the prefab and the name, and the failed
+      spawn leaves no entity.
+    - A `Handle<T>` writes its asset path and reads back to the same
+      handle, loaded in the context's scope; a bad path is an error naming
+      the field.
+    - A level file's entities spawn through their prefabs in
+      `Scope::Level`.
+    - `Sprite`, `Collider` and `Animator` are reflected and registered;
+      the world hash leaves out what `nadir::animate` writes;
+      `hashes.txt` is blessed again with its reason, and each of the
+      earlier types' columns, matched by name in its `types` line, has the
+      same values at every tick.
+    - The three captures' frames are byte for byte those of before
+      (`cargo xtask site` on llvmpipe), and their new world hashes are
+      recorded, with the reason, in this task's notes.
+  - Verify: `cargo test -p nadir-scene`;
+    `NADIR_BLESS=1 cargo test -p NadirGE --test determinism`, then
+    `cargo test -p NadirGE`; `cargo xtask cook`; `cargo test -p sandbox`;
+    `cargo xtask site`; `cargo xtask ci`
+
+- [ ] **M5.12 — cook: LDtk to `levels/<name>.klvl`; the sandbox's field as an LDtk project, and its props as prefabs**
+  - Note (from M5.5, ADR-0035): every `.json` the cook finds is read as an
+    Aseprite export: LDtk's own JSON must keep its `.ldtk` and `.ldtkl`
+    extensions, or the scan must learn them first.
+  - Note (from M5.10, ADR-0038): the conventions for animated tiles, tall
+    tiles, the `Collision` layer, entities' prefabs and their fields'
+    overrides, placement, drawing and side outputs are ADR-0038's; the
+    level file's format and reader are M5.10's.
+  - Note (from the split): `tools/cook/tests/cook/workspace.rs` cooks the
+    real `assets/` and expects nothing skipped, so anything added below
+    `assets/` (the level, the prefabs, no README) comes with this task.
+  - Depends: M5.10, M5.11
+  - Do:
+    - The scan learns `.ldtk` and `.ldtkl`; each project claims its
+      external levels; a tile set's `relPath` resolves to a scanned PNG,
+      `..` only to stay inside `assets/`.
+    - A job per project that writes each of its levels as
+      `levels/<name>.klvl`, reads it back with `nadir_codec::level::parse`,
+      and is cooked again when the project, one of its `.ldtkl`s, or a
+      tile set's PNG or sidecar changes; the cook refuses what ADR-0038
+      refuses, naming the file and member, and checks that each entity's
+      prefab exists.
+    - Tests on projects made by hand: each layer type, tall and animated
+      tiles, entities and their fields, external levels, the mistakes; two
+      cooks byte for byte; an edit to an `.ldtkl` or a sidecar cooking the
+      level again to what a clean cook writes.
+    - `assets/levels/field.ldtk` (and its `.ldtkl` if external), written
+      once in 1.5.3's format from map.rs's `MAP` by a script that is not
+      committed: the ground with its animated water (4 frames of 250 ms)
+      and flowers (2 of 600 ms), the solid cells, the tall walls, and the
+      trees and rocks as entities. `assets/data/prefabs/` for the trees
+      and rocks, in M5.11's encodings.
+    - A sandbox test that reads the cooked `levels/field.klvl` and finds
+      `MAP`, cell for cell: the ground's tiles and frames, the solid
+      cells, the walls and the props; and that each cooked prefab reads
+      with no unknown component. Seeds: the cooked field in
+      `fuzz/corpus/level/`.
+    - The docs: the cook's pipelines and module doc, its description.
+  - Accept:
+    - The sandbox level is authored in LDtk's format: `cargo xtask cook`
+      turns `assets/levels/field.ldtk` into `levels/field.klvl`, which the
+      game's reader takes and which is map.rs's field, cell for cell.
+    - Two cooks are byte for byte the same; an edit to an `.ldtkl` or a
+      tile set's sidecar cooks the level again to what a clean cook
+      writes; an `.ldtk` or `.ldtkl` is never read as an Aseprite export.
+    - Each mistake ADR-0038 names is refused with its file and member.
+    - The field's prefabs cook to `data/prefabs/*.kbj` and read with no
+      unknown component.
+  - Verify: `cargo test -p nadir-cook`; `cargo xtask cook`;
+    `cargo test -p sandbox`; `cargo xtask fuzz-smoke --target level --secs 20`;
+    `cargo xtask ci`
+
+- [ ] **M5.6 — facade: `load_level`; the sandbox's field is an LDtk level**
+  - Note (from M4.5, ADR-0023):
+    - nadir-scene may not depend on nadir-render, so the facade turns a
+      level's tile layers into `TileLayer`s in its `TileLayers` resource,
+      and draws them with `TileLayerDraw`s from an engine system in
+      `Extract`.
+    - A tall tile is a `Sprite` whose `uv` is `TileSet::block_uv`, with
+      its feet at the bottom of its cell, as the sandbox's tall walls are
+      (`games/sandbox/src/map.rs`).
+    - The grid comes from the IntGrid, with `grid.layer` the layer the
+      prefabs call "World" (the sandbox's `map::WORLD`).
+    - A layer replaced in place on reload is drawn anew: revisions are
+      unique to the process.
+  - Note (from M5.3, ADR-0030): `load_level` unloads the previous level
+    with `unload_scope(Scope::Level)`. `Clips` and `TileLayers` are
     not assets: `load_level` removes a level's own (M4.6's note to M5.3).
     Assets show a frame or more after their load in a window, so a loading
     state (M9.1) can wait for `has_pending` to clear.
-  - Note (from M5.5, ADR-0035): prefabs and other data are `.jsonc` below
-    `assets/data/`, which the cook writes as KBJ at `data/<path>.kbj`
-    (`assets/data/prefabs/slime.jsonc` → `data/prefabs/slime.kbj`). A
-    level's atlas clips come with `Clips::add_atlas`, which returns their
-    handles: `load_level` removes them with `Clips::remove`, as it removes
-    its `TileLayers`. Adding an atlas twice is `ClipError::NameTaken`.
-    Every `.json` the cook finds is read as an Aseprite export: LDtk's own
-    JSON must keep its `.ldtk` and `.ldtkl` extensions, or the scan must
-    learn them first.
-  - Depends: M5.5, M4.5, M4.2
+  - Note (from M5.5, ADR-0035): a level's atlas clips come with
+    `Clips::add_atlas`, which returns their handles: `load_level` removes
+    them with `Clips::remove`, as it removes its `TileLayers`. Adding an
+    atlas twice is `ClipError::NameTaken` (ADR-0038: `Clips` skips an
+    atlas it has).
+  - Note (from the split): map.rs's `MAP` stays, the reference of M5.12's
+    test; map.rs's tests of `build` and `tall_wall` are rewritten against
+    the level, and only `field()`'s own `draw_tiles` goes: the stress
+    scenes keep theirs.
+  - Depends: M5.11, M5.12, M4.5
   - Do:
-    - LDtk → `.klvl` (tile layers, IntGrid → collision, entities, tall
-      tiles, external levels, `jsonVersion` check)
-    - `PrefabLibrary` with `extends`
-    - `load_level`
-  - Accept: the sandbox level is authored in LDtk; prefab inheritance tests
-    pass; an unknown component name is reported.
-  - Verify: `cargo test -p nadir-cook -p nadir-scene`; `cargo dev`
-    (manual)
+    - `load_level(name)`, as ADR-0038 has it: the previous level's
+      entities, tile layers, clips and `Scope::Level` assets go; the new
+      level's assets load in `Scope::Level`, its tile layers go into
+      `TileLayers`, its grid to `Collisions::set_grid`, its tall tiles
+      become sprites, its entities spawn through their prefabs, and its
+      background is the clear colour.
+    - An engine system in frame `Extract` that draws the level's tile
+      layers with no allocation in a frame.
+    - Facade tests on a small level: loading, a second level replacing the
+      first, a layer replaced in place drawn anew, an unknown component
+      reported.
+    - The sandbox's field loads `field`, names its collision layers
+      ("World", "People"), and leaves its hand-built map.
+    - `cargo xtask dist` and `cargo xtask site` ship `levels/` and `data/`
+      beside `atlas/`.
+    - The docs: scene.md's "Levels", assets-and-codecs.md, the README, the
+      cook's package texts in `xtask/src/dist.rs`, and the feature "Levels
+      and prefabs".
+  - Accept:
+    - The sandbox level is authored in LDtk: the field draws from
+      `levels/field.klvl`, its prefabs and `load_level`, with no
+      hand-built map; the captures' frames are those of M5.9, and their
+      world hashes M5.11's, or each change is explained.
+    - `load_level` replaces a level whole: the previous level's entities,
+      tile layers, clips and `Scope::Level` assets are gone.
+    - An engine `Extract` system draws the tiles, with no allocation in a
+      frame.
+    - The download and the demo page carry `levels/` and `data/`, and run
+      the field.
+    - The time `load_level` takes for the field is measured and noted.
+  - Verify: `cargo xtask cook`; `cargo test -p nadir-cook -p nadir-scene`;
+    `cargo test -p NadirGE`; `cargo test -p sandbox`; `cargo xtask dist`;
+    `cargo xtask site`; `cargo xtask ci`; `cargo dev` (manual)
 
 - [ ] **M5.7 — pack files**
   - Depends: M5.4

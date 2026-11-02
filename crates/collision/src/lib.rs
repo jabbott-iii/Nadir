@@ -1,5 +1,20 @@
-//! Collision and navigation for the Nadir engine: shapes, spatial hash,
-//! move-and-slide, queries, A* and flow fields.
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Collision for the Nadir engine: shapes, a spatial hash, move-and-slide,
+//! sweeps and queries. A* and flow fields, for navigation, come with roadmap
+//! M9.5.
 //!
 //! It is kinematic, with no rigid-body physics (ADR-0011), and a plain
 //! library over `nadir-core`: the facade copies the ECS's colliders into a

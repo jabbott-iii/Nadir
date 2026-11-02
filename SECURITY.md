@@ -147,9 +147,11 @@ sha256sum --check --ignore-missing SHA256SUMS
 
 The apt repository is signed: apt refuses an index that the key in
 `nadir-archive-keyring.gpg` did not sign. Compare that key's fingerprint
-(`gpg --show-keys nadir-archive-keyring.gpg`) with the one in
-`docs/05-release.md` before you trust it. Each release is built by
-`.github/workflows/release.yml` from a commit of `main` that CI passed.
+(`gpg --show-keys nadir-archive-keyring.gpg`) with the one recorded in
+`docs/05-release.md` before you trust it. None is recorded there yet: the
+key will be made, and its fingerprint recorded there, before the first
+release. Each release is built by `.github/workflows/release.yml` from a
+commit of `main` that CI passed.
 
 ## How the code is kept safe
 
@@ -165,9 +167,12 @@ The apt repository is signed: apt refuses an index that the key in
 - Every workflow pins each action by its full commit SHA and uses only the
   actions `docs/04-quality.md` allows it. Its token reads the repository
   by default, and only the jobs that need it are given write access, to
-  what they need: CodeQL's analysis job to code scanning, and the demo
-  page's deploy job to Pages. `cargo xtask workflows` checks this on every
-  push, and Dependabot proposes updates to the pins each week.
+  what they need: CodeQL's analysis job to code scanning, the demo page's
+  deploy job to Pages, the release workflow's `release` job to the
+  repository's contents (`contents: write`, which it needs to publish the
+  release, though it could also push to any branch), and its `image` job
+  to its packages. `cargo xtask workflows` checks this on every push, and
+  Dependabot proposes updates to the pins each week.
 
 ## Known issues
 

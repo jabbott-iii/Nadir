@@ -1,3 +1,17 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! JSON tests against the hand-made vectors in `tests/json/`, and property
 //! tests of the parser and the writers working together.
 
@@ -56,6 +70,20 @@ fn identical(a: &Value, b: &Value) -> bool {
 }
 
 // ------------------------------------------------------------ RFC 8259
+
+// json/rfc8259_image.json and json/rfc8259_locations.json, their copies in
+// fuzz/corpus/json and their KBJ encodings in fuzz/corpus/kbj are the
+// examples of IETF RFC 8259, section 13, which the tests below also quote.
+// They are the IETF Trust's, not the project's, and keep its notice:
+//
+// Copyright (c) 2017 IETF Trust and the persons identified as authors of
+// the code. All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, is permitted pursuant to, and subject to the license terms
+// contained in, the Revised BSD License set forth in Section 4.c of the
+// IETF Trust's Legal Provisions Relating to IETF Documents
+// (https://trustee.ietf.org/license-info).
 
 const RFC_IMAGE: &str = include_str!("json/rfc8259_image.json");
 const RFC_LOCATIONS: &str = include_str!("json/rfc8259_locations.json");

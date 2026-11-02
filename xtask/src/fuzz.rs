@@ -1,3 +1,17 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! `cargo xtask fuzz-smoke`: throws mutated inputs at the parsers for a
 //! while, and fails if one of them panics or hangs.
 //!
@@ -14,11 +28,13 @@ use std::fs;
 use std::io::Write;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use nadir_codec::inflate::ErrorKind as InflateError;
 use nadir_codec::{
-    CodecError, Limits, adler32, aseprite, atlas, bmfont, inflate, json, kbj, klz, png, qoi, wav,
+    CodecError, Limits, adler32, aseprite, atlas, bmfont, inflate, json, kbj, klz, ldtk, level,
+    png, prefab, qoi, wav,
 };
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
@@ -78,6 +94,18 @@ const TARGETS: &[Target] = &[
     Target {
         name: "aseprite",
         run: parse_aseprite,
+    },
+    Target {
+        name: "ldtk",
+        run: parse_ldtk,
+    },
+    Target {
+        name: "level",
+        run: parse_level_file,
+    },
+    Target {
+        name: "prefab",
+        run: parse_prefab,
     },
 ];
 
@@ -372,6 +400,299 @@ fn parse_aseprite(input: &[u8]) {
     assert!(
         names.windows(2).all(|pair| pair[0] != pair[1]),
         "two tags of one name"
+    );
+}
+
+/// The project the `ldtk` target reads its inputs against as level files:
+/// the seed `external.ldtk`, which saves its two levels apart.
+fn ldtk_project() -> &'static ldtk::Project {
+    static PROJECT: OnceLock<ldtk::Project> = OnceLock::new();
+    PROJECT.get_or_init(|| {
+        ldtk::parse_project(
+            include_str!("../../fuzz/corpus/ldtk/external.ldtk"),
+            Limits::default(),
+        )
+        .expect("the seed external.ldtk is a project the reader takes")
+    })
+}
+
+/// The `ldtk` target: `nadir_codec::ldtk::parse_project`, and
+/// `parse_level` against [`ldtk_project`], with the default limits. What
+/// they accept must keep the promises the cook relies on: a version of
+/// 1.5.x; definitions of their own uids, whose references are to ones the
+/// project has; each level saved apart exactly as the project says, with a
+/// size; each layer of its definition's type, of a grid that its IntGrid
+/// fills with values it defines; each tile of its layer's tile set, flipped
+/// 0 to 3 and from 0 to 1 opaque; each entity of a definition the project
+/// has.
+fn parse_ldtk(input: &[u8]) {
+    // The reader takes text. Bytes that are not UTF-8 become U+FFFD, so
+    // that every input reaches it.
+    let text = String::from_utf8_lossy(input);
+    let limits = Limits::default();
+    if let Ok(project) = ldtk::parse_project(&text, limits) {
+        assert!(
+            project.json_version.starts_with("1.5."),
+            "a version other than 1.5.x"
+        );
+        let unique = |uids: Vec<i64>| {
+            uids.iter()
+                .enumerate()
+                .all(|(index, uid)| !uids[..index].contains(uid))
+        };
+        assert!(
+            unique(project.tilesets.iter().map(|tileset| tileset.uid).collect())
+                && unique(project.layers.iter().map(|layer| layer.uid).collect())
+                && unique(project.entities.iter().map(|entity| entity.uid).collect()),
+            "two definitions of one uid"
+        );
+        for tileset in &project.tilesets {
+            assert!(
+                tileset.tile_count() <= limits.max_entries as u64,
+                "a tile set of more tiles than the limit"
+            );
+            assert!(
+                tileset
+                    .custom_data
+                    .iter()
+                    .all(|data| u64::from(data.tile) < tileset.tile_count()),
+                "custom data of a tile the set lacks"
+            );
+        }
+        for layer in &project.layers {
+            assert!(
+                layer
+                    .tileset
+                    .is_none_or(|uid| project.tileset(uid).is_some()),
+                "a layer of a tile set the project lacks"
+            );
+            assert!(
+                layer.int_grid_values.iter().all(|value| value.value >= 1),
+                "an IntGrid value below 1"
+            );
+        }
+        for level in &project.levels {
+            assert!(
+                level.external_path.is_some() == level.layers.is_none()
+                    && level.layers.is_none() == project.external_levels,
+                "a level saved apart, or not, against its project"
+            );
+            check_ldtk_level(&project, level, limits);
+        }
+    }
+    let project = ldtk_project();
+    if let Ok(level) = ldtk::parse_level(&text, project, limits) {
+        assert!(level.layers.is_some(), "a level file with no layers");
+        assert!(
+            project
+                .levels
+                .iter()
+                .any(|known| known.iid == level.iid && known.external_path.is_some()),
+            "a level file of a level the project does not save apart"
+        );
+        check_ldtk_level(project, &level, limits);
+    }
+}
+
+/// The promises of [`parse_ldtk`] that a level of `project` keeps.
+fn check_ldtk_level(project: &ldtk::Project, level: &ldtk::Level, limits: Limits) {
+    assert!(level.width >= 1 && level.height >= 1, "a level of no size");
+    for layer in level.layers.iter().flatten() {
+        let definition = project
+            .layer(layer.layer_def)
+            .expect("a layer of a definition the project has");
+        assert_eq!(layer.kind, definition.kind, "a layer of another type");
+        let cells = u64::from(layer.columns) * u64::from(layer.rows);
+        assert!(
+            cells <= limits.max_entries as u64 && layer.grid_size >= 1,
+            "a layer of more cells than the limit, or of cells of no size"
+        );
+        if layer.kind == ldtk::LayerKind::IntGrid {
+            assert_eq!(layer.int_grid.len() as u64, cells, "an IntGrid not filled");
+            assert!(
+                layer.int_grid.iter().all(|&value| value == 0
+                    || definition
+                        .int_grid_values
+                        .iter()
+                        .any(|known| known.value == value)),
+                "an IntGrid value the layer does not define"
+            );
+        } else {
+            assert!(
+                layer.int_grid.is_empty(),
+                "values in a layer of another type"
+            );
+        }
+        let tiles = layer.grid_tiles.iter().chain(&layer.auto_layer_tiles);
+        match layer.tileset.and_then(|uid| project.tileset(uid)) {
+            Some(tileset) => {
+                for tile in tiles {
+                    assert!(
+                        u64::from(tile.tile) < tileset.tile_count()
+                            && tile.flip <= 3
+                            && (0.0..=1.0).contains(&tile.alpha),
+                        "a tile its set lacks, or flipped or faded out of range"
+                    );
+                }
+            }
+            None => assert!(
+                layer.tileset.is_none() && tiles.count() == 0,
+                "tiles with no tile set, or of one the project lacks"
+            ),
+        }
+        assert!(
+            layer
+                .entities
+                .iter()
+                .all(|entity| project.entity(entity.entity_def).is_some()),
+            "an entity of a definition the project lacks"
+        );
+    }
+}
+
+/// The `level` target: `nadir_codec::level::parse`, with the default
+/// limits. What it accepts must keep the promises the game's level loading
+/// relies on: a size; its assets in order, each tile set's atlas among
+/// them; each tile set of at most 65535 tiles, its animations in order,
+/// apart and of its tiles; each layer and tall tile of a tile set it has,
+/// each cell of its set, one cell for each of a layer's or grid's; each
+/// tall block inside its set; each entity a prefab's name, its overrides
+/// named as components, none `null`.
+fn parse_level_file(input: &[u8]) {
+    let Ok(file) = level::parse(input, Limits::default()) else {
+        return;
+    };
+    assert!(
+        file.size
+            .iter()
+            .all(|side| (1..=level::MAX_SIDE).contains(side)),
+        "a level of no size, or too large"
+    );
+    assert!(
+        file.camera
+            .is_none_or(|camera| camera.width >= 1 && camera.height >= 1),
+        "a camera of no size"
+    );
+    assert!(
+        [&file.music, &file.ambience]
+            .into_iter()
+            .flatten()
+            .all(|path| !path.is_empty()),
+        "music or ambience of no path"
+    );
+    assert!(
+        file.assets.windows(2).all(|pair| pair[0] < pair[1])
+            && file.assets.iter().all(|asset| !asset.is_empty()),
+        "assets out of order, or empty"
+    );
+    for tileset in &file.tilesets {
+        assert!(
+            file.assets.contains(&tileset.atlas) && !tileset.sprite.is_empty(),
+            "a tile set's atlas that is not an asset, or of no sprite"
+        );
+        let count = tileset.tile_count();
+        assert!(
+            (1..=level::MAX_TILES).contains(&count),
+            "a tile set of no tiles, or of too many"
+        );
+        let mut next = 0;
+        for animation in &tileset.animations {
+            let end = u32::from(animation.tile) + u32::from(animation.frames);
+            assert!(
+                u32::from(animation.tile) >= next
+                    && end <= count
+                    && animation.frames >= 2
+                    && animation.millis >= 1,
+                "an animation out of order, overlapping, past its set, or of no time"
+            );
+            next = end;
+        }
+    }
+    let count = |index: u32| file.tilesets[index as usize].tile_count();
+    for layer in &file.layers {
+        let cells = u64::from(layer.size[0]) * u64::from(layer.size[1]);
+        assert_eq!(
+            layer.cells.len() as u64,
+            cells,
+            "a layer's cells do not fill it"
+        );
+        let tiles = count(layer.tileset);
+        assert!(
+            layer
+                .cells
+                .iter()
+                .flatten()
+                .all(|cell| u32::from(cell.tile) < tiles),
+            "a cell of a tile its set lacks"
+        );
+        assert!(
+            layer.size[0] >= 1 && layer.size[1] >= 1 && (1..=level::MAX_CELL).contains(&layer.cell),
+            "a layer of no cells, or of cells of no size or too large"
+        );
+    }
+    if let Some(grid) = &file.grid {
+        let cells = u64::from(grid.size[0]) * u64::from(grid.size[1]);
+        assert_eq!(
+            grid.solid.len() as u64,
+            cells,
+            "a grid's cells do not fill it"
+        );
+        assert!(
+            grid.size[0] >= 1 && grid.size[1] >= 1 && (1..=level::MAX_CELL).contains(&grid.cell),
+            "a grid of no cells, or of cells of no size or too large"
+        );
+        assert!(!grid.layer.is_empty(), "a grid on no collision layer");
+    }
+    for tall in &file.tall {
+        let tileset = &file.tilesets[tall.tileset as usize];
+        let columns = u32::from(tileset.columns);
+        let (column, row) = (
+            u32::from(tall.tile) % columns,
+            u32::from(tall.tile) / columns,
+        );
+        assert!(
+            tall.size[0] >= 1
+                && tall.size[1] >= 1
+                && column + u32::from(tall.size[0]) <= columns
+                && row + u32::from(tall.size[1]) <= u32::from(tileset.rows),
+            "a tall block outside its set"
+        );
+    }
+    for entity in &file.entities {
+        assert!(
+            prefab::is_name(&entity.prefab),
+            "an entity of no prefab's name"
+        );
+        assert!(
+            entity
+                .overrides
+                .iter()
+                .all(|(name, value)| prefab::is_component_name(name) && !value.is_null()),
+            "an override of no component's name, or null"
+        );
+    }
+}
+
+/// The `prefab` target: `nadir_codec::prefab::parse`, with the default
+/// limits. What it accepts must keep the promises nadir-scene relies on:
+/// a prefab's name, and a base's that is not its own; its components named
+/// as types, none `null`.
+fn parse_prefab(input: &[u8]) {
+    let Ok(file) = prefab::parse(input, Limits::default()) else {
+        return;
+    };
+    assert!(prefab::is_name(&file.name), "a prefab of no name");
+    assert!(
+        file.extends
+            .as_deref()
+            .is_none_or(|base| prefab::is_name(base) && base != file.name),
+        "a base of no name, or the prefab itself"
+    );
+    assert!(
+        file.components
+            .iter()
+            .all(|(name, value)| prefab::is_component_name(name) && !value.is_null()),
+        "a component of no type's name, or null"
     );
 }
 
@@ -1622,6 +1943,51 @@ mod tests {
                 .iter()
                 .any(|sprite| sprite.name == "sprites/person")
         }));
+    }
+
+    #[test]
+    fn the_ldtk_seeds_are_projects_and_level_files_the_reader_accepts() {
+        let project = ldtk_project();
+        let mut projects = 0;
+        let mut levels = 0;
+        for seed in seeds_of("ldtk") {
+            let text = std::str::from_utf8(&seed).unwrap();
+            match ldtk::parse_project(text, Limits::default()) {
+                Ok(_) => projects += 1,
+                Err(_) => {
+                    ldtk::parse_level(text, project, Limits::default()).unwrap();
+                    levels += 1;
+                }
+            }
+        }
+        // A project that keeps its level inside it, the one that saves them
+        // apart, and both its level files.
+        assert_eq!((projects, levels), (2, 2));
+    }
+
+    #[test]
+    fn the_level_and_prefab_seeds_are_files_the_codec_accepts() {
+        let levels: Vec<level::LevelFile> = seeds_of("level")
+            .iter()
+            .map(|seed| level::parse(seed, Limits::default()))
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // Among them, a grid, tall tiles, overrides and a camera.
+        assert!(levels.iter().any(|file| file.grid.is_some()));
+        assert!(levels.iter().any(|file| !file.tall.is_empty()));
+        assert!(levels.iter().any(|file| file.camera.is_some()));
+        assert!(levels.iter().any(|file| {
+            file.entities
+                .iter()
+                .any(|entity| !entity.overrides.is_empty())
+        }));
+        let prefabs: Vec<prefab::PrefabFile> = seeds_of("prefab")
+            .iter()
+            .map(|seed| prefab::parse(seed, Limits::default()))
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(prefabs.iter().any(|file| file.extends.is_some()));
+        assert!(prefabs.iter().any(|file| file.components.is_empty()));
     }
 
     #[test]

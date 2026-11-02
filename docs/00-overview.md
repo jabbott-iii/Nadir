@@ -34,7 +34,8 @@ them.** A subsystem is not "done" until the sandbox uses it.
 ## Performance budgets
 
 These are the numbers we test against. "Min-spec" is the slowest machine we
-promise to support. Pick a concrete machine at M0 and record it here.
+promise to support. No min-spec machine is named yet: record one here
+before M11.5 measures every budget on it.
 
 | Budget | Target |
 | :- | :- |

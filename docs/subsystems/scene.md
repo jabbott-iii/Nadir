@@ -59,7 +59,7 @@ pub trait FromValue: Reflect + Sized {
 - **Built-in impls:** `bool`, the integers up to 64 bits (`i8` to `i64`,
   `isize`, `u8` to `u64`, `usize`), `f32`, `f64`, `String`, `Vec2`,
   `IVec2`, `Color`, `Rect`, `Option<T>`, `Vec<T>`. `Handle<T>` (as an asset
-  path string) comes with prefabs and levels (M5.6), and `Entity`
+  path string) comes with prefabs and levels (M5.11), and `Entity`
   references (as `SaveId`) with saves (M9.4): they need the asset server and
   the `SaveId` map in the context.
 - **Encodings** (ADR-0020):
@@ -105,8 +105,8 @@ pub trait FromValue: Reflect + Sized {
   - reflected: `Transform` as `{"position": [x, y]}`, `Velocity` as
     `[x, y]` in pixels a second, `Player` as `{}`, `SaveId` as an
     integer, and `Facing` (M4.6) as its variant's name;
-  - not yet: `Sprite` (a `Handle`, M5.6), `Collider` (layer names, M5.6),
-    `Animator` (a `Handle<Clip>` from the facade's `Clips`, M5.6,
+  - not yet: `Sprite` (a `Handle`, M5.11), `Collider` (layer names,
+    M5.11), `Animator` (a `Handle<Clip>` from the facade's `Clips`, M5.11,
     ADR-0024) and `Parent` (an `Entity`, M9.4);
   - never in data: `PrevTransform`, which the engine gives every drawn
     entity.

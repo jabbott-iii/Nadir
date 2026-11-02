@@ -15,8 +15,8 @@ below is our own code (dependency policy items 26–28).
 | Golden-image tests | `xtask golden`; scenes in the GL test binaries, references in `tests/golden/` | Linux CI (llvmpipe); Windows and macOS locally before release | Rendering regressions, backend divergence |
 | Determinism tests | `nadir/tests/determinism.rs` | `cargo test` | Replays producing different world state |
 | Fuzz smoke | `xtask fuzz-smoke` | CI (time-boxed) | Panics, hangs, huge allocations in parsers |
-| Soak tests | `xtask soak` (manual or nightly) | Real hardware | Audio underruns, memory growth, handle leaks |
-| Benchmarks | `nadir-bench` | Nightly or manual | Performance regressions versus the stored baseline |
+| Soak tests | `xtask soak` (from M6.7; manual or nightly) | Real hardware | Audio underruns, memory growth, handle leaks |
+| Benchmarks | `nadir-bench` | Manual; nightly once there is a nightly job | Performance regressions versus the stored baseline |
 
 ## Own harnesses
 
@@ -56,7 +56,8 @@ pub fn check_sized<T: std::fmt::Debug>(
   - The facade's tests are behind its `dev` feature, not `headless-test`,
     so `cargo test -p NadirGE --features dev` on Linux needs EGL and an
     OpenGL 3.3 driver.
-- A nightly job runs with random seeds and prints the seeds it used.
+- A nightly job, once there is one, runs the property tests with random
+  seeds and prints the seeds it used.
 - Shrinking is deliberately minimal, and only `check_sized` does it: the
   harness retries a failing case at every smaller size and reports the
   smallest size that still fails.
@@ -238,7 +239,8 @@ pub fn check_sized<T: std::fmt::Debug>(
     them (`png`). One that can check its own answers asserts them, so that
     a wrong answer is a finding too (`inflate`, `klz`, `kbj`), and so does
     one whose reader makes promises its users rely on (`atlas`,
-    `aseprite`). See `docs/subsystems/assets-and-codecs.md`.
+    `aseprite`, `ldtk`, `level`, `prefab`). See
+    `docs/subsystems/assets-and-codecs.md`.
 - The optional coverage-guided fuzzing (`cargo fuzz`) is a separate,
   **unapproved** proposal (policy item 29).
 
@@ -259,7 +261,7 @@ pub fn check_sized<T: std::fmt::Debug>(
   count for the last frame in the resource `FrameAllocs`: from the end of
   the frame before to the end of this one. The sandbox reports it once a
   second.
-- The debug overlay shows allocations per frame.
+- The debug overlay will show allocations per frame (M7.3).
 - Tests assert **0 allocations** in steady state:
   - the facade's unit test `steady_frames` in `crates/engine/src/app.rs`
     draws 10,000 sprite entities of its own through the real loop,
@@ -344,8 +346,9 @@ pub fn check_sized<T: std::fmt::Debug>(
 | `test` | `cargo test --workspace --all-features` |
 | `deps` | `cargo metadata --format-version 1`, parsed with `nadir-codec::json`; every package with a non-null `source` must appear in `xtask/deps-allowlist.txt` with its exact version. A path package from outside the workspace also fails (vendored code) |
 | `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |
-| `crates` | Same metadata (ADR-0036). Each workspace member that crates.io gets (no `publish = false`) must have a description, a license and a repository; be at `NadirGE`'s version; and depend on workspace crates only if crates.io gets them too, by the requirement `^<version>`. Notes the crates it checked |
+| `crates` | Same metadata (ADR-0036). Each workspace member that crates.io gets (no `publish = false`) must have a description, a license and a repository, and copies of the root's `LICENSE` and `NOTICE` in its folder, byte for byte, as cargo leaves them out of its package otherwise (ADR-0037); be at `NadirGE`'s version; and depend on workspace crates only if crates.io gets them too, by the requirement `^<version>`. Notes the crates it checked |
 | `unsafe-audit` | Scans `*.rs`, ignoring comments and string literals: no `unsafe` outside `sys`/`platform`/`gfx`; `allow`, `expect` or `warn(unsafe_code)` only in those three crate roots; every `unsafe {` / `unsafe impl` preceded by a `// SAFETY:` comment that ends at most 3 lines above it; prints a per-crate `unsafe` count (reviewed if it grows) |
+| `headers` | Walks the workspace (not the top-level `target`, nor hidden folders but `.github`) for source files, by extension or name: `.rs`, `.glsl`, `.metal`, `.py`, `.sh`, `.js`, `.css`, `.html`, `Makefile`, `Dockerfile` and `.github/workflows/*.yml`. Each must start with the Apache-2.0 header of `LICENSE`'s appendix in its comment syntax, then a blank line: on line 1, or after a GLSL `#version` line, a `#!` line or an HTML doctype. Names the first line that differs and what it should be (ADR-0037) |
 | `workflows` | Reads each file of `.github/workflows` line by line (ADR-0032). Fails a workflow with no row in its table of the actions each may use and the jobs that may grant `write`, with the permissions each may; an action not in its row, not pinned by a full commit SHA, or with no `# v…` tag comment on its line (a list item is read however it is spaced); top-level permissions other than `{}` or `contents: read`, or none; a job's `write` on any permission its row does not name, or permissions written on one line (`write-all`, `read-all`, `{ … }`); `pull_request_target`; and an `actions/checkout` without `persist-credentials: false` |
 | `release-no-dev` | Runs `cargo tree -p sandbox -e normal --prefix none` without the `dev` feature and fails if `nadir-debug` appears |
 | `features` | Reads `docs/features.jsonc` with `nadir-codec::json` and the roadmap's task lines (`- [x] **M3.3 — …**`, or `[X]`). Fails when a line looks like a task's (a list item, indented, quoted or numbered or not, with a checkbox of one character and, anywhere after it, the start of a task ID such as `M5.3` or `m5.3`, bold or not, outside a longer word) but cannot be read as one, two tasks share an ID, a ticked task belongs to no feature, a feature's `ticked` (the tasks ticked when its summary was written) is not what the roadmap ticks or names a task the feature does not need, a feature names a task the roadmap lacks or names one twice, two features share a name, or an entry is not an object of `name`, `area`, `summary` (none blank) and `tasks` (at least one ID). Notes how many features are shipped, in progress and planned (ADR-0029) |
@@ -397,7 +400,7 @@ understood.
   `security-extended` queries, on pushes to `main`, on pull requests,
   weekly and by hand, and reports to the repository's Security tab. Its
   analysis job has `contents: read` and `security-events: write`.
-- **Nightly:**
+- **Nightly** (no such workflow yet; M11.6 adds the nightly fuzz job):
   - `xtask bench` (report only)
   - fuzz smoke for 30 minutes per parser
   - property tests with random seeds
@@ -450,7 +453,8 @@ understood.
      - cooks `assets/` into `target/cooked` first, as `cargo xtask cook`
        does: the sandbox draws the cooked sprites (ADR-0033);
      - packs the sandbox and the cooked atlases, `target/cooked/atlas` and
-       nothing else of that folder, as `assets/atlas` beside it, into
+       nothing else of that folder, as `assets/atlas` beside it, with a
+       `README.txt`, `LICENSE` and `NOTICE` (ADR-0037), into
        `downloads/nadir-sandbox-linux-x86_64.tar.gz`, with its SHA-256 and
        the oldest glibc it runs on, read from the version names in the
        executable;

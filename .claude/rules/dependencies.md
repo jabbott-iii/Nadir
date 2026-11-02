@@ -27,11 +27,11 @@ paths:
 - **Toolchain:** don't change the pinned toolchain in `rust-toolchain.toml`
   as a side effect of another task. Toolchain bumps are their own task.
 - **Lockfile:** `Cargo.lock` must stay free of `source = ` entries. Check
-  with `cargo xtask deps` (or `grep -c 'source = ' Cargo.lock` before M0.6
-  exists).
+  with `cargo xtask deps`.
 - **Build scripts:** `build.rs` may only emit `cargo:` directives (link
   args, rerun-if-changed). No network access, no running external tools.
-  Windows resource compilation happens in `xtask package`, not `build.rs`.
+  Windows resource compilation will happen in `xtask package` (roadmap
+  M11.1), not `build.rs`.
 - **xtask:**
   - must never upload, publish, sign with real credentials, or read secrets
   - must not call the network

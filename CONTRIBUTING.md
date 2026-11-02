@@ -137,10 +137,12 @@ Windows and macOS, and the same commands CI runs:
 
 | Command | What it does |
 | :- | :- |
-| `cargo xtask ci` | The whole pull request gate: fmt check, clippy with `-D warnings`, `cook`, tests, `deps`, `layers`, `unsafe-audit`, `workflows`, `release-no-dev`, `features` |
+| `cargo xtask ci` | The whole pull request gate: fmt check, clippy with `-D warnings`, `cook`, tests, `deps`, `layers`, `crates`, `unsafe-audit`, `headers`, `workflows`, `release-no-dev`, `features` |
 | `cargo xtask deps` | Fails if `Cargo.lock` holds a package from outside the workspace that the policy does not approve |
 | `cargo xtask layers` | Fails if a crate depends on one the dependency matrix forbids |
+| `cargo xtask crates` | Fails if a crate for crates.io lacks what crates.io shows or copies of `LICENSE` and `NOTICE`, is at another version, or depends on a crate crates.io does not get |
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the three allowed crates, or without a `SAFETY:` comment |
+| `cargo xtask headers` | Fails if a source file does not start with the license header, in its place |
 | `cargo xtask workflows` | Fails if a workflow in `.github/workflows` uses an action it may not, pins one by anything but a commit SHA with its tag in a comment, or gives its token more than it may |
 | `cargo xtask features` | Fails if `docs/features.jsonc` does not match the roadmap's ticks |
 | `cargo xtask golden [--bless]` | Draws the golden scenes offscreen and compares them with `tests/golden/` |
@@ -149,13 +151,16 @@ Windows and macOS, and the same commands CI runs:
 | `cargo xtask cook [--force]` | Cooks `assets/` into `target/cooked/` |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site` (needs EGL and GStreamer) |
 
-### Why there is no Makefile
+### The Makefile
 
-`cargo xtask` already gives every contributor one set of commands, written
-in Rust in this workspace, and it runs the same way on all three systems,
-including Windows, where `make` is not installed by default. A Makefile
-would be a second list of the same commands to keep in step, and CI would
-not run it. If you are used to `make`:
+The root `Makefile` has one target, `make release`, with which a
+maintainer tags a release and pushes the tag
+([`docs/05-release.md`](docs/05-release.md), "Making a release"). Every
+other check and tool is a `cargo xtask` command, written in Rust in this
+workspace: it runs the same way on all three systems, including Windows,
+where `make` is not installed by default, and CI runs the same commands.
+The Makefile leaves them out, as it would be a second list of the same
+commands to keep in step. If you are used to `make`:
 
 | Instead of | Run |
 | :- | :- |
@@ -294,3 +299,14 @@ what is in scope.
 
 By contributing, you agree that your contributions are licensed under the
 Apache License 2.0 (see [`LICENSE`](LICENSE), section 5).
+
+Every source file starts with the license header from the appendix of
+`LICENSE`, in that file's comment syntax; copy it from any file of the
+same kind into a new one. It goes after a `#!` line, an HTML doctype, or
+a shader's `#version 330 core`, which must stay the first line, and
+`cargo xtask headers` checks it. A crate published to crates.io keeps
+copies of `LICENSE` and `NOTICE` in its folder, which `cargo xtask crates`
+checks.
+[`NOTICE`](NOTICE) holds only the notices a license requires there;
+material that is not the project's own keeps its own license and notice
+beside it.

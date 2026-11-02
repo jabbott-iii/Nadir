@@ -1,5 +1,19 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! Nadir, a 2D top-down game engine for desktop. This facade crate provides
-//! `App`, plugins, the main loop and re-exports of the engine's subsystems.
+//! `App`, the main loop and re-exports of the engine's subsystems.
 //!
 //! So far there is [`App`] with the main loop: it opens the log file and
 //! the window, latches the game's actions, steps the simulation

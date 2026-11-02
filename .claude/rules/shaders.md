@@ -9,8 +9,9 @@ paths:
 
 - **Both versions or neither.** Each program lives in
   `crates/render/shaders/<name>/` as `<name>.vert.glsl`, `<name>.frag.glsl`
-  (GLSL `#version 330 core`) and `<name>.metal` (entry points `vs_main` and
-  `fs_main`). Changing one means changing the other in the same task.
+  (GLSL `#version 330 core`) and, from roadmap M10.3, `<name>.metal` (entry
+  points `vs_main` and `fs_main`). Until then a program has only its GLSL;
+  from then on, changing one means changing the other in the same task.
 - **The Rust interface constant for the shader is the source of truth.**
   It lists attribute locations, uniform blocks and their sizes, and texture
   slots. Update it first, then make both sources match. The parity test

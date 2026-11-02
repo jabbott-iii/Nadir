@@ -1,7 +1,21 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! The parts of `cargo metadata` that the `deps`, `layers` and `crates`
 //! checks read.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use nadir_codec::Limits;
 use nadir_codec::json::{self, Value};
@@ -32,6 +46,8 @@ pub(crate) struct Package {
     pub(crate) source: Option<String>,
     /// Whether the package is a member of this workspace.
     pub(crate) is_member: bool,
+    /// The folder of its `Cargo.toml`, which cargo always gives.
+    pub(crate) dir: Option<PathBuf>,
     /// Whether crates.io may get it: no `publish = false`, nor a list of
     /// registries without crates.io.
     pub(crate) to_crates_io: bool,
@@ -114,6 +130,8 @@ pub(crate) fn parse(text: &str) -> Result<Metadata, Error> {
             version: string(package, "version")?.to_string(),
             source: optional_string(package, "source")?,
             is_member: members.contains(&id),
+            dir: unless_absent(package, "manifest_path")?
+                .and_then(|path| Path::new(&path).parent().map(Path::to_path_buf)),
             to_crates_io: to_crates_io(package)?,
             about: About {
                 description: unless_absent(package, "description")?,
@@ -228,6 +246,7 @@ pub(crate) mod testing {
             version: "0.1.0".to_string(),
             source: None,
             is_member: true,
+            dir: None,
             to_crates_io: true,
             about: About::default(),
             dependencies: Vec::new(),
@@ -241,6 +260,7 @@ pub(crate) mod testing {
             version: version.to_string(),
             source: Some(CRATES_IO.to_string()),
             is_member: false,
+            dir: None,
             to_crates_io: true,
             about: About::default(),
             dependencies: Vec::new(),
@@ -425,6 +445,11 @@ mod tests {
         assert!(sample.packages[0].to_crates_io);
         assert_eq!(sample.packages[0].about.description, None);
         assert!(sample.packages[0].about.authors.is_empty());
+        assert_eq!(
+            sample.packages[0].dir.as_deref(),
+            Some(Path::new("/work/nadir/crates/core"))
+        );
+        assert_eq!(metadata.packages[0].dir, None);
         assert_eq!(
             detail(parse(&text.replace(r#"["A <a@a.example>"]"#, "[7]"))),
             "`authors` holds something not a string"

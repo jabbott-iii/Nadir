@@ -2,12 +2,17 @@
 
 ## Cargo profiles
 
+The root `Cargo.toml` sets only `[profile.xtask]` so far. The rest of this
+block is the plan, which nothing sets yet. Until it is set, `cargo xtask
+dist` and the release workflow build in cargo's default `release` profile,
+and the `dist` profile is for `xtask package` (M11.1).
+
 ```toml
 [profile.dev]
 opt-level = 1                  # debuggable but not glacial
 
 # Hot, rarely-stepped-through crates can be optimized harder in dev.
-# Decide per crate in M0 by measuring sandbox frame time:
+# Decide per crate by measuring sandbox frame time:
 # [profile.dev.package.nadir-codec]
 # opt-level = 3
 
@@ -118,9 +123,10 @@ and its README state (2.34 on 2026-10-31), not the container's floor above.
 Once `xtask package` exists (M11.1), the page can offer the package above
 instead.
 
-`LICENSES.txt` lists our own license and the licenses of any approved
-dependencies. With zero dependencies, that's just ours. Fonts and other
-content have their own entries.
+`LICENSES.txt` lists our own license and `NOTICE`, which a game that
+ships the engine must carry (the license's section 4(d)), and the
+licenses of any approved dependencies. With zero dependencies, that's
+just ours. Fonts and other content have their own entries.
 
 ## Engine releases (`.github/workflows/release.yml`, ADR-0036)
 
@@ -132,10 +138,10 @@ crates. Nothing is signed or notarized until M11.2.
 
 | Where | What |
 | :- | :- |
-| The GitHub release `v<version>` | `nadir-<version>-<target>.tar.gz` (Linux, macOS) or `.zip` (Windows) for each of the six targets, `{x86_64,aarch64}-{unknown-linux-gnu,pc-windows-msvc,apple-darwin}`. Each holds `nadir-cook`, the sandbox with its cooked atlases in `assets/`, `README.txt` and `LICENSE`. On Windows and macOS the sandbox runs in an empty window until the engine draws there (M2.6, M2.7), which their READMEs say |
+| The GitHub release `v<version>` | `nadir-<version>-<target>.tar.gz` (Linux, macOS) or `.zip` (Windows) for each of the six targets, `{x86_64,aarch64}-{unknown-linux-gnu,pc-windows-msvc,apple-darwin}`. Each holds `nadir-cook`, the sandbox with its cooked atlases in `assets/`, `README.txt`, `LICENSE` and `NOTICE` (ADR-0037). On Windows and macOS the sandbox runs in an empty window until the engine draws there (M2.6, M2.7), which their READMEs say |
 | The same release | `nadir-cook_<version>_<arch>.deb` and `nadir-sandbox_<version>_<arch>.deb` for `amd64` and `arm64` (the file named for the release's version, as GitHub turns Debian's `~` into `.` in an asset's name); the apt repository's `Packages`, `Packages.gz`, `Release`, `InRelease`, `Release.gpg` and `nadir-archive-keyring.gpg`; and `SHA256SUMS` of every file |
 | ghcr.io | `ghcr.io/jabbott-iii/nadir-cook:<version>`, and `:latest` unless the version is a pre-release, for `linux/amd64` and `linux/arm64`: the cook linked statically, `FROM scratch` (`tools/cook/Dockerfile`) |
-| crates.io | 13 crates at `<version>`: `NadirGE`, the facade (`nadir` in code); `nadir-cook`; and `nadir-core`, `-sys`, `-platform`, `-gfx`, `-codec`, `-ecs`, `-input`, `-render`, `-assets`, `-collision` and `-scene`. The sandbox, `xtask`, `nadir-bench`, `nadir-audio` and `nadir-debug` have `publish = false` |
+| crates.io | 13 crates at `<version>`: `NadirGE`, the facade (`nadir` in code); `nadir-cook`; and `nadir-core`, `-sys`, `-platform`, `-gfx`, `-codec`, `-ecs`, `-input`, `-render`, `-assets`, `-collision` and `-scene`, each with copies of `LICENSE` and `NOTICE` (ADR-0037). The sandbox, `xtask`, `nadir-bench`, `nadir-audio` and `nadir-debug` have `publish = false` |
 
 A version with a `-`, such as `0.2.0-rc.1`, is a pre-release: GitHub does
 not mark it latest, so apt stays on the last full release, and the image
@@ -212,7 +218,7 @@ for it, so push the next tag once the release before it has finished.
    - `cargo xtask dist` (`xtask/src/dist.rs`):
      - cooks `assets/`, and builds the cook and the sandbox in release,
        `--locked`;
-     - lays them out with the atlases, `README.txt` and `LICENSE`;
+     - lays them out with the atlases, `README.txt`, `LICENSE` and `NOTICE`;
      - runs them: `nadir-cook --version` must print the version, the
        laid-out cook must cook `assets/` into the same atlases byte for
        byte, and the sandbox must refuse an unknown scene, which it does

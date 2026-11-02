@@ -1,46 +1,147 @@
-# Nadir engine — design and build plan
+# Nadir
 
-This folder is the design for a cross-platform (desktop) 2D top-down game
-engine written in Rust, with almost no third-party dependencies. It is laid out
-so Claude Code (or another coding agent) can start building it right away.
+Nadir is a 2D game engine for top-down games, written in Rust for Windows,
+macOS and Linux. It is made for games with tilemaps, y-sorted sprites,
+kinematic movement and many entities.
 
-## How to use it
+It is written from the ground up, with no third-party crates. Its OS
+bindings, OpenGL backend, math, ECS, codecs, asset pipeline and tools are all
+in this repository. Beyond Rust's standard library, it calls only the
+system's own libraries, such as Xlib, EGL and OpenGL.
 
-1. Create an empty Git repository and copy everything in this folder into its
-   root, including the hidden `.claude` directory.
-2. Start Claude Code in the repository root. It loads `CLAUDE.md`, which
-   imports `AGENTS.md`.
-3. Run `/next-task`. It picks up `M0.1` and works through the roadmap one task
-   at a time, leaving each change uncommitted for you to review.
+The [demo page](https://jabbott.dev/Nadir/) shows recordings of what it draws
+today and has a Linux download of the sandbox game.
 
-## What is in here
+## Status
+
+Nadir is early (version 0.1), and its APIs will change. It is built one task
+of the [roadmap](https://github.com/jabbott-iii/Nadir/blob/main/docs/roadmap.md)
+at a time, alongside the game in `games/sandbox`, which pulls each feature in.
+
+- **On Linux (X11),** these work:
+  - a window, with keyboard and mouse input;
+  - a fixed 60 Hz simulation, which rendering interpolates between ticks;
+  - an OpenGL 3.3 renderer, with:
+    - y-sorted, instanced sprite batches;
+    - tilemaps;
+    - animation;
+    - a pixel-perfect camera;
+  - an ECS, collision with move-and-slide, and replays checked for
+    determinism;
+  - assets loaded on worker threads;
+  - an offline cook that packs PNG images, Aseprite exports and bitmap fonts
+    into atlases.
+- **On Windows and macOS,** everything builds and passes the tests, but the
+  window stays empty until the OpenGL contexts land (roadmap tasks M2.6 and
+  M2.7).
+- **Not built yet:** audio, text, the debug tools, gamepads, LDtk levels, pack
+  files, hot reload, saves and the Metal backend.
+
+## Build and run
+
+You need [rustup](https://rustup.rs). `rust-toolchain.toml` pins the
+toolchain, and rustup installs it the first time you run `cargo` here. Each
+system also needs:
+
+| System | You need |
+| :- | :- |
+| Linux | An X11 session (or Wayland with XWayland) and OpenGL 3.3. The engine loads `libX11`, `libEGL` and OpenGL at run time, so no development packages are needed. |
+| Windows | The MSVC build tools and the Windows SDK. |
+| macOS | The Xcode command-line tools. |
+
+```bash
+git clone https://github.com/jabbott-iii/Nadir.git
+cd Nadir
+cargo xtask cook
+cargo run -p sandbox
+```
+
+`cargo xtask cook` cooks `assets/` into `target/cooked/`, which the sandbox
+draws from. Run it again after you change the assets.
+
+In the sandbox, WASD or the arrow keys walk. Close the window to quit.
+
+Other ways to run it:
+
+| Command | What it runs |
+| :- | :- |
+| `cargo run -p sandbox -- --scene stress-sprites` | 10,000 people walking about in view |
+| `cargo run -p sandbox -- --scene stress-entities` | 5,000 people jostling in a maze of walls |
+| `cargo dev` | A development build: placeholders for missing assets, and allocation counts in the log |
+
+## Use it in a game
+
+Add the `NadirGE` crate (see [Releases](#releases)); code names it `nadir`. A
+game needs only this crate:
+
+```rust
+use nadir::prelude::*;
+
+fn main() -> Result<(), nadir::Error> {
+    App::new(Config::default())
+        .add_fixed_system(FixedStage::Gameplay, "hello", |_, tick| {
+            if tick.index == 0 {
+                nadir::log::info!("the first tick");
+            }
+        })
+        .run()
+}
+```
+
+For a fuller example, see the sandbox's
+[`main.rs`](https://github.com/jabbott-iii/Nadir/blob/main/games/sandbox/src/main.rs).
+It has:
+
+- a tile map;
+- a walking character that collides;
+- a camera that follows them;
+- sprites cooked from an Aseprite export.
+
+## Repository layout
 
 | Path | Contents |
 | :- | :- |
-| `AGENTS.md` | Project rules for any coding agent: scope, constraints, workspace map, commands, conventions, definition of done |
-| `CLAUDE.md` | Imports `AGENTS.md`, plus Claude Code skills, rules and permissions |
-| `docs/00-overview.md` | Goals, non-goals, budgets, assumptions, scope estimate |
-| `docs/01-architecture.md` | Crates, dependency matrix, main loop, data flow, threading |
-| `docs/02-dependency-policy.md` | The build-it-ourselves rule, the exception process, the build-vs-buy register |
-| `docs/03-platforms.md` | Windows, macOS and Linux specifics |
-| `docs/04-quality.md` | Testing strategy, own test harnesses, CI, `xtask` checks |
-| `docs/05-release.md` | Build profiles, releases, packaging, signing, notarization, crash reports |
-| `docs` | One spec per subsystem: responsibilities, API sketch, invariants, tests |
-| `docs/roadmap.md` | Milestones M0–M11 plus backlog, with checkbox tasks and acceptance criteria |
-| `docs/decisions.md` | Architecture decision records (ADRs) |
-| `.claude/settings.json` | Permission guardrails for Claude Code |
-| `.claude` | Path-scoped rules for unsafe/FFI, dependencies, parsers, shaders |
-| `.claude` | `/next-task`, `/evaluate-dependency`, `/add-ffi-binding`, `/record-decision` |
+| `crates/` | The engine, one crate per subsystem. `crates/engine` is the facade a game uses. |
+| `tools/cook` | `nadir-cook`, the offline asset pipeline |
+| `games/sandbox` | The game that drives the engine's requirements |
+| `assets/` | The sandbox's source assets, which the cook reads |
+| `xtask/` | `cargo xtask`: the CI checks, golden images, fuzzing, cooking, packaging and the demo page |
+| `bench/` | The benchmark harness |
+| `fuzz/` | The fuzzer's seed corpora |
+| `tests/golden/` | The renderer's golden reference images |
+| `site/` | The demo page |
+| `docs/` | The design |
 
-## The two constraints that shape everything
+## Documentation
 
-1. **Desktop only:** Windows, macOS, Linux. Dropping web and mobile lets the
-   engine own a simple polling main loop, use plain threads instead of async,
-   and avoid browser and mobile lifecycle constraints. See ADR-0001.
-2. **Build it unless it's unreasonable:** zero third-party runtime crates. OS
-   bindings, the graphics backends, codecs, the ECS, the mixer, the debug UI
-   and the test harnesses are all ours. See `docs/02-dependency-policy.md` and
-   ADR-0002.
+| Document | Contents |
+| :- | :- |
+| [`docs/00-overview.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/00-overview.md) | Goals, non-goals and performance budgets |
+| [`docs/01-architecture.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/01-architecture.md) | The crates and their dependency matrix, the main loop, threading |
+| [`docs/subsystems/`](https://github.com/jabbott-iii/Nadir/tree/main/docs/subsystems) | One spec per subsystem |
+| [`docs/roadmap.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/roadmap.md) | Milestones, with each task's acceptance criteria |
+| [`docs/decisions.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/decisions.md) | Architecture decision records: why things are the way they are |
+| [`docs/05-release.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/05-release.md) | Build profiles, releases and packaging |
+
+## Contributing
+
+Open an issue before you open a pull request.
+[`CONTRIBUTING.md`](https://github.com/jabbott-iii/Nadir/blob/main/CONTRIBUTING.md)
+covers the setup, the rules and the checks. `cargo xtask ci` runs the same
+checks as the pull request gate in CI.
+
+Coding agents follow
+[`AGENTS.md`](https://github.com/jabbott-iii/Nadir/blob/main/AGENTS.md).
+
+Report vulnerabilities privately, as
+[`SECURITY.md`](https://github.com/jabbott-iii/Nadir/blob/main/SECURITY.md)
+describes.
+
+## License
+
+Apache License 2.0: see
+[`LICENSE`](https://github.com/jabbott-iii/Nadir/blob/main/LICENSE) and
+[`NOTICE`](https://github.com/jabbott-iii/Nadir/blob/main/NOTICE).
 
 ## Releases
 

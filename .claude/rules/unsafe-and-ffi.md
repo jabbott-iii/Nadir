@@ -37,7 +37,6 @@ These three crates are the only ones allowed to contain `unsafe`.
 - **Errors:** convert HRESULT, `errno`, EGL/GL errors and `NSError` into our
   error enums with context. Never ignore a return code. If ignoring one is
   truly correct, add a comment saying why.
-- **Before reporting done,** run `cargo xtask unsafe-audit` (once it
-  exists).
+- **Before reporting done,** run `cargo xtask unsafe-audit`.
 - If layout assertions can only compile on another OS, say which OS must
   verify them. Do not claim they passed.

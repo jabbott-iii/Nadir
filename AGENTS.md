@@ -1,8 +1,14 @@
 # Nadir — 2D top-down game engine (Rust, desktop only)
 
-**Status:** design complete, no code yet. Work starts at milestone M0 in
-`docs/roadmap.md`. Any command, crate, or file this document mentions does not
-exist until the roadmap task that creates it is done. Check before assuming.
+**Status:** in development, at version 0.1. `docs/roadmap.md` ticks each task
+once it is done and verified. A task whose code is written but still needs a
+check on another OS stays unticked, with a `⏳ needs <OS>` note. The next task
+is the first unticked one whose dependencies are all ticked, skipping one
+whose remaining work needs an OS you cannot run. This document also describes
+what is not built yet, such as the Metal backend (and
+`cargo xtask golden --backend`), audio and the debug tools, whose crates are
+still empty. Some of what it mentions may not exist yet, and some exists
+before its roadmap task is ticked: check before assuming.
 
 ## What we are building
 
@@ -85,7 +91,7 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | `crates/sys` | `nadir-sys` | Hand-written raw FFI declarations (Win32, Cocoa/objc, X11, EGL, GL, ALSA, CoreAudio, WASAPI, XInput, evdev) | allowed |
 | `crates/platform` | `nadir-platform` | Windows, event loop, input devices, GL/Metal surfaces, audio device output, paths, dynamic loading | allowed |
 | `crates/gfx` | `nadir-gfx` | Small render hardware interface (RHI) with an OpenGL 3.3 core backend and, from M10, a Metal backend | allowed |
-| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite exports (cook only), the cook's atlas files | deny |
+| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite exports and LDtk projects (cook only), the cook's atlas and level files, prefab files | deny |
 | `crates/ecs` | `nadir-ecs` | Generational entities, sparse-set storage, resources, events, commands, schedule | deny |
 | `crates/input` | `nadir-input` | Physical keys, device state, action maps, per-tick latching, bindings | deny |
 | `crates/render` | `nadir-render` | Sprite batching, y-sort, tilemap chunks, camera, bitmap text, debug draw, passes | deny |
@@ -100,15 +106,16 @@ exist until the roadmap task that creates it is done. Check before assuming.
 | `games/sandbox` | `sandbox` | The game that drives requirements | deny |
 | `bench` | `nadir-bench` | Own micro-benchmark harness and benches | deny |
 
-## Commands (created in M0; verify they exist before relying on them)
+## Commands (verify one exists before relying on it)
 
 | Command | What it does |
 | :- | :- |
-| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), `cook`, tests, `deps`, `layers`, `crates`, `unsafe-audit`, `workflows`, `release-no-dev`, `features`: the full PR gate |
+| `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), `cook`, tests, `deps`, `layers`, `crates`, `unsafe-audit`, `headers`, `workflows`, `release-no-dev`, `features`: the full PR gate |
 | `cargo xtask deps` | Fails if `Cargo.lock` contains any non-workspace package not approved in the policy |
 | `cargo xtask layers` | Fails if a crate depends on a crate the dependency matrix forbids |
-| `cargo xtask crates` | Fails if a crate that crates.io gets lacks a description, license or repository, is at another version than `NadirGE`, or depends on a workspace crate crates.io does not get or by another version (ADR-0036) |
+| `cargo xtask crates` | Fails if a crate that crates.io gets lacks a description, license or repository, or copies of the root's `LICENSE` and `NOTICE` in its folder; is at another version than `NadirGE`; or depends on a workspace crate crates.io does not get or by another version (ADR-0036, ADR-0037) |
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the allowed crates or lacks a `SAFETY:` comment |
+| `cargo xtask headers` | Fails if a source file lacks the Apache-2.0 header of `LICENSE`'s appendix, or has it altered or out of place (ADR-0037) |
 | `cargo xtask workflows` | Fails if a GitHub workflow uses an action it is not allowed, pins one by anything but a commit SHA, or gives its token more than it may (ADR-0032) |
 | `cargo xtask features` | Fails if a ticked roadmap task belongs to no feature in `docs/features.jsonc`, or a feature's `ticked` is not what the roadmap ticks |
 | `cargo xtask golden [--bless] [--backend gl\|metal]` | Renders golden scenes offscreen and compares them to references |
@@ -148,6 +155,16 @@ ADR-0029).
   counter (see `docs/04-quality.md`) checks this.
 - **Docs:** every `pub` item has a doc comment (`missing_docs` = warn, `-D` in
   CI).
+- **License headers:** every source file (Rust, GLSL, scripts, the site's
+  HTML, CSS and JS, the `Makefile`, the Dockerfile, the workflows) starts
+  with the Apache-2.0 header from `LICENSE`'s appendix, in its comment
+  syntax. It goes after a shebang, an HTML doctype or a GLSL
+  `#version 330 core`, which nadir-gfx requires on line 1. A new file gets
+  it too (`cargo xtask headers` checks). A new crate for crates.io gets
+  copies of `LICENSE` and `NOTICE` in its folder (`cargo xtask crates`).
+  `NOTICE` holds only what a license requires there; anything else not
+  ours keeps its own license and notice beside it, as the RFC 8259
+  examples do in `crates/codec/tests/json.rs` (ADR-0037).
 - **Tests:**
   - Unit tests live in `#[cfg(test)] mod tests` beside the code.
   - Integration tests live in each crate's `tests/`.

@@ -6,7 +6,7 @@ Key facts:
 
 - Status: in development, {{tasks_done}} of {{tasks_total}} roadmap tasks done at commit {{commit_short}} of {{commit_date}} ({{commit_subject}})
 - Language: Rust {{toolchain}}, edition 2024; {{crates}} crates in the workspace; third-party crates: {{third_party}}
-- Targets: Windows 10+ (x86_64), macOS 12+ (Apple Silicon and Intel) and Linux (x86_64, X11). Only Linux runs so far: Windows and macOS need their windows (roadmap M1.5, M1.6) and OpenGL contexts (M2.6, M2.7).
+- Targets: Windows 10+ and Linux (X11) on x86_64 and aarch64, and macOS 12+ (Apple Silicon and Intel). Only Linux draws so far: the Windows and macOS windows (roadmap M1.5, M1.6, still to be checked by hand) stay empty until their OpenGL contexts land (M2.6, M2.7).
 - Out of scope: web and WASM, Android, iOS, consoles, 3D and networking
 - License: Apache-2.0
 - Source: {{repository_url}}

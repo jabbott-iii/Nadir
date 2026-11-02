@@ -1,0 +1,615 @@
+{
+	"__header__": {
+		"fileType": "LDtk Project JSON",
+		"app": "LDtk",
+		"doc": "https://ldtk.io/json",
+		"schema": "https://ldtk.io/files/JSON_SCHEMA.json",
+		"appAuthor": "Sebastien 'deepnight' Benard",
+		"appVersion": "1.5.3",
+		"url": "https://ldtk.io"
+	},
+	"identifier": "Level_0",
+	"iid": "8e1b2c30-006e-11ef-0302-00000001bb02",
+	"uid": 0,
+	"worldX": 0,
+	"worldY": 0,
+	"worldDepth": 0,
+	"pxWid": 64,
+	"pxHei": 48,
+	"__bgColor": "#40465B",
+	"bgColor": null,
+	"useAutoIdentifier": true,
+	"bgRelPath": null,
+	"bgPos": null,
+	"bgPivotX": 0.5,
+	"bgPivotY": 0.5,
+	"__smartColor": "#ADADB5",
+	"__bgPos": null,
+	"externalRelPath": null,
+	"fieldInstances": [],
+	"layerInstances": [
+		{
+			"__identifier": "Entities",
+			"__type": "Entities",
+			"__cWid": 4,
+			"__cHei": 3,
+			"__gridSize": 16,
+			"__opacity": 1,
+			"__pxTotalOffsetX": 0,
+			"__pxTotalOffsetY": 0,
+			"__tilesetDefUid": null,
+			"__tilesetRelPath": null,
+			"iid": "8e1b2c30-00dd-11ef-060b-000000037a0b",
+			"levelId": 0,
+			"layerDefUid": 10,
+			"pxOffsetX": 0,
+			"pxOffsetY": 0,
+			"visible": true,
+			"optionalRules": [],
+			"intGridCsv": [],
+			"autoLayerTiles": [],
+			"seed": 1234788,
+			"overrideTilesetUid": null,
+			"gridTiles": [],
+			"entityInstances": [
+				{
+					"__identifier": "Tree",
+					"__grid": [
+						1,
+						0
+					],
+					"__pivot": [
+						0.5,
+						1
+					],
+					"__tags": [],
+					"__tile": null,
+					"__smartColor": "#94D9B3",
+					"iid": "8e1b2c30-012d-11ef-083b-00000004bc3b",
+					"width": 16,
+					"height": 32,
+					"defUid": 20,
+					"px": [
+						24,
+						16
+					],
+					"fieldInstances": [
+						{
+							"__identifier": "Health__max",
+							"__type": "Int",
+							"__value": 12,
+							"__tile": null,
+							"defUid": 40,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Speed",
+							"__type": "Float",
+							"__value": 1.5,
+							"__tile": null,
+							"defUid": 41,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Solid",
+							"__type": "Bool",
+							"__value": true,
+							"__tile": null,
+							"defUid": 42,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Name",
+							"__type": "String",
+							"__value": "Oak by the path",
+							"__tile": null,
+							"defUid": 43,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Note",
+							"__type": "Multilines",
+							"__value": "Two lines\nof text",
+							"__tile": null,
+							"defUid": 44,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Tint",
+							"__type": "Color",
+							"__value": "#3D8E2B",
+							"__tile": null,
+							"defUid": 45,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Target",
+							"__type": "Point",
+							"__value": {
+								"cx": 2,
+								"cy": 1
+							},
+							"__tile": null,
+							"defUid": 46,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Script",
+							"__type": "FilePath",
+							"__value": "scripts/tree.txt",
+							"__tile": null,
+							"defUid": 47,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Kind",
+							"__type": "LocalEnum.Kind",
+							"__value": "Oak",
+							"__tile": null,
+							"defUid": 48,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Drops",
+							"__type": "Array<Int>",
+							"__value": [
+								1,
+								2,
+								3
+							],
+							"__tile": null,
+							"defUid": 49,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Friend",
+							"__type": "EntityRef",
+							"__value": {
+								"entityIid": "8e1b2c30-012d-11ef-083b-00000004bc3b",
+								"layerIid": "8e1b2c30-00c9-11ef-057f-00000003297f",
+								"levelIid": "8e1b2c30-0064-11ef-02bc-0000000192bc",
+								"worldIid": "8e1b2c30-0001-11ef-0007-000000000407"
+							},
+							"__tile": null,
+							"defUid": 50,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Icon",
+							"__type": "Tile",
+							"__value": {
+								"tilesetUid": 1,
+								"x": 64,
+								"y": 0,
+								"w": 16,
+								"h": 32
+							},
+							"__tile": null,
+							"defUid": 51,
+							"realEditorValues": []
+						},
+						{
+							"__identifier": "Unset",
+							"__type": "Int",
+							"__value": null,
+							"__tile": null,
+							"defUid": 52,
+							"realEditorValues": []
+						}
+					],
+					"__worldX": 24,
+					"__worldY": 16
+				},
+				{
+					"__identifier": "Rock",
+					"__grid": [
+						2,
+						1
+					],
+					"__pivot": [
+						0.5,
+						1
+					],
+					"__tags": [],
+					"__tile": null,
+					"__smartColor": "#94D9B3",
+					"iid": "8e1b2c30-012e-11ef-0842-00000004c042",
+					"width": 16,
+					"height": 16,
+					"defUid": 21,
+					"px": [
+						40,
+						32
+					],
+					"fieldInstances": [
+						{
+							"__identifier": "Health__max",
+							"__type": "Int",
+							"__value": 3,
+							"__tile": null,
+							"defUid": 53,
+							"realEditorValues": []
+						}
+					],
+					"__worldX": 40,
+					"__worldY": 32
+				}
+			]
+		},
+		{
+			"__identifier": "Collision",
+			"__type": "IntGrid",
+			"__cWid": 4,
+			"__cHei": 3,
+			"__gridSize": 16,
+			"__opacity": 1,
+			"__pxTotalOffsetX": 0,
+			"__pxTotalOffsetY": 0,
+			"__tilesetDefUid": 1,
+			"__tilesetRelPath": "../sprites/tiles.png",
+			"iid": "8e1b2c30-00de-11ef-0612-000000037e12",
+			"levelId": 0,
+			"layerDefUid": 11,
+			"pxOffsetX": 0,
+			"pxOffsetY": 0,
+			"visible": true,
+			"optionalRules": [],
+			"intGridCsv": [
+				1,
+				1,
+				1,
+				1,
+				1,
+				2,
+				0,
+				1,
+				1,
+				1,
+				1,
+				1
+			],
+			"autoLayerTiles": [
+				{
+					"px": [
+						0,
+						0
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						0
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						16,
+						0
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						1
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						32,
+						0
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						2
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						48,
+						0
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						3
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						0,
+						16
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						4
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						48,
+						16
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						7
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						0,
+						32
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						8
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						16,
+						32
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						9
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						32,
+						32
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						10
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						48,
+						32
+					],
+					"src": [
+						48,
+						0
+					],
+					"f": 0,
+					"t": 3,
+					"d": [
+						700,
+						11
+					],
+					"a": 1
+				}
+			],
+			"seed": 1234789,
+			"overrideTilesetUid": null,
+			"gridTiles": [],
+			"entityInstances": []
+		},
+		{
+			"__identifier": "Shadows",
+			"__type": "AutoLayer",
+			"__cWid": 4,
+			"__cHei": 3,
+			"__gridSize": 16,
+			"__opacity": 1,
+			"__pxTotalOffsetX": 0,
+			"__pxTotalOffsetY": 0,
+			"__tilesetDefUid": 1,
+			"__tilesetRelPath": "../sprites/tiles.png",
+			"iid": "8e1b2c30-00df-11ef-0619-000000038219",
+			"levelId": 0,
+			"layerDefUid": 12,
+			"pxOffsetX": 0,
+			"pxOffsetY": 0,
+			"visible": true,
+			"optionalRules": [],
+			"intGridCsv": [],
+			"autoLayerTiles": [
+				{
+					"px": [
+						32,
+						16
+					],
+					"src": [
+						48,
+						16
+					],
+					"f": 0,
+					"t": 11,
+					"d": [
+						701,
+						6
+					],
+					"a": 0.5
+				}
+			],
+			"seed": 1234790,
+			"overrideTilesetUid": null,
+			"gridTiles": [],
+			"entityInstances": []
+		},
+		{
+			"__identifier": "Ground",
+			"__type": "Tiles",
+			"__cWid": 4,
+			"__cHei": 3,
+			"__gridSize": 16,
+			"__opacity": 1,
+			"__pxTotalOffsetX": 0,
+			"__pxTotalOffsetY": 0,
+			"__tilesetDefUid": 1,
+			"__tilesetRelPath": "../sprites/tiles.png",
+			"iid": "8e1b2c30-00e0-11ef-0620-000000038620",
+			"levelId": 0,
+			"layerDefUid": 13,
+			"pxOffsetX": 0,
+			"pxOffsetY": 0,
+			"visible": true,
+			"optionalRules": [],
+			"intGridCsv": [],
+			"autoLayerTiles": [],
+			"seed": 1234791,
+			"overrideTilesetUid": null,
+			"gridTiles": [
+				{
+					"px": [
+						0,
+						0
+					],
+					"src": [
+						0,
+						0
+					],
+					"f": 0,
+					"t": 0,
+					"d": [
+						0
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						0,
+						0
+					],
+					"src": [
+						16,
+						0
+					],
+					"f": 0,
+					"t": 1,
+					"d": [
+						0
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						16,
+						16
+					],
+					"src": [
+						0,
+						16
+					],
+					"f": 0,
+					"t": 8,
+					"d": [
+						5
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						32,
+						16
+					],
+					"src": [
+						0,
+						0
+					],
+					"f": 3,
+					"t": 0,
+					"d": [
+						6
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						48,
+						16
+					],
+					"src": [
+						64,
+						0
+					],
+					"f": 0,
+					"t": 4,
+					"d": [
+						7
+					],
+					"a": 1
+				},
+				{
+					"px": [
+						32,
+						32
+					],
+					"src": [
+						80,
+						0
+					],
+					"f": 1,
+					"t": 5,
+					"d": [
+						10
+					],
+					"a": 1
+				}
+			],
+			"entityInstances": []
+		}
+	],
+	"__neighbours": []
+}
