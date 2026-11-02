@@ -237,6 +237,7 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
   | tick `PostMovement` | `nadir::triggers` | sends `TriggerEnter` and `TriggerExit` |
   | frame `Animate` | `nadir::animate` | advances each `Animator` by the clock's step, writes its frame into its `Sprite`, sends `AnimationFinished`, mirrors each Sprite that faces left and unmirrors the rest with a `Facing` (ADR-0024) |
   | frame `Extract` | `nadir::extract_sprites` | draws each `Sprite` between the last two ticks |
+  | frame `Extract` | `nadir::extract_level` | draws the `CurrentLevel`'s tile layers, its background the clear colour |
 - Structural changes (spawn, despawn, add or remove component) are deferred
   through `Commands`. They are applied after each fixed tick and after the
   frame stages, never mid-iteration. The one exception is the engine's

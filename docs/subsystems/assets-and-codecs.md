@@ -848,7 +848,7 @@ pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no al
   - Levels declare their asset list. Unloading a level frees every asset
     scoped to it that no other scope also holds.
   - The facade's `Clips` and `TileLayers` are not assets (ADR-0023,
-    ADR-0024): `load_level` (M5.6) removes a level's own.
+    ADR-0024): `load_level` removes a level's own (M5.6).
   - This is explicit, predictable, and has no hidden `Drop` cost.
 - **Placeholders in dev:**
   - The server's `OnFailure::Placeholder` shows them. It is a runtime
@@ -859,9 +859,9 @@ pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no al
   - A failed sound becomes silence.
   - Failures log with the path and the error.
 - **Release:** a missing level file or prefab is an error from `load_level`
-  (M5.6), and a missing texture a hard error with a dialog in M9.1's
-  loading state (ADR-0038). Until then, with `OnFailure::Nothing`, it is
-  `Failed` and logged.
+  (a `LevelError`, M5.6), and a missing texture a hard error with a dialog
+  in M9.1's loading state (ADR-0038). Until then, with
+  `OnFailure::Nothing`, it is `Failed` and logged.
 
 ### Virtual file system
 
@@ -1208,7 +1208,9 @@ KBJ, its members in this order (ADR-0038):
   bottom middle of the block.
 - Positions are whole pixels that fit an `i32`.
 - The game reads it with `nadir_codec::level::parse` (above, "Level file
-  reader"); the cook writes it (above, "LDtk levels"), and reads each it
+  reader"), through nadir-scene's `Level` asset, and the facade's
+  `load_level` loads it into the world (`docs/subsystems/scene.md`,
+  "Levels"); the cook writes it (above, "LDtk levels"), and reads each it
   writes the same way, so that it never writes one that reader refuses.
   The version is the reader's `level::VERSION`.
 

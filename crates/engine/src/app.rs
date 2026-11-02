@@ -39,9 +39,9 @@ use crate::animation::AnimationClock;
 use crate::limiter::FrameLimiter;
 use crate::replay::{PlayReplay, ReplayInput};
 use crate::{
-    AnimationFinished, Animator, Clips, Collider, CollisionLayers, Collisions, Error, Facing,
-    Parent, Player, PrevTransform, Replay, SaveId, Sprite, TickStats, Transform, TriggerEnter,
-    TriggerExit, Velocity, glue, log_file,
+    AnimationFinished, Animator, Clips, Collider, CollisionLayers, Collisions, CurrentLevel, Error,
+    Facing, LevelError, Parent, Player, PrevTransform, Replay, SaveId, Sprite, TickStats,
+    Transform, TriggerEnter, TriggerExit, Velocity, glue, log_file,
 };
 
 /// How many times a second the simulation steps.
@@ -350,7 +350,9 @@ impl EngineCore {
 ///   mirrors the Sprite of each entity that faces [`Facing::Left`], and
 ///   unmirrors the rest with a [`Facing`];
 /// - `nadir::extract_sprites` (frame `Extract`): draws every [`Sprite`]
-///   into the [`RenderFrame`], between the last two ticks.
+///   into the [`RenderFrame`], between the last two ticks;
+/// - `nadir::extract_level` (frame `Extract`): draws the tile layers of the
+///   [`CurrentLevel`], with its background as the clear colour.
 ///
 /// So a game sets velocities in `Gameplay`, and reacts to the moves after
 /// the engine's, in `Movement` or `PostMovement`. It sets [`Facing`] and
@@ -378,6 +380,8 @@ impl EngineCore {
 ///   them
 /// - [`CollisionLayers`], the names of the game's collision layers, none
 ///   until [`App::collision_layers`] gives them
+/// - [`CurrentLevel`], the level [`App::load_level`] loaded, none until it
+///   loads one
 /// - with [`App::play_replay`], [`Replay`], how far the replay got
 /// - the events [`TriggerEnter`], [`TriggerExit`] and [`AnimationFinished`]
 /// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
@@ -449,6 +453,7 @@ impl App {
         world.insert_resource(Clips::new());
         world.insert_resource(CollisionLayers::default());
         world.insert_resource(PrefabLibrary::new());
+        world.insert_resource(CurrentLevel::default());
         world.insert_resource(AnimationClock::default());
         #[cfg(feature = "dev")]
         world.insert_resource(crate::FrameAllocs::default());
@@ -488,6 +493,11 @@ impl App {
                 FrameStage::Extract,
                 "nadir::extract_sprites",
                 glue::extract_sprites,
+            )
+            .add_frame(
+                FrameStage::Extract,
+                "nadir::extract_level",
+                crate::level::extract_level,
             );
         Self {
             config,
@@ -528,6 +538,19 @@ impl App {
             .register_component::<T>();
         self.world.register::<T>();
         self
+    }
+
+    /// Loads the level `name`, `levels/<name>.klvl`, in place of the one the
+    /// world holds, as [`load_level`](crate::load_level) says: its prefabs
+    /// and tile sets are read before this returns, its entities spawned,
+    /// and its tile layers drawn from the next frame.
+    ///
+    /// # Errors
+    ///
+    /// A [`LevelError`] if it cannot be loaded. The previous level is gone
+    /// then, and nothing of the new one is in the world.
+    pub fn load_level(&mut self, name: &str) -> Result<(), LevelError> {
+        crate::load_level(&mut self.world, name)
     }
 
     /// Names the game's collision layers: bit 0 of a
@@ -1109,6 +1132,7 @@ mod tests {
                 "frame Animate: react",
                 "frame Camera: follow",
                 "frame Extract: nadir::extract_sprites",
+                "frame Extract: nadir::extract_level",
                 "frame Extract: draw_ground",
             ]
         );
@@ -1143,9 +1167,10 @@ mod tests {
                 "Animator"
             ]
         );
-        // The engine's own, and the prefabs a game loads.
+        // The engine's own, the prefabs a game loads, and no level yet.
         assert!(world.contains_resource::<CollisionLayers>());
         assert!(world.contains_resource::<PrefabLibrary>());
+        assert_eq!(world.resource::<CurrentLevel>().name(), None);
     }
 
     nadir_scene::reflect_newtype! {
@@ -2285,10 +2310,108 @@ mod tests {
             assert_eq!(at(48, 17), CLEAR);
             assert_eq!(at(47, 18), CLEAR);
         }
+
+        /// Writes the level `plot` into `assets`: a layer over the whole
+        /// view of the tile `tile` of a tile set of two tiles of 8 pixels,
+        /// green then yellow, the texture `tiles.qoi`.
+        fn write_plot(assets: &std::path::Path, tile: u16) {
+            use nadir_codec::{Limits, json, kbj};
+            let write_kbj = |path: &str, text: &str| {
+                let value = json::parse(text, Limits::default()).expect("the test's JSON");
+                let bytes = kbj::encode(&value, Limits::default()).expect("KBJ");
+                let path = assets.join(path);
+                fs::create_dir_all(path.parent().expect("a folder")).expect("make the folder");
+                fs::write(path, bytes).expect("write the file");
+            };
+            let header = Header {
+                width: 16,
+                height: 8,
+                channels: Channels::Rgba,
+                color_space: ColorSpace::Srgb,
+            };
+            let pixels: Vec<u8> = (0..16 * 8)
+                .flat_map(|at| if at % 16 < 8 { GREEN } else { YELLOW })
+                .collect();
+            let texture = qoi::encode(&header, &pixels).expect("a valid image");
+            fs::write(assets.join("tiles.qoi"), texture).expect("write the texture");
+            write_kbj(
+                "tiles.kbj",
+                r#"{ "version": 2, "pages": [ { "path": "tiles.qoi", "w": 16, "h": 8 } ],
+                     "sprites": [ { "name": "tiles", "tiles": [8, 8],
+                       "frames": [ { "page": 0, "x": 0, "y": 0, "w": 16, "h": 8,
+                                     "ox": 0, "oy": 0, "sw": 16, "sh": 8 } ] } ] }"#,
+            );
+            let cell = 1 + tile;
+            write_kbj(
+                "levels/plot.klvl",
+                &format!(
+                    r#"{{ "version": 1, "size": [32, 24], "background": [0, 0, 255],
+                         "assets": ["tiles.kbj"],
+                         "tilesets": [ {{ "atlas": "tiles.kbj", "sprite": "tiles", "columns": 2,
+                                          "rows": 1, "animations": [] }} ],
+                         "layers": [ {{ "tileset": 0, "size": [4, 3], "cell": 8, "origin": [-16, -9],
+                                        "layer": 0, "depth": 0, "cells": [{}] }} ],
+                         "tall": [], "entities": [] }}"#,
+                    vec![cell.to_string(); 12].join(", ")
+                ),
+            );
+        }
+
+        const GREEN: [u8; 4] = [0, 255, 0, 255];
+        const YELLOW: [u8; 4] = [255, 255, 0, 255];
+
+        /// How many of a frame's pixels are `color`.
+        fn count(frame: &[u8], color: [u8; 4]) -> usize {
+            frame
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|&&p| p == color)
+                .count()
+        }
+
+        #[test]
+        fn a_level_loaded_again_draws_its_new_layer_at_once() {
+            let log = shared();
+            let mut app = app("offscreen-level", &log);
+            let assets = app.config.assets.clone();
+            write_plot(&assets, 0);
+            // The tile set's texture is the game's own, so that loading the
+            // level again replaces only its layer.
+            {
+                let world = app.world();
+                let mut server = world.resource_mut::<AssetServer>();
+                let atlas = server
+                    .load_now::<nadir_render::Atlas>("tiles.kbj", &mut FinalizeCtx::new())
+                    .expect("the atlas");
+                let atlas = server.get(atlas).cloned().expect("the atlas");
+                atlas.load_pages(&mut server, nadir_assets::Scope::Global);
+            }
+            app.load_level("plot").expect("the plot");
+            let Some(mut offscreen) = offscreen(app, SIZE) else {
+                return;
+            };
+            // The texture is made after the first frame.
+            offscreen.frame(Duration::ZERO, &[]).expect("a frame");
+            let first = offscreen.frame(TICK, &[]).expect("a frame");
+            assert!(count(&first, GREEN) > 0, "the green tiles are drawn");
+            assert_eq!(count(&first, YELLOW), 0);
+
+            // The same level, its layer now yellow: the layer it replaces in
+            // the tile layers is drawn anew in the very next frame.
+            write_plot(&assets, 1);
+            offscreen.app.load_level("plot").expect("the plot again");
+            let second = offscreen.frame(TICK, &[]).expect("a frame");
+            fs::remove_dir_all(&assets).expect("remove the asset folder");
+            assert!(count(&second, YELLOW) > 0, "the yellow tiles are drawn");
+            assert_eq!(count(&second, GREEN), 0, "no green tile is left");
+            assert_eq!(count(&first, YELLOW) + count(&second, GREEN), 0);
+        }
     }
 
     /// A steady frame of 10,000 sprites allocates nothing (roadmap M3.5),
-    /// now drawn from entities.
+    /// now drawn from entities, over a level's tile layer, which the
+    /// engine's `nadir::extract_level` draws (M5.6).
     #[cfg(feature = "dev")]
     mod steady_frames {
         use std::env;
@@ -2297,13 +2420,12 @@ mod tests {
         use std::path::PathBuf;
         use std::process;
 
-        use nadir_assets::Handle;
         use nadir_codec::qoi::{self, Channels, ColorSpace, Header};
+        use nadir_codec::{Limits, json, kbj};
         use nadir_core::{Color, Rect, Vec2};
         use nadir_platform::{
             AllocCounts, HeadlessGl, PlatformError, create_headless_gl, thread_alloc_counts,
         };
-        use nadir_render::{Tile, TileLayer, TileLayerDraw, TileSet};
 
         use super::*;
         use crate::{Clip, ClipFrame, FrameAllocs, Playback};
@@ -2328,8 +2450,8 @@ mod tests {
         /// The view, which the walkers stay inside.
         const VIEW: Vec2 = Vec2::new(480.0, 270.0);
 
-        /// The ground's layer, and the frames drawn so far.
-        struct Ground(Handle<TileLayer>, usize);
+        /// The frames drawn so far, by which the camera moves.
+        struct Ground(usize);
 
         /// What each frame saw: the last frame's allocations and drawing,
         /// and the ticks so far. Room for every frame is made up front, and
@@ -2428,18 +2550,59 @@ mod tests {
             }
         }
 
-        fn draw_ground(world: &World, _: &Frame) {
+        fn move_camera(world: &World, _: &Frame) {
             let mut ground = world.resource_mut::<Ground>();
             let mut out = world.resource_mut::<RenderFrame>();
             // Over the first chunk only, then on the walkers, where four
             // chunks meet.
-            out.camera.position = if ground.1 < MOVED {
+            out.camera.position = if ground.0 < MOVED {
                 VIEW * 0.5 - Vec2::splat(256.0)
             } else {
                 VIEW * 0.5
             };
-            ground.1 += 1;
-            out.tile_layers.push(TileLayerDraw::new(ground.0));
+            ground.0 += 1;
+        }
+
+        /// Writes `json` as KBJ at `path`.
+        fn write_kbj(path: &std::path::Path, json: &str) {
+            let value = json::parse(json, Limits::default()).expect("the test's JSON");
+            let bytes = kbj::encode(&value, Limits::default()).expect("KBJ");
+            fs::create_dir_all(path.parent().expect("a folder")).expect("make the folder");
+            fs::write(path, bytes).expect("write the file");
+        }
+
+        /// Writes the ground as the level `ground`: a tile set of 2 × 2
+        /// tiles of 16 pixels, the texture `ground.qoi`, and a layer of it,
+        /// a quarter of its tiles animated, with its corner at `corner`.
+        fn write_ground(assets: &std::path::Path, corner: Vec2) {
+            write_kbj(
+                &assets.join("ground.kbj"),
+                r#"{ "version": 2, "pages": [ { "path": "ground.qoi", "w": 32, "h": 32 } ],
+                     "sprites": [ { "name": "ground", "tiles": [16, 16],
+                       "frames": [ { "page": 0, "x": 0, "y": 0, "w": 32, "h": 32,
+                                     "ox": 0, "oy": 0, "sw": 32, "sh": 32 } ] } ] }"#,
+            );
+            let mut cells = Vec::new();
+            for y in 0..GROUND {
+                for x in 0..GROUND {
+                    // Tile 1, animated, or tile 0.
+                    cells.push(if (x + y) % 4 == 0 { "2" } else { "1" });
+                }
+            }
+            let side = GROUND * 16;
+            let level = format!(
+                r#"{{ "version": 1, "size": [{side}, {side}], "background": [0, 0, 0],
+                     "assets": ["ground.kbj"],
+                     "tilesets": [ {{ "atlas": "ground.kbj", "sprite": "ground", "columns": 2, "rows": 2,
+                                      "animations": [ {{ "tile": 1, "frames": 3, "ms": 100 }} ] }} ],
+                     "layers": [ {{ "tileset": 0, "size": [{GROUND}, {GROUND}], "cell": 16,
+                                    "origin": [{}, {}], "layer": 0, "depth": 0, "cells": [{}] }} ],
+                     "tall": [], "entities": [] }}"#,
+                corner.x as i32,
+                corner.y as i32,
+                cells.join(", ")
+            );
+            write_kbj(&assets.join("levels/ground.klvl"), &level);
         }
 
         fn probe(world: &World, _: &Frame) {
@@ -2469,31 +2632,12 @@ mod tests {
             })
             .insert_resource(Rc::clone(seen))
             .add_fixed_system(FixedStage::Gameplay, "walk", walk)
-            .add_frame_system(FrameStage::Extract, "draw_ground", draw_ground)
+            .add_frame_system(FrameStage::Camera, "move_camera", move_camera)
             .add_frame_system(FrameStage::Ui, "probe", probe);
-            let (walker, ground) = {
-                let mut server = app.world().resource_mut::<AssetServer>();
-                (server.load("walker.qoi"), server.load("ground.qoi"))
-            };
-            let set = TileSet {
-                texture: ground,
-                columns: 2,
-                rows: 2,
-            };
+            let walker = app.world().resource_mut::<AssetServer>().load("walker.qoi");
             // Cell (32, 32), the corner of four chunks, at the view's centre.
-            let corner = VIEW * 0.5 - Vec2::splat(512.0);
-            let mut layer = TileLayer::new(set, UVec2::splat(GROUND), 16.0, corner);
-            for y in 0..GROUND as i32 {
-                for x in 0..GROUND as i32 {
-                    let tile = if (x + y) % 4 == 0 {
-                        Tile::animated(1, 3, 100)
-                    } else {
-                        Tile::new(0)
-                    };
-                    layer.set(nadir_core::IVec2::new(x, y), Some(tile));
-                }
-            }
-            let ground = app.world().resource_mut::<TileLayers>().add(layer);
+            write_ground(&app.config.assets, VIEW * 0.5 - Vec2::splat(512.0));
+            app.load_level("ground").expect("the ground's level");
             // A walk of 4 frames, the quarters of the walker's texture. Clips
             // that play once, and the events they send, are in
             // `glue::tests::steady_animation`, whose frames are not timed by
@@ -2535,7 +2679,7 @@ mod tests {
                     .with(Animator::starting_at(walk, phase))
                     .with(facing_of(velocity));
             }
-            app.insert_resource(Ground(ground, 0))
+            app.insert_resource(Ground(0))
         }
 
         #[test]

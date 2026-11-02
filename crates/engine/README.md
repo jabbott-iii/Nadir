@@ -30,6 +30,9 @@ Built:
 - prefabs, which extend one another, spawned through the
   `PrefabLibrary`, with the engine's sprites, colliders and animators
   reflected for them;
+- levels made in LDtk and cooked, which `App::load_level` loads whole, in
+  place of the last: their tile layers drawn, their grid collided with,
+  their tall tiles and entities spawned;
 - assets loaded on worker threads, and an offline cook that packs images,
   Aseprite exports and bitmap fonts into atlases, and makes level files of
   LDtk projects;
@@ -40,8 +43,7 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7);
 - audio (M6), text (M7.1), the debug tools (M7), gamepads (M8);
-- loading levels, which the cook makes of LDtk projects (M5.6), pack files
-  (M5.7), hot reload (M5.8);
+- pack files (M5.7), hot reload (M5.8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 
@@ -394,6 +396,7 @@ adds its own first in their stages:
 | tick `PostMovement` | `nadir::triggers` | Sends `TriggerEnter` and `TriggerExit` |
 | frame `Animate` | `nadir::animate` | Advances each `Animator`, writes its frame into its `Sprite`, and mirrors the sprites that face left |
 | frame `Extract` | `nadir::extract_sprites` | Draws each `Sprite` into the `RenderFrame`, between the last two ticks |
+| frame `Extract` | `nadir::extract_level` | Draws the `CurrentLevel`'s tile layers, with its background as the clear colour |
 
 So a game sets velocities in `Gameplay`, and reacts to the moves after the
 engine's, in `Movement` or `PostMovement`. Gameplay goes in tick systems,
@@ -545,11 +548,10 @@ nadir-cook assets cooked
   the prefabs of their names.
 
 A job whose files did not change since the last cook into `OUT` is skipped,
-unless `--force`. Point `Config::assets` at `OUT`. Prefabs and level files
-are `nadir::scene`'s `PrefabAsset` and `Level`, and loading a level into
-the world comes with roadmap task M5.6. The engine has no asset type for
-the cooked fonts and other data files yet: text comes with roadmap task
-M7.1.
+unless `--force`. Point `Config::assets` at `OUT`. `App::load_level`
+loads a level file into the world, its prefabs with it. The engine has no
+asset type for the cooked fonts and other data files yet: text comes with
+roadmap task M7.1.
 
 ## Features
 

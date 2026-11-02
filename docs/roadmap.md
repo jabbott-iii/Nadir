@@ -3109,7 +3109,7 @@ by the batched sprite renderer.
       `App::collision_layers(&["World", "People"])` before it spawns them.
     - A prefab's sprite loads its atlas in the context's scope.
 
-- [ ] **M5.6 — facade: `load_level`; the sandbox's field is an LDtk level**
+- [x] **M5.6 — facade: `load_level`; the sandbox's field is an LDtk level**
   - Note (from M4.5, ADR-0023):
     - nadir-scene may not depend on nadir-render, so the facade turns a
       level's tile layers into `TileLayer`s in its `TileLayers` resource,
@@ -3171,6 +3171,77 @@ by the batched sprite renderer.
   - Verify: `cargo xtask cook`; `cargo test -p nadir-cook -p nadir-scene`;
     `cargo test -p nadir_engine`; `cargo test -p sandbox`; `cargo xtask dist`;
     `cargo xtask site`; `cargo xtask ci`; `cargo dev` (manual)
+  - Built (2026-11-02, ADR-0038):
+    - The facade (`crates/engine/src/level.rs`): `App::load_level`,
+      `nadir::load_level` on a world, `unload_level`, the resource
+      `CurrentLevel`, `LevelError`, and the engine's
+      `nadir::extract_level`, in frame `Extract`, after
+      `nadir::extract_sprites`. `Clips::add_atlas` holds an atlas added
+      twice once more, and `Clips::release_atlas` lets go of it.
+    - The sandbox: the field names its collision layers (`["World",
+      "People"]`) and loads `field`. `map.rs` is now only the tests'
+      reference. The stress scenes keep their own tile layers.
+    - `cargo xtask dist` and `cargo xtask site` carry `atlas/`, `data/` and
+      `levels/`.
+    - Tests:
+      - The facade's, on a level in memory:
+        - its tiles, grid, tall tile, prefab entities and clips;
+        - a second level replacing the first whole, the game's clear colour
+          coming back once none is loaded;
+        - the game's atlas, added before the level or after it, keeping its
+          clips;
+        - an unknown component, a missing level, a bad name and an unnamed
+          collision layer, each leaving nothing but the prefabs read.
+      - An offscreen test: a level loaded again draws its new layer in the
+        next frame.
+      - The steady-frame allocation test, its ground now a level's.
+      - The sandbox's field, loaded, against `MAP`, cell for cell.
+  - As built, where ADR-0038 left room:
+    - `LevelError` is an error of its own, so the facade's `Error` is
+      unchanged.
+    - A level puts back the clear colour it replaced.
+    - Its prefabs stay in the `PrefabLibrary` (see M5.8's note).
+    - The clips of an atlas that only a prefab names are not added: the
+      cook lists only tile sets' atlases among a level's assets.
+  - Captures (`sandbox --capture`, release, on llvmpipe, against HEAD
+    `c3e45ba` built from `git archive`):
+    - Each scene's 600 frames are the same byte for byte (SHA-256 of
+      `frames.rgba`).
+    - The stress scenes' world hashes are unchanged: stress-sprites
+      `c47e62a4e2bb26d6`, stress-entities `28e943b7c2b0247e`.
+    - The field's changed, `8587378f99a52c1a` → `298521738b5650ef`: its
+      colliders are now written with the names of its collision layers.
+      With the names cleared before hashing, it hashed to
+      `8587378f99a52c1a` again.
+  - Measured on an i7-11800H: `load_level("field")` takes 0.4 ms in release,
+    in the captures and in the demo page's download alike. That covers the
+    level file, its two prefabs, 56 entities and a layer of 3,072 cells,
+    with the sandbox's atlas already loaded; its textures stream in after.
+    The 500 ms budget is M11.5's to enforce.
+  - `cargo dev` on Linux (Wayland session, XWayland, Mesa, Intel UHD
+    Graphics TGL GT1), 14 s of the field:
+    - 60 ticks and 60 frames a second;
+    - 57 sprites in 9 batches, and 1,024 tiles in 1 chunk;
+    - 0 not ready, no warnings, and no allocation after the first second.
+
+    No key was pressed, and no person watched the window.
+  - `cargo xtask dist`: the archive and the sandbox's `.deb` carry
+    `levels/field.klvl` and `data/prefabs/`. `cargo xtask site`: so does the
+    download, which, unpacked, runs the field (`--capture`: the level loaded
+    in 0.4 ms, and the same world hash).
+  - One review round confirmed 18 points and refuted 3:
+    - **Fixed:**
+      - A game that added an atlas after a level did lost its clips when
+        the level went. Clips are now held per add.
+      - The clear colour stayed the last level's background once none was
+        loaded.
+      - Formatting.
+      - Docs: what the download and the release files hold, the tables of
+        the engine's systems, the demo page's caption, the sandbox's crate
+        doc, the feature's summary, and the load time noted here.
+    - **Documented, not fixed:** a level's prefabs stay in the
+      `PrefabLibrary`, even after a failed load. Taking them out needs
+      nadir-scene, a fourth package for this task; it is noted for M5.8.
 
 - [ ] **M5.7 — pack files**
   - Depends: M5.4
@@ -3208,6 +3279,11 @@ by the batched sprite renderer.
     `cargo xtask fuzz-smoke --target kpak --secs 300`
 
 - [ ] **M5.8 — hot reload**
+  - Note (from M5.6, ADR-0038): `PrefabLibrary` keeps every prefab a level
+    read, and `load_level` uses a kept one without reading it again, so a
+    prefab cooked anew needs a way out of the library (a
+    `PrefabLibrary::remove` in nadir-scene) for a level loaded again to read
+    it.
   - Note (from M4.6): `Clips` cannot replace a clip in place yet: add
     `get_mut` or `replace`. An animator then goes on from its time on the
     new clip: a looping one wraps it by the new duration, and a finished

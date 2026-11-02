@@ -47,10 +47,9 @@
 //! | [`prefab`] | The prefab file, `data/prefabs/<name>.kbj`: a prefab's base and its components' values | [`prefab::parse`], [`prefab::read`] |
 //! | [`klz`] | KLZ, an LZ77 block compression of Nadir's own, for pack entries | [`klz::decompress`], [`klz::compress`] |
 //!
-//! Today the game reads QOI textures, atlas files and prefab files, and
-//! nadir-scene loads level files as assets; loading a whole level into the
-//! game waits for roadmap M5.6, and pack files, whose entries KLZ
-//! compresses, for M5.7.
+//! Today the game reads QOI textures, atlas files, prefab files and level
+//! files, which the engine's `load_level` loads into the world; pack
+//! files, whose entries KLZ compresses, wait for roadmap M5.7.
 //!
 //! Read only by the cook:
 //!

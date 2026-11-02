@@ -131,7 +131,19 @@
 //! [`loading_context`] gives it a reflect context with what the engine's
 //! components need, the asset server, the clips and the collision layers,
 //! and [`reflect_context`] one for writing them, as a hash or a save
-//! does. Levels' loading comes with roadmap M5.6.
+//! does.
+//!
+//! # Levels
+//!
+//! The cook makes a level file, `levels/<name>.klvl`, of each level of an
+//! LDtk project. [`App::load_level`] (or [`load_level`] on a world) loads
+//! one in place of the last: its prefabs are read and checked before it
+//! returns, its assets load in `Scope::Level`, its tall tiles and entities
+//! spawn, its tile layers go into the [`TileLayers`](render::TileLayers)
+//! and its grid into the [`Collisions`], and the engine draws its tile
+//! layers each frame, its background the clear colour. [`CurrentLevel`]
+//! says what it made, and the next load removes it whole; a
+//! [`LevelError`] says why one did not load (ADR-0038).
 //!
 //! # Collision
 //!
@@ -353,6 +365,7 @@ mod error;
 #[cfg(feature = "dev")]
 mod frame_allocs;
 mod glue;
+mod level;
 mod limiter;
 mod log_file;
 mod reflected;
@@ -379,6 +392,7 @@ pub use components::{
 pub use error::Error;
 #[cfg(feature = "dev")]
 pub use frame_allocs::FrameAllocs;
+pub use level::{CurrentLevel, LevelError, load_level, unload_level};
 pub use reflected::{CollisionLayers, loading_context, reflect_context};
 pub use replay::{Replay, world_hash};
 pub use tick_stats::TickStats;

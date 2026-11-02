@@ -19,13 +19,15 @@
 //! 1. Cooks `assets/` into `target/cooked`, as `cargo xtask cook` does,
 //!    and builds `nadir-cook` and the sandbox in release, `--locked`.
 //! 2. Lays out `nadir-<version>-<target>/`: the two executables, the
-//!    sandbox's cooked atlases in `assets/` beside it, where it reads them
-//!    (ADR-0033), a `README.txt`, and the `LICENSE` and `NOTICE`. On
+//!    sandbox's cooked atlases, data and levels in `assets/` beside it,
+//!    where it reads them (ADR-0033), a `README.txt`, and the `LICENSE` and
+//!    `NOTICE`. On
 //!    Windows and macOS the sandbox shows an empty window until the engine
 //!    draws there, which its README says ([`Target::drawing_task`]).
 //! 3. Runs what it laid out. `nadir-cook --version` must print the
 //!    workspace's version; the laid-out cook must cook `assets/` into the
-//!    atlases `target/cooked` has, byte for byte; and the sandbox must
+//!    atlases, data and levels `target/cooked` has, byte for byte; and the
+//!    sandbox must
 //!    start, which it shows by refusing a scene that does not exist. It
 //!    refuses before it opens a window, so this runs on a machine with no
 //!    display.
@@ -74,10 +76,6 @@ const BUILD: &[&str] = &[
     "json-render-diagnostics",
 ];
 
-/// The cooked folder the sandbox reads, which the archive and the
-/// package carry, and which the laid-out cook must cook again the same.
-const ATLASES: &str = "atlas";
-
 /// What the sandbox says when asked for the scene `none`.
 const NO_SCENE: &str = "there is no scene `none`";
 
@@ -103,8 +101,9 @@ const COOK_DEB: Deb = Deb {
     name: "nadir-cook",
     section: "devel",
     summary: "offline asset pipeline of the Nadir game engine",
-    details: " Cooks a folder of PNG images, Aseprite exports, BMFont fonts and JSONC\n \
-              data into the atlases and binary files the Nadir engine loads.\n",
+    details: " Cooks a folder of PNG images, Aseprite exports, BMFont fonts, LDtk\n \
+              levels and JSONC data into the atlases, level files and binary\n \
+              files the Nadir engine loads.\n",
 };
 
 /// The sandbox, in `/usr/lib/games/nadir-sandbox` with its cooked
@@ -342,12 +341,13 @@ fn readme(release: &Release, glibc: Option<&str>) -> String {
     let cook = run("nadir-cook");
     let mut programs = String::from(
         "  nadir-cook   the offline asset pipeline. It cooks a folder of PNG\n               \
-         images, Aseprite exports, BMFont fonts and JSONC data\n               \
-         into the atlases and binary files the engine loads.\n",
+         images, Aseprite exports, BMFont fonts, LDtk levels and\n               \
+         JSONC data into the atlases, level files and binary\n               \
+         files the engine loads.\n",
     );
     programs.push_str(
         "  sandbox      the game that drives the engine's requirements, with its\n               \
-         cooked sprites in assets/.\n",
+         cooked sprites, prefabs and levels in assets/.\n",
     );
     let sandbox = run("sandbox");
     let commands = format!("    {cook} --help\n    {cook} SOURCE OUT\n    {sandbox}\n");
@@ -431,15 +431,17 @@ fn smoke(root: &Path, dir: &Path, work: &Path, release: &Release) -> Result<(), 
 
     let cooked = work.join("cooked");
     site::run(Command::new(&cook).arg(root.join("assets")).arg(&cooked))?;
-    let (shipped, again) = (root.join(COOKED).join(ATLASES), cooked.join(ATLASES));
-    if let Some(difference) = differ(&files(&shipped)?, &files(&again)?) {
-        return Err(Error::UnexpectedOutput {
-            command: format!("nadir-cook assets {}", cooked.display()),
-            detail: format!(
-                "the cook laid out did not cook what `{}` holds: {difference}",
-                shipped.display()
-            ),
-        });
+    for folder in site::COOKED_FOLDERS {
+        let (shipped, again) = (root.join(COOKED).join(folder), cooked.join(folder));
+        if let Some(difference) = differ(&files(&shipped)?, &files(&again)?) {
+            return Err(Error::UnexpectedOutput {
+                command: format!("nadir-cook assets {}", cooked.display()),
+                detail: format!(
+                    "the cook laid out did not cook what `{}` holds: {difference}",
+                    shipped.display()
+                ),
+            });
+        }
     }
 
     let sandbox = dir.join(target.executable("sandbox"));

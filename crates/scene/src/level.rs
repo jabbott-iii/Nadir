@@ -15,8 +15,8 @@
 //! Levels: the cooked level file, `levels/<name>.klvl`, as an asset
 //! (`docs/subsystems/scene.md`, "Levels"; ADR-0038). Its entities spawn
 //! through their prefabs with [`PrefabLibrary::spawn_level`]; its tile
-//! layers, grid and tall tiles are the facade's to draw and collide with
-//! (roadmap M5.6).
+//! layers, grid and tall tiles are the facade's to draw and collide with,
+//! as its `load_level` does (M5.6).
 //!
 //! The file's types are [`nadir_codec::level`]'s, re-exported here.
 //!

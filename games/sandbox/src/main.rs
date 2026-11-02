@@ -14,9 +14,10 @@
 
 //! The sandbox game. It drives the Nadir engine's requirements.
 //!
-//! A person walks a field, a map of tiles built by hand (`map.rs`): grass,
-//! paths, flowers and rippling water, walled in stone, with tall walls,
-//! trees and rocks to walk behind and in front of. They are moved with WASD
+//! A person walks a field, the LDtk level `assets/levels/field.ldtk`,
+//! cooked to `levels/field.klvl` with its prefabs, which the game loads
+//! (`App::load_level`): grass, paths, flowers and rippling water, walled in
+//! stone, with tall walls, trees and rocks to walk behind and in front of. They are moved with WASD
 //! or the arrow keys, walk in a cycle of four frames facing the way they
 //! go, collide with the walls, the water, the trees and the rocks, and the
 //! camera follows them. Once a second it logs how fast the
@@ -452,7 +453,7 @@ fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
     #[cfg(feature = "dev")]
     let app = app.insert_resource(AllocTally::default());
     let app = match scene {
-        Scene::Field => field(app, &sprites),
+        Scene::Field => field(app, &sprites)?,
         Scene::StressSprites => stress::add(app, &sprites),
         Scene::StressEntities => stress_entities::add(app, &sprites),
     };
@@ -470,34 +471,29 @@ fn at_feet(half: Vec2, layer: LayerMask, mask: LayerMask) -> Collider {
     })
 }
 
-/// The field: the map's ground and grid, its tall walls, trees and rocks,
+/// The names of the collision layers, bit by bit: [`map::WORLD`], then
+/// [`map::PEOPLE`], as the field's prefabs and grid name them.
+const COLLISION_LAYERS: [&str; 2] = ["World", "People"];
+
+/// The field: the level `field` (`assets/levels/field.ldtk`, cooked to
+/// `levels/field.klvl`), its ground, grid, tall walls, trees and rocks,
 /// then the person, and the camera on them.
-fn field(mut app: App, sprites: &Sprites) -> App {
+///
+/// # Errors
+///
+/// If the level cannot be loaded: it says to cook the assets.
+fn field(app: App, sprites: &Sprites) -> Result<App, Box<dyn Error>> {
     let gait = sprites.gait;
-    let set = sprites.tiles;
-    let map = map::build(set);
+    let mut app = app.collision_layers(&COLLISION_LAYERS);
+    app.load_level("field").map_err(|error| {
+        format!(
+            "the field, `levels/field.klvl`, cannot be loaded: {error}; run `cargo xtask cook` to cook `assets/` into `target/cooked`"
+        )
+    })?;
+    // A trunk or a rock, which the level spawns, stops the person at its
+    // foot, so that they are drawn behind it when they walk into it from
+    // above, and in front of it from below.
     let world = app.world_mut();
-    for &feet in &map.walls {
-        world
-            .spawn()
-            .with(Transform::at(feet))
-            .with(map::tall_wall(set));
-    }
-    // A trunk or a rock stops the person at its foot, so that they are
-    // drawn behind it when they walk into it from above, and in front of it
-    // from below.
-    for &(kind, feet) in &map.props {
-        let (mut sprite, half) = match kind {
-            Prop::Tree => (sprites.tree.sprite, Vec2::new(4.0, 3.0)),
-            Prop::Rock => (sprites.rock.sprite, Vec2::new(7.0, 4.0)),
-        };
-        sprite.layer = 1;
-        world
-            .spawn()
-            .with(Transform::at(feet))
-            .with(sprite)
-            .with(at_feet(half, map::WORLD, map::WORLD));
-    }
     let mut person = sprites.person[0].sprite;
     person.layer = 1;
     let player = spawn_player(world, person, &gait);
@@ -505,15 +501,11 @@ fn field(mut app: App, sprites: &Sprites) -> App {
         player,
         at_feet(Vec2::new(5.0, 3.0), map::PEOPLE, map::WORLD),
     );
-    world.resource_mut::<Collisions>().set_grid(map.grid);
-    let tiles = world.resource_mut::<TileLayers>().add(map.ground);
-    app.insert_resource(Ground {
-        tiles,
-        outside: Color::rgb(84, 84, 96),
-    })
-    .insert_resource(gait)
-    .add_frame_system(FrameStage::Camera, "follow_camera", follow_camera)
-    .add_frame_system(FrameStage::Extract, "draw_tiles", draw_tiles)
+    Ok(app.insert_resource(gait).add_frame_system(
+        FrameStage::Camera,
+        "follow_camera",
+        follow_camera,
+    ))
 }
 
 /// The person, at [`PLAYER_START`], drawn as `sprite`, standing as `gait`
@@ -936,7 +928,7 @@ mod tests {
                 "frame Camera: follow_camera",
                 "frame Ui: report",
                 "frame Extract: nadir::extract_sprites",
-                "frame Extract: draw_tiles",
+                "frame Extract: nadir::extract_level",
             ]
         );
     }
@@ -1084,10 +1076,14 @@ mod tests {
             assert_eq!(sprite.texture, texture, "{sprite:?}");
         }
         assert_eq!(out.camera.position, PLAYER_START);
-        // The ground, under everything, and around it the stone's color.
-        let ground = world.resource::<Ground>();
+        // The level's ground, under everything, and around it its
+        // background, the stone's color.
+        let level = world.resource::<nadir::CurrentLevel>();
+        let [ground] = level.tile_layers() else {
+            panic!("one tile layer: {:?}", level.tile_layers());
+        };
         assert_eq!(out.tile_layers, [TileLayerDraw::new(ground.tiles)]);
-        assert_eq!(out.clear, ground.outside);
+        assert_eq!(out.clear, Color::rgb(84, 84, 96));
         let layers = world.resource::<TileLayers>();
         let tiles = layers.get(ground.tiles).expect("the ground");
         assert_eq!(tiles.size(), UVec2::new(map::WIDTH, map::HEIGHT));

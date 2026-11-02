@@ -85,7 +85,8 @@
 //!   ([`level`] re-exports its types), and
 //!   [`PrefabLibrary::spawn_level`] spawns its entities, each with its
 //!   position, after [`PrefabLibrary::load_level`] loads their prefabs.
-//!   Its tile layers and grid are the facade's (roadmap M5.6).
+//!   Its tile layers and grid are the facade's, whose `load_level` loads a
+//!   whole level (M5.6).
 //! - **[`Value`]** is `nadir-codec`'s JSON tree, re-exported. `nadir-codec`
 //!   reads JSONC text and KBJ into one.
 //!

@@ -243,6 +243,17 @@ fn from_nanos(nanos: u128) -> Duration {
 pub struct Clips {
     clips: GenArena<Named>,
     names: BTreeMap<String, Handle<Clip>>,
+    /// The atlases added, each by its pages' textures, with the clips added
+    /// of it that are still here.
+    atlases: Vec<AtlasClips>,
+}
+
+/// An atlas that gave clips, known by its pages, the clips it gave that
+/// are still there, and how many adds hold them.
+struct AtlasClips {
+    pages: Vec<Handle<Texture>>,
+    clips: Vec<Handle<Clip>>,
+    holds: u32,
 }
 
 /// A clip, and its name if it has one.
@@ -257,6 +268,7 @@ impl Clips {
         Self {
             clips: GenArena::new(),
             names: BTreeMap::new(),
+            atlases: Vec::new(),
         }
     }
 
@@ -294,11 +306,18 @@ impl Clips {
     /// in the atlas's order, and each sprite's clips by name. A looping clip
     /// is [`Playback::Loop`]; the others [`Playback::Once`].
     ///
+    /// An atlas is known by its pages. One added before with the same
+    /// `pages`, whose clips are not all removed, is not added again: the
+    /// result is the handles it gave, and the atlas is held once more, as
+    /// [`Clips::release_atlas`] lets go. So a level and the game can each
+    /// add an atlas they share, in either order, and the clips stay until
+    /// the last lets go of it (ADR-0038).
+    ///
     /// # Errors
     ///
     /// [`ClipError::WrongPages`] if `pages` is not one texture a page, and
-    /// [`ClipError::NameTaken`] if a clip has one of their names, as when an
-    /// atlas is added twice. Then none is added.
+    /// [`ClipError::NameTaken`] if a clip has one of their names, as when
+    /// two atlases have a sprite of one name. Then none is added.
     pub fn add_atlas(
         &mut self,
         atlas: &Atlas,
@@ -309,6 +328,10 @@ impl Clips {
                 needed: atlas.pages().len(),
                 given: pages.len(),
             });
+        }
+        if let Some(known) = self.atlases.iter_mut().find(|known| known.pages == pages) {
+            known.holds = known.holds.saturating_add(1);
+            return Ok(known.clips.clone());
         }
         let mut made = Vec::new();
         for sprite in atlas.sprites() {
@@ -340,13 +363,46 @@ impl Clips {
                 made.push((name, Clip::try_new(frames, playback)?));
             }
         }
-        Ok(made
+        let handles: Vec<Handle<Clip>> = made
             .into_iter()
             .map(|(name, clip)| {
                 self.add_named(name, clip)
                     .expect("each name was checked as free, and they differ")
             })
-            .collect())
+            .collect();
+        if !handles.is_empty() {
+            self.atlases.push(AtlasClips {
+                pages: pages.to_vec(),
+                clips: handles.clone(),
+                holds: 1,
+            });
+        }
+        Ok(handles)
+    }
+
+    /// Lets go of one hold of the atlas of `pages`, which
+    /// [`Clips::add_atlas`] took, and returns whether that was the last:
+    /// then the clips it gave that are still here are removed, as
+    /// [`Clips::remove`] removes one. An atlas that gave no clip, or whose
+    /// clips are all gone, is not held: nothing happens.
+    pub fn release_atlas(&mut self, pages: &[Handle<Texture>]) -> bool {
+        let Some(index) = self.atlases.iter().position(|known| known.pages == pages) else {
+            return false;
+        };
+        let known = &mut self.atlases[index];
+        known.holds -= 1;
+        if known.holds > 0 {
+            return false;
+        }
+        let atlas = self.atlases.remove(index);
+        for handle in atlas.clips {
+            if let Some(named) = self.clips.remove(handle.id())
+                && let Some(name) = &named.name
+            {
+                self.names.remove(name);
+            }
+        }
+        true
     }
 
     /// The clip of `handle`, or `None` if it was removed.
@@ -371,6 +427,11 @@ impl Clips {
         let named = self.clips.remove(handle.id())?;
         if let Some(name) = &named.name {
             self.names.remove(name);
+            // An atlas whose clips are all gone may be added again.
+            for atlas in &mut self.atlases {
+                atlas.clips.retain(|&clip| clip != handle);
+            }
+            self.atlases.retain(|atlas| !atlas.clips.is_empty());
         }
         Some(named.clip)
     }
@@ -900,6 +961,39 @@ mod tests {
         );
         assert_eq!(clips.len(), 1);
         assert_eq!(clips.find("sprites/person/stand"), None);
+    }
+
+    #[test]
+    fn an_atlas_added_again_is_held_again_until_its_clips_are_removed() {
+        let atlas = atlas();
+        let pages = [texture(7), texture(8)];
+        let mut clips = Clips::new();
+        let added = clips.add_atlas(&atlas, &pages).expect("the clips");
+        assert!(!added.is_empty());
+        let count = clips.len();
+        // Again, by the same pages: the same clips, held twice.
+        assert_eq!(clips.add_atlas(&atlas, &pages), Ok(added.clone()));
+        assert_eq!(clips.len(), count);
+        // Let go once, they stay; let go again, they go, and it is not held.
+        assert!(!clips.release_atlas(&pages));
+        assert_eq!(clips.len(), count);
+        assert!(clips.release_atlas(&pages));
+        assert!(clips.is_empty());
+        assert_eq!(clips.find("sprites/person/stand"), None);
+        assert!(!clips.release_atlas(&pages));
+        let added = clips.add_atlas(&atlas, &pages).expect("the clips");
+        // By other pages, another load of it: its names are taken.
+        assert!(matches!(
+            clips.add_atlas(&atlas, &[texture(9), texture(10)]),
+            Err(ClipError::NameTaken(_))
+        ));
+        // Once its clips are gone, it is added anew.
+        for handle in added {
+            clips.remove(handle);
+        }
+        assert!(clips.is_empty());
+        let again = clips.add_atlas(&atlas, &pages).expect("the clips");
+        assert_eq!(again.len(), count);
     }
 
     #[test]

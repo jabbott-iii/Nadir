@@ -24,9 +24,9 @@
 //! 3. Encodes each capture with GStreamer (`gst-launch-1.0`) into a VP9
 //!    WebM and a PNG poster, at twice the size: every pixel of the game a
 //!    square of four.
-//! 4. Packs the sandbox and its cooked atlases, `target/cooked/atlas`, with
-//!    `LICENSE` and `NOTICE`, into `downloads/`, with `tar`, and takes its
-//!    SHA-256 with `sha256sum`.
+//! 4. Packs the sandbox and its cooked assets, the `atlas/`, `data/` and
+//!    `levels/` of `target/cooked`, with `LICENSE` and `NOTICE`, into
+//!    `downloads/`, with `tar`, and takes its SHA-256 with `sha256sum`.
 //! 5. Fills `site/index.html` from the commit (`git`), the workspace, the
 //!    roadmap, the features and the captures, and `site/llms.txt`, the
 //!    same as plain text for language models, and copies `site/nadir.css`
@@ -81,10 +81,10 @@ const TEXT_TEMPLATE: &str = "site/llms.txt";
 const OWN_FILES: &[&str] = &["site/nadir.css", "site/nadir.js"];
 
 /// The cooked assets, relative to the workspace root, where
-/// `cargo xtask cook` puts them, and the folder of them the download takes:
-/// the cook's own, which holds what it wrote and nothing else.
+/// `cargo xtask cook` puts them, and the folders of them the download
+/// takes: the cook's own, which hold what it wrote and nothing else.
 pub(crate) const COOKED: &str = "target/cooked";
-const COOKED_ATLASES: &str = "atlas";
+pub(crate) const COOKED_FOLDERS: [&str; 3] = ["atlas", "data", "levels"];
 
 /// The repository, where `GITHUB_REPOSITORY` does not name it.
 const REPOSITORY: &str = "jabbott-iii/Nadir";
@@ -94,7 +94,7 @@ const SCENES: &[Scene] = &[
     Scene {
         name: "field",
         title: "The field",
-        caption: "A person walks a hand-built map of tiles: down to the path and along it \
+        caption: "A person walks a field made in LDtk, of tiles, trees and rocks: down to the path and along it \
                   past the pond, down it past the flowers and through a gap in a row of \
                   tall walls, then along the face of one until it ends. The camera follows \
                   them. They walk in four frames, facing the way they go, and are drawn in \
@@ -387,9 +387,10 @@ fn read_frame(path: &Path, offset: u64, length: u64) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
-/// Packs the sandbox's executable and its cooked atlases
-/// (`target/cooked/atlas`, as `assets/atlas`), with a note, `LICENSE` and
-/// `NOTICE`, into a `.tar.gz` in `downloads`, by way of `work`.
+/// Packs the sandbox's executable and its cooked assets (the
+/// [`COOKED_FOLDERS`] of `target/cooked`, in `assets/`), with a note,
+/// `LICENSE` and `NOTICE`, into a `.tar.gz` in `downloads`, by way of
+/// `work`.
 fn package(
     root: &Path,
     sandbox: &Path,
@@ -725,11 +726,18 @@ pub(crate) fn copy(from: &Path, to: &Path) -> Result<(), Error> {
     })
 }
 
-/// Copies the cooked atlases under `cooked` into `assets`, as the sandbox
-/// reads them from beside its executable: `atlas/`, which the cook owns,
-/// and nothing else of the folder, such as the cook's cache.
+/// Copies the cooked assets under `cooked` into `assets`, as the sandbox
+/// reads them from beside its executable: the [`COOKED_FOLDERS`] that the
+/// cook wrote, which it owns, and nothing else of the folder, such as the
+/// cook's cache.
 pub(crate) fn copy_cooked(cooked: &Path, assets: &Path) -> Result<(), Error> {
-    copy_dir(&cooked.join(COOKED_ATLASES), &assets.join(COOKED_ATLASES))
+    for folder in COOKED_FOLDERS {
+        let from = cooked.join(folder);
+        if from.is_dir() {
+            copy_dir(&from, &assets.join(folder))?;
+        }
+    }
+    Ok(())
 }
 
 /// Copies the files under `from` into `to`, keeping the tree.
@@ -948,14 +956,17 @@ mod tests {
     }
 
     #[test]
-    fn the_download_takes_the_cooked_atlases_alone() {
+    fn the_download_takes_the_cooked_atlases_data_and_levels_alone() {
         let dir = scratch("cooked");
         let cooked = dir.join("cooked");
         for (path, text) in [
             ("atlas/sprites.kbj", "atlas"),
             ("atlas/sprites/tiles.tiles.qoi", "tiles"),
+            ("data/prefabs/tree.kbj", "tree"),
+            ("levels/field.klvl", "field"),
             (".cache.kbj", "cache"),
             ("stray.txt", "stray"),
+            ("other/thing.kbj", "other"),
         ] {
             let file = cooked.join(path);
             fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -979,7 +990,12 @@ mod tests {
         found.sort();
         assert_eq!(
             found,
-            ["atlas/sprites.kbj", "atlas/sprites/tiles.tiles.qoi"]
+            [
+                "atlas/sprites.kbj",
+                "atlas/sprites/tiles.tiles.qoi",
+                "data/prefabs/tree.kbj",
+                "levels/field.klvl"
+            ]
         );
         fs::remove_dir_all(&dir).unwrap();
     }

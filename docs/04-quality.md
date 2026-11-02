@@ -452,8 +452,9 @@ understood.
        of four, which 4:2:0 chroma keeps whole) and a PNG poster;
      - cooks `assets/` into `target/cooked` first, as `cargo xtask cook`
        does: the sandbox draws the cooked sprites (ADR-0033);
-     - packs the sandbox and the cooked atlases, `target/cooked/atlas` and
-       nothing else of that folder, as `assets/atlas` beside it, with a
+     - packs the sandbox and its cooked assets, the `atlas/`, `data/` and
+       `levels/` of `target/cooked` and nothing else of that folder, in
+       `assets/` beside it (M5.6), with a
        `README.txt`, `LICENSE` and `NOTICE` (ADR-0037), into
        `downloads/nadir-sandbox-linux-x86_64.tar.gz`, with its SHA-256 and
        the oldest glibc it runs on, read from the version names in the

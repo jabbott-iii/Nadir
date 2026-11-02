@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The field's map, built by hand: 64 × 48 tiles of 16 pixels, written
-//! as rows of letters. It makes the ground, a tile layer of the tile set
-//! `assets/sprites/tiles.png`, cooked, and the collision grid; the tall walls,
-//! trees and rocks stand on it as y-sorted sprites (`docs/subsystems/
-//! render.md`, "Tilemaps").
+//! The field's map, as it was built by hand until the field became the
+//! LDtk level `assets/levels/field.ldtk` (roadmap M5.12, M5.6): 64 × 48
+//! tiles of 16 pixels, written as rows of letters. Its ground is a tile
+//! layer of the tile set `assets/sprites/tiles.png`, cooked, with the
+//! collision grid under it; the tall walls, trees and rocks stand on it as
+//! y-sorted sprites (`docs/subsystems/render.md`, "Tilemaps"). The game
+//! loads the level; the tests find this map in it, cell for cell.
 //!
 //! | Letter | Tile | Solid |
 //! | :- | :- | :- |
@@ -32,6 +34,7 @@
 
 use nadir::prelude::*;
 
+#[cfg(test)]
 use crate::Prop;
 
 /// The tile set's tiles across and down, numbered row by row: 8 × 4 of 16
@@ -40,20 +43,27 @@ pub(crate) const COLUMNS: u16 = 8;
 pub(crate) const ROWS: u16 = 4;
 
 /// A tile's side, in pixels.
+#[cfg(test)]
 pub(crate) const TILE: f32 = 16.0;
 
-/// The tiles of the set.
-const GRASS: u16 = 0;
-const GRASS_TUFTS: u16 = 1;
-const PATH: u16 = 2;
 /// A stone wall seen from above, which the maze of `stress-entities` is
 /// made of too.
 pub(crate) const STONE: u16 = 3;
-/// The top of a tall wall, over its face, tile 12.
-const TALL_WALL: u16 = 4;
-const FLOWERS: u16 = 5;
-const WATER: u16 = 8;
-const GRASS_DARK: u16 = 13;
+
+/// The tiles of the set.
+#[cfg(test)]
+mod tile {
+    pub(super) const GRASS: u16 = 0;
+    pub(super) const GRASS_TUFTS: u16 = 1;
+    pub(super) const PATH: u16 = 2;
+    /// The top of a tall wall, over its face, tile 12.
+    pub(super) const TALL_WALL: u16 = 4;
+    pub(super) const FLOWERS: u16 = 5;
+    pub(super) const WATER: u16 = 8;
+    pub(super) const GRASS_DARK: u16 = 13;
+}
+#[cfg(test)]
+use tile::*;
 
 /// The layer of what the map's walls, water, trees and rocks are, which
 /// the grid's tiles are on.
@@ -62,10 +72,13 @@ pub(crate) const WORLD: LayerMask = LayerMask::bit(0);
 pub(crate) const PEOPLE: LayerMask = LayerMask::bit(1);
 
 /// The size of the map, in tiles.
+#[cfg(test)]
 pub(crate) const WIDTH: u32 = 64;
+#[cfg(test)]
 pub(crate) const HEIGHT: u32 = 48;
 
 /// The map, row by row from the top.
+#[cfg(test)]
 const MAP: [&str; HEIGHT as usize] = [
     "################################################################",
     "#................,,............................................#",
@@ -118,6 +131,7 @@ const MAP: [&str; HEIGHT as usize] = [
 ];
 
 /// What the map makes.
+#[cfg(test)]
 pub(crate) struct Map {
     /// The ground: every cell's tile.
     pub(crate) ground: TileLayer,
@@ -130,6 +144,7 @@ pub(crate) struct Map {
 }
 
 /// Reads the map, with `set` as the ground's tile set.
+#[cfg(test)]
 pub(crate) fn build(set: TileSet) -> Map {
     let mut ground = TileLayer::new(set, UVec2::new(WIDTH, HEIGHT), TILE, Vec2::ZERO);
     let mut grid = TileGrid::new(WIDTH, HEIGHT, TILE, Vec2::ZERO);
@@ -170,17 +185,9 @@ pub(crate) fn build(set: TileSet) -> Map {
     }
 }
 
-/// The sprite of a tall wall: its top and its face, one tile wide, two
-/// high, y-sorted by its feet among the people.
-pub(crate) fn tall_wall(set: TileSet) -> Sprite {
-    let mut wall = Sprite::new(set.texture, Vec2::new(TILE, 2.0 * TILE));
-    wall.uv = set.block_uv(TALL_WALL, UVec2::new(1, 2));
-    wall.layer = 1;
-    wall
-}
-
 #[cfg(test)]
 mod tests {
+    use nadir::CurrentLevel;
     use nadir::assets::Scope;
     use nadir::scene::level::{Level, LevelFile};
     use nadir::scene::{PrefabLibrary, TypeRegistry};
@@ -212,44 +219,65 @@ mod tests {
     }
 
     #[test]
-    fn the_grid_is_solid_where_the_walls_and_the_water_are() {
+    fn the_loaded_field_is_the_map_with_its_walls_and_props_on_it() {
         let app = crate::tests::scene(crate::Scene::Field);
         let world = app.world();
         let set = world.resource::<crate::Sprites>().tiles;
         assert_eq!((set.columns, set.rows), (COLUMNS, ROWS));
         let map = build(set);
+        let level = world.resource::<CurrentLevel>();
+        assert_eq!(level.name(), Some("field"));
+
+        // The grid, solid where the walls and the water are.
         let collisions = world.resource::<Collisions>();
         let grid = collisions.grid();
         assert_eq!(grid.layer, WORLD);
         assert_eq!((grid.width(), grid.height()), (WIDTH, HEIGHT));
-        let mut letters = [0usize; 256];
+        // The ground, each cell's tile the map's, animated as it animates.
+        let [ground] = level.tile_layers() else {
+            panic!("one tile layer: {:?}", level.tile_layers());
+        };
+        let layers = world.resource::<TileLayers>();
+        let tiles = layers.get(ground.tiles).expect("the ground");
+        assert_eq!(tiles.tileset(), set);
         for (y, row) in (0..).zip(MAP) {
             for (x, letter) in (0..).zip(row.bytes()) {
                 let cell = IVec2::new(x, y);
                 let solid = matches!(letter, b'#' | b'~' | b'W');
                 assert_eq!(grid.is_solid(cell), solid, "({x}, {y})");
-                let tile = map.ground.get(cell).expect("every cell has a tile");
-                let frames = match letter {
-                    b'~' => 4,
-                    b'*' => 2,
-                    _ => 1,
-                };
-                assert_eq!(tile.frames, frames, "({x}, {y})");
-                letters[usize::from(letter)] += 1;
+                assert_eq!(tiles.get(cell), map.ground.get(cell), "({x}, {y})");
             }
         }
-        assert_eq!(map.walls.len(), letters[usize::from(b'W')]);
-        assert_eq!(
-            map.props.len(),
-            letters[usize::from(b'T')] + letters[usize::from(b'R')]
-        );
-        // A tall wall is the tile set's column 4, rows 0 and 1.
-        let wall = tall_wall(set);
-        assert_eq!(
-            wall.uv,
-            Rect::new(Vec2::new(0.5, 0.0), Vec2::new(0.625, 0.5))
-        );
-        assert_eq!((wall.size, wall.layer), (Vec2::new(16.0, 32.0), 1));
+
+        // The level's entities: the tall walls, then the trees and rocks,
+        // in the map's order, each at its feet.
+        let entities = level.entities();
+        assert_eq!(entities.len(), map.walls.len() + map.props.len());
+        let transforms = world.read::<Transform>();
+        let feet: Vec<Vec2> = entities
+            .iter()
+            .map(|&entity| transforms.get(entity).expect("a Transform").position)
+            .collect();
+        let made: Vec<Vec2> = map
+            .walls
+            .iter()
+            .copied()
+            .chain(map.props.iter().map(|&(_, feet)| feet))
+            .collect();
+        assert_eq!(feet, made);
+        // A tall wall is the tile set's column 4, rows 0 and 1: its top and
+        // its face, one tile wide, two high, y-sorted among the people.
+        let sprites = world.read::<Sprite>();
+        for &entity in &entities[..map.walls.len()] {
+            let wall = sprites.get(entity).expect("a wall's sprite");
+            assert_eq!(wall.texture, set.texture);
+            assert_eq!(
+                wall.uv,
+                Rect::new(Vec2::new(0.5, 0.0), Vec2::new(0.625, 0.5))
+            );
+            assert_eq!((wall.size, wall.layer), (Vec2::new(16.0, 32.0), 1));
+            assert_eq!(set.block_uv(TALL_WALL, UVec2::new(1, 2)), wall.uv);
+        }
     }
 
     #[test]
@@ -259,7 +287,7 @@ mod tests {
         let map = build(set);
         let level = cooked(&app);
         assert_eq!(level.size, [WIDTH * 16, HEIGHT * 16]);
-        // The sandbox's clear colour, which M5.6 takes from the level.
+        // The sandbox's clear colour, which the level gives the frames.
         assert_eq!(level.background, [84, 84, 96]);
         assert_eq!(level.assets, ["atlas/sprites.kbj"]);
 

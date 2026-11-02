@@ -34,9 +34,9 @@ Built today:
 - `Level`, the cooked level file as an asset, whose entities
   `PrefabLibrary::spawn_level` spawns through their prefabs.
 
-Not yet: loading a whole level, its tile layers and grid, which is the
-facade's (roadmap task M5.6); entity references and saves with M9.4; game
-states with M9.1.
+A whole level, its tile layers, grid and tall tiles with its entities, is
+loaded by the facade's `App::load_level`, which uses these. Not yet:
+entity references and saves with M9.4; game states with M9.1.
 
 ## Usage
 
