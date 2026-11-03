@@ -935,7 +935,7 @@ pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no al
 
 ```rust
 pub trait Source: Send + Sync {
-    fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError>;      // NotFound, or Read
+    fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError>;      // NotFound, Read, or Decode (a damaged pack entry)
     fn modified(&self, path: &AssetPath) -> Option<std::time::SystemTime> { None }  // loose files tell
 }
 ```
@@ -943,8 +943,20 @@ pub trait Source: Send + Sync {
 - **`LooseSource`** reads files under a root directory: in development,
   `target/cooked/`. It stays in every build (ADR-0041); release builds
   read the pack from M5.7.
-- **`PackSource`** (M5.14) reads from `game.kpak`, through
-  `nadir_codec::kpak`.
+- **`PackSource`** reads the cook's pack, `game.kpak`
+  (`PackSource::FILE_NAME`), through `nadir_codec::kpak`. As built in
+  M5.14 (ADR-0041):
+  - `PackSource::open(path)` reads the header and the TOC, within the
+    game's `Limits`, and keeps the file open: `NotFound` with no file,
+    `Read` for one that cannot be read, `Decode` with the codec's
+    `CodecError::Kpak` for one the reader refuses.
+  - `read` finds the entry by a binary search of the TOC, then, holding
+    the file's mutex, seeks to it and reads its stored bytes alone; the
+    CRC check and the decompression run after the lock is let go, so the
+    workers decode at once. A path not in the pack is `NotFound`; a pack
+    cut short since it was opened is `Read`; a damaged entry is
+    `Decode(Kpak { kind: Damaged { name, .. }, .. })`, naming its path.
+  - `modified` is `None`: a pack cannot tell when a file changed.
 - **Paths are normalized** as `AssetPath`s, above: lowercase, forward
   slashes, no `..`. The cook tool rejects source paths that differ only in
   case, so Windows/macOS (case-insensitive) and Linux (case-sensitive)
@@ -967,7 +979,21 @@ toc (toc_size bytes at toc_offset, a multiple of 16, to the end of the file; toc
 ```
 
 - Hash collisions between distinct paths are detected at cook time, which
-  fails the build (M5.14).
+  fails the build: `CookError::OutputCollision`, whose message says so.
+- **The writer** (`tools/cook/src/kpak.rs`, M5.14): every cook writes
+  `OUT/game.kpak` of the outputs its cache lists, after the stale files
+  are removed and before the cache is written. The files are laid out in
+  path order, each at a multiple of 16, one of the same bytes as an
+  earlier one stored once with it; each is KLZ when that is smaller, and
+  stored as it is otherwise; the TOC and its string table follow, in order
+  of the paths' hashes. The pack is read back with `nadir_codec::kpak` and
+  the game's `Limits`, every entry decompressed, before it is written, and
+  it is written only when its bytes change, so that a cook that changes
+  nothing leaves it as it was. A file larger than the game reads, more
+  files than it reads, or a TOC larger, is `CookError::Encode`, as is a
+  pack the reader refuses; a path longer than 65,535 bytes is
+  `CookError::BadPath`. The sandbox's six cooked files, 19,030 bytes,
+  pack into 5,304, each smaller as KLZ.
 - At runtime, each read of an entry checks the CRC-32 of its stored bytes
   before it decompresses them. A mismatch is a corruption error naming the
   path, from the string table, which the cook always writes (ADR-0041), or
@@ -984,9 +1010,10 @@ toc (toc_size bytes at toc_offset, a multiple of 16, to the end of the file; toc
 
 ## `nadir-cook` (library + CLI)
 
-As built in M5.4, M5.5 and M5.12 (ADR-0031, ADR-0035, ADR-0038): the
-atlas pipeline, with PNGs, Aseprite exports and BMFont fonts; data, its
-prefabs checked; LDtk projects' levels; the cache; and the CLI. The audio
+As built in M5.4, M5.5, M5.12 and M5.14 (ADR-0031, ADR-0035, ADR-0038,
+ADR-0041): the atlas pipeline, with PNGs, Aseprite exports and BMFont
+fonts; data, its prefabs checked; LDtk projects' levels; the pack of
+every output (above, "Pack file"); the cache; and the CLI. The audio
 pipeline comes with M6.6.
 
 ### Pipelines
@@ -1332,9 +1359,10 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
   cook would not write (not an asset path as written, or an output not a
   `.qoi` or `.kbj` below `atlas/`, a `.kbj` below `data/`, or a `.klvl`
   below `levels/`) is not used, with a warning.
-- Each output is written through a `.tmp` and a rename, and the cache last.
-  The cook owns `OUT/atlas/`, `OUT/data/` and `OUT/levels/`: every file
-  there that no job wrote is removed. The output folder and the source folder may not hold
+- Each output is written through a `.tmp` and a rename, then the pack,
+  and the cache last. The cook owns `OUT/atlas/`, `OUT/data/` and
+  `OUT/levels/`: every file there that no job wrote is removed; and it
+  writes `OUT/game.kpak`, above, over whatever is there. The output folder and the source folder may not hold
   each other. Two outputs of one name, or of names that fold alike, are
   an error.
 
@@ -1344,7 +1372,8 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
   command line not understood, or with an argument that is not valid
   Unicode. It prints each job, cooked (an atlas group's sprites, pages,
   clips and fonts; a project's levels and their entities) or up to date,
-  and warns on standard error.
+  then the pack's files and size, read from its header, and warns on
+  standard error.
 - `cargo xtask cook [--force]` runs it, built in release mode, on
   `assets/` and `target/cooked/`.
 
@@ -1354,7 +1383,7 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
 - there are no timestamps
 - map iteration uses ordered maps or the deterministic hasher
 - the same inputs always produce byte-identical output, and so a
-  byte-identical `game.kpak` (M5.14). Checked by cooking into two folders,
+  byte-identical `game.kpak`. Checked by cooking into two folders,
   and an incremental cook against a clean one, in `cargo test -p
   nadir-cook`, and by `cargo xtask cook --force` against the cook before
   it.
@@ -1409,7 +1438,8 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
   (`prefab`, all three M5.10), the pack file reader (`kpak`, M5.13) and
   the save reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
-  load every cooked asset through `PackSource` and `LooseSource`.
+  read every cooked file through `PackSource` and `LooseSource`, and find
+  the same bytes (`tools/cook/tests/cook/workspace.rs`, M5.14).
 - **The cook** (`tools/cook`): the scan's rules on lists of names made by
   hand, so that names differing only in case are tested on every system,
   and on disk where the file system can hold both; MaxRects over random
@@ -1428,9 +1458,17 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
   saved apart, two cooks byte for byte, an edit to a level file, a tile
   set's image, sidecar or group cooking the level again to what a clean
   cook writes, and each mistake ADR-0038 names refused with its file and
-  member. The sandbox's tests read the cooked field, `levels/field.klvl`,
+  member. The pack (`tests/cook/pack.rs`): every file the cook wrote, and
+  no other, read through `PackSource` as `LooseSource` reads it; outputs
+  of one value stored once and KLZ where smaller; a damaged entry named;
+  the pack kept as it was by a cook that changes nothing; an empty pack
+  for a cook of nothing; and, beside the writer, two paths of one hash
+  refused. The sandbox's tests read the cooked field, `levels/field.klvl`,
   and find `games/sandbox/src/map.rs`'s map in it, cell for cell, and its
   prefabs the trees and rocks it makes by hand.
+- **`PackSource`** (`crates/assets/src/source.rs`): a pack's files read
+  and no others, a damaged one named, each way `open` fails, a pack cut
+  short after it was opened, and four threads reading at once.
 - **The asset server** (`crates/assets/tests`): loads that never wait for a
   source held shut, order, budgets and turns, panics, scopes. The load
   storm (`storm.rs`) asks for 1,000 images in one frame, and holds every

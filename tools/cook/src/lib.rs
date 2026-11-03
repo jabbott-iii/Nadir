@@ -25,7 +25,7 @@
 //!
 //! # What it cooks
 //!
-//! So far (roadmap M5.4, M5.5, M5.12), [`cook`] reads a source folder and
+//! So far (roadmap M5.4, M5.5, M5.12, M5.14), [`cook`] reads a source folder and
 //! writes, into an output folder:
 //!
 //! - each atlas group's QOI pages, `atlas/<group>_<n>.qoi`, and a KBJ of
@@ -40,6 +40,10 @@
 //!   `.ldtkl`, as a level file, `levels/<name>.klvl`: its tile layers, its
 //!   `Collision` grid, its tall tiles and its entities, which spawn the
 //!   prefabs of their names;
+//! - a pack, [`PACK`], `game.kpak`, of every file above, which release
+//!   builds read (ADR-0041): each stored once however many paths have its
+//!   bytes, at a multiple of 16, compressed as KLZ where that makes it
+//!   smaller, and read back with the game's reader before it is written;
 //! - and a cache, [`CACHE`], that lets the next cook skip the jobs whose
 //!   files did not change.
 //!
@@ -109,9 +113,9 @@
 //!   cooker wrote is not used, so a new build cooks everything once. The
 //!   `nadir-cook` command gives its version and a hash of its executable.
 //! - **What it owns:** the cook removes every file below the output's
-//!   `atlas/`, `data/` and `levels/` that no job wrote; keep nothing of
-//!   your own there. The output folder and the source folder may not hold each
-//!   other.
+//!   `atlas/`, `data/` and `levels/` that no job wrote, and writes
+//!   [`PACK`] over whatever is there; keep nothing of your own there. The
+//!   output folder and the source folder may not hold each other.
 //! - **Errors:** [`cook`]'s `# Errors` says what a failure leaves in the
 //!   output folder. Each output is written through a `.tmp` beside it and
 //!   a rename, so none is left half written. A file not cooked, or a
@@ -139,6 +143,7 @@ mod cache;
 mod config;
 mod error;
 mod image;
+mod kpak;
 mod level;
 mod pack;
 mod scan;
@@ -160,6 +165,11 @@ pub use error::CookError;
 
 /// The name of the cache in the output folder.
 pub const CACHE: &str = ".cache.kbj";
+
+/// The name of the pack in the output folder, `game.kpak`: every file the
+/// cache lists, in one file, which nadir-assets' `PackSource` reads
+/// (ADR-0041).
+pub const PACK: &str = nadir_assets::PackSource::FILE_NAME;
 
 /// The folder of the output folder that the atlas pipeline owns: a file in
 /// it that the cache does not list is removed.
@@ -360,7 +370,8 @@ enum Made<'p> {
 /// their hashes) into files still there as it wrote them, unless
 /// [`Options::force`] says to cook everything. Then every file below
 /// `out/atlas`, `out/data` or `out/levels` that no job wrote is removed,
-/// and the cache is written.
+/// the pack, [`PACK`], is written of the files the jobs wrote, unless it
+/// already holds those bytes, and the cache is written.
 ///
 /// # Errors
 ///
@@ -368,8 +379,11 @@ enum Made<'p> {
 /// written. An error before the jobs are cooked leaves `out` as it was, and
 /// makes no folder. One while they are leaves the files of the jobs cooked
 /// before it written, and the cache as it was. One while stale files are
-/// removed, or the cache is written, can leave some of the stale files
-/// there.
+/// removed, or the pack is made or written, can leave some of the stale
+/// files there, and the pack and the cache as they were; one while the
+/// cache is written leaves the new pack beside the old cache, which the
+/// next cook writes anew. Two paths of one hash in the pack are a
+/// [`CookError::OutputCollision`].
 pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, CookError> {
     let source = fs::canonicalize(source).map_err(|error| CookError::io(source, "open", &error))?;
     let resolved = resolve(out)?;
@@ -821,6 +835,17 @@ pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, Cook
         .collect();
     for owned in [ATLAS, DATA, LEVELS] {
         remove_others(&out, owned, &written)?;
+    }
+    // The pack of what the cache lists, as the jobs left it: written only
+    // when its bytes change, so that a cook that changes nothing leaves it
+    // as it was.
+    let mut packed = Vec::with_capacity(written.len());
+    for path in &written {
+        packed.push((path.clone(), read(&out.join(path))?));
+    }
+    let pack = kpak::write(&packed)?;
+    if fs::read(out.join(PACK)).ok().as_deref() != Some(&pack[..]) {
+        write(&out, PACK, &pack)?;
     }
     let bytes = cache.write().map_err(|error| CookError::Encode {
         path: CACHE.to_string(),

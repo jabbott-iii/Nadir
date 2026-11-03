@@ -17,11 +17,13 @@
 //! `nadir-cook [--force] SOURCE OUT` cooks the files below `SOURCE` into
 //! `OUT`. `cargo xtask cook` runs it on `assets/` and `target/cooked/`.
 
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
-use nadir_cook::{Counts, Options, Report};
+use nadir_codec::{Limits, kpak};
+use nadir_cook::{Counts, Options, PACK, Report};
 use nadir_core::cli::Args;
 use nadir_core::hash::fnv1a64;
 
@@ -38,8 +40,9 @@ const USAGE: &str = "Usage: nadir-cook [--force] SOURCE OUT
 Cooks the files below SOURCE into OUT: each folder's PNG images, Aseprite
 exports and BMFont fonts into an atlas, `atlas/<group>_<n>.qoi` and
 `atlas/<group>.kbj`, with each font's `atlas/<font>.font.kbj`; and each
-JSONC file below `data/` into KBJ, `data/<name>.kbj`. A job whose files did
-not change since the last cook into OUT is left as it is.
+JSONC file below `data/` into KBJ, `data/<name>.kbj`; and every file it
+writes into one pack, `game.kpak`. A job whose files did not change since
+the last cook into OUT is left as it is.
 
 Options:
   --force    Cook every job, whatever the cache in OUT says
@@ -80,7 +83,8 @@ fn main() -> ExitCode {
     };
     match nadir_cook::cook(Path::new(source), Path::new(out), &options) {
         Ok(report) => {
-            let (text, warnings) = describe(&report, out);
+            let (mut text, warnings) = describe(&report, out);
+            text.push_str(&describe_pack(Path::new(out)));
             // If standard error is closed, there is nobody left to warn.
             let _ = io::stderr().write_all(warnings.as_bytes());
             say(&mut io::stdout(), &text, ExitCode::SUCCESS)
@@ -184,6 +188,26 @@ fn describe(report: &Report, out: &str) -> (String, String) {
     (text, warnings)
 }
 
+/// The pack's line: how many files it holds, in how many bytes, from its
+/// header.
+fn describe_pack(out: &Path) -> String {
+    let header = File::open(out.join(PACK)).and_then(|mut file| {
+        let size = file.metadata()?.len();
+        let mut start = [0; kpak::HEADER_SIZE];
+        file.read_exact(&mut start)?;
+        Ok((kpak::header(&start, size, Limits::default()), size))
+    });
+    match header {
+        Ok((Ok(header), size)) => format!(
+            "cook: {PACK}: {} in {size} bytes\n",
+            count(header.entry_count as usize, "file")
+        ),
+        // The cook read the pack back before it wrote it, so only
+        // something else can have changed it since.
+        _ => format!("cook: {PACK}: cannot be read\n"),
+    }
+}
+
 /// `n things`, or `1 thing`.
 fn count(n: usize, thing: &str) -> String {
     if n == 1 {
@@ -268,6 +292,28 @@ mod tests {
             "warning: `sprites/rock.png` has gAMA chunks\n\
              warning: 1 file not cooked:\n  sprites/atlas.qoi: no pipeline cooks it yet\n"
         );
+    }
+
+    #[test]
+    fn the_pack_s_line_says_what_it_holds() {
+        let root =
+            std::env::temp_dir().join(format!("nadir-cook-pack-line-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (source, out) = (root.join("assets"), root.join("cooked"));
+        std::fs::create_dir_all(source.join("data")).unwrap();
+        std::fs::write(source.join("data/items.jsonc"), "[1, 2, 3]").unwrap();
+        assert_eq!(describe_pack(&out), "cook: game.kpak: cannot be read\n");
+        let options = Options {
+            force: false,
+            cooker: "test".to_string(),
+        };
+        nadir_cook::cook(&source, &out, &options).unwrap();
+        let size = std::fs::metadata(out.join(PACK)).unwrap().len();
+        assert_eq!(
+            describe_pack(&out),
+            format!("cook: game.kpak: 1 file in {size} bytes\n")
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

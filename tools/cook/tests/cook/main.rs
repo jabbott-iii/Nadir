@@ -22,6 +22,7 @@ mod fonts;
 mod incremental;
 mod ldtk;
 mod output;
+mod pack;
 mod rules;
 mod workspace;
 

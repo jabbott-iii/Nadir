@@ -3,7 +3,8 @@
 The offline asset pipeline of Nadir: the `nadir-cook` command, and the
 library it is built on. It cooks the files artists make (PNG images,
 Aseprite exports, BMFont fonts, LDtk levels and JSONC data) into the few
-formats the game loads: QOI atlas pages, KBJ files and level files.
+formats the game loads: QOI atlas pages, KBJ files and level files, and a
+pack that holds them all, `game.kpak`.
 
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine
 for top-down games on Windows, macOS and Linux, written in Rust with no
@@ -58,6 +59,7 @@ cook: data/items: cooked
 cook: data/prefabs/rock: cooked
 cook: ldtk/levels/field: 1 level, 16 entities
 cook: 4 jobs cooked, 0 up to date, into target/cooked
+cook: game.kpak: 6 files in 5304 bytes
 ```
 
 Warnings, and the files it did not cook with why, go to standard error.
@@ -96,7 +98,7 @@ assets/                          target/cooked/
     items.jsonc                      prefabs/rock.kbj
     prefabs/rock.jsonc             levels/
   levels/                            field.klvl
-    field.ldtk
+    field.ldtk                     game.kpak
 ```
 
 - **Pages:** `atlas/<group>_<n>.qoi`, squares of 64 to 4096 pixels. A
@@ -127,6 +129,12 @@ assets/                          target/cooked/
   `data/items.kbj`. What the value means is checked where the game loads
   it. A prefab, `data/prefabs/<name>.jsonc`, must be a prefab file of that
   name: `{ "name": "rock", "components": { … } }`.
+- **The pack** `game.kpak` holds every file above, as nadir-assets'
+  `PackSource` reads it: each found by its path's hash and checked
+  against its CRC-32 as it is read, the files of the same bytes stored
+  once, each compressed where that makes it smaller. The cook reads it
+  back with the game's reader before it writes it, and writes it only
+  when it changes.
 - **LDtk projects** cook each level to `levels/<its name in
   snake_case>.klvl`, by the conventions of the engine's ADR-0038: a tile
   set's tile is animated by custom data `{"frames": 4, "ms": 250}`, or the
@@ -153,9 +161,11 @@ outputs' are lowercase.
 - The cache is `.cache.kbj` in the output folder. A cook of another
   version, or built anew, cooks everything once.
 - The cook owns the output's `atlas/`, `data/` and `levels/`: it removes
-  every file there that no job wrote.
-- Each file is written to a `.tmp` beside it and then renamed, and the
-  cache last, so a cook stopped halfway leaves no file half written.
+  every file there that no job wrote. It owns `game.kpak` too, which it
+  writes over whatever is there.
+- Each file is written to a `.tmp` beside it and then renamed, the pack
+  after the files, and the cache last, so a cook stopped halfway leaves
+  no file half written.
 - The same source files cook to the same bytes on every run and every
   system.
 

@@ -3185,7 +3185,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0041 — M5.7 split into three tasks; the pack's reader in codec; every cook writes `game.kpak`, which release builds read
 
-- **Status:** Accepted: the split, and release builds reading `<assets>/game.kpak`, which the user chose on 2026-11-02; proposed with them, for review: the format's details, and every cook writing the pack; as built in M5.13, the reader's checks run in the order its docs list, two entries may share bytes only as one blob (the same offset, sizes, codec and CRC), and every read of an entry checks its CRC, not only the first
+- **Status:** Accepted: the split, and release builds reading `<assets>/game.kpak`, which the user chose on 2026-11-02; proposed with them, for review: the format's details, and every cook writing the pack; as built in M5.13, the reader's checks run in the order its docs list, two entries may share bytes only as one blob (the same offset, sizes, codec and CRC), and every read of an entry checks its CRC, not only the first; as built in M5.14, every cook writes the pack after the stale files are removed and before the cache, only when its bytes change, having read it back with the game's reader, and the pack is not in the cook's `Report` and its errors are `CookError`'s existing variants, so the cook's API is unchanged; `PackSource` keeps the file open behind a mutex and reads only an entry's bytes under it
 - **Date:** 2026-11-02
 - **Context:**
   - Roadmap task M5.7 ("pack files") asks for the `.kpak` writer in the

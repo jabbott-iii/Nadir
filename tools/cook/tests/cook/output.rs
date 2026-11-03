@@ -356,9 +356,10 @@ fn the_same_sources_cook_to_the_same_bytes_in_any_folder() {
     cook(&root.join("first"), &root.join("out1")).expect("a cook");
     cook(&root.join("second"), &root.join("out2")).expect("a cook");
     let (one, two) = (files(&root.join("out1")), files(&root.join("out2")));
+    // The pack among them.
     assert_eq!(
         one.len(),
-        7,
+        8,
         "{:?}",
         one.iter().map(|(name, _)| name).collect::<Vec<_>>()
     );

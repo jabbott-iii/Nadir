@@ -29,8 +29,8 @@ Formats made for the game, which reads them at run time:
   engine's `load_level` loads into the world.
 - **The pack file**, `game.kpak`: its header and table of contents read
   and checked, an entry found by its path, and its bytes checked against
-  their CRC-32 and decompressed. The cook does not write packs yet
-  (M5.14).
+  their CRC-32 and decompressed. The cook writes it, and nadir-assets'
+  `PackSource` reads it.
 - **KLZ**, Nadir's LZ77 block compression, for the pack's entries.
 
 Formats only the cook reads:

@@ -3322,7 +3322,7 @@ by the batched sprite renderer.
     - The reach figures, measured with more mutations than a run makes:
       measured again as the fuzzer makes its inputs.
 
-- [ ] **M5.14 — cook: the pack writer; assets: `PackSource`**
+- [x] **M5.14 — cook: the pack writer; assets: `PackSource`**
   - Note (from M5.4, ADR-0031): pack the outputs `target/cooked/.cache.kbj`
     lists, not a walk of the folder. An option that changes output goes in
     the cache's `options` string, or a forced cook is the only way the
@@ -3359,6 +3359,53 @@ by the batched sprite renderer.
     the same pack byte for byte; a corrupted entry is detected and named.
   - Verify: `cargo test -p nadir-assets -p nadir-cook`; `cargo xtask cook`;
     `cargo xtask ci`
+  - Built (2026-11-02, ADR-0041):
+    - nadir-cook: the writer, `tools/cook/src/kpak.rs`; `cook` packs the
+      outputs its cache lists into `OUT/game.kpak` after the stale files
+      are removed and before the cache, only when the pack's bytes change,
+      read back first with `nadir_codec::kpak` and the game's limits;
+      `nadir_cook::PACK`; the CLI's line for the pack, from its header;
+      `CookError::OutputCollision`'s message for two paths of one hash.
+    - nadir-assets: `PackSource` (`open`, `path`, `len`, `is_empty`,
+      `FILE_NAME`), a `Source`; the `Source` trait's errors name `Decode`
+      for a damaged pack entry.
+    - Tests: `tools/cook/tests/cook/pack.rs` and `common::round_trip`
+      (every file the cook wrote, and no other, read through `PackSource`
+      as `LooseSource` reads it), the workspace's `assets/` round-tripped,
+      the writer's own tests beside it (blobs, KLZ, a collision, a path too
+      long), `PackSource`'s beside it (each way `open` fails, a damaged
+      entry, a pack cut short, four threads). Two cooks byte for byte, in
+      two folders and after an incremental cook, are `output.rs`'s and
+      `incremental.rs`'s tests, whose outputs now hold the pack.
+    - The docs: `docs/subsystems/assets-and-codecs.md` (`PackSource`, the
+      writer, ownership, the CLI, the tests), the cook's and the assets'
+      READMEs and crate docs, the codec's, `AGENTS.md`'s `cargo xtask cook`.
+  - As built:
+    - The cook's API is unchanged: the pack is not in `Report`, whose
+      fields are public and which is not `#[non_exhaustive]`, so the CLI
+      reads the pack's header for its line; and its errors are existing
+      variants: two paths of one hash `OutputCollision`, a file or a TOC
+      past the game's limits, or a pack the reader refuses, `Encode`, a
+      path past 65,535 bytes `BadPath`.
+    - The data region is in path order; a file of the same bytes as one
+      before it shares its blob; each blob is KLZ only when that is
+      smaller; an empty file is a stored entry of no bytes.
+    - `PackSource` keeps the file open behind a mutex, and reads only an
+      entry's bytes under it; the CRC check and decompression run after.
+  - Measured: the sandbox's six cooked files, 19,030 bytes loose, pack into
+    5,304, each smaller as KLZ; `cargo xtask cook` with nothing to cook
+    takes 0.00 to 0.01 s, the pack's read back and comparison included.
+  - Review: one adversarial round, 6 findings confirmed, 4 refuted; all in
+    docs and a test, fixed:
+    - `cook`'s errors: one while the cache is written leaves the new pack
+      beside the old cache.
+    - The `Source` trait's errors, and the design's, without `Decode`.
+    - The test of a cook that changes nothing, which could not see a
+      rewrite on a clock coarser than the time between two cooks: it sets
+      the pack's time far back first.
+    - The codec's README and crate docs, and the cook's, which said the
+      cook did not write packs yet, or left M5.14 out.
+  - `cargo xtask ci`: all 12 checks ok, 1,572 tests passed, 1 ignored.
 
 - [ ] **M5.7 — release builds read the pack**
   - Note (from M5.7, ADR-0041): split into M5.13, M5.14 and this task,
@@ -3371,6 +3418,14 @@ by the batched sprite renderer.
     `assets` beside its executable, as the demo page's download has it;
     `cargo xtask ci` cooks before its tests. Release builds reading the
     pack change both.
+  - Note (from M5.14): every cook now writes `target/cooked/game.kpak`
+    (`nadir_cook::PACK`, `nadir_assets::PackSource::FILE_NAME`), so the
+    sandbox's tests, which run without `dev`, will read the pack once the
+    facade prefers it. `PackSource::open` fails with `NotFound`, `Read` or
+    `Decode`, and `App::new` cannot fail: decide whether a pack that does
+    not open is logged and the loose files read, or makes every load fail.
+    `site::copy_cooked`'s folders and dist's byte-for-byte check are the
+    loose folders still.
   - Depends: M5.14
   - Do: the facade, without `dev`, reads `<Config::assets>/game.kpak`
     through a `PackSource` when it is there, and the loose files otherwise

@@ -18,11 +18,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use nadir_assets::{AssetPath, LooseSource, PackSource, Source};
 use nadir_codec::adler32;
 use nadir_codec::json::Value;
 use nadir_codec::qoi::{self, Image};
-use nadir_codec::{Limits, atlas, kbj};
-use nadir_cook::{CookError, Options, Report};
+use nadir_codec::{Limits, atlas, kbj, kpak};
+use nadir_cook::{CACHE, CookError, Options, PACK, Report};
 use nadir_core::hash::crc32;
 
 /// A PNG of `width` × `height` RGBA8 pixels, rows from the top, with each
@@ -125,6 +126,38 @@ pub(crate) fn files(root: &Path) -> Vec<(String, Vec<u8>)> {
     }
     found.sort();
     found
+}
+
+/// Checks that the pack in `out` holds every file the cook wrote there, and
+/// no other, each read through a [`PackSource`] as a [`LooseSource`] reads
+/// it, and gives how many there are.
+pub(crate) fn round_trip(out: &Path) -> usize {
+    let cooked: Vec<(String, Vec<u8>)> = files(out)
+        .into_iter()
+        .filter(|(name, _)| ![CACHE, PACK].contains(&name.as_str()))
+        .collect();
+    let bytes = fs::read(out.join(PACK)).expect("the pack");
+    let toc = kpak::parse(&bytes, Limits::default()).expect("a pack the game reads");
+    let mut names: Vec<&str> = (0..toc.len())
+        .map(|index| toc.name(index).expect("a path for each entry"))
+        .collect();
+    names.sort_unstable();
+    let expected: Vec<&str> = cooked.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, expected, "the pack's files");
+    let (pack, loose) = (
+        PackSource::open(out.join(PACK)).expect("the pack opens"),
+        LooseSource::new(out),
+    );
+    for (name, cooked) in &cooked {
+        let path = AssetPath::new(name).expect("an asset path");
+        assert_eq!(
+            pack.read(&path).as_ref(),
+            Ok(cooked),
+            "{name}, from the pack"
+        );
+        assert_eq!(pack.read(&path), loose.read(&path), "{name}");
+    }
+    cooked.len()
 }
 
 /// The paths of [`files`].

@@ -26,7 +26,7 @@ use nadir_codec::{Limits, atlas, level, png, prefab};
 use nadir_cook::Counts;
 
 use crate::common::{
-    clips, cook, dir, files, frame_pixels, frames, int, kbj, qoi as read_qoi, sprite,
+    clips, cook, dir, files, frame_pixels, frames, int, kbj, qoi as read_qoi, round_trip, sprite,
 };
 
 fn assets() -> &'static Path {
@@ -223,4 +223,12 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
     );
     assert!(again.warnings.is_empty(), "{:?}", again.warnings);
     assert_eq!(files(&out), first);
+}
+
+#[test]
+fn the_sandbox_s_pack_reads_as_its_loose_files_do() {
+    let out = dir("workspace_pack");
+    cook(assets(), &out).expect("a cook");
+    // The atlas file and its two pages, the two prefabs and the field.
+    assert_eq!(round_trip(&out), 6);
 }

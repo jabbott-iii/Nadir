@@ -32,7 +32,8 @@
 //! QOI file, and `Atlas`, the cook's atlas file, each decoded with
 //! nadir-codec.
 //! The files are the cook's outputs, in `target/cooked/` during
-//! development. Any type can be an asset: implement [`Asset`] for it.
+//! development, loose or in its pack, `game.kpak`. Any type can be an
+//! asset: implement [`Asset`] for it.
 //!
 //! The design is in
 //! [`docs/subsystems/assets-and-codecs.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/subsystems/assets-and-codecs.md)
@@ -61,15 +62,17 @@
 //!   device. [`Asset::placeholder`] and [`Asset::release`] are optional.
 //! - **Paths:** [`AssetPath`], a path below the source's root, such as
 //!   `sprites/hero.qoi`: lowercased, then checked, the same on every system.
-//! - **Sources:** the [`Source`] trait, which the workers read through, and
-//!   [`LooseSource`], which reads files under a folder.
-//!   [`AssetServer::new`] reads through a [`LooseSource`], and
-//!   [`AssetServer::with_source`] through any [`Source`].
+//! - **Sources:** the [`Source`] trait, which the workers read through;
+//!   [`LooseSource`], which reads files under a folder; and [`PackSource`],
+//!   which reads the cook's pack, each file checked against its CRC-32 as
+//!   it is read (ADR-0041). [`AssetServer::new`] reads through a
+//!   [`LooseSource`], and [`AssetServer::with_source`] through any
+//!   [`Source`].
 //! - **Freeing:** [`AssetServer::unload_scope`].
 //!
-//! Not built yet: pack files and their `PackSource` (roadmap M5.14), and hot
-//! reload (M5.8). [`Source::modified`] already tells when a loose file
-//! changed, but nothing watches it.
+//! Not built yet: hot reload (M5.8). [`Source::modified`] already tells
+//! when a loose file changed, but nothing watches it. Release builds of the
+//! engine read the pack from roadmap M5.7.
 //!
 //! # Example
 //!
@@ -218,7 +221,7 @@ pub use error::AssetError;
 pub use nadir_core::Handle;
 pub use path::AssetPath;
 pub use server::{AssetServer, OnFailure, Scope};
-pub use source::{LooseSource, Source};
+pub use source::{LooseSource, PackSource, Source};
 
 // The README's examples are compiled as doc tests too.
 #[cfg(doctest)]

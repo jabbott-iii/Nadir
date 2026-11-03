@@ -69,8 +69,9 @@ fn changing_one_png_cooks_only_its_group_again() {
         .filter(|file| !before.contains(file))
         .map(|(name, _)| name.as_str())
         .collect();
-    // Its page changed; where the rock is, and so its regions, did not.
-    assert_eq!(changed, [".cache.kbj", "atlas/world_0.qoi"]);
+    // Its page changed, and the pack that holds it; where the rock is, and
+    // so its regions, did not.
+    assert_eq!(changed, [".cache.kbj", "atlas/world_0.qoi", "game.kpak"]);
 
     // And it comes to what a clean cook of the same files writes.
     let clean = root.join("clean");
@@ -161,6 +162,7 @@ fn files_no_group_wrote_are_removed_from_the_atlas_folder_only() {
             "atlas/chars_0.qoi",
             "atlas/world.kbj",
             "atlas/world_0.qoi",
+            "game.kpak",
             "notes.txt"
         ]
     );

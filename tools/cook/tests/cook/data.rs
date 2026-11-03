@@ -136,7 +136,12 @@ fn each_data_file_is_cooked_again_alone_and_the_cook_owns_the_data_folder() {
     cook(&source, &out).expect("a cook");
     assert_eq!(
         names(&out),
-        [".cache.kbj", "data/b.kbj", "elsewhere/kept.txt"]
+        [
+            ".cache.kbj",
+            "data/b.kbj",
+            "elsewhere/kept.txt",
+            "game.kpak"
+        ]
     );
     let clean = root.join("clean");
     cook(&source, &clean).expect("a cook");

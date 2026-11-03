@@ -29,11 +29,14 @@ Built:
 - Scopes: an asset loaded in `Scope::Global`, `Scope::Level` or
   `Scope::Transient` stays until each scope it was loaded in is unloaded.
 - `AssetPath`: the same path rules on every system.
-- The `Source` trait, and `LooseSource`, which reads files under a folder.
+- The `Source` trait; `LooseSource`, which reads files under a folder; and
+  `PackSource`, which reads the pack file the cook writes, `game.kpak`,
+  each file found by a binary search of its path's hash and checked
+  against its CRC-32 as it is read, so that a damaged one is an error
+  naming its path.
 - Placeholders for failed loads, when the server is asked to show them.
 
-Not built yet: pack files, read through a `PackSource` (roadmap M5.14), and
-hot reload (M5.8).
+Not built yet: hot reload (M5.8).
 
 The engine's asset types are in nadir-render: `Texture` (`.qoi`) and `Atlas`
 (`.kbj`).

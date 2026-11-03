@@ -127,16 +127,17 @@ pub enum CookError {
     },
     /// Two outputs, or folders of outputs, that are one, or would be on a
     /// system that ignores case: groups' atlas files, tile sets' pages, or
-    /// fonts' files.
+    /// fonts' files; or two outputs whose paths have one hash in the pack
+    /// ([`PACK`](crate::PACK)).
     OutputCollision {
         /// One, below the output folder.
         first: String,
         /// The other.
         second: String,
     },
-    /// An encoder refused what the cook made, or the game's atlas reader
-    /// refused the atlas file it encoded: a pivot past what an `f32`
-    /// holds, say.
+    /// An encoder refused what the cook made, or the game's atlas or pack
+    /// reader refused the file it wrote: a pivot past what an `f32` holds,
+    /// say, or an output larger than the game reads from a pack.
     Encode {
         /// The output, below the output folder.
         path: String,
@@ -214,9 +215,17 @@ impl fmt::Display for CookError {
                 f,
                 "`{path}`: frame {frame}, {w} × {h} once trimmed, does not fit the largest page, 4096 × 4096, with its extrusion"
             ),
+            Self::OutputCollision { first, second }
+                if crate::scan::fold(first) == crate::scan::fold(second) =>
+            {
+                write!(
+                    f,
+                    "`{first}` and `{second}` would be one file on Windows and macOS"
+                )
+            }
             Self::OutputCollision { first, second } => write!(
                 f,
-                "`{first}` and `{second}` would be one file on Windows and macOS"
+                "`{first}` and `{second}` have one path hash, so would be one entry of the pack: rename one"
             ),
             Self::Encode { path, error } => write!(f, "`{path}`: {error}"),
         }
