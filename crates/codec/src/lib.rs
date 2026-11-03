@@ -51,8 +51,8 @@
 //! Today the game reads QOI textures, atlas files, prefab files and level
 //! files, which the engine's `load_level` loads into the world. The pack
 //! file's reader is built (roadmap M5.13); the cook writes packs, and
-//! nadir-assets' `PackSource` reads them (M5.14); release builds will read
-//! their assets from them (M5.7).
+//! nadir-assets' `PackSource` reads them (M5.14), as the engine's release
+//! builds do (M5.7).
 //!
 //! Read only by the cook:
 //!

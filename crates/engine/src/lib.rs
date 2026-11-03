@@ -344,8 +344,10 @@
 //!
 //! # Features
 //!
-//! - `dev`: development builds. A texture that failed to load shows a
-//!   placeholder rather than nothing, and the global allocator counts
+//! - `dev`: development builds. The assets are the loose files of
+//!   [`Config::assets`], not the cook's pack there, which builds without
+//!   `dev` read when it is there (ADR-0041). A texture that failed to load
+//!   shows a placeholder rather than nothing, and the global allocator counts
 //!   allocations: the resource `FrameAllocs` holds the last frame's, and
 //!   `thread_alloc_counts` and `process_alloc_counts` give the counts so
 //!   far, as `AllocCounts`. No other crate in the program may then declare
@@ -368,6 +370,7 @@ mod glue;
 mod level;
 mod limiter;
 mod log_file;
+mod pack;
 mod reflected;
 mod replay;
 mod tick_stats;

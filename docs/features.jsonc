@@ -218,9 +218,9 @@
     {
       "name": "Pack files",
       "area": "Content",
-      "summary": "The cook writes every file it cooks into one pack, each file of the same bytes stored once, aligned, and compressed where that makes it smaller, and reads it back with the game's reader before writing it. The engine reads packs strictly and under the fuzzer, through the same virtual file system as loose files: a header and a table of contents checked against their CRC-32 and the limits before anything is allocated, each file found by a binary search of its path's hash, and each file's bytes checked against their CRC-32 as it is read, so that a damaged one is refused, naming its path. Release builds will ship and read the pack.",
+      "summary": "The cook writes every file it cooks into one pack, each file of the same bytes stored once, aligned, and compressed where that makes it smaller, and reads it back with the game's reader before writing it. The engine reads packs strictly and under the fuzzer, through the same virtual file system as loose files: a header and a table of contents checked against their CRC-32 and the limits before anything is allocated, each file found by a binary search of its path's hash, and each file's bytes checked against their CRC-32 as it is read, so that a damaged one is refused, naming its path. Release builds read the pack alone, and the release files and the download ship nothing else; a pack that does not open fails every load with its error, and development builds read the loose files.",
       "tasks": ["M5.13", "M5.14", "M5.7"],
-      "ticked": ["M5.13", "M5.14"]
+      "ticked": ["M5.13", "M5.14", "M5.7"]
     },
     {
       "name": "Hot reload",

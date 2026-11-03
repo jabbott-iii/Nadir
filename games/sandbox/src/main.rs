@@ -45,7 +45,9 @@
 //! The sprites are cooked (`assets/sprites/`, cooked by `cargo xtask cook`
 //! into one atlas): they are read from `assets` beside the executable, as
 //! the demo page's download has them, or else from the workspace's
-//! `target/cooked`. The person's clips are the tags of their Aseprite
+//! `target/cooked`. Without `dev` they are read from the cook's pack there,
+//! `game.kpak`, which is all the download and the release files hold; with
+//! it, from the loose files of `target/cooked` (ADR-0041). The person's clips are the tags of their Aseprite
 //! export, `assets/sprites/person.json`.
 //!
 //! A recording, when its window is closed, and its replay each log their
@@ -117,8 +119,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 /// The cooked assets: `assets` beside the executable, where the demo
-/// page's download has them (ADR-0029), or else the workspace's
-/// `target/cooked`, where `cargo xtask cook` puts them.
+/// page's download and the release files have their pack (ADR-0029,
+/// ADR-0041), or else the workspace's `target/cooked`, where
+/// `cargo xtask cook` puts them.
 fn assets() -> PathBuf {
     let beside = env::current_exe()
         .ok()
@@ -1247,6 +1250,58 @@ mod tests {
         assert!(error.contains("`atlas/sprites.kbj`"), "{error}");
         assert!(error.contains("run `cargo xtask cook`"), "{error}");
         std::fs::remove_dir(&empty).expect("remove the folder");
+    }
+
+    #[test]
+    fn without_dev_the_field_sets_up_from_the_pack_alone_as_from_the_loose_files() {
+        let root = std::env::temp_dir().join(format!("sandbox-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (packed, loose) = (root.join("packed"), root.join("loose"));
+        std::fs::create_dir_all(&packed).expect("a folder");
+        let cooked = PathBuf::from(COOKED);
+        std::fs::copy(cooked.join("game.kpak"), packed.join("game.kpak"))
+            .expect("the cooked pack: run `cargo xtask cook`");
+        for folder in ["atlas", "data", "levels"] {
+            copy_dir(&cooked.join(folder), &loose.join(folder));
+        }
+        let field = |assets: &PathBuf| {
+            let config = Config {
+                assets: assets.clone(),
+                ..Config::default()
+            };
+            game(App::new(config), Scene::Field)
+        };
+        let from_loose =
+            field(&loose).unwrap_or_else(|error| panic!("from the loose files: {error}"));
+        let from_pack = field(&packed);
+        if cfg!(feature = "dev") {
+            // Dev builds read the loose files, which are not there.
+            let error = match from_pack {
+                Ok(_) => panic!("a dev build read the pack"),
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains("`atlas/sprites.kbj`"), "{error}");
+        } else {
+            // Builds without `dev` read the pack, and need nothing else.
+            let from_pack =
+                from_pack.unwrap_or_else(|error| panic!("from the pack alone: {error}"));
+            assert_eq!(from_pack.world_hash(), from_loose.world_hash());
+        }
+        std::fs::remove_dir_all(&root).expect("remove the folders");
+    }
+
+    /// Copies the files under `from` into `to`, keeping the tree.
+    fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+        std::fs::create_dir_all(to).expect("a folder");
+        for entry in std::fs::read_dir(from).expect("a cooked folder") {
+            let path = entry.expect("an entry").path();
+            let target = to.join(path.file_name().expect("a name"));
+            if path.is_dir() {
+                copy_dir(&path, &target);
+            } else {
+                std::fs::copy(&path, &target).expect("copy a cooked file");
+            }
+        }
     }
 
     #[test]

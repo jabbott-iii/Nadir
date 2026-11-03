@@ -95,7 +95,9 @@ pub struct Config {
     /// scaled up into the window by the largest whole factor that fits
     /// (pixel-perfect mode, ADR-0018).
     pub virtual_resolution: UVec2,
-    /// The folder the game's assets are loaded from.
+    /// The folder the game's assets are loaded from: the cook's output,
+    /// whose pack `game.kpak` builds without `dev` read when it is there
+    /// ([`App::new`]).
     pub assets: PathBuf,
 }
 
@@ -427,7 +429,11 @@ impl App {
     /// entities.
     ///
     /// Its [`AssetServer`] loads from [`Config::assets`]. With the `dev`
-    /// feature, a failed asset shows its placeholder; without it, nothing.
+    /// feature, it reads the loose files there, and a failed asset shows
+    /// its placeholder. Without it, it reads the cook's pack there,
+    /// `game.kpak`, when there is one, and the loose files otherwise; a
+    /// pack that does not open is logged, and every load then fails with
+    /// its error (ADR-0041); and a failed asset shows nothing.
     ///
     /// Of the engine's components, [`Transform`], [`Velocity`], [`Player`],
     /// [`SaveId`], [`Facing`], [`Sprite`], [`Collider`] and [`Animator`] are
@@ -444,7 +450,11 @@ impl App {
         };
         let mut world = World::new();
         world.insert_resource(Input::new());
-        world.insert_resource(AssetServer::new(&config.assets, on_failure));
+        world.insert_resource(crate::pack::asset_server(
+            &config.assets,
+            on_failure,
+            !cfg!(feature = "dev"),
+        ));
         world.insert_resource(RenderFrame::new());
         world.insert_resource(TileLayers::new());
         world.insert_resource(FrameStats::default());

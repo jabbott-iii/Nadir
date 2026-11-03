@@ -19,15 +19,14 @@
 //! 1. Cooks `assets/` into `target/cooked`, as `cargo xtask cook` does,
 //!    and builds `nadir-cook` and the sandbox in release, `--locked`.
 //! 2. Lays out `nadir-<version>-<target>/`: the two executables, the
-//!    sandbox's cooked atlases, data and levels in `assets/` beside it,
-//!    where it reads them (ADR-0033), a `README.txt`, and the `LICENSE` and
-//!    `NOTICE`. On
+//!    sandbox's cooked assets, the pack `game.kpak`, in `assets/` beside it,
+//!    where it reads them (ADR-0033, ADR-0041), a `README.txt`, and the
+//!    `LICENSE` and `NOTICE`. On
 //!    Windows and macOS the sandbox shows an empty window until the engine
 //!    draws there, which its README says ([`Target::drawing_task`]).
 //! 3. Runs what it laid out. `nadir-cook --version` must print the
 //!    workspace's version; the laid-out cook must cook `assets/` into the
-//!    atlases, data and levels `target/cooked` has, byte for byte; and the
-//!    sandbox must
+//!    pack the layout holds, byte for byte; and the sandbox must
 //!    start, which it shows by refusing a scene that does not exist. It
 //!    refuses before it opens a window, so this runs on a machine with no
 //!    display.
@@ -163,7 +162,7 @@ pub(crate) fn command(mut args: Args, root: &Path, out: &mut dyn Write) -> Resul
     let target = &release.target;
     site::copy(&cook, &dir.join(target.executable("nadir-cook")))?;
     site::copy(&sandbox, &dir.join(target.executable("sandbox")))?;
-    site::copy_cooked(&root.join(COOKED), &dir.join("assets"))?;
+    site::copy_pack(&root.join(COOKED), &dir.join("assets"))?;
     site::copy(&root.join("LICENSE"), &dir.join("LICENSE"))?;
     site::copy(&root.join("NOTICE"), &dir.join("NOTICE"))?;
     // The newer of the two programs' floors.
@@ -347,7 +346,7 @@ fn readme(release: &Release, glibc: Option<&str>) -> String {
     );
     programs.push_str(
         "  sandbox      the game that drives the engine's requirements, with its\n               \
-         cooked sprites, prefabs and levels in assets/.\n",
+         cooked sprites, prefabs and levels in assets/game.kpak.\n",
     );
     let sandbox = run("sandbox");
     let commands = format!("    {cook} --help\n    {cook} SOURCE OUT\n    {sandbox}\n");
@@ -431,17 +430,15 @@ fn smoke(root: &Path, dir: &Path, work: &Path, release: &Release) -> Result<(), 
 
     let cooked = work.join("cooked");
     site::run(Command::new(&cook).arg(root.join("assets")).arg(&cooked))?;
-    for folder in site::COOKED_FOLDERS {
-        let (shipped, again) = (root.join(COOKED).join(folder), cooked.join(folder));
-        if let Some(difference) = differ(&files(&shipped)?, &files(&again)?) {
-            return Err(Error::UnexpectedOutput {
-                command: format!("nadir-cook assets {}", cooked.display()),
-                detail: format!(
-                    "the cook laid out did not cook what `{}` holds: {difference}",
-                    shipped.display()
-                ),
-            });
-        }
+    let shipped = dir.join("assets").join(site::PACK);
+    if read(&shipped)? != read(&cooked.join(site::PACK))? {
+        return Err(Error::UnexpectedOutput {
+            command: format!("nadir-cook assets {}", cooked.display()),
+            detail: format!(
+                "the cook laid out did not pack what `{}` holds",
+                shipped.display()
+            ),
+        });
     }
 
     let sandbox = dir.join(target.executable("sandbox"));
@@ -493,22 +490,6 @@ fn files(dir: &Path) -> Result<Vec<(String, Vec<u8>)>, Error> {
     walk(dir, "", &mut found)?;
     found.sort();
     Ok(found)
-}
-
-/// How two sets of [`files`] differ, if they do: the first file one has
-/// and the other lacks, or the first whose bytes differ.
-fn differ(expected: &[(String, Vec<u8>)], actual: &[(String, Vec<u8>)]) -> Option<String> {
-    for (name, bytes) in expected {
-        match actual.iter().find(|(other, _)| other == name) {
-            None => return Some(format!("it made no `{name}`")),
-            Some((_, other)) if other != bytes => return Some(format!("its `{name}` differs")),
-            Some(_) => {}
-        }
-    }
-    actual
-        .iter()
-        .find(|(name, _)| !expected.iter().any(|(other, _)| other == name))
-        .map(|(name, _)| format!("it made `{name}` as well"))
 }
 
 /// Packs the layout `stem` in `work` into an archive in `output`, and
@@ -578,7 +559,7 @@ fn debian(
         }
         let executable = lib.join("sandbox");
         site::copy(&dir.join("sandbox"), &executable)?;
-        site::copy_cooked(&dir.join("assets"), &lib.join("assets"))?;
+        site::copy_pack(&dir.join("assets"), &lib.join("assets"))?;
         // Run through the link, the sandbox still finds `assets` beside
         // itself: on Linux its own path is the one the link names.
         site::run(
@@ -962,8 +943,8 @@ Description: demo game of the Nadir game engine
     }
 
     #[test]
-    fn two_trees_differ_by_a_missing_extra_or_changed_file() {
-        let dir = scratch("differ");
+    fn a_tree_s_files_are_sorted_and_counted_once_installed() {
+        let dir = scratch("files");
         for (path, bytes) in [("a/one.kbj", "1"), ("a/b/two.qoi", "2"), ("three", "")] {
             let path = dir.join(path);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -972,21 +953,6 @@ Description: demo game of the Nadir game engine
         let tree = files(&dir).unwrap();
         let names: Vec<&str> = tree.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(names, ["a/b/two.qoi", "a/one.kbj", "three"]);
-        assert_eq!(differ(&tree, &tree), None);
-        let mut changed = tree.clone();
-        changed[1].1 = b"one".to_vec();
-        assert_eq!(
-            differ(&tree, &changed).as_deref(),
-            Some("its `a/one.kbj` differs")
-        );
-        assert_eq!(
-            differ(&tree, &tree[1..]).as_deref(),
-            Some("it made no `a/b/two.qoi`")
-        );
-        assert_eq!(
-            differ(&tree[1..], &tree).as_deref(),
-            Some("it made `a/b/two.qoi` as well")
-        );
         // Files of the package's control do not count as installed.
         fs::create_dir_all(dir.join("DEBIAN")).unwrap();
         fs::write(dir.join("DEBIAN/control"), vec![b'x'; 5000]).unwrap();

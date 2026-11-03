@@ -31,12 +31,13 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   - assets loaded on worker threads;
   - an offline cook that packs PNG images, Aseprite exports and bitmap fonts
     into atlases, and turns LDtk levels into level files, which the game
-    loads whole, with their prefabs.
+    loads whole, with their prefabs; and puts all it cooks in one pack
+    file, `game.kpak`, which release builds read.
 - **On Windows and macOS,** everything builds and passes the tests, but the
   window stays empty until the OpenGL contexts land (roadmap tasks M2.6 and
   M2.7).
-- **Not built yet:** audio, text, the debug tools, gamepads, pack files, hot
-  reload, saves and the Metal backend.
+- **Not built yet:** audio, text, the debug tools, gamepads, hot reload,
+  saves and the Metal backend.
 
 ## Build and run
 

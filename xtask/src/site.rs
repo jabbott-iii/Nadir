@@ -24,9 +24,10 @@
 //! 3. Encodes each capture with GStreamer (`gst-launch-1.0`) into a VP9
 //!    WebM and a PNG poster, at twice the size: every pixel of the game a
 //!    square of four.
-//! 4. Packs the sandbox and its cooked assets, the `atlas/`, `data/` and
-//!    `levels/` of `target/cooked`, with `LICENSE` and `NOTICE`, into
-//!    `downloads/`, with `tar`, and takes its SHA-256 with `sha256sum`.
+//! 4. Packs the sandbox and its cooked assets, the pack `game.kpak` of
+//!    `target/cooked` in `assets/` (ADR-0041), with `LICENSE` and
+//!    `NOTICE`, into `downloads/`, with `tar`, and takes its SHA-256 with
+//!    `sha256sum`.
 //! 5. Fills `site/index.html` from the commit (`git`), the workspace, the
 //!    roadmap, the features and the captures, and `site/llms.txt`, the
 //!    same as plain text for language models, and copies `site/nadir.css`
@@ -81,10 +82,14 @@ const TEXT_TEMPLATE: &str = "site/llms.txt";
 const OWN_FILES: &[&str] = &["site/nadir.css", "site/nadir.js"];
 
 /// The cooked assets, relative to the workspace root, where
-/// `cargo xtask cook` puts them, and the folders of them the download
-/// takes: the cook's own, which hold what it wrote and nothing else.
+/// `cargo xtask cook` puts them.
 pub(crate) const COOKED: &str = "target/cooked";
-pub(crate) const COOKED_FOLDERS: [&str; 3] = ["atlas", "data", "levels"];
+
+/// The pack the cook writes there, of every file it cooked, which the
+/// download and the release files take, and the sandbox reads in release
+/// (ADR-0041): `nadir_assets::PackSource::FILE_NAME`, whose crate `xtask`
+/// may not link.
+pub(crate) const PACK: &str = "game.kpak";
 
 /// The repository, where `GITHUB_REPOSITORY` does not name it.
 const REPOSITORY: &str = "jabbott-iii/Nadir";
@@ -387,8 +392,8 @@ fn read_frame(path: &Path, offset: u64, length: u64) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
-/// Packs the sandbox's executable and its cooked assets (the
-/// [`COOKED_FOLDERS`] of `target/cooked`, in `assets/`), with a note,
+/// Packs the sandbox's executable and its cooked assets (the [`PACK`] of
+/// `target/cooked`, in `assets/`), with a note,
 /// `LICENSE` and `NOTICE`, into a `.tar.gz` in `downloads`, by way of
 /// `work`.
 fn package(
@@ -408,7 +413,7 @@ fn package(
     })?;
     let glibc = glibc_floor(&executable);
     copy(sandbox, &dir.join("sandbox"))?;
-    copy_cooked(&root.join(COOKED), &dir.join("assets"))?;
+    copy_pack(&root.join(COOKED), &dir.join("assets"))?;
     copy(&root.join("LICENSE"), &dir.join("LICENSE"))?;
     copy(&root.join("NOTICE"), &dir.join("NOTICE"))?;
     write(
@@ -506,9 +511,9 @@ Run it from this directory:
 
     ./sandbox
 
-Its sprites are in assets/, as `cargo xtask cook` cooked them from the
-repository's assets/. WASD or the arrow keys walk. Close the window to
-quit. The other scenes:
+Its sprites, prefabs and level are in assets/game.kpak, the pack
+`cargo xtask cook` made of the repository's assets/. WASD or the arrow
+keys walk. Close the window to quit. The other scenes:
 
     ./sandbox --scene stress-sprites
     ./sandbox --scene stress-entities
@@ -726,41 +731,12 @@ pub(crate) fn copy(from: &Path, to: &Path) -> Result<(), Error> {
     })
 }
 
-/// Copies the cooked assets under `cooked` into `assets`, as the sandbox
-/// reads them from beside its executable: the [`COOKED_FOLDERS`] that the
-/// cook wrote, which it owns, and nothing else of the folder, such as the
-/// cook's cache.
-pub(crate) fn copy_cooked(cooked: &Path, assets: &Path) -> Result<(), Error> {
-    for folder in COOKED_FOLDERS {
-        let from = cooked.join(folder);
-        if from.is_dir() {
-            copy_dir(&from, &assets.join(folder))?;
-        }
-    }
-    Ok(())
-}
-
-/// Copies the files under `from` into `to`, keeping the tree.
-fn copy_dir(from: &Path, to: &Path) -> Result<(), Error> {
-    make_dir(to)?;
-    let entries = fs::read_dir(from).map_err(|source| Error::Read {
-        path: from.to_path_buf(),
-        source,
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|source| Error::Read {
-            path: from.to_path_buf(),
-            source,
-        })?;
-        let path = entry.path();
-        let target = to.join(entry.file_name());
-        if path.is_dir() {
-            copy_dir(&path, &target)?;
-        } else {
-            copy(&path, &target)?;
-        }
-    }
-    Ok(())
+/// Copies the [`PACK`] in `cooked` into `assets`, as the sandbox reads
+/// it from beside its executable: the pack alone, not the loose files the
+/// cook wrote beside it, or its cache.
+pub(crate) fn copy_pack(cooked: &Path, assets: &Path) -> Result<(), Error> {
+    make_dir(assets)?;
+    copy(&cooked.join(PACK), &assets.join(PACK))
 }
 
 #[cfg(test)]
@@ -956,47 +932,31 @@ mod tests {
     }
 
     #[test]
-    fn the_download_takes_the_cooked_atlases_data_and_levels_alone() {
+    fn the_download_takes_the_pack_alone() {
         let dir = scratch("cooked");
         let cooked = dir.join("cooked");
         for (path, text) in [
+            ("game.kpak", "pack"),
             ("atlas/sprites.kbj", "atlas"),
-            ("atlas/sprites/tiles.tiles.qoi", "tiles"),
             ("data/prefabs/tree.kbj", "tree"),
             ("levels/field.klvl", "field"),
             (".cache.kbj", "cache"),
-            ("stray.txt", "stray"),
-            ("other/thing.kbj", "other"),
         ] {
             let file = cooked.join(path);
             fs::create_dir_all(file.parent().unwrap()).unwrap();
             fs::write(file, text).unwrap();
         }
         let assets = dir.join("staged/assets");
-        copy_cooked(&cooked, &assets).unwrap();
-        let mut found = Vec::new();
-        let mut stack = vec![assets.clone()];
-        while let Some(at) = stack.pop() {
-            for entry in fs::read_dir(at).unwrap() {
-                let path = entry.unwrap().path();
-                if path.is_dir() {
-                    stack.push(path);
-                } else {
-                    let relative = path.strip_prefix(&assets).unwrap();
-                    found.push(relative.to_string_lossy().replace('\\', "/"));
-                }
-            }
-        }
-        found.sort();
-        assert_eq!(
-            found,
-            [
-                "atlas/sprites.kbj",
-                "atlas/sprites/tiles.tiles.qoi",
-                "data/prefabs/tree.kbj",
-                "levels/field.klvl"
-            ]
-        );
+        copy_pack(&cooked, &assets).unwrap();
+        let found: Vec<_> = fs::read_dir(&assets)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(found, ["game.kpak"]);
+        assert_eq!(fs::read(assets.join("game.kpak")).unwrap(), b"pack");
+        // A cook that wrote no pack is an error.
+        fs::remove_file(cooked.join("game.kpak")).unwrap();
+        assert!(copy_pack(&cooked, &dir.join("again")).is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 

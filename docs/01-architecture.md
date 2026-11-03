@@ -387,7 +387,7 @@ OS events ─► platform::Event ─► input (device state, edge accumulation)
 | Feature | Crates | Enables |
 | :- | :- | :- |
 | `dev` | `nadir`, `platform`, `sandbox` | A failed asset shows its placeholder; the allocation counter is the global allocator, read through `FrameAllocs` (and `thread_alloc_counts`, `process_alloc_counts`). Still to join it: the debug UI, profiler and console (M7), and hot reload (M5.8) |
-| (none) | — | Release behavior: a failed asset shows nothing, there is no allocation counter, and no debug code is compiled in. Assets load from loose files until pack files (M5.7) |
+| (none) | — | Release behavior: a failed asset shows nothing, there is no allocation counter, and no debug code is compiled in. Assets load from the cook's pack, `game.kpak`, in `Config::assets`, or from its loose files where there is no pack (M5.7, ADR-0041); with `dev`, from the loose files |
 
 Run dev builds with `cargo dev` (the alias above). Release builds never
 include `dev`. `cargo xtask release-no-dev` checks this: `nadir-debug` must

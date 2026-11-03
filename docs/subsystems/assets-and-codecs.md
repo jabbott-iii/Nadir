@@ -941,8 +941,16 @@ pub trait Source: Send + Sync {
 ```
 
 - **`LooseSource`** reads files under a root directory: in development,
-  `target/cooked/`. It stays in every build (ADR-0041); release builds
-  read the pack from M5.7.
+  `target/cooked/`. It stays in every build (ADR-0041).
+- **Which the engine reads** (M5.7, ADR-0041): `App::new` reads
+  `<Config::assets>/game.kpak` through a `PackSource` in builds without
+  `dev`, and the loose files when there is no pack there
+  (`PackSource::open` gives `NotFound`); with `dev` it reads the loose
+  files, which hot reload watches (M5.8). A pack that is there but does
+  not open (`Read`, or `Decode` for one the reader refuses) is logged, and
+  every load then fails with that error, rather than reading loose files
+  that may not be its cook's. The release files and the demo page's
+  download ship `assets/game.kpak` alone.
 - **`PackSource`** reads the cook's pack, `game.kpak`
   (`PackSource::FILE_NAME`), through `nadir_codec::kpak`. As built in
   M5.14 (ADR-0041):

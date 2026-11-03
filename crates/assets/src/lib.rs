@@ -22,7 +22,9 @@
 //! A game reaches this crate through nadir_engine, as `nadir::assets`; its
 //! prelude has [`AssetServer`], [`FinalizeCtx`], [`Handle`] and
 //! [`LoadState`]. The facade's `App` keeps an [`AssetServer`] as a resource
-//! of its world, reading loose files under `Config::assets`. It finishes
+//! of its world, reading `Config::assets`: in builds without the facade's
+//! `dev` feature, the cook's pack there through a [`PackSource`] when
+//! there is one, and otherwise its loose files (ADR-0041). It finishes
 //! loads within the budget after each frame it draws in the window, and
 //! waits for every load after each frame it draws offscreen. With the
 //! facade's `dev` feature a failed asset shows its placeholder
@@ -71,8 +73,7 @@
 //! - **Freeing:** [`AssetServer::unload_scope`].
 //!
 //! Not built yet: hot reload (M5.8). [`Source::modified`] already tells
-//! when a loose file changed, but nothing watches it. Release builds of the
-//! engine read the pack from roadmap M5.7.
+//! when a loose file changed, but nothing watches it.
 //!
 //! # Example
 //!

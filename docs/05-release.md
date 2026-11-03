@@ -116,7 +116,8 @@ opt-level = 3                  # the fuzzer tries more inputs; overflow checks a
 6. Archive the `.dwp` / debug file.
 
 The demo page's download (ADR-0029) is not this package. It is the
-sandbox in the `release` profile with its loose `assets/`, built on
+sandbox in the `release` profile with its cooked assets in one pack,
+`assets/game.kpak` (ADR-0041), built on
 `ubuntu-latest` for each push to `main` that passes CI, and unsigned. It
 needs the glibc that its executable's symbol versions name, which the page
 and its README state (2.34 on 2026-10-31), not the container's floor above.
@@ -138,7 +139,7 @@ crates. Nothing is signed or notarized until M11.2.
 
 | Where | What |
 | :- | :- |
-| The GitHub release `v<version>` | `nadir-<version>-<target>.tar.gz` (Linux, macOS) or `.zip` (Windows) for each of the six targets, `{x86_64,aarch64}-{unknown-linux-gnu,pc-windows-msvc,apple-darwin}`. Each holds `nadir-cook`, the sandbox with its cooked atlases, prefabs and levels (`atlas/`, `data/`, `levels/`) in `assets/`, `README.txt`, `LICENSE` and `NOTICE` (ADR-0037). On Windows and macOS the sandbox runs in an empty window until the engine draws there (M2.6, M2.7), which their READMEs say |
+| The GitHub release `v<version>` | `nadir-<version>-<target>.tar.gz` (Linux, macOS) or `.zip` (Windows) for each of the six targets, `{x86_64,aarch64}-{unknown-linux-gnu,pc-windows-msvc,apple-darwin}`. Each holds `nadir-cook`, the sandbox with its cooked atlases, prefabs and levels in one pack, `assets/game.kpak` (ADR-0041), `README.txt`, `LICENSE` and `NOTICE` (ADR-0037). On Windows and macOS the sandbox runs in an empty window until the engine draws there (M2.6, M2.7), which their READMEs say |
 | The same release | `nadir-cook_<version>_<arch>.deb` and `nadir-sandbox_<version>_<arch>.deb` for `amd64` and `arm64` (the file named for the release's version, as GitHub turns Debian's `~` into `.` in an asset's name); the apt repository's `Packages`, `Packages.gz`, `Release`, `InRelease`, `Release.gpg` and `nadir-archive-keyring.gpg`; and `SHA256SUMS` of every file |
 | ghcr.io | `ghcr.io/jabbott-iii/nadir-cook:<version>`, and `:latest` unless the version is a pre-release, for `linux/amd64` and `linux/arm64`: the cook linked statically, `FROM scratch` (`tools/cook/Dockerfile`) |
 | crates.io | 13 crates at `<version>`: `nadir_engine`, the facade (`nadir` in code; ADR-0039); `nadir-cook`; and `nadir-core`, `-sys`, `-platform`, `-gfx`, `-codec`, `-ecs`, `-input`, `-render`, `-assets`, `-collision` and `-scene`, each with copies of `LICENSE` and `NOTICE` (ADR-0037). The sandbox, `xtask`, `nadir-bench`, `nadir-audio` and `nadir-debug` have `publish = false` |
@@ -218,11 +219,12 @@ for it, so push the next tag once the release before it has finished.
    - `cargo xtask dist` (`xtask/src/dist.rs`):
      - cooks `assets/`, and builds the cook and the sandbox in release,
        `--locked`;
-     - lays them out with the cooked atlases, prefabs and levels,
-       `README.txt`, `LICENSE` and `NOTICE`;
+     - lays them out with the cooked atlases, prefabs and levels in one
+       pack, `assets/game.kpak` (ADR-0041), `README.txt`, `LICENSE` and
+       `NOTICE`;
      - runs them: `nadir-cook --version` must print the version, the
-       laid-out cook must cook `assets/` into the same atlases, prefabs and
-       levels byte for byte, and the sandbox must refuse an unknown scene,
+       laid-out cook must cook `assets/` into the same pack byte for byte,
+       and the sandbox must refuse an unknown scene,
        which it does
        before it opens a window;
      - packs the archive and, on Linux, the two `.deb`s, whose

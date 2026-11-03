@@ -34,8 +34,9 @@ Built:
   place of the last: their tile layers drawn, their grid collided with,
   their tall tiles and entities spawned;
 - assets loaded on worker threads, and an offline cook that packs images,
-  Aseprite exports and bitmap fonts into atlases, and makes level files of
-  LDtk projects;
+  Aseprite exports and bitmap fonts into atlases, makes level files of
+  LDtk projects, and puts all it cooks in one pack file, which release
+  builds read;
 - a world hash, to check that a replay gives the same simulation.
 
 Not built yet:
@@ -43,7 +44,7 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7);
 - audio (M6), text (M7.1), the debug tools (M7), gamepads (M8);
-- pack files (M5.7), hot reload (M5.8);
+- hot reload (M5.8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 
@@ -546,9 +547,15 @@ nadir-cook assets cooked
 - Each LDtk 1.5.3 project, `.ldtk`, with its `.ldtkl` level files, becomes
   a level file of each level, `levels/<name>.klvl`, whose entities spawn
   the prefabs of their names.
+- Every file above goes into one pack too, `game.kpak`, each file of the
+  same bytes stored once, compressed where that makes it smaller.
 
 A job whose files did not change since the last cook into `OUT` is skipped,
-unless `--force`. Point `Config::assets` at `OUT`. `App::load_level`
+unless `--force`. Point `Config::assets` at `OUT`. A build without `dev`
+reads the pack there when there is one, and the loose files otherwise, so
+a release of the game needs only `game.kpak`; a pack that does not open
+fails every load, with its error. A build with `dev` reads the loose
+files. `App::load_level`
 loads a level file into the world, its prefabs with it. The engine has no
 asset type for the cooked fonts and other data files yet: text comes with
 roadmap task M7.1.
@@ -556,6 +563,7 @@ roadmap task M7.1.
 ## Features
 
 - `dev`: for development builds.
+  - The assets are the loose files of `Config::assets`, not its pack.
   - A texture that failed to load shows a placeholder, a magenta and black
     checker, rather than nothing.
   - The global allocator counts allocations. The resource `FrameAllocs`

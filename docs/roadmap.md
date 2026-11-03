@@ -3407,7 +3407,7 @@ by the batched sprite renderer.
       cook did not write packs yet, or left M5.14 out.
   - `cargo xtask ci`: all 12 checks ok, 1,572 tests passed, 1 ignored.
 
-- [ ] **M5.7 — release builds read the pack**
+- [x] **M5.7 — release builds read the pack**
   - Note (from M5.7, ADR-0041): split into M5.13, M5.14 and this task,
     which keeps M5.7's number.
   - Note (from M3.2): `AssetServer::new(root, ..)` reads loose files. If
@@ -3438,6 +3438,58 @@ by the batched sprite renderer.
     loose files.
   - Verify: `cargo xtask cook`; `cargo test -p nadir_engine -p sandbox`;
     `cargo xtask dist`; `cargo xtask site`; `cargo xtask ci`
+  - Built (2026-11-03, ADR-0041):
+    - The facade: `crates/engine/src/pack.rs`, whose `asset_server`
+      `App::new` calls with `!cfg!(feature = "dev")`. Without `dev`, a
+      `PackSource` of `<Config::assets>/game.kpak` when it opens, and the
+      loose files when there is none (`NotFound`); a pack that does not
+      open is logged, and every load fails with its error. With `dev`, the
+      loose files. The docs of `App::new`, `Config::assets` and the `dev`
+      feature, and the README.
+    - xtask: `site::PACK` and `site::copy_pack` in place of
+      `COOKED_FOLDERS` and `copy_cooked`, so that the download, the
+      release archives and the sandbox's `.deb` hold `assets/game.kpak`
+      alone; dist's smoke compares the pack it ships with the laid-out
+      cook's, byte for byte, in place of the folders (`differ` gone); the
+      READMEs they write name the pack.
+    - The sandbox: its docs, and a test that without `dev` the field sets
+      up from a folder holding only the cooked pack, with the world hash
+      it has from the loose files alone, and with `dev` does not.
+    - Tests: the facade's `pack` tests make the choice themselves, so that
+      `cargo xtask ci`, which tests with `dev`, runs both ways: the pack
+      read in place of the loose files, the loose files with no pack or as
+      with `dev`, a pack that does not open (not a pack, a damaged TOC)
+      failing every load with its error; and `App::new`'s choice by its
+      feature.
+    - The docs: the design doc's VFS, the architecture's features table,
+      `05-release.md`, `04-quality.md`, the root and facade READMEs, the
+      assets' and the codec's crate docs; ADR-0041's status, and those of
+      ADR-0030, ADR-0033, ADR-0036 and ADR-0038, where it overrides them;
+      a note for M9.1.
+  - As built:
+    - A pack that is there but does not open fails every load with the
+      error that opening it gave, logged by `App::new`, rather than reading
+      the loose files beside it, which may be another cook's (proposed in
+      ADR-0041, for review).
+    - `cargo xtask ci` tests with `--all-features`, so with `dev`: there
+      the sandbox's tests read the loose files of `target/cooked`, and
+      `cargo test -p sandbox` without features reads the pack. In the gate
+      the pack's contents are checked by the cook's round trip of the
+      workspace's assets (M5.14), and the choice by the facade's tests.
+  - Measured: release builds' captures of the three scenes, 600 frames of
+    480 × 270 each, made from a folder holding only the sandbox and
+    `assets/game.kpak`, are byte for byte those of the build before the
+    change, which read the loose files (the SHA-256 of `frames.rgba`), with
+    the same world hashes. The Linux archive, the sandbox's `.deb` and the
+    download hold `assets/game.kpak` and no loose folders; the archive's
+    pack is `target/cooked`'s, byte for byte.
+  - Review: one adversarial round, 5 findings confirmed, 3 refuted; all in
+    docs, fixed: the root README, which listed pack files as not built;
+    `05-release.md`'s download, "with its loose `assets/`"; the assets
+    crate's docs, which said the facade reads loose files; the status lines
+    of ADR-0030, ADR-0033, ADR-0036 and ADR-0038; and the feature's
+    summary.
+  - `cargo xtask ci`: all 12 checks ok, 1,576 tests passed, 1 ignored.
 
 - [ ] **M5.8 — hot reload**
   - Note (from M5.6, ADR-0038): `PrefabLibrary` keeps every prefab a level
@@ -3747,6 +3799,10 @@ by the batched sprite renderer.
     headless run finishes none. `AssetServer::finish_all_loads` waits for
     every load, but needs the device in its context, which the facade has
     and tick systems do not (ADR-0030).
+  - Note (from M5.7, ADR-0041): in a build without `dev`, a pack that does
+    not open fails every load with the error that opening it gave, which
+    `App::new` logs before `App::run` opens the log file: the loading
+    state's dialog for a failed load should say it.
   - Depends: M5.6
   - Do: the `GameState` machine with on-enter/on-exit and run conditions;
     a loading screen; level transitions that unload the previous level's
