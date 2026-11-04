@@ -486,6 +486,13 @@ understood.
   (`cargo xtask site`, about a minute) needs the same packages. `--out DIR` must be new, empty, or made by an earlier
   run, which leaves the mark `.nadir-site`; a run removes only what an
   earlier one wrote.
+
+  Between the build and the features, the page draws views 1 and 2 of
+  `diagrams/c4-architecture.md`, the system context and the containers.
+  They are inline SVG in `site/index.html`, drawn by hand in the site's
+  colors, since the page runs no script but jabbott.dev's and its own:
+  a change to either view changes them too, and `site/llms.txt` says the
+  same in words.
 - **Supply-chain hygiene for CI itself:**
   - Pin every action by full commit SHA, with the tag as a comment.
     Dependabot (`.github/dependabot.yml`) proposes new pins and comments

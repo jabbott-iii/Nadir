@@ -317,7 +317,10 @@ fn values(page: &Page) -> BTreeMap<&'static str, String> {
     set("scene_tabs", scene_tabs(page.recordings));
     set("scenes", scenes(page.recordings, version));
     set("milestones", milestones(page.milestones));
-    set("download", download(page.download, version));
+    set(
+        "download",
+        download(page.download, version, &build.repository),
+    );
     set(
         "feature_filters",
         feature_filters(
@@ -349,7 +352,10 @@ fn text_values(page: &Page) -> BTreeMap<&'static str, String> {
         ("tasks_done", counts.done.to_string()),
         ("tasks_total", counts.total.to_string()),
         ("scenes", scenes_text(page.recordings, version)),
-        ("download", download_text(page.download, version)),
+        (
+            "download",
+            download_text(page.download, version, &build.repository),
+        ),
         ("features_lede", counts.features_lede(version)),
         ("features", features_text(page.features)),
         ("milestones", milestones_text(page.milestones)),
@@ -686,8 +692,9 @@ fn milestones(milestones: &[Milestone]) -> String {
     trim_line_end(html)
 }
 
-/// The download button and what it gets. `version` goes on its address.
-fn download(download: &Download, version: &str) -> String {
+/// The download button and what it gets. `version` goes on its address,
+/// and `repository` names where the releases are.
+fn download(download: &Download, version: &str, repository: &str) -> String {
     let file = escape(&download.file);
     format!(
         "        <div class=\"nadir-download\">\n\
@@ -703,10 +710,13 @@ fn download(download: &Download, version: &str) -> String {
          \x20         <p class=\"nadir-download__meta\">SHA-256 <span class=\"nadir-mono \
          nadir-hash\">{sha}</span></p>\n\
          \x20         <p class=\"nadir-download__meta\">Unpack it and run \
-         <code>./sandbox</code>; its README names the scenes and keys. Windows and \
-         macOS builds need their windows (roadmap M1.5, M1.6), their OpenGL contexts \
-         (M2.6, M2.7) and a build on those systems.</p>\n\
+         <code>./sandbox</code>; its README names the scenes and keys. The \
+         <a href=\"{repository}/releases\">releases</a> carry the sandbox and the cook of \
+         each tagged version for Windows, macOS and Linux on x86_64 and aarch64; on \
+         Windows and macOS the sandbox's window stays empty until the engine draws there \
+         (roadmap M2.6, M2.7).</p>\n\
          \x20       </div>",
+        repository = escape(repository),
         path = escape(&download_path(download, version)),
         requirements = escape(&requirements(download)),
         size = escape(&megabytes(download.bytes)),
@@ -797,11 +807,14 @@ fn scenes_text(recordings: &[Recording], version: &str) -> String {
 }
 
 /// The download, as a line of `llms.txt`.
-fn download_text(download: &Download, version: &str) -> String {
+fn download_text(download: &Download, version: &str, repository: &str) -> String {
     format!(
         "- [{file}]({PAGE_URL}{path}): the sandbox as this build drew it, for Linux on x86_64, \
          {requirements}; {size}; SHA-256 {sha}. Unpack it and run `./sandbox`; its README \
-         names the scenes and keys.",
+         names the scenes and keys. The releases ({repository}/releases) carry the sandbox \
+         and the cook of each tagged version for Windows, macOS and Linux on x86_64 and \
+         aarch64; on Windows and macOS the sandbox's window stays empty until the engine draws \
+         there (roadmap M2.6, M2.7).",
         file = download.file,
         path = download_path(download, version),
         requirements = requirements(download),
@@ -1089,9 +1102,20 @@ mod tests {
                 "<a class=\"btn btn--amber\" href=\"https://jabbott.dev/log/\">",
                 "<li><a href=\"https://jabbott.dev/\">Home</a></li>",
                 "<li><a href=\"https://jabbott.dev/log/\">Engineering log</a></li>",
+                "<a href=\"https://github.com/jabbott-iii/Nadir/releases\">releases</a> carry the \
+                 sandbox and the cook of each tagged version",
+                // The C4 views of diagrams/c4-architecture.md, drawn in SVG.
+                "<h2 class=\"section-title\" id=\"arch-title\">Architecture</h2>",
+                "href=\"https://github.com/jabbott-iii/Nadir/tree/0123456789abcdef/diagrams\"",
+                "<title id=\"c4-context-title\">",
+                "<title id=\"c4-containers-title\">",
             ] {
                 assert!(html.contains(expected), "missing {expected:?}");
             }
+            // The architecture comes between the build and the features.
+            let at = |id: &str| html.find(&format!("id=\"{id}\"")).expect(id);
+            assert!(at("build-title") < at("arch-title"));
+            assert!(at("arch-title") < at("features-title"));
         });
     }
 
@@ -1226,6 +1250,11 @@ mod tests {
                  nadir-sandbox-linux-x86_64.tar.gz?v=0123456): the sandbox as this build drew it, \
                  for Linux on x86_64, X11 with OpenGL 3.3 and glibc 2.34 or newer; 1.3 MB; \
                  SHA-256 abab",
+                "The releases (https://github.com/jabbott-iii/Nadir/releases) carry the sandbox \
+                 and the cook of each tagged version for Windows, macOS and Linux",
+                "## Architecture\n\n",
+                "https://github.com/jabbott-iii/Nadir/blob/0123456789abcdef/diagrams/\
+                 c4-architecture.md",
                 "1 shipped, 0 in progress and 1 planned.",
                 "### Shipped\n\n- Tilemaps (Graphics): Draws \"things\". Roadmap tasks: M4.5.\n\n\
                  ### Planned\n\n- Pack files (Graphics): Draws \"things\". Roadmap tasks: M5.7, \
@@ -1249,9 +1278,14 @@ mod tests {
                 glibc: None,
             },
             "abc",
+            "https://github.com/o/r",
         );
         assert!(html.contains("for X11 with OpenGL 3.3 &middot;"), "{html}");
         assert!(html.contains("href=\"downloads/a.tar.gz?v=abc\""), "{html}");
+        assert!(
+            html.contains("<a href=\"https://github.com/o/r/releases\">releases</a>"),
+            "{html}"
+        );
     }
 
     #[test]

@@ -22,7 +22,9 @@
   footer and head metadata repeat jabbott.dev's (its _includes/header.html,
   footer.html and seo.html), whose stylesheet and script the page loads:
   keep them in step with that site's. jabbott.dev's robots.txt and
-  sitemap.xml cover this page.
+  sitemap.xml cover this page. The architecture section's two diagrams
+  are drawn by hand in SVG after views 1 and 2 of
+  diagrams/c4-architecture.md: a change to either view changes them too.
 -->
 <html lang="en-US" data-site-url="https://jabbott.dev" data-github="jabbott-iii">
 <head>
@@ -190,6 +192,212 @@
         </div>
       </aside>
     </div>
+
+    <section class="nadir-arch" aria-labelledby="arch-title">
+      <div class="section-head">
+        <h2 class="section-title" id="arch-title">Architecture</h2>
+      </div>
+      <p class="nadir-arch__lede">The engine in two views of the C4 model, drawn by hand from its code: the system among the people and systems around it, then its programs and the files they pass between them. The crates inside the game and the cook, the game loop and the main types are drawn in <a href="{{repository_url}}/tree/{{commit}}/diagrams">the repository's diagrams</a>.</p>
+      <figure class="nadir-c4 panel panel--brackets" aria-labelledby="c4-context-heading">
+        <figcaption>
+          <h3 class="nadir-c4__title" id="c4-context-heading">System context</h3>
+          <p class="nadir-c4__text">The game built on Nadir and Nadir's own tools, with the people, editors, system interfaces and services they deal with. The Windows and macOS windows are written but still wait on checks on those systems (roadmap M1.5, M1.6), and there the game runs without drawing until their OpenGL contexts land (M2.6, M2.7).</p>
+        </figcaption>
+        <div class="nadir-c4__scroll" tabindex="0" role="region" aria-labelledby="c4-context-heading">
+          <svg class="nadir-c4__svg" viewBox="0 0 1280 1000" width="1280" height="1000" role="img" aria-labelledby="c4-context-title c4-context-desc">
+          <title id="c4-context-title">Nadir in its surroundings: a C4 system context diagram</title>
+          <desc id="c4-context-desc">The game developer draws sprites in Aseprite, lays out levels in LDtk, and draws images and makes fonts in image editors and font generators; each saves into assets/ on the filesystem. The developer runs Nadir's tools, nadir-cook and xtask, which read assets/ and write target/cooked/ and game.kpak, and writes and runs the game built on Nadir, which reads the cooked files or game.kpak and writes nadir.log. The player plays the game with keyboard and mouse, watches the demo page and downloads releases. The game opens a window and reads its events through the OS window and input APIs, and draws through OpenGL 3.3 core, through EGL on Linux. Planned: OpenGL on Windows and macOS, then Metal (M2.6, M2.7, M10), the OS audio APIs (M6) and gamepad APIs (M8). GitHub Actions runs cargo xtask, deploys the demo page to GitHub Pages and publishes each tagged release to the release channels.</desc>
+          <defs>
+          <marker id="c4-context-arrow" class="c4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z"/></marker>
+          <marker id="c4-context-arrow-planned" class="c4-arrow c4-arrow--planned" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z"/></marker>
+          </defs>
+          <g class="c4-boundary"><rect x="325" y="404" width="270" height="396" rx="10"/><text class="c4-boundary__title" x="341" y="428">Nadir</text></g>
+          <g class="c4-edges">
+          <path class="c4-edge" d="M780 202.5L570 83" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M780 220.5L570 199" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M780 243L570 322" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M797.6 270L570 504.5" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M956 270L570 677.5" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M350 83L160 83" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M350 199L160 199" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M350 322L160 322" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M350 521L160 521" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M350 705L160 705" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M760 534.4L570 534.4" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M940 543L1060 543" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M850 500L850.0 474.0Q850 466 858.0 466.0L1254.0 466.0Q1262 466 1262.0 474.0L1262.0 712.0Q1262 720 1254.0 720.0L1240 720" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M780 731.6L570 731.6" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M950 680L1114 586" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M980 723L1060 732" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M383 760L300 870" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge" d="M438 760L470 870" marker-end="url(#c4-context-arrow)"/>
+          <path class="c4-edge c4-edge--planned" d="M493 760L684 870" marker-end="url(#c4-context-arrow-planned)"/>
+          <path class="c4-edge c4-edge--planned" d="M526 760L890 870" marker-end="url(#c4-context-arrow-planned)"/>
+          <path class="c4-edge c4-edge--planned" d="M552.4 760L1113 870" marker-end="url(#c4-context-arrow-planned)"/>
+          </g>
+          <g class="c4-node c4-node--external"><path class="c4-shape" d="M20 50v740a70 10 0 0 0 140 0v-740a70 10 0 0 0 -140 0z"/><path class="c4-shape c4-shape--rim" d="M20 50a70 10 0 0 0 140 0"/><text class="c4-type" text-anchor="middle"><tspan x="90" y="382.14">FILES</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="90" y="399.04">Filesystem</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="90" y="416.7">assets/ sources,</tspan><tspan x="90" y="431.7">target/cooked/</tspan><tspan x="90" y="446.7">files and</tspan><tspan x="90" y="461.7">game.kpak, the</tspan><tspan x="90" y="476.7">game's log files</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="350" y="40" width="220" height="86" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="460" y="60.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="460" y="77.54">Aseprite</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="460" y="95.2">sprite sheets: PNG and</tspan><tspan x="460" y="110.2">JSON exports</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="350" y="156" width="220" height="86" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="460" y="176.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="460" y="193.54">LDtk</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="460" y="211.2">level projects: .ldtk and</tspan><tspan x="460" y="226.2">.ldtkl files</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="350" y="272" width="220" height="100" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="460" y="298.14">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="460" y="315.04">Image editors and</tspan><tspan x="460" y="333.04">font generators</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="460" y="350.7">PNG images, BMFont .fnt fonts</tspan></text></g>
+          <g class="c4-node c4-node--system"><rect class="c4-shape" x="350" y="466" width="220" height="110" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="460" y="491.14">SOFTWARE SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="460" y="508.04">Nadir's tools</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="460" y="525.7">nadir-cook, the asset cook,</tspan><tspan x="460" y="540.7">and xtask, the build</tspan><tspan x="460" y="555.7">automation</tspan></text></g>
+          <g class="c4-node c4-node--system"><rect class="c4-shape" x="350" y="650" width="220" height="110" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="460" y="682.64">SOFTWARE SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="460" y="699.54">Game built on Nadir</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="460" y="717.2">the sandbox, linked with the</tspan><tspan x="460" y="732.2">nadir_engine facade</tspan></text></g>
+          <g class="c4-node c4-node--person"><rect class="c4-shape" x="780" y="180" width="220" height="90" rx="22"/><text class="c4-type" text-anchor="middle"><tspan x="890" y="202.64">PERSON</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="890" y="219.54">Game developer</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="890" y="237.2">writes the game, draws its</tspan><tspan x="890" y="252.2">sprites, lays out its levels</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="760" y="500" width="180" height="86" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="850" y="520.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="850" y="537.54">GitHub Actions</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="850" y="555.2">workflows CI, CodeQL,</tspan><tspan x="850" y="570.2">Pages and Release</tspan></text></g>
+          <g class="c4-node c4-node--person"><rect class="c4-shape" x="780" y="680" width="200" height="86" rx="22"/><text class="c4-type" text-anchor="middle"><tspan x="880" y="708.14">PERSON</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="880" y="725.04">Player</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="880" y="742.7">plays the game</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="1060" y="500" width="180" height="86" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="1150" y="520.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="1150" y="537.54">GitHub Pages</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="1150" y="555.2">the demo page at</tspan><tspan x="1150" y="570.2">jabbott.dev/Nadir</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="1060" y="660" width="180" height="120" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="1150" y="682.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="1150" y="699.54">Release channels</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="1150" y="717.2">GitHub release and apt</tspan><tspan x="1150" y="732.2">repository, the cook's</tspan><tspan x="1150" y="747.2">image on ghcr.io, the</tspan><tspan x="1150" y="762.2">crates on crates.io</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="160" y="870" width="200" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="260" y="892.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="260" y="909.54">OS window and</tspan><tspan x="260" y="927.54">input APIs</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="260" y="945.2">X11 on Linux, Win32 on</tspan><tspan x="260" y="960.2">Windows, AppKit on macOS</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="380" y="870" width="200" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="480" y="901.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="480" y="918.54">GPU driver</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="480" y="936.2">OpenGL 3.3 core through</tspan><tspan x="480" y="951.2">EGL, on Linux</tspan></text></g>
+          <g class="c4-node c4-node--planned"><rect class="c4-shape" x="600" y="870" width="210" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="705" y="892.64">PLANNED</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="705" y="909.54">GPU on Windows</tspan><tspan x="705" y="927.54">and macOS</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="705" y="945.2">WGL and NSOpenGL</tspan><tspan x="705" y="960.2">contexts, then Metal</tspan></text></g>
+          <g class="c4-node c4-node--planned"><rect class="c4-shape" x="830" y="870" width="200" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="930" y="909.14">PLANNED</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="930" y="926.04">OS audio APIs</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="930" y="943.7">ALSA, WASAPI, CoreAudio</tspan></text></g>
+          <g class="c4-node c4-node--planned"><rect class="c4-shape" x="1050" y="870" width="210" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="1155" y="901.64">PLANNED</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="1155" y="918.54">Gamepad APIs</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="1155" y="936.2">evdev, XInput,</tspan><tspan x="1155" y="951.2">GameController</tspan></text></g>
+          <g class="c4-labels">
+          <g class="c4-label"><rect x="615.4" y="110.0" width="89.3" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="660" y="123.92">draws sprites</tspan></text></g>
+          <g class="c4-label"><rect x="609.2" y="197.0" width="101.5" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="660" y="210.92">lays out levels</tspan></text></g>
+          <g class="c4-label"><rect x="615.4" y="277.0" width="89.3" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="660" y="290.92">draws images,</tspan><tspan x="660" y="304.92">makes fonts</tspan></text></g>
+          <g class="c4-label"><rect x="622.2" y="400.0" width="107.6" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="676" y="413.92">runs cargo xtask</tspan></text></g>
+          <g class="c4-label"><rect x="801.2" y="370.0" width="101.5" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="852" y="383.92">writes and runs</tspan></text></g>
+          <g class="c4-label"><rect x="213.4" y="66.0" width="83.2" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="255" y="79.92">exports into</tspan><tspan x="255" y="93.92">assets/</tspan></text></g>
+          <g class="c4-label"><rect x="207.3" y="182.0" width="95.4" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="255" y="195.92">saves projects</tspan><tspan x="255" y="209.92">into assets/</tspan></text></g>
+          <g class="c4-label"><rect x="219.5" y="305.0" width="71.0" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="255" y="318.92">saves into</tspan><tspan x="255" y="332.92">assets/</tspan></text></g>
+          <g class="c4-label"><rect x="182.9" y="497.0" width="138.1" height="48.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="252" y="510.92">reads assets/,</tspan><tspan x="252" y="524.92">writes target/cooked/</tspan><tspan x="252" y="538.92">and game.kpak</tspan></text></g>
+          <g class="c4-label"><rect x="189.1" y="681.0" width="125.9" height="48.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="252" y="694.92">reads the cooked</tspan><tspan x="252" y="708.92">files or game.kpak,</tspan><tspan x="252" y="722.92">writes nadir.log</tspan></text></g>
+          <g class="c4-label"><rect x="601.5" y="517.0" width="77.1" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="640" y="530.92">runs</tspan><tspan x="640" y="544.92">cargo xtask</tspan></text></g>
+          <g class="c4-label"><rect x="961.5" y="526.0" width="77.1" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1000" y="539.92">deploys the</tspan><tspan x="1000" y="553.92">demo page</tspan></text></g>
+          <g class="c4-label"><rect x="995.7" y="456.0" width="168.6" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1080" y="469.92">publishes a tagged release</tspan></text></g>
+          <g class="c4-label"><rect x="605.0" y="714.0" width="125.9" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="668" y="727.92">plays with keyboard</tspan><tspan x="668" y="741.92">and mouse</tspan></text></g>
+          <g class="c4-label"><rect x="959.1" y="598.0" width="113.7" height="48.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1016" y="611.92">watches the demo,</tspan><tspan x="1016" y="625.92">downloads the</tspan><tspan x="1016" y="639.92">Linux build</tspan></text></g>
+          <g class="c4-label"><rect x="987.5" y="681.0" width="64.9" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1020" y="694.92">downloads</tspan><tspan x="1020" y="708.92">a release</tspan></text></g>
+          <g class="c4-label"><rect x="246.2" y="819.0" width="107.6" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="300" y="832.92">opens a window,</tspan><tspan x="300" y="846.92">reads its events</tspan></text></g>
+          <g class="c4-label"><rect x="429.2" y="819.0" width="101.5" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="480" y="832.92">draws through</tspan><tspan x="480" y="846.92">OpenGL 3.3 core</tspan></text></g>
+          <g class="c4-label c4-label--planned"><rect x="612.3" y="819.0" width="95.4" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="660" y="832.92">planned: M2.6,</tspan><tspan x="660" y="846.92">M2.7, M10</tspan></text></g>
+          <g class="c4-label c4-label--planned"><rect x="801.5" y="830.0" width="77.1" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="840" y="843.92">planned: M6</tspan></text></g>
+          <g class="c4-label c4-label--planned"><rect x="991.5" y="840.0" width="77.1" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1030" y="853.92">planned: M8</tspan></text></g>
+          </g></svg>
+        </div>
+        <p class="nadir-c4__hint">Scroll sideways to see all of it.</p>
+        <details class="nadir-c4__more">
+          <summary>Each arrow as text</summary>
+          <ul>
+            <li>Game developer &rarr; Aseprite: draws sprites</li>
+            <li>Game developer &rarr; LDtk: lays out levels</li>
+            <li>Game developer &rarr; Image editors and font generators: draws images, makes fonts</li>
+            <li>Game developer &rarr; Nadir's tools: runs cargo xtask</li>
+            <li>Game developer &rarr; Game built on Nadir: writes and runs</li>
+            <li>Aseprite &rarr; Filesystem: exports into assets/</li>
+            <li>LDtk &rarr; Filesystem: saves projects into assets/</li>
+            <li>Image editors and font generators &rarr; Filesystem: saves into assets/</li>
+            <li>Nadir's tools &rarr; Filesystem: reads assets/, writes target/cooked/ and game.kpak</li>
+            <li>Game built on Nadir &rarr; Filesystem: reads the cooked files or game.kpak, writes nadir.log</li>
+            <li>GitHub Actions &rarr; Nadir's tools: runs cargo xtask</li>
+            <li>GitHub Actions &rarr; GitHub Pages: deploys the demo page</li>
+            <li>GitHub Actions &rarr; Release channels: publishes a tagged release</li>
+            <li>Player &rarr; Game built on Nadir: plays with keyboard and mouse</li>
+            <li>Player &rarr; GitHub Pages: watches the demo, downloads the Linux build</li>
+            <li>Player &rarr; Release channels: downloads a release</li>
+            <li>Game built on Nadir &rarr; OS window and input APIs: opens a window, reads its events</li>
+            <li>Game built on Nadir &rarr; GPU driver: draws through OpenGL 3.3 core</li>
+            <li>Game built on Nadir &rarr; GPU on Windows and macOS: planned: M2.6, M2.7, M10</li>
+            <li>Game built on Nadir &rarr; OS audio APIs: planned: M6</li>
+            <li>Game built on Nadir &rarr; Gamepad APIs: planned: M8</li>
+          </ul>
+        </details>
+      </figure>
+      <figure class="nadir-c4 panel panel--brackets" aria-labelledby="c4-containers-heading">
+        <figcaption>
+          <h3 class="nadir-c4__title" id="c4-containers-heading">Containers</h3>
+          <p class="nadir-c4__text">The workspace's programs and the files they pass. The cook turns <code>assets/</code> into loose files and one pack, <code>game.kpak</code>: a game built with the <code>dev</code> feature reads the loose files, and one built without it reads the pack, or the loose files where there is no pack. The sandbox reads the folder <code>assets</code> beside its executable when there is one, as in the release files and the download above, and <code>target/cooked/</code> otherwise.</p>
+        </figcaption>
+        <div class="nadir-c4__scroll" tabindex="0" role="region" aria-labelledby="c4-containers-heading">
+          <svg class="nadir-c4__svg" viewBox="0 0 1300 1090" width="1300" height="1090" role="img" aria-labelledby="c4-containers-title c4-containers-desc">
+          <title id="c4-containers-title">Nadir's programs and the files between them: a C4 container diagram</title>
+          <desc id="c4-containers-desc">Inside the Nadir workspace: xtask, which the game developer runs and GitHub Actions runs as cargo xtask ci, golden, fuzz-smoke, site and dist; nadir-cook, which xtask runs to cook, reading assets/ and writing the loose files in target/cooked/, skipping jobs and files that did not change, and packing every output into target/cooked/game.kpak; the game executable, the sandbox, which the developer runs, and xtask builds in release and runs for site and dist: with the dev feature it reads the loose files, and without it the pack when it is there, else the loose files; nadir-bench, which xtask runs for bench; and target/dist/ and target/site/, which xtask's dist and site write. The game writes its logs to the user's logs folder, and opens its window, reads its events and draws through the OS and GPU driver. Planned (M5.8): the game reloads what changed in the loose files.</desc>
+          <defs>
+          <marker id="c4-containers-arrow" class="c4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z"/></marker>
+          <marker id="c4-containers-arrow-planned" class="c4-arrow c4-arrow--planned" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z"/></marker>
+          </defs>
+          <g class="c4-boundary"><rect x="20" y="150" width="1060" height="926" rx="10"/><text class="c4-boundary__title" x="36" y="174">Nadir workspace</text><text class="c4-boundary__type" x="36" y="190">SOFTWARE SYSTEM</text></g>
+          <g class="c4-edges">
+          <path class="c4-edge" d="M252 110L252.0 240.0Q252 248 260.0 248.0L400 248" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M830 72L710 237.6" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M960.2 104L928.8 500" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M415.5 300L136.8 512" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M462 300L334.8 512" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M533.3 300L524 500" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M610.8 300L704.4 500" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M691.4 300L867.2 500" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M651.6 616L545 772" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M757.2 616L757.2 802" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M665.68 616L665.7 932.0Q665.7 940 673.7 940.0L698.0 940.0Q706 940 706.0 948.0L706 966" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M876 650L876 802" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge c4-edge--planned" d="M934.08 650L934.1 863.5Q934.1 870 927.5 870.0L921 870" marker-end="url(#c4-containers-arrow-planned)"/>
+          <path class="c4-edge" d="M999.2 650L999.2 1000.0Q999.2 1008 991.2 1008.0L921 1008" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M1008 518L1092.0 518.0Q1100 518 1100.0 510.0L1100.0 400.0Q1100 392 1108.0 392.0L1120 392" marker-end="url(#c4-containers-arrow)"/>
+          <path class="c4-edge" d="M1008 582.5L1120 582.5" marker-end="url(#c4-containers-arrow)"/>
+          </g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="120" y="24" width="220" height="86" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="230" y="44.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="230" y="61.54">GitHub Actions</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="230" y="79.2">workflows CI, Pages and</tspan><tspan x="230" y="94.2">Release</tspan></text></g>
+          <g class="c4-node c4-node--person"><rect class="c4-shape" x="830" y="24" width="210" height="80" rx="22"/><text class="c4-type" text-anchor="middle"><tspan x="935" y="56.64">PERSON</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="935" y="73.54">Game developer</tspan></text></g>
+          <g class="c4-node c4-node--container"><rect class="c4-shape" x="400" y="196" width="310" height="104" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="555" y="225.64">CONTAINER: RUST BINARY</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="555" y="242.54">xtask</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="555" y="260.2">run as cargo xtask: the checks, cook,</tspan><tspan x="555" y="275.2">golden, fuzz-smoke, bench, site, dist</tspan></text></g>
+          <g class="c4-node c4-node--store"><path class="c4-shape" d="M40 510v140a88 10 0 0 0 176 0v-140a88 10 0 0 0 -176 0z"/><path class="c4-shape c4-shape--rim" d="M40 510a88 10 0 0 0 176 0"/><text class="c4-type" text-anchor="middle"><tspan x="128" y="542.14">FILES</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="128" y="559.04">target/dist/</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="128" y="576.7">nadir-VERSION-TARGET:</tspan><tspan x="128" y="591.7">sandbox, nadir-cook,</tspan><tspan x="128" y="606.7">assets/game.kpak, as</tspan><tspan x="128" y="621.7">.zip or .tar.gz, and</tspan><tspan x="128" y="636.7">.debs on Linux</tspan></text></g>
+          <g class="c4-node c4-node--store"><path class="c4-shape" d="M238 510v110a88 10 0 0 0 176 0v-110a88 10 0 0 0 -176 0z"/><path class="c4-shape c4-shape--rim" d="M238 510a88 10 0 0 0 176 0"/><text class="c4-type" text-anchor="middle"><tspan x="326" y="542.14">FILES</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="326" y="559.04">target/site/</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="326" y="576.7">the demo page, its</tspan><tspan x="326" y="591.7">videos and posters, the</tspan><tspan x="326" y="606.7">Linux download</tspan></text></g>
+          <g class="c4-node c4-node--container"><rect class="c4-shape" x="436" y="500" width="176" height="100" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="524" y="535.14">CONTAINER: RUST BINARY</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="524" y="552.04">nadir-bench</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="524" y="569.7">the benchmark harness</tspan></text></g>
+          <g class="c4-node c4-node--container"><rect class="c4-shape" x="634" y="500" width="176" height="116" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="722" y="535.64">CONTAINER: LIBRARY, CLI</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="722" y="552.54">nadir-cook</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="722" y="570.2">nadir-cook [--force]</tspan><tspan x="722" y="585.2">SOURCE OUT</tspan></text></g>
+          <g class="c4-node c4-node--container"><rect class="c4-shape" x="832" y="500" width="176" height="150" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="920" y="528.64">CONTAINER: RUST BINARY</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="920" y="545.54">Game executable:</tspan><tspan x="920" y="563.54">sandbox</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="920" y="581.2">on nadir_engine.</tspan><tspan x="920" y="596.2">cargo run -p sandbox,</tspan><tspan x="920" y="611.2">or cargo dev for the</tspan><tspan x="920" y="626.2">dev feature</tspan></text></g>
+          <g class="c4-node c4-node--store"><path class="c4-shape" d="M410 770v130a90 10 0 0 0 180 0v-130a90 10 0 0 0 -180 0z"/><path class="c4-shape c4-shape--rim" d="M410 770a90 10 0 0 0 180 0"/><text class="c4-type" text-anchor="middle"><tspan x="500" y="797.14">FILES</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="500" y="814.04">assets/</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="500" y="831.7">PNG images and</tspan><tspan x="500" y="846.7">sprite.jsonc sidecars,</tspan><tspan x="500" y="861.7">Aseprite JSON, LDtk</tspan><tspan x="500" y="876.7">projects, data JSONC</tspan><tspan x="500" y="891.7">and prefabs</tspan></text></g>
+          <g class="c4-node c4-node--store"><path class="c4-shape" d="M721 800v130a100 10 0 0 0 200 0v-130a100 10 0 0 0 -200 0z"/><path class="c4-shape c4-shape--rim" d="M721 800a100 10 0 0 0 200 0"/><text class="c4-type" text-anchor="middle"><tspan x="821" y="826.14">FILES</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="821" y="843.04">target/cooked/</tspan><tspan x="821" y="861.04">loose files</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="821" y="878.7">atlas QOI pages, KBJ and</tspan><tspan x="821" y="893.7">font files, data KBJ,</tspan><tspan x="821" y="908.7">levels .klvl, the cache</tspan><tspan x="821" y="923.7">.cache.kbj</tspan></text></g>
+          <g class="c4-node c4-node--store"><path class="c4-shape" d="M691 970v84a115 10 0 0 0 230 0v-84a115 10 0 0 0 -230 0z"/><path class="c4-shape c4-shape--rim" d="M691 970a115 10 0 0 0 230 0"/><text class="c4-type" text-anchor="middle"><tspan x="806" y="996.64">FILES</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="806" y="1013.54">target/cooked/game.kpak</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="806" y="1031.2">the pack: every cooked file,</tspan><tspan x="806" y="1046.2">KLZ where that is smaller</tspan></text></g>
+          <g class="c4-node c4-node--external"><path class="c4-shape" d="M1120 340v116a85 10 0 0 0 170 0v-116a85 10 0 0 0 -170 0z"/><path class="c4-shape c4-shape--rim" d="M1120 340a85 10 0 0 0 170 0"/><text class="c4-type" text-anchor="middle"><tspan x="1205" y="366.14">FILES</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="1205" y="383.04">The user's</tspan><tspan x="1205" y="401.04">logs folder</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="1205" y="418.7">nadir.log and the</tspan><tspan x="1205" y="433.7">logs of the three</tspan><tspan x="1205" y="448.7">runs before</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="1120" y="520" width="170" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="1205" y="542.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="1205" y="559.54">OS and GPU</tspan><tspan x="1205" y="577.54">driver</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="1205" y="595.2">window, events,</tspan><tspan x="1205" y="610.2">OpenGL</tspan></text></g>
+          <g class="c4-labels">
+          <g class="c4-label"><rect x="161.6" y="167.0" width="180.8" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="252" y="180.92">runs cargo xtask ci, golden,</tspan><tspan x="252" y="194.92">fuzz-smoke, site and dist</tspan></text></g>
+          <g class="c4-label"><rect x="752.8" y="122.0" width="34.4" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="770" y="135.92">runs</tspan></text></g>
+          <g class="c4-label"><rect x="942.8" y="290.0" width="34.4" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="960" y="303.92">runs</tspan></text></g>
+          <g class="c4-label"><rect x="136.2" y="438.0" width="107.6" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="190" y="451.92">dist: lays out,</tspan><tspan x="190" y="465.92">checks and packs</tspan></text></g>
+          <g class="c4-label"><rect x="322.2" y="399.0" width="107.6" height="62.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="376" y="412.92">site: captures,</tspan><tspan x="376" y="426.92">encodes with</tspan><tspan x="376" y="440.92">GStreamer, packs</tspan><tspan x="376" y="454.92">the download</tspan></text></g>
+          <g class="c4-label"><rect x="461.1" y="376.0" width="125.9" height="48.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="524" y="389.92">bench: cargo run</tspan><tspan x="524" y="403.92">--release --package</tspan><tspan x="524" y="417.92">nadir-bench</tspan></text></g>
+          <g class="c4-label"><rect x="602.8" y="408.0" width="162.5" height="76.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="684" y="421.92">cook: cargo run --release</tspan><tspan x="684" y="435.92">--package nadir-cook.</tspan><tspan x="684" y="449.92">With --watch: builds it</tspan><tspan x="684" y="463.92">once, runs it on each</tspan><tspan x="684" y="477.92">change</tspan></text></g>
+          <g class="c4-label"><rect x="776.0" y="420.0" width="132.0" height="48.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="842" y="433.92">site and dist: build</tspan><tspan x="842" y="447.92">it in release and</tspan><tspan x="842" y="461.92">run it</tspan></text></g>
+          <g class="c4-label"><rect x="609.8" y="680.0" width="40.5" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="630" y="693.92">reads</tspan></text></g>
+          <g class="c4-label"><rect x="676.0" y="676.0" width="138.1" height="48.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="745" y="689.92">writes, skipping jobs</tspan><tspan x="745" y="703.92">and files that did</tspan><tspan x="745" y="717.92">not change</tspan></text></g>
+          <g class="c4-label"><rect x="611.5" y="853.0" width="77.1" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="650" y="866.92">packs every</tspan><tspan x="650" y="880.92">output into</tspan></text></g>
+          <g class="c4-label"><rect x="825.2" y="673.0" width="101.5" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="876" y="686.92">with dev: reads</tspan><tspan x="876" y="700.92">the loose files</tspan></text></g>
+          <g class="c4-label c4-label--planned"><rect x="899.4" y="726.0" width="89.3" height="48.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="944" y="739.92">planned M5.8:</tspan><tspan x="944" y="753.92">reloads what</tspan><tspan x="944" y="767.92">changed</tspan></text></g>
+          <g class="c4-label"><rect x="936.0" y="889.0" width="125.9" height="62.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="999" y="902.92">without dev: reads</tspan><tspan x="999" y="916.92">the pack when it is</tspan><tspan x="999" y="930.92">there, else the</tspan><tspan x="999" y="944.92">loose files</tspan></text></g>
+          <g class="c4-label"><rect x="1076.7" y="472.0" width="46.6" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1100" y="485.92">writes</tspan></text></g>
+          <g class="c4-label"><rect x="1013.2" y="593.0" width="101.5" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1064" y="606.92">window, events,</tspan><tspan x="1064" y="620.92">OpenGL</tspan></text></g>
+          </g></svg>
+        </div>
+        <p class="nadir-c4__hint">Scroll sideways to see all of it.</p>
+        <details class="nadir-c4__more">
+          <summary>Each arrow as text</summary>
+          <ul>
+            <li>GitHub Actions &rarr; xtask: runs cargo xtask ci, golden, fuzz-smoke, site and dist</li>
+            <li>Game developer &rarr; xtask: runs</li>
+            <li>Game developer &rarr; Game executable: sandbox: runs</li>
+            <li>xtask &rarr; target/dist/: dist: lays out, checks and packs</li>
+            <li>xtask &rarr; target/site/: site: captures, encodes with GStreamer, packs the download</li>
+            <li>xtask &rarr; nadir-bench: bench: cargo run --release --package nadir-bench</li>
+            <li>xtask &rarr; nadir-cook: cook: cargo run --release --package nadir-cook. With --watch: builds it once, runs it on each change</li>
+            <li>xtask &rarr; Game executable: sandbox: site and dist: build it in release and run it</li>
+            <li>nadir-cook &rarr; assets/: reads</li>
+            <li>nadir-cook &rarr; target/cooked/ loose files: writes, skipping jobs and files that did not change</li>
+            <li>nadir-cook &rarr; target/cooked/game.kpak: packs every output into</li>
+            <li>Game executable: sandbox &rarr; target/cooked/ loose files: with dev: reads the loose files</li>
+            <li>Game executable: sandbox &rarr; target/cooked/ loose files: planned M5.8: reloads what changed</li>
+            <li>Game executable: sandbox &rarr; target/cooked/game.kpak: without dev: reads the pack when it is there, else the loose files</li>
+            <li>Game executable: sandbox &rarr; The user's logs folder: writes</li>
+            <li>Game executable: sandbox &rarr; OS and GPU driver: window, events, OpenGL</li>
+          </ul>
+        </details>
+      </figure>
+      <ul class="nadir-c4-legend" aria-label="Key to the diagrams">
+        <li><span class="nadir-c4-key nadir-c4-key--person" aria-hidden="true"></span>A person</li>
+        <li><span class="nadir-c4-key nadir-c4-key--nadir" aria-hidden="true"></span>Part of Nadir</li>
+        <li><span class="nadir-c4-key nadir-c4-key--external" aria-hidden="true"></span>Outside Nadir</li>
+        <li><span class="nadir-c4-key nadir-c4-key--files" aria-hidden="true"></span>A cylinder: files on disk</li>
+        <li><span class="nadir-c4-key nadir-c4-key--planned" aria-hidden="true"></span>Dashed: planned, not built yet</li>
+      </ul>
+    </section>
 
     <section class="nadir-features" aria-labelledby="features-title">
       <div class="section-head">

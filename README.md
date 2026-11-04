@@ -125,7 +125,7 @@ It has:
 | [`docs/roadmap.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/roadmap.md) | Milestones, with each task's acceptance criteria |
 | [`docs/decisions.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/decisions.md) | Architecture decision records: why things are the way they are |
 | [`docs/05-release.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/05-release.md) | Build profiles, releases and packaging |
-| [`diagrams/`](https://github.com/jabbott-iii/Nadir/tree/main/diagrams) | C4 views of the crates, the game loop's sequence, and class diagrams of the main types |
+| [`diagrams/`](https://github.com/jabbott-iii/Nadir/tree/main/diagrams) | C4 views of the system, its programs and its crates, the game loop's sequence, and class diagrams of the main types |
 
 ## Contributing
 

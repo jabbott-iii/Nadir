@@ -16,3 +16,7 @@ main loop, and `docs/subsystems/` for each crate. When the code and a
 diagram disagree, the code is right: a change that alters a crate's
 dependencies, the main loop or a type drawn here should update the diagram
 too.
+
+The demo page draws views 1 and 2 of `c4-architecture.md` again, by hand
+in SVG, in `site/index.html`, and describes them in `site/llms.txt`: a
+change to either view changes those too.

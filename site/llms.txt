@@ -14,7 +14,7 @@ Key facts:
 
 ## Pages
 
-- [Engine demo](https://jabbott.dev/Nadir/): the recorded scenes, this build, the roadmap's milestones and every feature
+- [Engine demo](https://jabbott.dev/Nadir/): the recorded scenes, this build, the roadmap's milestones, two architecture diagrams and every feature
 - [Repository]({{repository_url}}): the source, with the design in docs/
 
 ## Scenes
@@ -26,6 +26,13 @@ Each is drawn offscreen by the engine on the CI runner, one 60 Hz tick a frame, 
 ## Download
 
 {{download}}
+
+## Architecture
+
+The page draws two views of the C4 model, which {{repository_url}}/blob/{{commit}}/diagrams/c4-architecture.md also draws, with the crates inside the game and the cook:
+
+- System context: the game developer draws sprites in Aseprite, lays out levels in LDtk, and draws images and makes fonts in image editors and font generators, each saving into assets/. The developer runs Nadir's tools, nadir-cook, the asset cook, and xtask, the build automation, which read assets/ and write target/cooked/ and game.kpak, and writes and runs the game built on Nadir, which reads the cooked files or game.kpak and writes nadir.log. The player plays the game with keyboard and mouse, watches the demo, downloads the Linux build and downloads releases. The game opens a window and reads its events through X11 on Linux, Win32 on Windows and AppKit on macOS, and draws through OpenGL 3.3 core, through EGL on Linux. Planned: OpenGL contexts on Windows and macOS, then Metal (roadmap M2.6, M2.7, M10), the OS audio APIs (M6) and gamepads (M8). GitHub Actions runs cargo xtask, deploys this page to GitHub Pages, and publishes each tagged release: the GitHub release and apt repository, the cook's image on ghcr.io and the crates on crates.io.
+- Containers: xtask, which the developer runs and GitHub Actions runs as cargo xtask ci, golden, fuzz-smoke, site and dist, runs nadir-cook to cook: it reads assets/, writes the loose files in target/cooked/, skipping jobs and files that did not change, and packs every output into target/cooked/game.kpak. The developer runs the game executable, the sandbox, and xtask builds it in release and runs it for site and dist: with the dev feature it reads the loose files, and without it the pack when it is there, else the loose files. The sandbox reads the folder assets beside its executable when there is one, as in the release files and the download, and target/cooked/ otherwise. xtask also runs nadir-bench, and writes target/dist/ and target/site/. The game writes its logs to the user's logs folder, and draws through the OS and GPU driver. Planned (M5.8): the game reloads what changed.
 
 ## Features
 
@@ -42,4 +49,5 @@ Each is drawn offscreen by the engine on the CI runner, one 60 Hz tick a frame, 
 - [Roadmap]({{repository_url}}/blob/{{commit}}/docs/roadmap.md): every task, with its acceptance criteria
 - [Architecture]({{repository_url}}/blob/{{commit}}/docs/01-architecture.md): the crates, their dependency matrix, the main loop and threading
 - [Decisions]({{repository_url}}/blob/{{commit}}/docs/decisions.md): the architecture decision records
+- [Diagrams]({{repository_url}}/tree/{{commit}}/diagrams): C4 views of the system, its programs and its crates, the game loop's sequence, and class diagrams of the main types
 - [jabbott.dev](https://jabbott.dev/llms.txt): the author's site: resume, engineering log and other projects

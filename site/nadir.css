@@ -108,6 +108,7 @@
 .nadir-download { margin-bottom: 14px; }
 .nadir-download .btn { margin-bottom: 10px; }
 .nadir-download__meta { margin: 0 0 6px; color: var(--text-3); font-size: 12.5px; line-height: 1.55; }
+.nadir-download__meta a { color: var(--teal); }
 .nadir-download__meta code {
   padding: 0.05em 0.35em;
   font-family: var(--mono); font-size: 0.95em;
@@ -146,10 +147,88 @@
 .nadir-feature[data-status="planned"] { background: rgba(16, 19, 21, 0.55); }
 .nadir-feature[data-status="planned"] .nadir-feature__name { color: var(--text-2); }
 
+/* ---------- Architecture ---------- */
+
+.nadir-arch { margin-bottom: 56px; }
+.nadir-arch__lede { margin: -6px 0 22px; color: var(--text-2); max-width: 70ch; }
+.nadir-arch__lede a { color: var(--teal); }
+
+.nadir-c4 { margin: 0; padding: clamp(16px, 2.4vw, 26px); }
+.nadir-c4 + .nadir-c4 { margin-top: 22px; }
+.nadir-c4__title {
+  margin: 0 0 8px;
+  font-size: clamp(19px, 1.9vw, 22px);
+  font-weight: 500;
+}
+.nadir-c4__text { margin: 0 0 16px; color: var(--text-2); max-width: 72ch; }
+.nadir-c4__scroll { overflow-x: auto; }
+.nadir-c4__svg { display: block; width: 100%; min-width: 1040px; height: auto; }
+.nadir-c4__hint { display: none; margin: 8px 0 0; color: var(--text-3); font-size: 12.5px; }
+.nadir-c4__more { margin: 14px 0 0; font-size: 13.5px; color: var(--text-2); }
+.nadir-c4__more summary { cursor: pointer; color: var(--text-3); }
+.nadir-c4__more summary:hover { color: var(--teal-hi); }
+.nadir-c4__more ul { margin: 10px 0 0; padding-left: 1.2em; display: grid; gap: 4px; }
+
+.nadir-c4-legend {
+  list-style: none;
+  margin: 18px 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 8px 22px;
+  font-size: 13px; color: var(--text-2);
+}
+.nadir-c4-legend li { display: flex; align-items: center; gap: 8px; }
+.nadir-c4-key { display: inline-block; width: 26px; height: 16px; border: 1.5px solid; border-radius: 3px; }
+.nadir-c4-key--person { border-color: var(--amber); background: rgba(242, 194, 0, 0.12); border-radius: 8px; }
+.nadir-c4-key--nadir { border-color: var(--teal); background: rgba(92, 203, 203, 0.14); }
+.nadir-c4-key--external { border-color: rgba(255, 255, 255, 0.22); background: rgba(41, 53, 58, 0.85); }
+.nadir-c4-key--planned { border-color: var(--text-3); border-style: dashed; }
+.nadir-c4-key--files { border-color: rgba(255, 255, 255, 0.22); border-radius: 8px / 4px; background: rgba(41, 53, 58, 0.85); }
+
+/* The diagrams' own drawing: inline SVG, in the site's tokens. */
+.nadir-c4__svg { font-family: var(--font); }
+.c4-type { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; fill: var(--text-3); }
+.c4-title { font-size: 15px; font-weight: 600; fill: var(--text); }
+.c4-desc { font-size: 12px; fill: var(--text-2); }
+.c4-shape { stroke-width: 1.5; }
+.c4-shape--rim { fill: none; }
+.c4-node--system .c4-shape,
+.c4-node--container .c4-shape,
+.c4-node--store .c4-shape { fill: rgba(92, 203, 203, 0.14); stroke: var(--teal); }
+.c4-node--system .c4-type,
+.c4-node--container .c4-type,
+.c4-node--store .c4-type { fill: var(--teal); }
+.c4-node--person .c4-shape { fill: rgba(242, 194, 0, 0.12); stroke: var(--amber); }
+.c4-node--person .c4-type { fill: var(--amber); }
+.c4-node--external .c4-shape { fill: rgba(41, 53, 58, 0.85); stroke: rgba(255, 255, 255, 0.22); }
+.c4-node--external .c4-type { fill: var(--text-2); }
+.c4-node--planned .c4-shape { fill: rgba(11, 12, 13, 0.4); stroke: var(--text-3); stroke-dasharray: 6 5; }
+.c4-node--planned .c4-title { fill: var(--text-2); font-weight: 500; }
+.c4-node--planned .c4-desc { fill: var(--text-3); }
+.c4-node--store .c4-shape--rim,
+.c4-node--external .c4-shape--rim { fill: none; }
+.c4-boundary rect {
+  fill: rgba(92, 203, 203, 0.035);
+  stroke: rgba(92, 203, 203, 0.45);
+  stroke-width: 1.2;
+}
+.c4-boundary__title { font-size: 14px; font-weight: 600; fill: var(--teal); }
+.c4-boundary__type { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; fill: var(--text-3); }
+.c4-edge { fill: none; stroke: rgba(238, 242, 243, 0.55); stroke-width: 1.4; }
+.c4-edge--planned { stroke: var(--text-3); stroke-dasharray: 5 4; }
+.c4-arrow path { fill: rgba(238, 242, 243, 0.55); }
+.c4-arrow--planned path { fill: var(--text-3); }
+.c4-label rect { fill: #0f1214; }
+.c4-label text { font-size: 11.5px; fill: var(--text-2); }
+.c4-label--planned text { fill: var(--text-3); }
+
 /* ---------- Narrow screens ---------- */
 
 @media (max-width: 960px) {
   .nadir-demo { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Where the diagrams are wider than their panel and scroll. */
+@media (max-width: 1180px) {
+  .nadir-c4__hint { display: block; }
 }
 
 @media (max-width: 560px) {
