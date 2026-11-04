@@ -1478,6 +1478,7 @@ by the batched sprite renderer.
     - `Handle` and `Entity` impls come with M5.6 and M9.4.
     - The compact encodings: `[x, y]`, `"#rrggbb(aa)"`,
       `{"min", "max"}`.
+
     `docs/subsystems/scene.md` has the rest. The design critique moved
     `FromValue` to a per-type impl, because `Color` has no `Default`.
   - Note: tests: 12 unit tests, 1 integration test and 3 doc tests.
@@ -1515,6 +1516,7 @@ by the batched sprite renderer.
     - `CollisionWorld::set_position` moves colliders between rebuilds.
     - `TileGrid::layer` is every layer by default.
     - A `collision_slide_5k` benchmark, besides the required one.
+
     Half-cell tiles went to the backlog. `docs/subsystems/collision.md`
     has the rest, including the choices made in the task: `ignore` on the
     casts and on `nearest`, trigger movers stopped by tiles only, casts
@@ -1554,6 +1556,7 @@ by the batched sprite renderer.
       claimed it exactly within ±65,536 px. The docs now say what a test
       measures: `EPSILON` plus under 0.002 px within ±16,384 px, and under
       0.008 px within ±65,536 px.
+
     The fuzzer that found the overflow then ran 60,000 cases of
     non-finite and extreme values in 3 seconds, with no NaN, panic or
     runaway memory.
@@ -1568,6 +1571,7 @@ by the batched sprite renderer.
         hash layout. Casts must go into what they hit, not graze it;
       - 200 runs of trigger pairs, diffed exactly, as colliders move,
         leave and arrive in a shuffled order.
+
       Positions are on a 1/8 px grid half the time, so shapes touch
       exactly and motions have exact zeros.
     - Scenarios for every rule the spec and ADR-0021 state:
@@ -2129,6 +2133,7 @@ by the batched sprite renderer.
       `collision_slide_5k`, as the review measured.
     - Wrong counts and overstated sentences in the docs, the rustdoc and
       the test comments.
+
     Not taken: storing each entry's hull at rebuild, which measured 1 to
     2% faster.
   - Note: 24 planted bugs, one at a time, in a copy of the tree, through
@@ -2279,6 +2284,7 @@ by the batched sprite renderer.
       `tRNS`, one before `PLTE` or of a wrong length, a stray `IDAT`, a bad
       suggested `PLTE`), and their memory bound missed Adam7's filter bytes
       and the copy of split image data. Several comments had wrong numbers.
+
     Not taken: fuzzing a release build (on M5.2's note) and reading the
     image data across chunks without a copy.
   - Note: 36 planted bugs in the codec and the repair, one at a time, in a
@@ -3098,6 +3104,7 @@ by the batched sprite renderer.
     - Docs: the feature's summary, the README's example output, the
       `Counts` break left unrecorded, the tall tiles' wording, and two lists
       of the cook's jobs.
+
     A 14th point, that an unset Point field skipped the type check, was
     refuted as the rule written down. The check runs on unset fields too
     anyway, so the cook refuses a field it cannot write as soon as it is
@@ -3675,8 +3682,9 @@ by the batched sprite renderer.
     must look its regions up each time.
   - Note (from M5.5, ADR-0035): the atlas file holds the clips too, named
     `<sprite>/<tag>` in `Clips` (`Clips::find`), so one reload reaches
-    both; `Clips::add_atlas` refuses names already there, so a reload
-    replaces each clip by name. An export's `.json`, its sheet and its
+    both; `Clips::add_atlas` refuses names already there, and gives back
+    the clips it made for an atlas of the same pages (ADR-0038), so a
+    reload replaces each clip by name. An export's `.json`, its sheet and its
     sidecar are its group's files, as a font's `.fnt` and pages are.
   - Note (from M5.8's scoping, ADR-0042):
     - `load_level` unloads the `Level` scope before it loads, which ends
@@ -4028,8 +4036,9 @@ by the batched sprite renderer.
   - Note (from M4.4): `SaveId` is a facade component, reflected as an
     integer. The world-level counter that assigns them is not built.
   - Note (from M4.6): `Facing` is reflected: save it, and the flip follows
-    from it. An `Animator` is not, and its time is transient: rebuild a
-    held pose from gameplay state. A `Once` clip started at its end with
+    from it. An `Animator` is reflected as its clip's name only (M5.11,
+    ADR-0038), and its time is transient: rebuild a held pose from
+    gameplay state. A `Once` clip started at its end with
     `Animator::starting_at` holds its last frame, but sends
     `AnimationFinished` on its first frame.
   - Note (from M4.7): `TypeRegistry::hash_world` takes the
@@ -4070,7 +4079,7 @@ by the batched sprite renderer.
   - Accept: a forced panic (`--debug-panic` flag, dev only) produces a
     complete report.
   - Verify: `cargo test -p nadir_engine`;
-    `cargo dev -- --debug-panic`, then inspect the report (manual)
+    `cargo dev --debug-panic`, then inspect the report (manual)
 
 - [ ] **M9.7 — content: one complete level of the real game**
   - Depends: M9.1–M9.6, M6.6

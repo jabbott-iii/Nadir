@@ -188,9 +188,9 @@ Methods on `CollisionWorld`:
 - Casts:
   - Casts step through the tile grid at most one cell at a time, only
     over the part of the cast that crosses the grid, in at most twice the
-    grid's width plus height steps. They stop after the first step whose
-    span holds the earliest hit found so far. They test colliders under
-    the whole cast.
+    grid's width plus height, plus 2, steps. They stop after the first step
+    whose span holds the earliest hit found so far. They test colliders
+    under the whole cast.
   - Casts share `move_and_slide`'s tolerance (ADR-0021):
     - A cast running exactly along an axis grazes a solid it overlaps
       across the motion by `EPSILON` or less.
@@ -251,7 +251,7 @@ picking.
     `exited` equal the brute-force diff, as colliders move, leave and
     arrive in a shuffled order. Every enter eventually has an exit when
     the shapes separate.
-- **Scenarios** (`slide.rs`, `queries.rs`):
+- **Scenarios** (`slide.rs`, `queries.rs`, and unit tests in `src/`):
   - sliding along a wall of tiles never stops at seams: 1 px and 16 px
     tiles, box and circle movers, sizes, offsets and origins that round;
   - a 45° approach into an inside corner settles without jitter, against

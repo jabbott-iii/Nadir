@@ -81,7 +81,7 @@ impl World {
     pub fn apply_commands(&mut self);
     // direct structural API for setup code and tests (not inside systems):
     pub fn spawn(&mut self) -> EntityMut<'_>;
-    pub fn despawn(&mut self, e: Entity);
+    pub fn despawn(&mut self, e: Entity) -> bool;     // whether it was alive
 }
 ```
 
@@ -174,16 +174,17 @@ impl<T: Clone> Events<T> {
   the frame stages. The schedule's `run_fixed` and `run_frame` do both,
   through clear functions that `add_event` records for each type.
 - Writers must be ordered before readers, either by stage or by insertion
-  order. Use the debug console's `schedule` command to check.
+  order. Use `Schedule::describe` to check, as the debug console (M7.5)
+  will.
 
 ## Schedule
 
 ```rust
 pub struct Schedule {
-    fixed: [Vec<SystemEntry<Tick>>; FixedStage::COUNT],
-    frame: [Vec<SystemEntry<Frame>>; FrameStage::COUNT],
+    fixed: [Vec<Entry<Tick>>; FixedStage::ALL.len()],
+    frame: [Vec<Entry<Frame>>; FrameStage::ALL.len()],
 }
-struct SystemEntry<C> {
+struct Entry<C> {
     name: &'static str,
     run: fn(&World, &C),
     condition: Option<fn(&World) -> bool>,   // run condition, e.g. "only in GameState::InGame"

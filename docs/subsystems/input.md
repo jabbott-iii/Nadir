@@ -138,7 +138,7 @@ impl<A: ActionSet> ActionState<A> {
   (keyboard/mouse or a specific gamepad). It drives UI prompts, e.g.
   showing "A" versus "Space".
 - **Aim:** for twin-stick, the mouse world position (via
-  `render::screen_to_world`) or the right stick, chosen by active device.
+  `Renderer::screen_to_world`) or the right stick, chosen by active device.
   The facade exposes this as `AimState`.
   - The pointer and the wheel are not actions: `Input::pointer()` and
     `Input::wheel()` (the last tick's total) are for the UI and for aiming.

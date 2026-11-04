@@ -1275,6 +1275,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     - no iteration of a `FastHashMap` or `FastHashSet`, whose order is
       fixed per target only;
     - no state whose bits a zero's sign or a NaN could set.
+
     The sandbox's stress scenes use `sin` and `cos`, so their hashes hold
     on one system only. If a system's CI run disagrees, the fallback is
     files per target (`hashes.<os>-<arch>.txt`, chosen by
@@ -1346,6 +1347,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     - A margin scaled to the mover alone drops giants kept aside, whose
       edges round by pixels.
     - Negative sizes break the overlap argument.
+
     The critique also found that the existing tests and the determinism
     hashes caught none of nine planted bugs in the gather.
   - The user decided on 2026-10-29:
@@ -1492,7 +1494,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0027 — The PNG decoder reads every color type and depth, rejects damage libpng loads, rounds 16-bit samples, and reports the color chunks it ignores
 
-- **Status:** Accepted; its rule that the cook warns for any chunk in `Image::ignored` is superseded by ADR-0031
+- **Status:** Accepted; its rule that the cook warns for any chunk in `Image::ignored` is superseded by ADR-0031; its 120 s of CI fuzzing a target is superseded by ADR-0028 (30 s)
 - **Date:** 2026-10-30
 - **Context:**
   - M5.1 adds the cook tool's PNG decoder. The spec's subset left out
@@ -1733,7 +1735,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     `target/site`, running external tools but making no network calls.
     `DIR` must be new, empty, or one an earlier run made and marked, and a
     run removes only what an earlier one wrote. It:
-    - it checks the features, and builds the sandbox in release;
+    - checks the features, and builds the sandbox in release;
     - captures `field`, `stress-sprites` and `stress-entities`;
     - encodes each with GStreamer (`gst-launch-1.0`) into a VP9 WebM, at
       twice the size with nearest-neighbour scaling, and a PNG poster;
@@ -2121,7 +2123,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0032 — CodeQL scans the Rust code and the workflows; Dependabot keeps the actions' pins current; `cargo xtask workflows` enforces the CI supply-chain rules
 
-- **Status:** Accepted
+- **Status:** Accepted; ADR-0036 adds `release.yml`'s row, whose `release` job may write `contents` and `image` job `packages`
 - **Date:** 2026-10-31
 - **Context:**
   - `docs/04-quality.md` says every action is pinned by its full commit
@@ -2639,6 +2641,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       the index lists the two platforms alone, and tags the version and,
       unless it is a pre-release, `latest`. It then runs the pushed amd64
       image's `--version`.
+
     Each build checks that its runner's host is its target, and runs
     `cargo --locked xtask dist`: a Cargo.lock that a version's raise
     left behind fails there. A required reviewer on `crates-io` holds the
@@ -2865,7 +2868,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0038 — M5.6 split into four tasks; LDtk 1.5.3 and its conventions; the level file `.klvl` (version 1) and the prefab file; how prefabs, reflection and `load_level` behave
 
-- **Status:** Accepted; as built in M5.11, a handle the asset server does not know, and an `Animator`'s clip with no name, are written as `null` with a warning, since `to_value` cannot fail (ADR-0020), and reading them back is an error; for a hash, a nameless clip is written as its handle; as built in M5.12, the cook's `Counts` is `#[non_exhaustive]`, with `Levels { levels, entities }` (a break), a project's job is `ldtk/<its path>`, only the tile sets of the layers it draws are read, a layer whose tiles are all tall is no tile layer, an entity's field with no value is left out and its overrides are in name order, a level's own fields are not cooked, with a warning, a level's tile layers and grid hold at most 2^23 cells together, and the data job reads each prefab of `data/prefabs/` with `prefab::read` and checks its name; as built in M5.6, `load_level` is `App::load_level`, and `nadir::load_level` on a world, with `unload_level`, the resource `CurrentLevel` and an error of its own, `LevelError`, so the facade's `Error` is unchanged; `Clips` knows an atlas by its pages and holds one added twice once more, until each lets go (`Clips::release_atlas`); a level puts back the clear colour it replaced when it goes, and its prefabs stay in the `PrefabLibrary`; the engine's `nadir::extract_level` draws the level's tile layers; the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` (ADR-0033, ADR-0036); and the sandbox names its collision layers, so the field's world hash changed once more, colliders now written with their layers' names (`8587378f99a52c1a` → `298521738b5650ef` over the capture, its frames the same); that the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` is superseded by ADR-0041: they carry the pack, `assets/game.kpak`, alone
+- **Status:** Accepted; as built in M5.11, a handle the asset server does not know, and an `Animator`'s clip with no name, are written as `null` with a warning, since `to_value` cannot fail (ADR-0020), and reading them back is an error; for a hash, a nameless clip is written as its handle; as built in M5.12, the cook's `Counts` is `#[non_exhaustive]`, with `Levels { levels, entities }` (a break), a project's job is `ldtk/<its path>`, without `.ldtk`, only the tile sets of the layers it draws are read, a layer whose tiles are all tall is no tile layer, an entity's field with no value is left out and its overrides are in name order, a level's own fields are not cooked, with a warning, a level's tile layers and grid hold at most 2^23 cells together, and the data job reads each prefab of `data/prefabs/` with `prefab::read` and checks its name; as built in M5.6, `load_level` is `App::load_level`, and `nadir::load_level` on a world, with `unload_level`, the resource `CurrentLevel` and an error of its own, `LevelError`, so the facade's `Error` is unchanged; `Clips` knows an atlas by its pages and holds one added twice once more, until each lets go (`Clips::release_atlas`); a level puts back the clear colour it replaced when it goes, and its prefabs stay in the `PrefabLibrary`; the engine's `nadir::extract_level` draws the level's tile layers; the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` (ADR-0033, ADR-0036); and the sandbox names its collision layers, so the field's world hash changed once more, colliders now written with their layers' names (`8587378f99a52c1a` → `298521738b5650ef` over the capture, its frames the same); that the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` is superseded by ADR-0041: they carry the pack, `assets/game.kpak`, alone
 - **Date:** 2026-11-01
 - **Context:**
   - Roadmap task M5.6 ("cook: LDtk importer; scene: prefabs and level

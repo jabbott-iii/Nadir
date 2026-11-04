@@ -22,8 +22,7 @@ lto = "thin"
 codegen-units = 1
 debug = "line-tables-only"     # enough for symbolicated backtraces
 split-debuginfo = "packed"     # .pdb / .dSYM / .dwp beside the binary: archive, don't ship
-panic = "unwind"               # keep unwinding so the panic hook can write a report and
-                               # catch_unwind works in the fuzz harness
+panic = "unwind"               # keep unwinding so the panic hook can write a report
 
 [profile.dist]
 inherits = "release"
@@ -59,8 +58,9 @@ opt-level = 3                  # the fuzzer tries more inputs; overflow checks a
 - **Game builds:** the version comes from the workspace version, plus the git
   short hash, which `xtask` injects through an environment variable read with
   `env!`.
-- **On-disk formats** (pack, level, save, settings): each has a `u16` format
-  version.
+- **On-disk formats** (pack, level, save, settings): each has a format
+  version: a `u16` in a binary header, such as the pack's, or a
+  whole-number `version` member in a KBJ file, such as the level file's.
   - Loaders support the current version and every older version that has a
     migration function.
   - Migrations are unit-tested with stored fixture files.
@@ -76,7 +76,7 @@ opt-level = 3                  # the fuzzer tries more inputs; overflow checks a
    into a `.res`, and link it via `build.rs` `cargo:rustc-link-arg`.
 3. Embed the manifest (`/MANIFEST:EMBED /MANIFESTINPUT:...`): DPI
    PerMonitorV2, UTF-8 active code page, supported-OS GUIDs.
-4. Lay out the folder: `Game.exe`, `game.pak`, `LICENSES.txt`.
+4. Lay out the folder: `Game.exe`, `game.kpak`, `LICENSES.txt`.
 5. **Sign (CI):**
    `signtool sign /fd SHA256 /tr <RFC3161 timestamp URL> /td SHA256 ...`.
    The certificate comes from CI secret storage or a cloud HSM / signing
@@ -90,7 +90,7 @@ opt-level = 3                  # the fuzzer tries more inputs; overflow checks a
 
 1. Build `aarch64-apple-darwin` and `x86_64-apple-darwin` (dist), then
    `lipo -create` them into a universal binary.
-2. Assemble `Game.app/Contents/{MacOS/Game, Resources/game.pak, Resources/Game.icns, Info.plist}`.
+2. Assemble `Game.app/Contents/{MacOS/Game, Resources/game.kpak, Resources/Game.icns, Info.plist}`.
    Make the `.icns` with `iconutil` from an iconset folder.
 3. **Sign (CI):**
    `codesign --force --options runtime --timestamp --sign "Developer ID Application: …" Game.app`.
@@ -108,7 +108,7 @@ opt-level = 3                  # the fuzzer tries more inputs; overflow checks a
 
 1. Build `x86_64-unknown-linux-gnu` (dist) **inside the oldest supported
    distro container** (glibc floor).
-2. Lay out: `game/` containing `Game` (binary), `game.pak`,
+2. Lay out: `game/` containing `Game` (binary), `game.kpak`,
    `game.desktop`, `game.png` and `LICENSES.txt`.
 3. Output `Game-<ver>-linux-x64.tar.gz`.
 4. Optional: build an AppImage with `appimagetool`.
@@ -133,7 +133,7 @@ just ours. Fonts and other content have their own entries.
 
 A pushed tag `v<version>` publishes the engine at that version: the
 programs, a signed apt repository, the cook's container image and the
-crates. Nothing is signed or notarized until M11.2.
+crates. Nothing else is signed or notarized until M11.2.
 
 ### What a release publishes
 
@@ -175,6 +175,7 @@ refuses an index the key did not sign.
 
 - **The apt key's fingerprint:** not made yet ("Setting it up, once",
   step 3, records it here).
+
 apt reads only the newest release, and an `apt update` while a release
 publishes can read two releases' files and fail; it passes when run again.
 
@@ -324,7 +325,7 @@ The game's packages, signed and notarized, join `release.yml` with
 M11.2. Until then the workflow publishes the engine's releases above.
 
 1. `cargo xtask ci` on all three OSes.
-2. `cargo xtask cook --release` to produce the deterministic `game.pak`.
+2. `cargo xtask cook` to produce the deterministic `game.kpak`.
    Record its content hash.
 3. Run `xtask package` per OS, with signing and notarization.
 4. Smoke-test each package on a clean runner. Launch with

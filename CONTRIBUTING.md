@@ -144,12 +144,14 @@ Windows and macOS, and the same commands CI runs:
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the three allowed crates, or without a `SAFETY:` comment |
 | `cargo xtask headers` | Fails if a source file does not start with the license header, in its place |
 | `cargo xtask workflows` | Fails if a workflow in `.github/workflows` uses an action it may not, pins one by anything but a commit SHA with its tag in a comment, or gives its token more than it may |
+| `cargo xtask release-no-dev` | Fails if `nadir-debug` is in the sandbox's dependency tree without the `dev` feature |
 | `cargo xtask features` | Fails if `docs/features.jsonc` does not match the roadmap's ticks |
 | `cargo xtask golden [--bless]` | Draws the golden scenes offscreen and compares them with `tests/golden/` |
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the mutation fuzzer over every parser, or one |
 | `cargo xtask bench [filter]` | Runs the benchmarks in release, against the recorded baseline |
 | `cargo xtask cook [--force] [--watch]` | Cooks `assets/` into `target/cooked/`; `--watch` again whenever they change, until stopped |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site` (needs EGL and GStreamer) |
+| `cargo xtask dist [--out DIR]` | Builds this machine's release files into `target/dist`: the archive and, on Linux, the `.deb`s (needs `dpkg-dev`) |
 
 ### The Makefile
 

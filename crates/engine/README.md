@@ -487,8 +487,10 @@ path there is found from the folder the game runs in.
   set up, such as an `Atlas`. Before the window opens there is no GPU, so
   only an asset that needs none, an atlas but not a texture, can be made
   then.
-- The asset types so far are `Texture`, a QOI image, and `Atlas`, the cook's
-  `atlas/<group>.kbj`. Asset paths are lowercase.
+- The asset types so far are `Texture`, a QOI image, `Atlas`, the cook's
+  `atlas/<group>.kbj`, and `nadir::scene`'s `Level` and `PrefabAsset`,
+  which `App::load_level` and the `PrefabLibrary` load. Asset paths are
+  lowercase.
 - Assets load in a `Scope`, `Global`, `Level` or `Transient`, and
   `unload_scope` frees those of one.
 - Loads finish only in drawn frames, at no frame known in advance, so tick
@@ -534,7 +536,8 @@ nadir-cook assets cooked
 
 - Each folder's PNG images, Aseprite exports and BMFont fonts go into an
   atlas named after the folder, its group: pages `atlas/<group>_<n>.qoi`
-  and the index `atlas/<group>.kbj`. `sprites/hero.png` is the sprite
+  and the index `atlas/<group>.kbj`, with each font's glyphs in
+  `atlas/<font>.font.kbj`. `sprites/hero.png` is the sprite
   `sprites/hero` in the group `sprites`. An `atlas.jsonc` in a folder can
   name another group, and an image directly in `SOURCE` is an error.
 - An Aseprite export is the JSON of

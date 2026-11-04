@@ -19,7 +19,7 @@ artists keep their normal tools (ADR-0008, ADR-0012).
 
 Every decoder:
 
-- takes `&[u8]` plus a `Limits` struct
+- takes `&[u8]`, or `&str` for a text format, plus a `Limits` struct
 - returns `Result<_, CodecError>` and **never panics** on any input
 - checks every length and offset against the input size before use
 - checks every allocation size against `Limits` before allocating
@@ -30,7 +30,7 @@ Every decoder:
 | `inflate` | RFC 1950/1951 | — | ✓ | no (cook only) | Stored, fixed and dynamic Huffman blocks; output cap from `Limits`. See below |
 | `png` (feature `png`) | PNG 1.2 / ISO 15948 | — | ✓ | no | See subset below |
 | `qoi` | qoiformat.org spec | ✓ | ✓ | yes | Textures, golden references |
-| `qoa` | qoaformat.org spec | ✓ | ✓ | yes | Music and long SFX; LMS predictor, 20-sample slices |
+| `qoa` | qoaformat.org spec | ✓ | ✓ | yes | Music and long SFX; LMS predictor, 20-sample slices. Not built yet (M6.1) |
 | `wav` | RIFF/WAVE | — | ✓ | no | PCM 16/24-bit int, 32-bit float; mono/stereo. See subset below |
 | `klz` | Below | ✓ | ✓ | yes | Pack entry compression. See below |
 | `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (settings, dev data) | Order-preserving objects: `Vec<(String, Value)>` |
@@ -804,9 +804,9 @@ As built in M3.2 and M5.3 (ADR-0030): loading on worker threads from a
 by scope. `reload` comes in M5.16 (ADR-0042).
 
 ```rust
-pub use nadir_core::Handle;                 // { id: GenIndex, _t: PhantomData<fn() -> T> }: Copy, Eq, Hash
+pub use nadir_core::Handle;                 // { id: GenIndex, marker: PhantomData<fn() -> T> }: Copy, Eq, Hash
 pub struct Assets<T> { arena: GenArena<Entry<T>>, by_path, pending: Vec<Handle<T>>, /* result channel, released */ }
-enum Slot<T> { Decoding, Pending(Result<T::Decoded, AssetError>), Loaded(T), Failed { error: AssetError, placeholder: Option<T> } }
+enum Slot<T> { Decoding, Pending(Result<T::Decoded, AssetError>), Loaded(T), Failed { error: AssetError, placeholder: Option<T> }, Finalizing }
 pub enum LoadState { Loading, Loaded, Failed }   // Loading: decoding, or waiting to be finalized
 pub enum OnFailure { Placeholder, Nothing }
 pub enum Scope { Global, Level, Transient }
@@ -894,8 +894,8 @@ pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no al
   - The rest is checked as one byte grammar on every system: `/` between
     parts, no empty, `.` or `..` part, and no part ending in a dot or a
     space or named like a Windows device.
-  - No control character, `\`, `:` or `*?"<>|` is allowed. A path that
-    fails is refused, not repaired.
+  - No control character, `\`, `:` or `*?"<>|` is allowed, and a path is
+    at most 1,024 bytes. A path that fails is refused, not repaired.
   - The last part must end in one of `T::EXTENSIONS`.
 - **`FinalizeCtx`** holds the resources `finalize` and `release` need, by
   type, such as render's `gfx::Device`. A missing one is
@@ -979,7 +979,7 @@ entries' CRCs cover, the string table and where the TOC ends. Read by
 ```
 header (32 bytes):
   magic "KPAK" | version u16 (1) | flags u16 | entry_count u32 | toc_offset u64 | toc_size u32 | toc_crc32 u32 | reserved u32 (0)
-data region: entries, each 16-byte aligned, identical blobs stored once (dedup by content hash)
+data region: entries, each 16-byte aligned, identical blobs stored once (dedup by their bytes)
 toc (toc_size bytes at toc_offset, a multiple of 16, to the end of the file; toc_crc32 is their CRC-32):
   entries, sorted by path_hash for binary search, none twice:
     path_hash u64 (fnv1a64 of normalized path) | offset u64 | stored_size u32 | raw_size u32 | codec u8 (0 none, 1 klz) | reserved [u8;3] (0) | crc32 u32 (of the stored bytes)
@@ -1474,8 +1474,8 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
 - **Fuzz targets** (fuzz smoke): every decoder above, the atlas file reader
   (`atlas`, M5.9), the Aseprite reader (`aseprite`, M5.5), the LDtk reader
   (`ldtk`), the level file reader (`level`) and the prefab file reader
-  (`prefab`, all three M5.10), the pack file reader (`kpak`, M5.13) and
-  the save reader.
+  (`prefab`, all three M5.10), the pack file reader (`kpak`, M5.13) and,
+  from M9.4, the save reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   read every cooked file through `PackSource` and `LooseSource`, and find
   the same bytes (`tools/cook/tests/cook/workspace.rs`, M5.14).

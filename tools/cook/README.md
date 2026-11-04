@@ -54,9 +54,9 @@ Options:
 It prints each job, cooked or up to date, to standard output:
 
 ```text
-cook: atlas/sprites: 5 sprites on 1 page, 2 clips
-cook: data/items: cooked
+cook: atlas/sprites: 5 sprites on 2 pages, 2 clips
 cook: data/prefabs/rock: cooked
+cook: data/prefabs/tree: cooked
 cook: ldtk/levels/field: 1 level, 16 entities
 cook: 4 jobs cooked, 0 up to date, into target/cooked
 cook: game.kpak: 6 files in 5304 bytes
@@ -155,9 +155,10 @@ outputs' are lowercase.
 ## The output and the cache
 
 - Each atlas group is a job, and so is each data file and each LDtk
-  project. A job is left as it is when its files have not changed since the last cook into the same
-  output folder, by their hashes, and its outputs are still there as the
-  cook wrote them. `--force` cooks every job.
+  project. A job is left as it is when its files have not changed since
+  the last cook into the same output folder, by their hashes, and its
+  outputs are still there as the cook wrote them. `--force` cooks every
+  job.
 - The cache is `.cache.kbj` in the output folder. A cook of another
   version, or built anew, cooks everything once.
 - The cook owns the output's `atlas/`, `data/` and `levels/`: it removes

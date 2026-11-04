@@ -218,8 +218,8 @@ As built in M5.11 (ADR-0038):
   `nadir::load_level` on a world:
   1. Removes the previous level (`nadir::unload_level`): it despawns the
      entities it spawned, takes its tile layers out of `TileLayers` and
-     the clips it added out of `Clips`, empties the grid, and unloads
-     `Scope::Level`.
+     the clips it added out of `Clips`, empties the grid, puts back the
+     clear colour it replaced, and unloads `Scope::Level`.
   2. Reads `levels/<name>.klvl` and its prefabs before it returns, the
      prefabs checked against the registry, in `Scope::Level`.
   3. Reads its tile sets' atlases, and adds their clips to `Clips`, but
@@ -237,7 +237,8 @@ As built in M5.11 (ADR-0038):
      leaves an empty grid.
   It logs how long it took. `CurrentLevel`, a resource, says what it made.
   A `LevelError` says why a level did not load: the previous one is gone
-  then, and nothing of the new one is in the world. Its textures stream
+  then, and nothing of the new one is in the world but the prefabs it
+  read, which the `PrefabLibrary` keeps. Its textures stream
   in as any do, a frame or more later; a loading state (M9.1) can wait
   for the asset server's `has_pending` to clear. The clips of an atlas
   only a prefab names, not a tile set, are not added: the cook lists only

@@ -11,7 +11,7 @@ coding agent. This section covers only what is specific to Claude Code.
 | :- | :- |
 | `/next-task [task-id]` | Pick the next unblocked roadmap task, or the one named, and carry it through the definition of done |
 | `/evaluate-dependency <crate> <need>` | Run the build-vs-buy evaluation before anyone proposes a third-party crate |
-| `/add-ffi-binding <os> <api>` | Add OS bindings to `nadir-sys` and wrap them safely in `nadir-platform` |
+| `/add-ffi-binding <os> <api>` | Add OS bindings to `nadir-sys` and wrap them safely in `nadir-platform` or `nadir-gfx` |
 | `/record-decision <title>` | Append an ADR to `docs/decisions.md` |
 
 **Path-scoped rules** in `.claude/rules` load automatically when you open
@@ -27,9 +27,10 @@ matching files:
 **Permissions:**
 
 - `.claude/settings.json` pre-approves routine `cargo` commands.
-- It denies Git operations that publish or finalize changes, plus `cargo publish`
-  and `make release` (which tags and pushes).
-- It asks before `cargo add`, `cargo update` and `cargo install`.
+- It denies Git operations that publish or finalize changes, plus
+  `cargo publish`, `cargo login` and `make release` (which tags and pushes).
+- It asks before `cargo add`, `cargo remove`, `cargo update` and
+  `cargo install`.
 - These are guardrails, not a security boundary. The rules in `AGENTS.md` still
   apply when a command slips past a pattern.
 

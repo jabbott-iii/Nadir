@@ -8,8 +8,9 @@ crate structure and the API every other crate sees.
 - **Contains only:** `#[repr(C)]` types, constants, `unsafe extern` blocks,
   function-pointer type aliases, COM vtable structs, `dlopen` symbol tables,
   and layout tests.
-- **No behavior:** no wrappers, no loops, no allocation. The only functions
-  are the generated symbol-table loaders.
+- **No behavior:** no wrappers, no loops, and no allocation but a table's
+  list of missing symbols. The only code is the generated symbol-table
+  loaders and, on macOS, `msg_send!`.
 
 ```
 crates/sys/src/
@@ -17,7 +18,7 @@ crates/sys/src/
 ├── gl.rs                 # GL types, enums, fn-pointer types (shared by all OSes)
 ├── dynlib.rs             # dynlib! macro: struct of fn pointers + load(&dyn Library) -> Result<Self, MissingSymbols>
 ├── windows/
-│   ├── types.rs          # HWND, HRESULT, GUID, RECT, MSG, WNDCLASSEXW, ...
+│   ├── types.rs          # HWND, HRESULT, GUID, RECT, POINT, ...
 │   ├── kernel32.rs user32.rs gdi32.rs shell32.rs winmm.rs ole32.rs
 │   ├── wgl.rs            # WGL + ARB extension enums
 │   ├── com.rs            # IUnknown vtable, GUID consts
@@ -26,6 +27,7 @@ crates/sys/src/
 ├── macos/
 │   ├── objc.rs           # objc_* runtime fns, Class/Sel/Id/BOOL types, msg_send! macro
 │   ├── foundation.rs appkit.rs quartzcore.rs   # NSRect/NSPoint/NSSize, enum constants
+│   ├── hitoolbox.rs      # kVK_* virtual key codes
 │   ├── opengl.rs metal.rs audiotoolbox.rs gamecontroller.rs
 ├── linux/
 │   ├── libc.rs           # dlopen/dlsym/dlerror, ioctl, inotify_*, poll, errno
@@ -38,10 +40,11 @@ crates/sys/src/
 
 - Declare **only what is called.** Each declaration cites its source: a
   header name or doc URL.
-- Every struct gets `const _: () = assert!(size_of::<T>() == N && align_of::<T>() == A);`,
+- Every struct whose fields are declared gets
+  `const _: () = assert!(size_of::<T>() == N && align_of::<T>() == A);`,
   with N and A taken from the header for each supported target. Use `cfg` on
   the assertion when sizes differ by architecture.
-- Calling conventions: `extern "system"` for Win32/COM, `extern "C"`
+- Calling conventions: `extern "system"` for Win32/COM and GL, `extern "C"`
   elsewhere.
 - Use edition-2024 syntax: `unsafe extern "C" { ... }`. Mark items whose
   calling has no preconditions as `safe fn` only when that's true for every
@@ -79,7 +82,7 @@ crates/sys/src/
 ### Public API
 
 ```rust
-pub struct Platform { /* per-OS backend enum */ }
+pub struct Platform { /* this OS's backend */ }
 
 pub struct WindowConfig {
     pub title: String,
@@ -187,7 +190,8 @@ pub fn create_headless_gl() -> Result<HeadlessGl, PlatformError>;               
   the driver refuses it, a warning is logged and the window opens anyway.
 - **Until M2.6 and M2.7**, Windows and macOS have no OpenGL context. Their
   `gpu_surface` is a context with no functions, whose swaps fail with
-  `Unsupported`, and `create_headless_gl` returns `Unsupported`.
+  `Unsupported`, and `create_headless_gl` returns `Unsupported`. They
+  ignore `WindowConfig::vsync`.
 
 ### Modal frames (Windows move/resize, macOS live resize)
 
@@ -238,11 +242,13 @@ it requires `unsafe impl GlobalAlloc`.
 
 ## Tests
 
-- **`sys`:** layout assertions, compiled per OS in CI.
+- **`sys`:** layout assertions, compiled per OS in CI, and unit tests of
+  the table loader, of `msg_send!`, and of a few calls into each system's
+  libraries.
 - **`platform`:**
   - unit tests for the key-mapping tables (every `Key` reachable on each OS
     with a documented exception list) and the path resolution logic (env-var
-    based, in temp dirs)
+    based, with the variables passed in, touching no folder)
   - a manual interactive test binary, `cargo run -p nadir-platform --example events`,
     which prints every event; used in milestone exit checks on each OS
 - **Headless GL** creation is tested in Linux CI: the tests behind the

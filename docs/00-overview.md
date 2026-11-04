@@ -78,7 +78,7 @@ S ≈ <1k lines, M ≈ 1–3k, L ≈ 3–6k, XL ≈ 6k+.
 | `platform` macOS | L | Objective-C runtime glue, Cocoa, NSOpenGL/CAMetalLayer, AudioUnit, GameController |
 | `gfx` GL 3.3 backend | M | Small RHI, function loader, state cache |
 | `gfx` Metal backend | M | Same RHI over objc messaging |
-| `codec` | M | inflate, PNG, QOI, QOA, WAV, LZ, JSON, CRC |
+| `codec` | M | inflate, PNG, QOI, QOA, WAV, LZ, JSON, Adler-32 |
 | `ecs` | M | Sparse sets, queries/joins, resources, events, commands, schedule |
 | `render` | M | Batcher, sort keys, tilemaps, camera, text, debug draw |
 | `audio` | M | Mixer, voices, buses, resampler, streaming |

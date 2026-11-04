@@ -13,8 +13,8 @@ These three crates are the only ones allowed to contain `unsafe`.
   Never write `extern` blocks in `platform` or `gfx`.
 - **To add bindings, follow `/add-ffi-binding`.** In short:
   - declare only what you call, and cite the header or doc for each item
-  - assert `size_of`/`align_of` for every `#[repr(C)]` type, plus
-    `offset_of!` for fields we read
+  - assert `size_of`/`align_of` for every `#[repr(C)]` type whose fields
+    are declared (not opaque ones), plus `offset_of!` for fields we read
 - **Edition 2024 syntax:** `unsafe extern "system" { ... }` for Win32/COM,
   `unsafe extern "C" { ... }` elsewhere.
 - **One unsafe operation per `unsafe` block,** each preceded by

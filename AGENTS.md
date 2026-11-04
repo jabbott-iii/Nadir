@@ -29,13 +29,13 @@ before its roadmap task is ticked: check before assuming.
 
 | If you are touching… | Read first |
 | :- | :- |
-| Anything | `docs/00-overview.md`, then `docs` |
+| Anything | `docs/00-overview.md`, then `docs/01-architecture.md` |
 | `crates/core` | `docs/subsystems/core.md` |
 | `Cargo.toml`, `Cargo.lock`, a new crate | `docs/02-dependency-policy.md` |
-| `crates/sys`, `crates/platform` | `docs/subsystems/sys-and-platform.md`, `docs` |
+| `crates/sys`, `crates/platform` | `docs/subsystems/sys-and-platform.md`, `docs/03-platforms.md` |
 | `crates/gfx` | `docs/subsystems/gfx.md` |
 | `crates/render` | `docs/subsystems/render.md` |
-| `crates/ecs`, `crates/scene` | `docs/subsystems/ecs.md`, `docs` |
+| `crates/ecs`, `crates/scene` | `docs/subsystems/ecs.md`, `docs/subsystems/scene.md` |
 | `crates/input` | `docs/subsystems/input.md` |
 | `crates/audio` | `docs/subsystems/audio.md` |
 | `crates/codec`, `crates/assets`, `tools/cook` | `docs/subsystems/assets-and-codecs.md` |
@@ -87,7 +87,7 @@ before its roadmap task is ticked: check before assuming.
 
 | Path | Package | Purpose | `unsafe` |
 | :- | :- | :- | :- |
-| `crates/core` | `nadir-core` | Math, color, rects, time, logging, RNG, hashing/CRC32, generational handles, key enums, profiling scopes, errors, test helpers | deny |
+| `crates/core` | `nadir-core` | Math, color, rects, time, logging, RNG, hashing/CRC32, generational handles, key enums, profiling scopes, CLI parsing, errors, test helpers | deny |
 | `crates/sys` | `nadir-sys` | Hand-written raw FFI declarations (Win32, Cocoa/objc, X11, EGL, GL, ALSA, CoreAudio, WASAPI, XInput, evdev) | allowed |
 | `crates/platform` | `nadir-platform` | Windows, event loop, input devices, GL/Metal surfaces, audio device output, paths, dynamic loading | allowed |
 | `crates/gfx` | `nadir-gfx` | Small render hardware interface (RHI) with an OpenGL 3.3 core backend and, from M10, a Metal backend | allowed |
@@ -117,14 +117,16 @@ before its roadmap task is ticked: check before assuming.
 | `cargo xtask unsafe-audit` | Fails if `unsafe` appears outside the allowed crates or lacks a `SAFETY:` comment |
 | `cargo xtask headers` | Fails if a source file lacks the Apache-2.0 header of `LICENSE`'s appendix, or has it altered or out of place (ADR-0037) |
 | `cargo xtask workflows` | Fails if a GitHub workflow uses an action it is not allowed, pins one by anything but a commit SHA, or gives its token more than it may (ADR-0032) |
+| `cargo xtask release-no-dev` | Fails if `nadir-debug` is in the sandbox's dependency tree without the `dev` feature |
 | `cargo xtask features` | Fails if a ticked roadmap task belongs to no feature in `docs/features.jsonc`, or a feature's `ticked` is not what the roadmap ticks |
 | `cargo xtask golden [--bless] [--backend gl\|metal]` | Renders golden scenes offscreen and compares them to references |
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the dependency-free mutation fuzzer over every parser, or over one |
-| `cargo xtask cook [--force] [--watch]` | Cooks `assets/` into `target/cooked/`, skipping the jobs (atlas groups, data files, LDtk projects) whose files did not change, unless `--force`, and packs what it wrote into `target/cooked/game.kpak`, writing only the files whose bytes changed. `--watch` keeps cooking, with a cook built once, whenever a file in `assets/` changes, until stopped (ADR-0042) |
+| `cargo xtask cook [--force] [--watch]` | Cooks `assets/` into `target/cooked/`, skipping the jobs (atlas groups, data files, LDtk projects) whose files did not change, unless `--force`, and packs all its outputs into `target/cooked/game.kpak`, writing only the files whose bytes changed. `--watch` keeps cooking, with a cook built once, whenever a file in `assets/` changes, until stopped (ADR-0042) |
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
 | `cargo xtask dist [--out DIR]` | Builds this machine's release files into `target/dist`: runs the laid-out programs, then packs the archive and, on Linux, the `.deb`s (needs `dpkg-dev`; ADR-0036) |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |
 | `cargo run -p sandbox` | Runs the sandbox game (opens a window). It draws the cooked sprites: run `cargo xtask cook` first, which `cargo xtask ci` also does, as the sandbox's tests need them too |
+| `cargo dev` | Runs the sandbox with its `dev` feature (an alias in `.cargo/config.toml`): a development build, which reads the loose cooked files, not the pack, shows a missing asset's placeholder, and logs how often the frames allocate |
 | `make release VERSION=v<version> [DRY_RUN=1]` | For maintainers, never agents (rule 7): checks that HEAD is on `main` at that version, then tags it and pushes the tag, which starts the release workflow (`docs/05-release.md`) |
 
 `xtask` never uploads, publishes or signs with real credentials. Publishing

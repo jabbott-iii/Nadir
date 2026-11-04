@@ -39,6 +39,7 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
   - golden scenes: `tile_layers`, `animated_tiles_0ms` and
     `animated_tiles_350ms`
 - M5.9: the `Atlas` asset, a cooked atlas's regions (ADR-0033), below
+- M5.5: the atlas's clips, and flips about the pivot (ADR-0035), below
 - Not built yet:
   - text, UI sprites, debug draw and post
   - the smooth-camera and native-resolution modes
@@ -177,8 +178,8 @@ Every world sprite gets a `u64` key, and the keys are sorted with
   - Consecutive sprites with the same texture and pipeline go into one
     instanced draw.
   - Y-sorting interleaves textures, so **atlasing is what keeps draw
-    counts low.** The cook tool packs all sprites for a level into as few
-    atlas pages as possible.
+    counts low.** The cook tool packs each atlas group's sprites, a
+    folder's by default, into as few atlas pages as possible.
 
 ## Instance data
 
@@ -191,9 +192,10 @@ uploads (`f32: Pod` is implemented inside `gfx`). This is fully safe, and with
 /// Logical layout of one sprite instance in the instance buffer (15 × f32 = 60 bytes).
 pub const SPRITE_INSTANCE_FLOATS: usize = 15;
 
-fn push_instance(out: &mut Vec<f32>, s: &SpriteDraw, uv: [f32; 4], color: [f32; 4]) {
+fn push_instance(out: &mut Vec<f32>, s: &SpriteDraw, placeholder: bool, snap_zoom: Option<f32>) {
+    // From `s`: uv (0 to 1 for a placeholder), pivot and position (below), color.to_linear()
     out.extend_from_slice(&[
-        s.position.x, s.position.y,      // location 0: pos (pivot, world)
+        position.x, position.y,          // location 0: pos (pivot, world)
         s.size.x, s.size.y,              // location 1: size
         pivot.x, pivot.y,                // location 2: pivot (normalized), 1 - x for flip.x, 1 - y for flip.y
         uv[0], uv[1], uv[2], uv[3],      // location 3: uv rect (flip applied by swapping)
@@ -229,15 +231,15 @@ fn push_instance(out: &mut Vec<f32>, s: &SpriteDraw, uv: [f32; 4], color: [f32; 
 ## Tilemaps
 
 - The layer data (tile indices per cell) is owned by the facade/scene. The
-  renderer owns `TileChunkSet` GPU caches keyed by layer ID.
+  renderer owns the chunks' GPU caches, keyed by the layer's handle.
 - **Chunk:** 32×32 tiles, one instance buffer of tile instances (cell, atlas
   tile index, flags). Built on load; rebuilt only when a tile in the chunk
   changes (dirty flag).
 - **Culling:** draw only the chunks that intersect the camera rect plus a
   one-tile margin.
-- **Animated tiles:** each instance carries `anim_frames` and `anim_ms`. The
-  shader picks the frame from `RenderFrame.time`, so animation needs no CPU
-  rebuild.
+- **Animated tiles:** each instance carries the tile's `frames` and
+  `frame_ms`. The shader picks the frame from `RenderFrame.time`, so
+  animation needs no CPU rebuild.
 - **Tall tiles** (trees, wall tops): the level importer emits them as
   y-sorted sprites, not chunk tiles. Otherwise they can't interleave with
   characters.
@@ -316,13 +318,15 @@ pub struct TileLayerDraw { pub tiles: Handle<TileLayer>, pub layer: u8, pub dept
   `alpha`. The shader gets whole milliseconds, which wrap after 2^32,
   about 49.7 days.
 - **Tall tiles:** a sprite whose `uv` is `TileSet::block_uv(index,
-  size)`, y-sorted by its feet at the bottom of its cell. The sandbox
-  spawns its tall walls as entities with a `Sprite`.
+  size)`, y-sorted by its feet at the bottom of its cell. The facade's
+  `load_level` spawns a level's tall tiles, the sandbox's tall walls
+  among them, as entities with a `Sprite`.
 
 ## Camera and resolution
 
-- `Camera2D { position, zoom: f32, shake: Vec2 }`. The view matrix maps the
-  world (+Y down) to clip space.
+- `Camera2D { position, zoom: f32, shake: Vec2 }`. The `Camera` uniform
+  (`View::uniform`), a scale and an offset, maps the world (+Y down) to
+  clip space.
 - **Pixel-perfect mode** (default when `virtual_resolution` is set):
   1. Render the world into an RT of exactly `virtual_resolution`.
   2. Upscale to the window by the largest integer factor that fits, with

@@ -25,8 +25,8 @@
 //!
 //! # What it cooks
 //!
-//! So far (roadmap M5.4, M5.5, M5.12, M5.14), [`cook`] reads a source folder and
-//! writes, into an output folder:
+//! So far (roadmap M5.4, M5.5, M5.12, M5.14), [`cook`] reads a source
+//! folder and writes, into an output folder:
 //!
 //! - each atlas group's QOI pages, `atlas/<group>_<n>.qoi`, and a KBJ of
 //!   where each frame went, `atlas/<group>.kbj`, from its folder's PNG
@@ -389,14 +389,14 @@ enum Made<'p> {
 /// Cooks the files below `source` into `out`, which it makes if needed.
 ///
 /// Each atlas group is a job, and so is each data file and each LDtk
-/// project. A job is skipped
-/// when the cache in `out` says the same cooker cooked the same files (by
-/// their hashes) into files still there as it wrote them, unless
-/// [`Options::force`] says to cook everything. Then every file below
-/// `out/atlas`, `out/data` or `out/levels` that no job wrote is removed,
-/// then the pack, [`PACK`], is made of the files the jobs wrote, and the
-/// cache last. Each file, as every output, is written only when its bytes
-/// change, so a cook that changes nothing writes no file (ADR-0042).
+/// project. A job is skipped when the cache in `out` says the same cooker
+/// cooked the same files (by their hashes) into files still there as it
+/// wrote them, unless [`Options::force`] says to cook everything. Then
+/// every file below `out/atlas`, `out/data` or `out/levels` that no job
+/// wrote is removed, then the pack, [`PACK`], is made of the files the jobs
+/// wrote, and the cache last. Each file, as every output, is written only
+/// when its bytes change, so a cook that changes nothing writes no file
+/// (ADR-0042).
 ///
 /// # Errors
 ///

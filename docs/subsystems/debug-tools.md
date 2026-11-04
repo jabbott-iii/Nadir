@@ -60,7 +60,7 @@ Games register their own commands with `console.register(name, help, fn)`.
 ## Profiler
 
 - `nadir_core::profile_scope!` records into thread-local buffers.
-  `profile::take_frame()` collects them at frame end.
+  `profile::take_frame` collects them at frame end.
 - Ring buffer of the last 300 frames.
 - **Export format:** Chrome Trace Event JSON, which opens in Perfetto UI or
   `chrome://tracing`.

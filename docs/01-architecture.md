@@ -34,6 +34,10 @@ crates its row in the dependency matrix allows.
 | 1 — OS behavior and formats | `platform`, `codec` |
 | 0 — foundations | `core`, `sys` |
 
+`diagrams/c4-architecture.md` draws these layers and each crate's
+dependencies, `diagrams/game-loop-sequence.md` follows the main loop
+through the code, and `diagrams/class-diagram.md` shows the main types.
+
 ## Dependency matrix
 
 A crate may depend on the workspace crates listed in its row and nothing else.
@@ -77,6 +81,7 @@ approves it.
 ├── assets/                   # source assets for the sandbox
 ├── tests/golden/             # golden-image references (.qoi)
 ├── fuzz/corpus/              # seed inputs per parser
+├── diagrams/                 # C4, game-loop sequence and class diagrams (Mermaid)
 └── docs/
 ```
 
@@ -171,8 +176,9 @@ As built (ADR-0022), `App::update(elapsed, events)` is everything from
 feeding the events to the frame stages, and `App::run` calls it once a
 frame before drawing. If `Device::new` fails, `App::run` logs it and runs
 the loop without drawing; any other error ends the loop, and is shown to
-the player (`nadir_platform::show_error_dialog`) before `run` returns it. The snapshot and the extract are the engine's own
-systems, `nadir::snapshot` and `nadir::extract_sprites` (see "Stages").
+the player (`nadir_platform::show_error_dialog`) before `run` returns it.
+The snapshot and the extract are the engine's own systems,
+`nadir::snapshot` and `nadir::extract_sprites` (see "Stages").
 `App::offscreen(size)` runs the same frames with no window: each
 `Offscreen::frame` updates, draws into a render target on an offscreen
 context, makes the loaded assets, and returns the pixels. The sandbox's

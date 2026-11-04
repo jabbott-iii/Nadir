@@ -39,7 +39,7 @@ releases build on `ubuntu-24.04`, whose symbols set their glibc floor
   at startup. Also declare it in the embedded manifest, so it applies even
   before code runs.
 - Create the window with `RegisterClassExW` and `CreateWindowExW` (UTF-16
-  strings via a small `to_wide()` helper).
+  strings via a small `wide()` helper).
 - Pump messages with `PeekMessageW(PM_REMOVE)`, then `TranslateMessage` and
   `DispatchMessageW`.
 - The window procedure forwards to a per-window state struct, stored with
@@ -129,9 +129,9 @@ we call, with the full slot ordering preserved.
 ### Timing
 
 - `std::time::Instant` uses `QueryPerformanceCounter`, so it's fine.
-- For the frame limiter, sleep with
-  `CreateWaitableTimerExW(CREATE_WAITABLE_TIMER_HIGH_RESOLUTION)` (Windows 10
-  1803+). Fall back to `timeBeginPeriod(1)` + `Sleep`.
+- For the frame limiter, `precise_sleep` sleeps with `std::thread::sleep`,
+  which uses `CreateWaitableTimerExW(CREATE_WAITABLE_TIMER_HIGH_RESOLUTION)`
+  (Windows 10 1803+), then spins through the last millisecond.
 
 ### Paths
 
@@ -153,7 +153,7 @@ we call, with the full slot ordering preserved.
 
 ## macOS
 
-### Objective-C runtime glue (in `nadir-sys::objc` + `nadir-platform::macos`)
+### Objective-C runtime glue (in `nadir-sys::macos::objc` + `nadir-platform::macos`)
 
 - Use `objc_getClass`, `sel_registerName` (cache selectors in a struct
   initialized once), and `objc_msgSend` **cast to the exact function pointer
@@ -266,8 +266,8 @@ directly: no locks that can block, and no allocation.
 
 - Config and data: `~/Library/Application Support/<Game>/`.
 - Logs: `~/Library/Logs/<Game>/`.
-- `~` is `HOME`, or the user database's entry if it is unset. In a sandboxed
-  app `HOME` is the app's container.
+- `~` is `HOME`, or the user database's entry if it is unset or empty. In a
+  sandboxed app `HOME` is the app's container.
 
 ### Release specifics
 

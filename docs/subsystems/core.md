@@ -1,7 +1,7 @@
 # Subsystem: `nadir-core`
 
-Foundation types used by every other crate. No `unsafe`, no OS calls, no
-dependencies.
+Foundation types used by every other crate but `nadir-sys`. No `unsafe`, no
+OS calls, no dependencies.
 
 ## Contents
 
@@ -12,20 +12,20 @@ dependencies.
 | `time` | `FixedClock` (accumulator, hitch clamp, `alpha`), `Tick` (index, dt), `Frame` (dt, alpha), `Stopwatch` |
 | `log` | Macros `error!`, `warn!`, `info!`, `debug!`, `trace!` with a module target; sinks: stderr, rotating file, in-memory ring buffer (last 1000 lines, for console and crash reports); level filter per target from settings |
 | `rng` | `Pcg32` (seedable, `next_u32`, `next_f32`, `range`, `shuffle`, `choose`); per-system streams derived from a world seed |
-| `hash` | `fnv1a64`; `FxLikeHasher` with `FastHashMap` / `FastHashSet` aliases (deterministic, non-cryptographic); `crc32` (IEEE, table-driven), shared by `codec` (PNG chunks) and `assets` (pack integrity) |
+| `hash` | `fnv1a64`; `FxLikeHasher` with `FastHashMap` / `FastHashSet` aliases (deterministic, non-cryptographic); `crc32` (IEEE, table-driven), shared by `codec` (PNG chunks, pack integrity) and `cook` (the pack writer) |
 | `handle` | `GenIndex { index: u32, generation: NonZeroU32 }`, `GenArena<T>` (insert/remove/get/iter, free list), typed `Handle<T>` built on it |
-| `keys` | `Key` (physical keys, USB-HID-usage order), `MouseButton`, `GamepadButton`, `GamepadAxis` (standard layout, Xbox naming), `Modifiers` |
+| `keys` | `Key` (physical keys, USB-HID-usage order), `MouseButton`, `GamepadButton`, `GamepadAxis` (standard layout, Xbox naming), `Modifiers`. Not built yet: the gamepad names (M8) and `Modifiers` |
 | `profile` | `profile_scope!("name")`: compiles to nothing unless feature `profile` is on; when on, records begin/end with `Instant` into a thread-local buffer; `profile::take_frame(&mut out)` moves the calling thread's records into a reused `Vec` |
-| `testing` | Property-test harness (`check`, `check_sized`), `assert_approx!`. The golden comparison lives in `xtask` (ADR-0017) |
+| `testing` | Property-test harness (`check`, `check_sized`), `assert_approx!` (not built yet). The golden comparison lives in `xtask` (ADR-0017) |
 | `cli` | Minimal argument parser for `xtask`, `cook` and the game binary (`--flag`, `--key value`, positional) |
-| `civil` | UTC date/time from `SystemTime` (days-to-civil conversion) for log and crash-file names |
-| `error` | `CoreError` and the `ErrorContext` helper for adding "while doing X" context to errors |
+| `civil` | UTC date/time from `SystemTime` (days-to-civil conversion) for log lines and crash-file names |
+| `error` | `CoreError` and the `ErrorContext` helper for adding "while doing X" context to errors (`ErrorContext` is not built yet) |
 
 ## Invariants
 
 - `GenArena` never hands out an index whose generation matches a removed
-  entry. Generations wrap at `u32::MAX` back to 1, never to 0, and a slot that
-  wraps is retired permanently.
+  entry. Generations start at 1 and never wrap: a slot whose generation
+  would pass `u32::MAX` is retired permanently.
 - All math is `f32`. No implicit `f64` promotion in hot paths.
 - The value of a `Key` is its id in the USB HID usage tables (keyboard page
   `0x07`), so `Key::A as u8` is `0x04`. The enum has the keys of ANSI and ISO

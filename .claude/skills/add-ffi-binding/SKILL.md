@@ -28,19 +28,24 @@ this procedure exactly.
 
 ## 2. Declare in `nadir-sys`
 
-- File: `crates/sys/src/<os>/<module>.rs`. Every item carries a doc
-  comment, or a `// source:` comment naming the header and declaration.
+- File: `crates/sys/src/<os>/<module>.rs`, or `crates/sys/src/gl.rs` for
+  GL. Every item carries a doc comment, or a `// source:` comment naming
+  the header and declaration.
 - Functions:
   - `unsafe extern "system" { ... }` for Win32/COM; `unsafe extern "C" { ... }`
     elsewhere
   - libraries we `dlopen` or `LoadLibraryW` use the `dynlib!` macro instead
     (a struct of function pointers, with every missing symbol reported by
     name)
+  - GL is never linked: each function gets a `PFNGL<NAME>PROC` type, an
+    `unsafe extern "system" fn`, and the pointer from the context's loader
+    is cast to it
 - Types: `#[repr(C)]`, with fields in header order and exact widths:
   - `DWORD` = `u32`; `LONG` = `i32` on Windows
   - `long` = `i64` on LP64 Linux and macOS
   - `BOOL` (Win32) = `i32`; `BOOL` (objc) = `bool` on arm64, `i8` on x86_64
-- Layout assertions for every struct:
+- Layout assertions for every struct or union whose fields are declared
+  (an opaque type has none):
   ```rust
   const _: () = assert!(core::mem::size_of::<XEvent>() == 192);
   const _: () = assert!(core::mem::align_of::<XEvent>() == 8);
@@ -81,8 +86,8 @@ this procedure exactly.
 - **Wrapper logic:** unit tests for anything that doesn't need the OS
   (mapping tables, string conversion, flag diffing).
 - **Behavior:** if the change is user-visible, extend
-  `examples/events.rs` or the relevant example, and describe the manual
-  check.
+  `crates/platform/examples/events.rs` or the relevant example, and
+  describe the manual check.
 - Run `cargo xtask unsafe-audit` and
   `cargo clippy -p <crate> --all-targets -- -D warnings`.
 

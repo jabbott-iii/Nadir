@@ -26,8 +26,9 @@ paths:
   - Prefer `vec4` packing and avoid `vec3`.
 - **MSL buffer indices:** vertex buffers 0–7, uniform blocks 8–15. Texture
   and sampler indices equal the slot order in the interface constant.
-- **Coordinates:** world space is +Y down. Clip-space conversion happens
-  only in the view-projection matrix built in Rust, never ad hoc in shaders.
+- **Coordinates:** world space is +Y down. Clip-space conversion comes
+  only from Rust, as the `Camera` uniform (`View::uniform`) or clip-space
+  vertices (`BLIT_QUAD`), never ad hoc in shaders.
 - **Color:** textures are sRGB-sampled (hardware converts to linear). Vertex
   colors arrive linear (ADR-0013). Output is premultiplied or straight alpha
   to match the pipeline's `BlendMode`; say which in a comment at the top of

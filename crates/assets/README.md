@@ -38,7 +38,8 @@ Built:
 
 Not built yet: hot reload (M5.16).
 
-The engine's asset types are in nadir-render: `Texture` (`.qoi`) and `Atlas`
+The engine's asset types are in nadir-render, `Texture` (`.qoi`) and
+`Atlas` (`.kbj`), and in nadir-scene, `Level` (`.klvl`) and `PrefabAsset`
 (`.kbj`).
 
 ## Usage

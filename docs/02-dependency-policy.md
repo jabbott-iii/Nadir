@@ -15,7 +15,7 @@ contain only workspace packages. `cargo xtask deps` fails otherwise.
 | :- | :- |
 | Any crate from crates.io or git in any `[dependencies]`, `[dev-dependencies]` or `[build-dependencies]` table | The Rust toolchain and `std` |
 | Vendored or copied third-party source code, including "just one file" | OS system libraries and frameworks we call through FFI (listed below) |
-| A build script that downloads anything or runs third-party code | OS and SDK tools invoked by `xtask` packaging (`signtool`, `rc`, `codesign`, `notarytool`, `lipo`, `iconutil`, `hdiutil`, `appimagetool`) |
+| A build script that downloads anything or runs third-party code | OS and SDK tools invoked by `xtask` packaging (`signtool`, `rc`, `codesign`, `notarytool`, `lipo`, `iconutil`, `hdiutil`, `appimagetool`, `tar`, `dpkg-deb`, `dpkg-shlibdeps`) |
 | A git submodule containing code | Content tools whose output files we parse (LDtk, Aseprite) |
 | A `cargo install`-ed tool that CI depends on | GitHub Actions used by CI. Pin by commit SHA; see `docs/04-quality.md` |
 
@@ -28,7 +28,7 @@ intended path.
 | OS | Libraries / frameworks | How |
 | :- | :- | :- |
 | Windows | `kernel32`, `user32`, `gdi32`, `opengl32`, `winmm`, `ole32`, `shell32`, `dbghelp`, `avrt`, `xinput1_4` (fallback `xinput9_1_0`) | Linked import libraries from the MSVC toolchain; XInput, avrt and dbghelp loaded with `LoadLibraryW` |
-| macOS | `libobjc`, `Foundation`, `AppKit`, `QuartzCore`, `OpenGL`, `Metal`, `AudioToolbox`, `CoreAudio`, `CoreFoundation`, `GameController` | `#[link(name = "...", kind = "framework")]` in `nadir-sys` |
+| macOS | `libobjc`, `Foundation`, `AppKit`, `QuartzCore`, `OpenGL`, `Metal`, `AudioToolbox`, `CoreAudio`, `CoreFoundation`, `GameController` | `#[link(name = "objc")]`, and `#[link(name = "...", kind = "framework")]` for the frameworks, in `nadir-sys` |
 | Linux | `libc` (glibc), `libX11.so.6`, `libEGL.so.1`, `libOpenGL.so.0` (fallback for GL symbols), `libasound.so.2`; later `libXi.so.6` | glibc linked; everything else loaded with `dlopen`, so a missing library produces a clear error message instead of a loader failure |
 
 ## The exception test
@@ -123,16 +123,17 @@ The **fallback** column is a pre-evaluated crate we would consider if the
 | 31 | CLI argument parsing | Build | Tiny parser in `nadir-core::cli` | `clap` | Not expected |
 | 32 | Timestamps | Build | UTC civil date from `SystemTime` (days-to-civil algorithm) | `chrono`, `time` | Not expected |
 | 33 | Error plumbing | Build | Per-crate error enums | `anyhow`, `thiserror` | Not expected |
-| 34 | Byte casting (`Pod`) | Build | `unsafe trait Pod` in `nadir-gfx` with size asserts | `bytemuck` | Not expected |
+| 34 | Byte casting (`Pod`) | Build | `unsafe trait Pod` in `nadir-gfx`, implemented only for primitives and their arrays | `bytemuck` | Not expected |
 
 ## Enforcement
 
 - **`cargo xtask deps`** reads `cargo metadata --format-version 1` (parsed
   with our own JSON parser). It fails if any package has a non-null `source`
-  and does not appear in `xtask/deps-allowlist.txt`.
+  and does not appear in `xtask/deps-allowlist.txt` at its exact version, or
+  if a path package comes from outside the workspace (vendored code).
 - **`cargo xtask layers`** checks the workspace dependency graph against the
   matrix in `docs/01-architecture.md`.
 - **Path-scoped rule** `.claude/rules/dependencies.md` loads whenever an agent
   opens a Cargo manifest.
-- **Claude Code permissions** ask before `cargo add`, `cargo update` and
-  `cargo install`.
+- **Claude Code permissions** ask before `cargo add`, `cargo remove`,
+  `cargo update` and `cargo install`.

@@ -13,7 +13,7 @@ below is our own code (dependency policy items 26–28).
 | Property tests | `nadir-core::testing::check` | `cargo test` | Edge cases: collision never leaves overlap, codecs round-trip, sort keys monotonic |
 | Integration tests | `crates/*/tests/` | `cargo test` | Cross-module behavior (asset load → GPU upload with the headless device) |
 | Golden-image tests | `xtask golden`; scenes in the GL test binaries, references in `tests/golden/` | Linux CI (llvmpipe); Windows and macOS locally before release | Rendering regressions, backend divergence |
-| Determinism tests | `nadir/tests/determinism.rs` | `cargo test` | Replays producing different world state |
+| Determinism tests | `crates/engine/tests/determinism.rs` | `cargo test` | Replays producing different world state |
 | Fuzz smoke | `xtask fuzz-smoke` | CI (time-boxed) | Panics, hangs, huge allocations in parsers |
 | Soak tests | `xtask soak` (from M6.7; manual or nightly) | Real hardware | Audio underruns, memory growth, handle leaks |
 | Benchmarks | `nadir-bench` | Manual; nightly once there is a nightly job | Performance regressions versus the stored baseline |
@@ -43,7 +43,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 );
 ```
 
-- The default seed comes from `NADIR_SEED`, or from a fixed value in CI so
+- The default seed comes from `NADIR_SEED`, or else from a fixed value, so
   runs are reproducible.
 - `NADIR_EXPECT_GL_RENDERER`, when set and not empty, makes the headless
   OpenGL tests of `nadir-platform`, `nadir-gfx`, `nadir-render` and the
@@ -71,9 +71,9 @@ pub fn check_sized<T: std::fmt::Debug>(
   320×180, and checks a few of its pixels.
   - The `gfx` scenes, from M2.4, draw through the `gfx` API, in
     `crates/gfx/tests/headless/golden.rs`: clear, textured quad (nearest,
-    linear, and repeat through an indexed draw), alpha blend (all four blend
-    modes), 1000 instanced quads, scissor and viewport, and the render
-    target round trip.
+    linear, and repeat through an indexed draw), alpha blend (every blend
+    mode but `Opaque`), 1000 instanced quads, scissor and viewport, and the
+    render target round trip.
   - The `render` scenes, from M3.3, draw through the `render` API, in
     `crates/render/tests/headless/golden.rs`:
     - `y_sort`: a person behind a tree and one in front, a flipped sprite, a
@@ -348,7 +348,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 | `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |
 | `crates` | Same metadata (ADR-0036). Each workspace member that crates.io gets (no `publish = false`) must have a description, a license and a repository, and copies of the root's `LICENSE` and `NOTICE` in its folder, byte for byte, as cargo leaves them out of its package otherwise (ADR-0037); be at `nadir_engine`'s version; and depend on workspace crates only if crates.io gets them too, by the requirement `^<version>`. Notes the crates it checked |
 | `unsafe-audit` | Scans `*.rs`, ignoring comments and string literals: no `unsafe` outside `sys`/`platform`/`gfx`; `allow`, `expect` or `warn(unsafe_code)` only in those three crate roots; every `unsafe {` / `unsafe impl` preceded by a `// SAFETY:` comment that ends at most 3 lines above it; prints a per-crate `unsafe` count (reviewed if it grows) |
-| `headers` | Walks the workspace (not the top-level `target`, nor hidden folders but `.github`) for source files, by extension or name: `.rs`, `.glsl`, `.metal`, `.py`, `.sh`, `.js`, `.css`, `.html`, `Makefile`, `Dockerfile` and `.github/workflows/*.yml`. Each must start with the Apache-2.0 header of `LICENSE`'s appendix in its comment syntax, then a blank line: on line 1, or after a GLSL `#version` line, a `#!` line or an HTML doctype. Names the first line that differs and what it should be (ADR-0037) |
+| `headers` | Walks the workspace (not the top-level `target`, nor hidden folders but `.github`) for source files, by extension or name: `.rs`, `.glsl`, `.metal`, `.py`, `.sh`, `.js`, `.css`, `.html`, `Makefile`, `Dockerfile` and `.github/workflows/*.yml` (or `.yaml`). Each must start with the Apache-2.0 header of `LICENSE`'s appendix in its comment syntax, then a blank line: on line 1, or after a GLSL `#version` line, a `#!` line or an HTML doctype. Names the first line that differs and what it should be (ADR-0037) |
 | `workflows` | Reads each file of `.github/workflows` line by line (ADR-0032). Fails a workflow with no row in its table of the actions each may use and the jobs that may grant `write`, with the permissions each may; an action not in its row, not pinned by a full commit SHA, or with no `# v…` tag comment on its line (a list item is read however it is spaced); top-level permissions other than `{}` or `contents: read`, or none; a job's `write` on any permission its row does not name, or permissions written on one line (`write-all`, `read-all`, `{ … }`); `pull_request_target`; and an `actions/checkout` without `persist-credentials: false` |
 | `release-no-dev` | Runs `cargo tree -p sandbox -e normal --prefix none` without the `dev` feature and fails if `nadir-debug` appears |
 | `features` | Reads `docs/features.jsonc` with `nadir-codec::json` and the roadmap's task lines (`- [x] **M3.3 — …**`, or `[X]`). Fails when a line looks like a task's (a list item, indented, quoted or numbered or not, with a checkbox of one character and, anywhere after it, the start of a task ID such as `M5.3` or `m5.3`, bold or not, outside a longer word) but cannot be read as one, two tasks share an ID, a ticked task belongs to no feature, a feature's `ticked` (the tasks ticked when its summary was written) is not what the roadmap ticks or names a task the feature does not need, a feature names a task the roadmap lacks or names one twice, two features share a name, or an entry is not an object of `name`, `area`, `summary` (none blank) and `tasks` (at least one ID). Notes how many features are shipped, in progress and planned (ADR-0029) |

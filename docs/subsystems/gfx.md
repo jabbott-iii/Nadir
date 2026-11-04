@@ -116,8 +116,8 @@ pub fn bytes_of<T: Pod>(slice: &[T]) -> &[u8];
 - **Orientation:** a texture's first row of data is `v = 0`. `read_pixels`
   gives rows from the top. On GL a render target is stored from its bottom
   row, so sampled, its `v = 0` is the bottom of what was drawn (clip space
-  `y = -1`): shaders that sample render targets (blit, post) account for
-  it.
+  `y = -1`): draws that sample render targets (blit, post) account for
+  it, as the blit's uv from Rust (`BLIT_QUAD`) does.
 - **R8** samples as `(r, 0, 0, 1)`, and reads back as `(r, 0, 0, 255)`.
 - `Pod` is implemented **only inside `gfx`**:
   - for `u8`, `u16`, `u32`, `i32` and `f32`
@@ -158,9 +158,9 @@ pub struct ShaderSource<'a> {
   gives a stub, so the check that guards there is the version check: 3.3
   core, and nothing beyond it without an extension check.
 - **Calls:** each GL function has one safe wrapper with one `unsafe`
-  block, on a token that exists only after the liveness check; wrappers
-  that pass pointers check the lengths. Only the two draws stay `unsafe`,
-  and their one call site follows the draw checks.
+  block for the call, on a token that exists only after the liveness
+  check; wrappers that pass pointers check the lengths. Only the two
+  draws stay `unsafe`, and their one call site follows the draw checks.
 - **Uploads:** `GL_UNPACK_ALIGNMENT` stays 1, so rows of any width are
   tightly packed. Every texture has `GL_TEXTURE_MAX_LEVEL` 0.
 - **State cache:** track the bound program, VAO, textures per unit, blend
@@ -214,9 +214,9 @@ pub struct ShaderSource<'a> {
     `ContextLost`.
 - **Readback:** `glReadPixels`, then flip vertically.
 - **Color space:** decided by ADR-0013.
-  - Textures are uploaded as `SRGB8_ALPHA8`; blending happens in linear space
-    with `GL_FRAMEBUFFER_SRGB` enabled on the default framebuffer and on
-    sRGB render targets.
+  - Color textures (`Rgba8Srgb`) are uploaded as `SRGB8_ALPHA8`; blending
+    happens in linear space with `GL_FRAMEBUFFER_SRGB` enabled on the
+    default framebuffer and on sRGB render targets.
   - If this causes visible differences from artists' expectations in pixel
     art (alpha-blended edges), switch to "everything sRGB-encoded,
     blend in sRGB". That change is one ADR plus a flag in `Caps`.
