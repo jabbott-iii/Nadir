@@ -42,7 +42,7 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
 - Not built yet:
   - text, UI sprites, debug draw and post
   - the smooth-camera and native-resolution modes
-  - shader hot reload (M5.8), and the Metal sources (M10.3)
+  - shader hot reload (M5.17), and the Metal sources (M10.3)
 
 ```rust
 impl Renderer {

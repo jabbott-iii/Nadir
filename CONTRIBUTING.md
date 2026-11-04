@@ -148,7 +148,7 @@ Windows and macOS, and the same commands CI runs:
 | `cargo xtask golden [--bless]` | Draws the golden scenes offscreen and compares them with `tests/golden/` |
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the mutation fuzzer over every parser, or one |
 | `cargo xtask bench [filter]` | Runs the benchmarks in release, against the recorded baseline |
-| `cargo xtask cook [--force]` | Cooks `assets/` into `target/cooked/` |
+| `cargo xtask cook [--force] [--watch]` | Cooks `assets/` into `target/cooked/`; `--watch` again whenever they change, until stopped |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site` (needs EGL and GStreamer) |
 
 ### The Makefile

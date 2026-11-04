@@ -17,6 +17,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use nadir_assets::{AssetPath, LooseSource, PackSource, Source};
 use nadir_codec::adler32;
@@ -126,6 +127,36 @@ pub(crate) fn files(root: &Path) -> Vec<(String, Vec<u8>)> {
     }
     found.sort();
     found
+}
+
+/// Sets every file below `root` to a time long past, which no cook
+/// writes, so that writing one again shows on any file system's clock, and
+/// gives that time.
+pub(crate) fn age(root: &Path) -> SystemTime {
+    let long_ago = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+    for (name, _) in files(root) {
+        fs::File::options()
+            .write(true)
+            .open(root.join(&name))
+            .and_then(|file| file.set_modified(long_ago))
+            .expect("set a file's time");
+    }
+    long_ago
+}
+
+/// The files below `root` written since [`age`] set them to `long_ago`, by
+/// their paths below `root`, in order.
+pub(crate) fn written(root: &Path, long_ago: SystemTime) -> Vec<String> {
+    files(root)
+        .into_iter()
+        .filter(|(name, _)| {
+            fs::metadata(root.join(name))
+                .and_then(|metadata| metadata.modified())
+                .expect("this system keeps modification times")
+                != long_ago
+        })
+        .map(|(name, _)| name)
+        .collect()
 }
 
 /// Checks that the pack in `out` holds every file the cook wrote there, and

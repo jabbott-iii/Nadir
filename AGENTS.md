@@ -120,7 +120,7 @@ before its roadmap task is ticked: check before assuming.
 | `cargo xtask features` | Fails if a ticked roadmap task belongs to no feature in `docs/features.jsonc`, or a feature's `ticked` is not what the roadmap ticks |
 | `cargo xtask golden [--bless] [--backend gl\|metal]` | Renders golden scenes offscreen and compares them to references |
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the dependency-free mutation fuzzer over every parser, or over one |
-| `cargo xtask cook [--force]` | Cooks `assets/` into `target/cooked/`, skipping the jobs (atlas groups, data files, LDtk projects) whose files did not change, unless `--force`, and packs what it wrote into `target/cooked/game.kpak` |
+| `cargo xtask cook [--force] [--watch]` | Cooks `assets/` into `target/cooked/`, skipping the jobs (atlas groups, data files, LDtk projects) whose files did not change, unless `--force`, and packs what it wrote into `target/cooked/game.kpak`, writing only the files whose bytes changed. `--watch` keeps cooking, with a cook built once, whenever a file in `assets/` changes, until stopped (ADR-0042) |
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
 | `cargo xtask dist [--out DIR]` | Builds this machine's release files into `target/dist`: runs the laid-out programs, then packs the archive and, on Linux, the `.deb`s (needs `dpkg-dev`; ADR-0036) |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |

@@ -219,7 +219,7 @@
 //!
 //! Bitmap text (roadmap M7.1), debug draw (M7.6), UI sprites, post effects,
 //! camera rotation, the smooth-camera and native-resolution modes, shader
-//! hot reload (M5.8), and the Metal shaders (M10.3).
+//! hot reload (M5.17), and the Metal shaders (M10.3).
 //!
 //! # Features
 //!

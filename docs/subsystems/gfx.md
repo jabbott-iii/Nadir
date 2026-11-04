@@ -246,7 +246,8 @@ pub struct ShaderSource<'a> {
 - Shader sources live in `crates/render/shaders/<name>/`:
   `<name>.vert.glsl`, `<name>.frag.glsl`, `<name>.metal`.
 - They are included with `include_str!`. In dev builds they hot-reload from
-  disk.
+  disk: the facade reads them, and nadir-render rebuilds a program from
+  the sources it is given (M5.17, M5.8; ADR-0042).
 - Every shader has a Rust "interface" constant: attributes with locations,
   uniform blocks with sizes, texture slots. Both sources must agree with it.
   A parity test parses the GLSL `layout(location = N) in` lines and the MSL

@@ -23,7 +23,7 @@ use nadir_codec::json::{self, Value};
 use nadir_codec::{CodecError, Limits, level};
 use nadir_cook::{CookError, Counts, Report};
 
-use crate::common::{cook, dir, files, jobs, kbj, plain, write};
+use crate::common::{age, cook, dir, files, jobs, kbj, plain, write, written};
 
 /// The level `Meadow`, 4 × 3 cells of 16 pixels, its layers top-most
 /// first, each type of LDtk's: entities (a tree with fields, and a big
@@ -407,6 +407,26 @@ fn an_edit_to_a_level_file_or_a_tile_set_cooks_the_level_again_as_a_clean_cook_d
             reason: "at `layerInstances[0].entityInstances[1].__identifier`: the entity `BigRock` spawns the prefab `big_rock`, and there is no `data/prefabs/big_rock.jsonc`".to_string(),
         }
     );
+}
+
+#[test]
+fn a_prefab_edited_to_the_same_value_leaves_its_file_and_the_level_as_they_were() {
+    let root = dir("ldtk_same");
+    let (source, out) = (root.join("source"), root.join("out"));
+    sources(&source, |_| {});
+    cook(&source, &out).expect("a cook");
+    let long_ago = age(&out);
+    // A comment: the prefab's job and the level's run again, and each
+    // writes the bytes already there, so that a game watching the files
+    // reloads neither (ADR-0042).
+    write(
+        &source,
+        "data/prefabs/tree.jsonc",
+        "// A tree.\n{ \"name\": \"tree\", \"components\": {} }",
+    );
+    let report = cooks_as_a_clean_cook(&source, &out, &root.join("clean"));
+    assert_eq!(jobs(&report), all([false, false, true, true]));
+    assert_eq!(written(&out, long_ago), [".cache.kbj"]);
 }
 
 /// What the cook says of the project of [`sources`] with `edit` made to it:

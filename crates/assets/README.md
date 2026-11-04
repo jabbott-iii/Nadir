@@ -36,7 +36,7 @@ Built:
   naming its path.
 - Placeholders for failed loads, when the server is asked to show them.
 
-Not built yet: hot reload (M5.8).
+Not built yet: hot reload (M5.16).
 
 The engine's asset types are in nadir-render: `Texture` (`.qoi`) and `Atlas`
 (`.kbj`).

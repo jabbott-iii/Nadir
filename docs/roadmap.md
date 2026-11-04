@@ -3491,7 +3491,173 @@ by the batched sprite renderer.
     summary.
   - `cargo xtask ci`: all 12 checks ok, 1,576 tests passed, 1 ignored.
 
-- [ ] **M5.8 — hot reload**
+- [x] **M5.15 — cook: `cargo xtask cook --watch`; outputs rewritten only when they change**
+  - Note (from M5.8, ADR-0042): M5.8 was split into M5.15, M5.16, M5.17
+    and M5.8, each of at most three packages, run in that order. ADR-0042
+    records the split, where the watch and the reload live, and how M5.8
+    is shown.
+  - Note (from M5.4): `xtask` may not link `nadir-cook` (the dependency
+    matrix), so `xtask cook --watch` runs the `nadir-cook` binary again on
+    each change: only the groups whose files changed are cooked, and the
+    cache stays right. A cook built anew cooks everything once.
+  - Note (from M5.14, ADR-0041): every cook packs every output again; for
+    the sandbox, a cook with nothing to cook takes 0.00 to 0.01 s, the
+    pack included. M5.8's 1 s may need a cook that skips the pack: time a
+    one-file cook in the watch.
+  - Note (from M5.8's scoping, ADR-0042): the cook writes every output of
+    a job it cooks, even when the bytes are those already there, so a game
+    polling times of change would reload a whole group for one sprite, and
+    the level for a prefab edit that leaves it the same; and an atlas job
+    writes `atlas/<group>.kbj` before the pages it names.
+  - Depends: M5.14
+  - Do:
+    - ADR-0042; this split in the roadmap and in `docs/features.jsonc`;
+      the forward references to M5.8 in the docs pointed at the task that
+      now does the work; the architecture's threading table.
+    - `cargo xtask cook --watch [--force]`: `nadir-cook` built in release
+      once and a first cook, then `assets/` polled every 100 ms, each file
+      by its time of change and its length; after a change and one poll
+      with no further change, the built cook run again; a cook that fails
+      printed, and the watch goes on; each cook's time from the change
+      seen printed.
+    - The cook writes an output, the cache and the pack only when their
+      bytes change, and an atlas group's pages before the files that name
+      them.
+  - Accept: a source saved while the watch runs is cooked again, under
+    0.5 s from the save to the end of the cook for the sandbox's assets;
+    an output whose bytes did not change keeps its time of change, and a
+    cook that changes nothing writes no file; the outputs are byte for
+    byte a clean cook's.
+  - Verify: `cargo test -p nadir-cook`; `cargo test -p xtask`;
+    `cargo xtask cook`; `cargo xtask cook --watch`, run with a source
+    edited and put back, its times noted; `cargo xtask ci`
+  - Built (2026-11-03, ADR-0042):
+    - The split: ADR-0042; M5.15, M5.16 and M5.17 before M5.8, which keeps
+      its number, each with the notes that are its own; `docs/features.jsonc`;
+      the forward references to M5.8 pointed at M5.16 (nadir-assets' crate
+      docs and README, `Source::modified`, the design's `reload`) and M5.17
+      (render's crate docs, README and design); `gfx.md` says who reads the
+      shaders in dev; the architecture's threading table.
+    - xtask: `cargo xtask cook --watch [--force]` (`xtask/src/watch.rs`):
+      the cook built once with cargo's JSON messages, `snapshot` of what the
+      cook's walk sees below `assets/`, and `Watch`, which says when a cook
+      is due; the usage and the `cook` line of `--help`.
+    - nadir-cook: `write` leaves a file that holds its bytes, under its
+      name, as it is, the cache and the pack too; `pages_first` writes an
+      atlas job's pages, then its atlas file, then its fonts' files.
+    - Tests: a cook that changes nothing, and a forced one, write no file,
+      and one image's change writes its page, the cache and the pack alone
+      (`incremental.rs`); a prefab edited to the same value leaves its file
+      and the level as they were (`ldtk.rs`); the order of an atlas job's
+      writes, with a group named like a font's file (`lib.rs`); the watch's
+      looks and when a cook is due (`watch.rs`).
+    - The docs: the design's "Hot reload (dev)", the CLI and the cache's
+      outputs; the cook's crate docs, `cook`'s docs and README; `AGENTS.md`
+      and `CONTRIBUTING.md`'s commands.
+  - As built:
+    - A file that holds its bytes is left as it is only when its name in
+      its folder is the one the cook gives, byte for byte: on a system that
+      ignores case, a file renamed in case alone (a capital past ASCII,
+      which asset paths keep) is written again under its new name, which
+      the removal of files no job wrote compares byte for byte.
+    - The watch looks at folders and links too, as the cook's walk sees
+      them, since the cook refuses some of each; what cannot be read below
+      `assets/` is marked, and the next look tells, so only `assets/` itself
+      must be read.
+    - The watch runs the executable cargo built when it started; a change
+      to the cook's own code needs the watch started again.
+  - Measured: on the sandbox's assets, a script ran the watch, saved edits
+    and put them back, three times, the last on the final code. A
+    prefab's comment was cooked 0.15 to 0.20 s after its save, and rewrote
+    `.cache.kbj` alone; a pixel of `sprites/tree.png`, 0.16 to 0.20 s, and
+    rewrote `atlas/sprites_0.qoi`, the cache and the pack. The last two
+    runs ended with `target/cooked` byte for byte as after the watch's
+    first cook (the first compared it with the files before that cook,
+    whose cache another build of the cook had written). The cook
+    took 0.01 to 0.05 s of that, the pack included, so no option skips the
+    pack (ADR-0041's trigger is not met).
+  - Review: one adversarial round, 7 findings confirmed, 3 refuted. Fixed:
+    the watch saw neither folders nor links, so taking away a link that
+    failed a cook cooked nothing again; an entry below `assets/` that could
+    not be read ended the watch; on a system that ignores case, a file left
+    as it was kept its old name, and was then removed as no job's; a group
+    named like a font's file ranked its atlas file with the fonts'; `cook`'s
+    docs said the cache is written on every cook; M5.16's Accept asked for
+    an allocation count nadir-assets cannot make, now M5.8's; ADR-0042 said
+    nadir-render has no features.
+  - `cargo xtask ci`: all 12 checks ok, 1,581 tests passed, 1 ignored.
+
+- [ ] **M5.16 — assets: reload behind a handle; the mtime watcher**
+  - Note (from M5.3): `Source::modified` gives a loose file's time of change.
+    A reload keeps the handle, but the server takes a worker's result only
+    for an asset in its decoding state, and frees an asset only through an
+    unloaded scope: a reload needs a state of its own, and must
+    `Asset::release` the old value once the new one is made.
+  - Note (from M5.8's scoping, ADR-0042):
+    - `finish_now` takes its handle out of the server's pending list, and
+      a finish takes out those `Loaded` or `Failed`: a reload queued for
+      one must stay.
+    - Up to four workers take jobs from one queue, so two reloads of a
+      path can finish out of order: only the later read may land.
+    - One path can be loaded as two asset types; a reload by path reaches
+      each.
+    - `LoadState` and `Source` are public and exhaustive: a new variant,
+      or a changed signature, breaks 0.2.
+    - Some systems keep coarse times of change (a test of M5.14 could not
+      see a rewrite): tests set them with `File::set_modified`, or use a
+      source of their own.
+    - The facade finishes loads only while `has_pending()`, so the
+      changed paths must be drained every frame, allocating nothing when
+      nothing changed. nadir-assets cannot count allocations (the
+      dependency matrix): the facade's count checks the drain in M5.8.
+    - The facade must learn which assets were swapped, to find an atlas's
+      regions and clips again, or respawn a level.
+  - Depends: M5.3
+  - Do: `AssetServer::reload`: a reload state of the entry's own; the
+    latest read made within the finish budget and swapped in behind the
+    same handle, the value it replaces released with `Asset::release`; a
+    reload that fails logged with its path, the value kept. The watcher: a
+    thread its owner starts, which polls the loaded paths'
+    `Source::modified` every 250 ms and hands the changed ones to the main
+    thread. A way to tell which assets were swapped. The docs.
+  - Accept: a reloaded asset has its new value behind the handle it had,
+    and the old value is released once; a reload that fails keeps the old
+    value; of two reloads finished out of order, the later read's value
+    stays; a loose file changed while watched is reloaded within a poll
+    and a finish; with nothing changed, draining the watcher gives nothing
+    and grows no buffer.
+  - Verify: `cargo test -p nadir-assets`; `cargo xtask ci`
+
+- [ ] **M5.17 — render: shader reload; a texture reloaded behind its handle**
+  - Note (from M5.8's scoping, ADR-0042):
+    - The renderer looks each texture handle's `TextureId` up every frame,
+      so a texture swapped behind its handle needs no renderer change,
+      only a test.
+    - `Renderer::new` builds the programs from `include_str!` sources.
+      gfx checks the uniform blocks' sizes but not the attributes'
+      locations, which only render's parity test (`shader.rs`, test only)
+      reads from the GLSL.
+    - `RenderError` is public and exhaustive: a new variant breaks 0.2.
+    - The Metal sources (M10.3) will need reloading too.
+  - Depends: M5.16
+  - Do: a program rebuilt from sources it is given, with its interface,
+    and the one it had kept when they do not compile or do not match the
+    interface (the parity check moved from the tests into the crate);
+    where the shader sources are, for the facade; headless tests: a
+    fragment shader reloaded changes what is drawn, a broken one keeps the
+    last, a texture reloaded behind its handle draws its new texels; the
+    docs.
+  - Accept: a reloaded program draws with its new sources from the next
+    frame; sources that do not compile, or whose interface differs, are
+    refused with their error, and the next frame draws as before; a
+    texture reloaded behind its handle draws its new texels; the golden
+    scenes are unchanged.
+  - Verify: `cargo test -p nadir-render`; `cargo xtask golden`;
+    `cargo xtask ci`
+
+- [ ] **M5.8 — hot reload: the game reloads what changed**
+  - Note (from M5.8, ADR-0042): split, it keeps M5.8's number and comes
+    after M5.15, M5.16 and M5.17. The session runs its demonstration.
   - Note (from M5.6, ADR-0038): `PrefabLibrary` keeps every prefab a level
     read, and `load_level` uses a kept one without reading it again, so a
     prefab cooked anew needs a way out of the library (a
@@ -3503,16 +3669,6 @@ by the batched sprite renderer.
     `Once` one plays the rest of a longer clip, still finished, with no
     second `AnimationFinished`. Decide then whether a finished one should
     hold the new last frame (`Animator::advance`).
-  - Depends: M5.6
-  - Note (from M5.4): `xtask` may not link `nadir-cook` (the dependency
-    matrix), so `xtask cook --watch` runs the `nadir-cook` binary again on
-    each change: only the groups whose files changed are cooked, and the
-    cache stays right. A cook built anew cooks everything once.
-  - Note (from M5.3): `Source::modified` gives a loose file's time of change.
-    A reload keeps the handle, but the server takes a worker's result only
-    for an asset in its decoding state, and frees an asset only through an
-    unloaded scope: a reload needs a state of its own, and must
-    `Asset::release` the old value once the new one is made.
   - Note (from M5.9, ADR-0033): an atlas is read once, with `load_now`,
     and its regions are copied into the game's sprites and clips at setup:
     reloading `atlas/<group>.kbj` must reach them, by name, or the game
@@ -3522,12 +3678,36 @@ by the batched sprite renderer.
     both; `Clips::add_atlas` refuses names already there, so a reload
     replaces each clip by name. An export's `.json`, its sheet and its
     sidecar are its group's files, as a font's `.fnt` and pages are.
-  - Do: `xtask cook --watch`; the runtime mtime watcher; reloading
-    textures, data, levels and shaders in dev.
+  - Note (from M5.8's scoping, ADR-0042):
+    - `load_level` unloads the `Level` scope before it loads, which ends
+      the handles in it, and makes the tile layers' handles anew, and the
+      clips' when only the level held the atlas: a level reloaded must
+      keep them, or say which it cannot.
+    - Prefabs' and tall tiles' `Sprite`s copy their regions at spawn and
+      keep no sprite name; the sandbox's `Sprites` copies regions at setup
+      for the stress scenes.
+    - Captures and recordings must not reload: the demo page's are built
+      without `dev`, and a reload changes the world.
+    - `Config` is not `#[non_exhaustive]`: a new field breaks it.
+    - render's shader folder, from its `CARGO_MANIFEST_DIR`, is in
+      cargo's registry for a game that takes the engine from crates.io.
+  - Depends: M5.6, M5.15, M5.16, M5.17
+  - Do: under `dev`, the facade starts the asset watcher on the loose
+    files and watches render's shader files; each frame it reloads what
+    changed: textures, atlases (sprites' regions and clips found again by
+    name), prefabs (`PrefabLibrary::remove` in nadir-scene), the current
+    level, and shaders; each reload logged with its time; a test under
+    `dev` that rewrites a cooked file and waits for the change; the
+    sandbox's docs.
   - Accept: an edit appears in the running game within 1 s, and existing
-    handles stay valid.
-  - Verify: manual demonstration in `cargo dev`; describe what was edited
-    and what was observed
+    handles stay valid; with the watcher running and nothing changed, a
+    frame allocates nothing (the facade's count, under `dev`).
+  - Verify: `cargo test -p nadir_engine -p nadir-scene -p sandbox`; the
+    manual demonstration in `cargo dev`, run by the session (ADR-0042):
+    edits made while `cargo xtask cook --watch` runs, the window captured
+    before and after, the reloads' times read from the log, and every
+    edit put back; describe what was edited and what was observed;
+    `cargo xtask ci`
 
 **Exit criteria (M5):**
 

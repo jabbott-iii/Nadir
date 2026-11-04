@@ -37,6 +37,7 @@ mod metadata;
 mod release_no_dev;
 mod site;
 mod unsafe_audit;
+mod watch;
 mod workflows;
 
 use std::fmt::Write as _;
@@ -94,10 +95,14 @@ fn run(mut args: Args, root: &Path, out: &mut dyn Write) -> Result<bool, Error> 
         }
         "cook" => {
             let force = args.flag("--force");
+            let watching = args.flag("--watch");
             if let Some(argument) = args.finish().map_err(usage)?.first() {
                 return Err(Error::Usage(format!(
-                    "`cook` takes no arguments but `--force`, and got `{argument}`"
+                    "`cook` takes no arguments but `--force` and `--watch`, and got `{argument}`"
                 )));
+            }
+            if watching {
+                return watch::command(force, root, out);
             }
             cargo::run(root, &cook_command(force))?;
             return Ok(true);
@@ -372,7 +377,11 @@ mod tests {
         );
         assert_eq!(
             usage_error(&["cook", "assets"]),
-            "`cook` takes no arguments but `--force`, and got `assets`"
+            "`cook` takes no arguments but `--force` and `--watch`, and got `assets`"
+        );
+        assert_eq!(
+            usage_error(&["cook", "--watch", "--force", "assets"]),
+            "`cook` takes no arguments but `--force` and `--watch`, and got `assets`"
         );
         assert_eq!(
             usage_error(&["cook", "--fast"]),

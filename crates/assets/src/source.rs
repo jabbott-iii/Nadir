@@ -41,7 +41,7 @@ pub trait Source: Send + Sync {
     fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError>;
 
     /// When the file at `path` last changed, if the source can tell, for
-    /// hot reload (roadmap M5.8). Loose files can; a pack cannot. `None` by
+    /// hot reload (roadmap M5.16). Loose files can; a pack cannot. `None` by
     /// default.
     fn modified(&self, path: &AssetPath) -> Option<SystemTime> {
         let _ = path;

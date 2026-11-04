@@ -36,7 +36,7 @@ Not yet:
 - bitmap text (roadmap M7.1) and debug draw (M7.6);
 - UI sprites, post effects, camera rotation, and the smooth-camera and
   native-resolution modes;
-- shader hot reload (M5.8) and the Metal shaders (M10.3).
+- shader hot reload (M5.17) and the Metal shaders (M10.3).
 
 ## Usage
 

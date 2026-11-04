@@ -72,7 +72,7 @@
 //!   [`Source`].
 //! - **Freeing:** [`AssetServer::unload_scope`].
 //!
-//! Not built yet: hot reload (M5.8). [`Source::modified`] already tells
+//! Not built yet: hot reload (M5.16). [`Source::modified`] already tells
 //! when a loose file changed, but nothing watches it.
 //!
 //! # Example

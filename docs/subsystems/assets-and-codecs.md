@@ -801,7 +801,7 @@ The checks run in the order below, and the first that fails is the error:
 
 As built in M3.2 and M5.3 (ADR-0030): loading on worker threads from a
 `Source`, finalizing on the main thread within a frame budget, and freeing
-by scope. `reload` comes in M5.8.
+by scope. `reload` comes in M5.16 (ADR-0042).
 
 ```rust
 pub use nadir_core::Handle;                 // { id: GenIndex, _t: PhantomData<fn() -> T> }: Copy, Eq, Hash
@@ -828,7 +828,7 @@ impl AssetServer {
     pub fn set_finish_budget(&mut self, budget: Duration);         // 2 ms unless set
     pub fn finish_completed_loads(&mut self, ctx: &mut FinalizeCtx<'_>); // main thread, once a frame; never waits
     pub fn finish_all_loads(&mut self, ctx: &mut FinalizeCtx<'_>);       // waits for every load: tools, tests, offscreen frames
-    // M5.8: pub fn reload(&self, path: &str);                    // dev hot reload
+    // M5.16: pub fn reload(&self, path: &str);                   // dev hot reload
 }
 
 pub trait Asset: Sized + Send + 'static {
@@ -1009,12 +1009,39 @@ toc (toc_size bytes at toc_offset, a multiple of 16, to the end of the file; toc
 
 ### Hot reload (dev)
 
-- The watcher thread polls the mtimes of the loose cooked files every 250 ms.
-- `cargo xtask cook --watch` re-cooks sources into `target/cooked/` when
-  they change. The game reloads the cooked file. The engine never links the
-  cook tool, which keeps the layering clean.
-- Reload swaps the data behind an existing handle, so references stay valid.
-  GPU textures are re-uploaded in `finalize`.
+Built in four tasks (ADR-0042): M5.15, the cook's side, is built; M5.16
+(nadir-assets), M5.17 (nadir-render) and M5.8 (the game) are not yet.
+
+- **The cook's side** (M5.15): `cargo xtask cook --watch [--force]` builds
+  `nadir-cook` in release once and cooks, `--force` for that first cook
+  alone. It then looks below `assets/` every 100 ms at what the cook's
+  walk sees: files, folders, and links, not followed, with names starting
+  with `.` left out; a file or a link by its time of change and its
+  length, compared for equality. What cannot be read is marked so, and
+  the next look tells; only `assets/` itself must be read. Once
+  something changed, and nothing more by the next look, it runs the built
+  cook again, and prints how long the cook took and how long since the
+  change was seen. A cook that fails is printed, and the watch goes on. A
+  change to the cook's own code needs the watch started again. The engine
+  never links the cook tool, which keeps the layering clean.
+- **What the cook writes:** an output only when its bytes change, and an
+  atlas group's pages before the atlas file and the fonts' files that name
+  them (below, "Incremental cache"), so that a game watching times
+  of change reloads only what changed, in an order it can read. On the
+  sandbox's assets, an edit is cooked 0.15 to 0.20 s after it is saved: a
+  prefab's comment, which rewrites the cache alone, and a sprite's pixel,
+  its page, the cache and the pack.
+- **The game's watcher** (M5.16): a thread polls the times of change of
+  the loaded loose cooked files every 250 ms, through `Source::modified`,
+  and hands the changed paths to the main thread. It is nadir-assets',
+  compiled in every build, and the facade starts it under `dev`.
+- **Reload** (M5.16) swaps the data behind an existing handle, so
+  references stay valid. GPU textures are re-uploaded in `finalize`. A
+  reload that fails keeps the value it had.
+- **Shaders** (M5.17, M5.8): under `dev` the facade reads render's shader
+  files as they change, and nadir-render rebuilds the program from them,
+  keeping the one it had when they do not compile or do not match its
+  interface.
 
 ## `nadir-cook` (library + CLI)
 
@@ -1368,7 +1395,10 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
   `.qoi` or `.kbj` below `atlas/`, a `.kbj` below `data/`, or a `.klvl`
   below `levels/`) is not used, with a warning.
 - Each output is written through a `.tmp` and a rename, then the pack,
-  and the cache last. The cook owns `OUT/atlas/`, `OUT/data/` and
+  and the cache last, each only when its bytes change, so that a file
+  keeps its time of change unless they do; within an atlas job, the
+  pages come before the atlas file, which names them, and the fonts'
+  files after it (M5.15, ADR-0042). The cook owns `OUT/atlas/`, `OUT/data/` and
   `OUT/levels/`: every file there that no job wrote is removed; and it
   writes `OUT/game.kpak`, above, over whatever is there. The output folder and the source folder may not hold
   each other. Two outputs of one name, or of names that fold alike, are
@@ -1383,7 +1413,8 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
   then the pack's files and size, read from its header, and warns on
   standard error.
 - `cargo xtask cook [--force]` runs it, built in release mode, on
-  `assets/` and `target/cooked/`.
+  `assets/` and `target/cooked/`; with `--watch`, it cooks again whenever
+  they change (above, "Hot reload (dev)").
 
 ### Determinism
 

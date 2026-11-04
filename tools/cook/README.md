@@ -165,7 +165,11 @@ outputs' are lowercase.
   writes over whatever is there.
 - Each file is written to a `.tmp` beside it and then renamed, the pack
   after the files, and the cache last, so a cook stopped halfway leaves
-  no file half written.
+  no file half written. A file that holds its bytes already is not
+  written, so it keeps its time of change, and an atlas group's pages
+  are written before the files that name them: a game that reloads what
+  changed while the cook runs reloads only that, in an order it can
+  read.
 - The same source files cook to the same bytes on every run and every
   system.
 

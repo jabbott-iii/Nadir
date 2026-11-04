@@ -19,7 +19,7 @@ use std::fs;
 use nadir_codec::json::Value;
 use nadir_codec::{Limits, kbj};
 
-use crate::common::{cook, cook_with, dir, files, jobs, names, plain, write};
+use crate::common::{age, cook, cook_with, dir, files, jobs, names, plain, write, written};
 use crate::tree;
 
 fn all(cooked: bool) -> Vec<(String, bool)> {
@@ -77,6 +77,36 @@ fn changing_one_png_cooks_only_its_group_again() {
     let clean = root.join("clean");
     cook(&source, &clean).expect("a cook");
     assert_eq!(files(&clean), after);
+}
+
+#[test]
+fn an_output_is_written_only_when_its_bytes_change() {
+    let root = dir("times");
+    let (source, out) = (root.join("source"), root.join("out"));
+    tree(&source);
+    cook(&source, &out).expect("a cook");
+    let long_ago = age(&out);
+    // A cook that changes nothing writes nothing: not the cache, nor the
+    // pack.
+    cook(&source, &out).expect("a cook");
+    assert_eq!(written(&out, long_ago), Vec::<String>::new());
+    // Forced, every group is cooked again, to the bytes already there.
+    assert_eq!(
+        jobs(&cook_with(&source, &out, true, "test").expect("a cook")),
+        all(true)
+    );
+    assert_eq!(written(&out, long_ago), Vec::<String>::new());
+    // One image's change writes its page, and the cache and the pack, and
+    // not the group's atlas file, whose regions are the same (ADR-0042).
+    write(&source, "props/rock.png", plain(10, 6, [1, 2, 3, 255]));
+    cook(&source, &out).expect("a cook");
+    assert_eq!(
+        written(&out, long_ago),
+        [".cache.kbj", "atlas/world_0.qoi", "game.kpak"]
+    );
+    let clean = root.join("clean");
+    cook(&source, &clean).expect("a cook");
+    assert_eq!(files(&clean), files(&out));
 }
 
 #[test]

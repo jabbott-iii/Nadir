@@ -225,8 +225,9 @@
     {
       "name": "Hot reload",
       "area": "Tools",
-      "summary": "An edited asset will be cooked again and show in the running game within a second.",
-      "tasks": ["M5.8"]
+      "summary": "While the cook watches the assets, one saved is cooked again in about a fifth of a second for the sandbox's, by a cook built once, and the cook rewrites only the files whose bytes changed, each atlas page before the file that names it. The running game will reload what changed, textures, data, levels and shaders, behind the handles it holds, within a second of the save.",
+      "tasks": ["M5.15", "M5.16", "M5.17", "M5.8"],
+      "ticked": ["M5.15"]
     },
     {
       "name": "Audio mixer",

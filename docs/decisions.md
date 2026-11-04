@@ -3280,3 +3280,121 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   milliseconds of a cook, which M5.8's 1 s reload cannot afford; a game
   needs files from outside its pack in a release build, such as mods; or a
   second pack version is written.
+
+## ADR-0042 — M5.8 split into four tasks; `cook --watch` in xtask runs a cook built once; the cook rewrites only outputs that changed; reload in nadir-assets and nadir-render, started by the facade under `dev`
+
+- **Status:** Accepted: the split, and M5.8's demonstration run by the session, which the user chose on 2026-11-03; proposed with them, for review: the rest
+- **Date:** 2026-11-03
+- **Context:**
+  - Roadmap task M5.8 ("hot reload") asks for `cargo xtask cook --watch`,
+    the runtime watcher, and reloading textures, data, levels and shaders
+    in dev. A scoping pass found it changes xtask, nadir-cook,
+    nadir-assets, nadir-render, nadir-scene, the facade and the sandbox:
+    more than the three packages `CLAUDE.md` allows a task. The user chose
+    on 2026-11-03 to split it in four, as ADR-0038 split M5.6 and ADR-0041
+    split M5.7.
+  - `xtask` may not link `nadir-cook` (the dependency matrix), so it can
+    only run the cook's binary. `cargo xtask cook` runs it through
+    `cargo run --release`, which checks the build on every run and builds
+    the cook again whenever an engine crate it uses changed.
+  - The `dev` feature belongs to the facade, nadir-platform and the
+    sandbox (`docs/01-architecture.md`); nadir-assets has no features,
+    and nadir-render's one, `headless-test`, builds its own offscreen
+    tests.
+  - The cook writes every output of a job it cooks, through a `.tmp` and a
+    rename, even when the bytes are those already there; only the pack is
+    written when its bytes change (ADR-0041). A watcher of times of change
+    would reload every page of a group for one changed sprite, and the
+    level for a prefab whose edit leaves it the same.
+  - An atlas job writes its files in path order, so `atlas/<group>.kbj`
+    comes before the pages it names (`.` sorts before `_` and `/`).
+  - ADR-0041 warned that packing every output on every cook may not fit
+    M5.8's 1 s; for the sandbox, a cook with nothing to cook takes 0.00 to
+    0.01 s, the pack included (M5.14).
+  - `docs/01-architecture.md`'s threading table gave the asset workers a
+    "dev re-cook", and the watcher the times of "source/cooked" files,
+    where the design has the engine never link the cook and the watcher
+    poll the cooked files.
+- **Decision:**
+  - **The split**, run in this order, each at most three packages:
+    1. **M5.15** (xtask, nadir-cook): `cargo xtask cook --watch`; the cook
+       writes an output only when its bytes change, and an atlas group's
+       pages before the files that name them; this ADR and the roadmap's
+       split.
+    2. **M5.16** (nadir-assets): a reload behind the same handle, and the
+       watcher thread that polls the loaded paths' times of change.
+    3. **M5.17** (nadir-render): a program rebuilt from new shader
+       sources, and a texture reloaded behind its handle, drawn.
+    4. **M5.8** (the facade, nadir-scene, the sandbox): under `dev`, the
+       game reloads what changed (textures, atlases with their clips,
+       prefabs, the current level, shaders), and the demonstration. It
+       keeps M5.8's number. New numbers rather than `M5.8a`, which
+       `cargo xtask features` refuses.
+  - **`cargo xtask cook --watch [--force]`** lives in xtask, not in the
+    cook's command line: it builds `nadir-cook` in release once, cooks
+    (`--force` for that first cook alone), then polls `assets/` every
+    100 ms: what the cook's walk sees, files, folders and links (not
+    followed), names starting with `.` left out, each file and link by its
+    time of change and its length.
+    After a change and one poll with no further change, it cooks again,
+    running the built binary; a cook that fails is printed and the watch
+    goes on. The binary is the one built at the start: a change to the
+    cook's own code needs the watch started again.
+  - **The cook rewrites an output only when its bytes change**, the cache
+    and the pack too, so that a file keeps its time of change unless its
+    bytes do; and within an atlas job it writes the pages before the atlas
+    file and the fonts' files that name them, so that a game polling the
+    output never reads an atlas file naming pages not written yet. The
+    outputs' bytes, the cache's format and the cook's API are unchanged.
+  - **No option to skip the pack**: the watch's cooks pack as every cook
+    does; ADR-0041's trigger to revisit that stands, measured by M5.15.
+  - **The reload and its watcher are nadir-assets'**, compiled in every
+    build with no feature, and started by the facade under `dev`, as it
+    picks `OnFailure::Placeholder` there (M5.16). The watcher polls the
+    loaded paths through `Source::modified`, not a walk of a folder. A
+    reload keeps the handle; one that fails keeps the value it had. The
+    published API grows but does not break: `LoadState` and `Source` keep
+    their shapes.
+  - **Shaders:** nadir-render rebuilds a program from sources it is given,
+    with no feature and no file reading of its own, and keeps the program
+    it had when the new sources do not compile or do not match the
+    program's interface (M5.17); the facade, under `dev`, reads the files
+    and hands them over (M5.8).
+  - **M5.8's Verify:** the session runs it, with a test under `dev` that
+    rewrites a cooked file and waits for the change, and with the window:
+    timestamped edits made while `cargo xtask cook --watch` and `cargo dev`
+    run, the window captured before and after, the reloads' times read
+    from the log, and every edit put back.
+  - `docs/01-architecture.md`'s threading table: the workers re-cook
+    nothing; the watcher polls the loaded cooked files' times.
+- **Consequences:**
+  - Good: each task is reviewable alone, and the first three are tested
+    without a window; an edit reloads only what it changed; the watch pays
+    cargo's start once, and keeps watching through a broken file.
+  - Bad: the watch runs a cook built when it started; a cook reads each
+    output it writes back first, to compare; a game that copies an
+    atlas's regions outside what the facade reloads (the sandbox's
+    `Sprites`) sees no change until it looks them up again; texture and
+    shader reloads can be seen only on Linux until M2.6 and M2.7.
+- **Alternatives considered:**
+  - M5.8 whole, across seven packages: against `CLAUDE.md`'s limit.
+  - Three tasks, asset and shader reload together: the largest task of the
+    set, reviewed as one.
+  - Shader reload left to the backlog: it changes the roadmap's Do line.
+  - `nadir-cook --watch`: a public command line change, and the released
+    cook would watch too.
+  - `cargo run` on each change: cargo's start on every cook, and a rebuild
+    of the cook in release whenever an engine crate changed.
+  - A skip-the-pack option in the cache's `options`: a changed options
+    string makes every job stale, and a skipped pack goes stale, which
+    release builds would read (ADR-0041).
+  - A `dev` feature in nadir-assets or nadir-render: a feature table entry
+    and a facade feature list for what a runtime setting does.
+  - A watcher that walks the output folder: tied to loose files, and it
+    would see `.tmp` files and the cache.
+  - The game waiting for the cook's cache, written last, before reloading:
+    ties the engine to the cook's private file, and misses hand edits.
+- **Revisit when:** a cook of one changed file takes more than 0.5 s in
+  the watch, half of M5.8's 1 s; a renderer needs to keep a replaced
+  texture until the GPU is done with it (Metal, M10); or a game needs to
+  reload in a release build, such as for mods.

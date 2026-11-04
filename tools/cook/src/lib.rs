@@ -118,10 +118,12 @@
 //!   output folder and the source folder may not hold each other.
 //! - **Errors:** [`cook`]'s `# Errors` says what a failure leaves in the
 //!   output folder. Each output is written through a `.tmp` beside it and
-//!   a rename, so none is left half written. A file not cooked, or a
-//!   warning, such as a PNG with color chunks that the cook ignores, taking
-//!   it as sRGB, is not an error: show [`Report::skipped`] and
-//!   [`Report::warnings`] to whoever made the files.
+//!   a rename, so none is left half written, and only when its bytes
+//!   change, so a file keeps its time of change unless they do; an atlas
+//!   group's pages come before the files that name them. A file not
+//!   cooked, or a warning, such as a PNG with color chunks that the cook
+//!   ignores, taking it as sRGB, is not an error: show [`Report::skipped`]
+//!   and [`Report::warnings`] to whoever made the files.
 //! - **Limits:** sources are decoded within nadir-codec's default
 //!   `Limits`, but for an image's width and height, which only its decoded
 //!   size bounds, since a sheet is cut up. A frame larger than a page of
@@ -270,15 +272,37 @@ fn read(path: &Path) -> Result<Vec<u8>, CookError> {
 
 /// Writes `bytes` as `path` below `out`, through a file beside it that is
 /// then renamed, so that a cook stopped halfway leaves no file half
-/// written under the output's name.
+/// written under the output's name. A file that holds `bytes` already is
+/// left as it is, keeping its time of change, which is what a game that
+/// reloads changed files watches (ADR-0042).
 fn write(out: &Path, path: &str, bytes: &[u8]) -> Result<(), CookError> {
     let target = out.join(path);
+    let same = fs::metadata(&target).is_ok_and(|file| file.len() == bytes.len() as u64)
+        && fs::read(&target).is_ok_and(|old| old == bytes)
+        && named_as(&target);
+    if same {
+        return Ok(());
+    }
     if let Some(folder) = target.parent() {
         fs::create_dir_all(folder).map_err(|error| CookError::io(folder, "create", &error))?;
     }
     let temporary = out.join(format!("{path}.tmp"));
     fs::write(&temporary, bytes).map_err(|error| CookError::io(&temporary, "write", &error))?;
     fs::rename(&temporary, &target).map_err(|error| CookError::io(&target, "write", &error))
+}
+
+/// Whether the file at `path` has that name in its folder, byte for byte.
+/// A system that ignores case, or a Unicode form, opens a file of another
+/// spelling under `path`; writing then stores the name the cook gives it,
+/// which the cook's removal of files no job wrote compares byte for byte.
+fn named_as(path: &Path) -> bool {
+    path.parent()
+        .zip(path.file_name())
+        .is_some_and(|(folder, name)| {
+            fs::read_dir(folder).is_ok_and(|mut entries| {
+                entries.any(|entry| entry.is_ok_and(|entry| entry.file_name() == name))
+            })
+        })
 }
 
 /// An Aseprite export, read, with the sheet it takes and its sidecar's
@@ -370,8 +394,9 @@ enum Made<'p> {
 /// their hashes) into files still there as it wrote them, unless
 /// [`Options::force`] says to cook everything. Then every file below
 /// `out/atlas`, `out/data` or `out/levels` that no job wrote is removed,
-/// the pack, [`PACK`], is written of the files the jobs wrote, unless it
-/// already holds those bytes, and the cache is written.
+/// then the pack, [`PACK`], is made of the files the jobs wrote, and the
+/// cache last. Each file, as every output, is written only when its bytes
+/// change, so a cook that changes nothing writes no file (ADR-0042).
 ///
 /// # Errors
 ///
@@ -693,11 +718,14 @@ pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, Cook
         }
         let cooked = atlas::cook(name, &members)?;
         report.warnings.extend(cooked.warnings);
-        let mut outputs = Vec::with_capacity(cooked.files.len());
-        for (path, bytes) in &cooked.files {
+        for (path, bytes) in pages_first(name, &cooked.files) {
             write(&out, path, bytes)?;
-            outputs.push((path.clone(), fnv1a64(bytes)));
         }
+        let outputs: Vec<(String, u64)> = cooked
+            .files
+            .iter()
+            .map(|(path, bytes)| (path.clone(), fnv1a64(bytes)))
+            .collect();
         report.jobs.push(JobReport {
             name: job.clone(),
             cooked: true,
@@ -837,16 +865,13 @@ pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, Cook
         remove_others(&out, owned, &written)?;
     }
     // The pack of what the cache lists, as the jobs left it: written only
-    // when its bytes change, so that a cook that changes nothing leaves it
-    // as it was.
+    // when its bytes change, as every output is, so that a cook that
+    // changes nothing leaves it as it was.
     let mut packed = Vec::with_capacity(written.len());
     for path in &written {
         packed.push((path.clone(), read(&out.join(path))?));
     }
-    let pack = kpak::write(&packed)?;
-    if fs::read(out.join(PACK)).ok().as_deref() != Some(&pack[..]) {
-        write(&out, PACK, &pack)?;
-    }
+    write(&out, PACK, &kpak::write(&packed)?)?;
     let bytes = cache.write().map_err(|error| CookError::Encode {
         path: CACHE.to_string(),
         error,
@@ -872,6 +897,27 @@ fn kept<'c>(
                 fs::read(out.join(path)).is_ok_and(|bytes| fnv1a64(&bytes) == *hash)
             })
     })
+}
+
+/// The files of the atlas group `group`'s job in the order they are
+/// written: the pages, then the atlas file, which names them, then the
+/// fonts' files, which name the atlas file's sprites, each kind in path
+/// order. A game that reloads what changed never reads a file naming one
+/// not written yet (ADR-0042).
+fn pages_first<'f>(group: &str, files: &'f [(String, Vec<u8>)]) -> Vec<&'f (String, Vec<u8>)> {
+    let atlas = format!("{ATLAS}/{group}.kbj");
+    let rank = |path: &str| {
+        if path.ends_with(".qoi") {
+            0
+        } else if path == atlas {
+            1
+        } else {
+            2
+        }
+    };
+    let mut order: Vec<&(String, Vec<u8>)> = files.iter().collect();
+    order.sort_by_key(|(path, _)| rank(path));
+    order
 }
 
 /// `bytes` as text, or an error naming `file`.
@@ -1379,4 +1425,60 @@ fn remove_others(out: &Path, owned: &str, written: &BTreeSet<String>) -> Result<
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_atlas_job_writes_its_pages_before_the_files_that_name_them() {
+        // As the atlas job gives them: in path order.
+        let files: Vec<(String, Vec<u8>)> = [
+            "atlas/big.font.kbj",
+            "atlas/chars.kbj",
+            "atlas/chars/hero.tiles.qoi",
+            "atlas/chars_0.qoi",
+            "atlas/chars_1.qoi",
+            "atlas/small.font.kbj",
+        ]
+        .into_iter()
+        .map(|path| (path.to_string(), Vec::new()))
+        .collect();
+        let order = |group, files: &[(String, Vec<u8>)]| -> Vec<String> {
+            pages_first(group, files)
+                .into_iter()
+                .map(|(path, _)| path.clone())
+                .collect()
+        };
+        assert_eq!(
+            order("chars", &files),
+            [
+                "atlas/chars/hero.tiles.qoi",
+                "atlas/chars_0.qoi",
+                "atlas/chars_1.qoi",
+                "atlas/chars.kbj",
+                "atlas/big.font.kbj",
+                "atlas/small.font.kbj",
+            ]
+        );
+        // A group whose name ends as a font's file does: its atlas file
+        // still comes before the fonts' files, which name its sprites.
+        let files: Vec<(String, Vec<u8>)> = [
+            "atlas/fonts/pixel.font.kbj",
+            "atlas/ui.font.kbj",
+            "atlas/ui.font_0.qoi",
+        ]
+        .into_iter()
+        .map(|path| (path.to_string(), Vec::new()))
+        .collect();
+        assert_eq!(
+            order("ui.font", &files),
+            [
+                "atlas/ui.font_0.qoi",
+                "atlas/ui.font.kbj",
+                "atlas/fonts/pixel.font.kbj",
+            ]
+        );
+    }
 }
