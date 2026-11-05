@@ -35,8 +35,15 @@ Built:
   against its CRC-32 as it is read, so that a damaged one is an error
   naming its path.
 - Placeholders for failed loads, when the server is asked to show them.
+- Reloads: `reload` reads a path's file again, and a later finish swaps
+  the new value in behind the same handle, releasing the old one; a reload
+  that fails keeps the value. `start_watcher` starts a thread that asks the
+  source every 250 ms when each loaded path's file last changed, and
+  `reload_changed`, once a frame, reloads those that did; `drain_swapped`
+  says which assets were swapped.
 
-Not built yet: hot reload (M5.16).
+Not built yet: the game reloading what changed under the facade's `dev`
+feature (M5.8).
 
 The engine's asset types are in nadir-render, `Texture` (`.qoi`) and
 `Atlas` (`.kbj`), and in nadir-scene, `Level` (`.klvl`) and `PrefabAsset`

@@ -418,7 +418,7 @@ sequenceDiagram
         participant Src as Source
     end
 
-    Srv->>Sto: load_in: a Decoding slot, job_sender
+    Srv->>Sto: load_in: a Decoding slot, job: its read's number
     Srv-)Wk: Workers::run: the job on the queue
     par the main thread goes on
         Note over Srv,Sto: the main thread runs ticks, frame stages, draws
@@ -427,7 +427,7 @@ sequenceDiagram
         Wk->>Src: read(path)
         Src-->>Wk: the bytes
         Wk->>Wk: T::decode
-        Wk-)Sto: the handle and the result
+        Wk-)Sto: the handle, the read's number, the result
     end
     Srv->>Sto: a drawn frame: finish, try_recv
     Sto->>Sto: finalize: upload a Texture
@@ -535,8 +535,9 @@ sequenceDiagram
 ## Not shown, because it is not built yet
 
 - The audio thread and its mixer (roadmap M6).
-- The hot-reload watcher thread, and reloads behind a handle (M5.8, M5.16,
-  M5.17).
+- The game reloading what changed (M5.8, M5.17). nadir-assets' reload
+  behind a handle and its watcher thread are built (M5.16), but the facade
+  does not start or call them yet, so the loop does not reach them.
 - Gamepads (M8), bitmap text (M7.1), and the debug UI, profiler and console
   (M7.2 to M7.6).
 - Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).

@@ -801,11 +801,13 @@ The checks run in the order below, and the first that fails is the error:
 
 As built in M3.2 and M5.3 (ADR-0030): loading on worker threads from a
 `Source`, finalizing on the main thread within a frame budget, and freeing
-by scope. `reload` comes in M5.16 (ADR-0042).
+by scope. As built in M5.16 (ADR-0042): reloading behind a handle, and the
+watcher (below, "Hot reload (dev)").
 
 ```rust
 pub use nadir_core::Handle;                 // { id: GenIndex, marker: PhantomData<fn() -> T> }: Copy, Eq, Hash
-pub struct Assets<T> { arena: GenArena<Entry<T>>, by_path, pending: Vec<Handle<T>>, /* result channel, released */ }
+pub struct Assets<T> { arena: GenArena<Entry<T>>, by_path, pending: Vec<Handle<T>>, /* result channel, released, reloading, swapped */ }
+struct Entry<T> { path: String, scopes, slot: Slot<T>, reads: u64, landed: u64, reloaded: Option<Result<T::Decoded, AssetError>> }
 enum Slot<T> { Decoding, Pending(Result<T::Decoded, AssetError>), Loaded(T), Failed { error: AssetError, placeholder: Option<T> }, Finalizing }
 pub enum LoadState { Loading, Loaded, Failed }   // Loading: decoding, or waiting to be finalized
 pub enum OnFailure { Placeholder, Nothing }
@@ -824,11 +826,14 @@ impl AssetServer {
     pub fn error<T: Asset>(&self, h: Handle<T>) -> Option<&AssetError>;
     pub fn path<T: Asset>(&self, h: Handle<T>) -> Option<&str>;
     pub fn assets<T: Asset>(&self) -> Option<&Assets<T>>;
-    pub fn has_pending(&self) -> bool;                             // loads out, or assets to free
+    pub fn has_pending(&self) -> bool;                             // loads or reloads out, or assets to free
     pub fn set_finish_budget(&mut self, budget: Duration);         // 2 ms unless set
     pub fn finish_completed_loads(&mut self, ctx: &mut FinalizeCtx<'_>); // main thread, once a frame; never waits
     pub fn finish_all_loads(&mut self, ctx: &mut FinalizeCtx<'_>);       // waits for every load: tools, tests, offscreen frames
-    // M5.16: pub fn reload(&self, path: &str);                   // dev hot reload
+    pub fn reload(&mut self, path: &str) -> usize;                 // M5.16: each type at the path; how many
+    pub fn start_watcher(&mut self) -> std::io::Result<()>;        // M5.16: the thread nadir-assets-watch
+    pub fn reload_changed(&mut self) -> usize;                     // M5.16: once a frame; allocates nothing when nothing changed
+    pub fn drain_swapped<T: Asset>(&mut self) -> impl Iterator<Item = Handle<T>> + '_; // M5.16: the handles a reload swapped
 }
 
 pub trait Asset: Sized + Send + 'static {
@@ -1009,8 +1014,9 @@ toc (toc_size bytes at toc_offset, a multiple of 16, to the end of the file; toc
 
 ### Hot reload (dev)
 
-Built in four tasks (ADR-0042): M5.15, the cook's side, is built; M5.16
-(nadir-assets), M5.17 (nadir-render) and M5.8 (the game) are not yet.
+Built in four tasks (ADR-0042): M5.15, the cook's side, and M5.16
+(nadir-assets) are built; M5.17 (nadir-render) and M5.8 (the game) are
+not yet.
 
 - **The cook's side** (M5.15): `cargo xtask cook --watch [--force]` builds
   `nadir-cook` in release once and cooks, `--force` for that first cook
@@ -1034,10 +1040,56 @@ Built in four tasks (ADR-0042): M5.15, the cook's side, is built; M5.16
 - **The game's watcher** (M5.16): a thread polls the times of change of
   the loaded loose cooked files every 250 ms, through `Source::modified`,
   and hands the changed paths to the main thread. It is nadir-assets',
-  compiled in every build, and the facade starts it under `dev`.
+  compiled in every build, and the facade starts it under `dev` (M5.8).
+  As built:
+  - `AssetServer::start_watcher` starts the thread, `nadir-assets-watch`;
+    starting it again does nothing, and dropping the server stops it.
+  - A path is watched from just before its file is first read: each read
+    of a watched path, by a worker or `load_now`, a load's or a reload's,
+    takes its time of change before reading if no look and no read has, so
+    a change made after the first read is seen at the next look, if it
+    gives the file a new time of change. On a system that keeps coarse
+    times, two writes within one tick of its clock look like one. Paths
+    loaded before the watcher started are watched from its first look. A
+    path stays watched until no asset of any type is at it
+    (`unload_scope`). Every ask of the source is made with the paths'
+    lock let go, so a load never waits for one, and a panic in it tells
+    nothing.
+  - A look copies the watched paths, with what was seen of each, into a
+    buffer it keeps, asks the source, and then, under the lock, sends each
+    path whose time is not the one seen before, on a channel; a missing
+    file is a time of `None`, so one that appears or goes is a change too.
+    A path whose `seen` changed since the copy, as a read took its time, is
+    left for the next look. A path is sent once until the main thread
+    receives it, however often it changes meanwhile. A stopping watcher
+    ends a look before its next ask. The buffer grows only when more paths
+    are watched; a `LooseSource` still makes each file's full path, each
+    look.
+  - `AssetServer::reload_changed`, once a frame on the main thread, reloads
+    each path received, and allocates nothing when nothing changed.
 - **Reload** (M5.16) swaps the data behind an existing handle, so
   references stay valid. GPU textures are re-uploaded in `finalize`. A
-  reload that fails keeps the value it had.
+  reload that fails keeps the value it had. As built:
+  - `AssetServer::reload(path)` queues a read of the file for each type
+    with an asset at the path, and returns how many; a path that failed
+    its type's check has no file to read again.
+  - Each entry numbers its reads. A result older than one already back is
+    dropped: up to four workers read at once, so two reloads can finish
+    out of order, and the later read's value is the one that stays. A
+    reload of an asset still loading lands as its first value.
+  - The read waits in the entry's own reload state, `reloaded`, while the
+    asset keeps its value and its `LoadState`; a list of the reloading
+    handles keeps it apart from the pending loads, and
+    `AssetServer::has_pending` is true until it is made.
+  - A finish makes it after its type's pending loads, within the same
+    budget, and swaps it in; the value it replaces, or a failed asset's placeholder, is
+    released with `Asset::release` then, once, and the swap is logged. A
+    reload that fails to read, decode or make is logged with its path, and
+    the asset keeps its value: a failed asset stays failed. An asset
+    unloaded while it reloads is dropped, as a load is.
+  - `AssetServer::drain_swapped::<T>()` gives the handles of type `T` that
+    a reload was swapped in for since the last call, each once, so that a
+    game can find again what it copied out of them (M5.8).
 - **Shaders** (M5.17, M5.8): under `dev` the facade reads render's shader
   files as they change, and nadir-render rebuilds the program from them,
   keeping the one it had when they do not compile or do not match its

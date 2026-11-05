@@ -3594,7 +3594,7 @@ by the batched sprite renderer.
     nadir-render has no features.
   - `cargo xtask ci`: all 12 checks ok, 1,581 tests passed, 1 ignored.
 
-- [ ] **M5.16 — assets: reload behind a handle; the mtime watcher**
+- [x] **M5.16 — assets: reload behind a handle; the mtime watcher**
   - Note (from M5.3): `Source::modified` gives a loose file's time of change.
     A reload keeps the handle, but the server takes a worker's result only
     for an asset in its decoding state, and frees an asset only through an
@@ -3634,6 +3634,56 @@ by the batched sprite renderer.
     and a finish; with nothing changed, draining the watcher gives nothing
     and grows no buffer.
   - Verify: `cargo test -p nadir-assets`; `cargo xtask ci`
+  - Built (2026-11-04, ADR-0042):
+    - nadir-assets: `AssetServer::reload`, `start_watcher`,
+      `reload_changed` and `drain_swapped`. Each entry numbers its reads
+      (`reads`, `landed`), and a result older than one back is dropped; a
+      reload's result waits in the entry's own `reloaded`, its handle in a
+      `reloading` list apart from the pending loads, and a finish makes it
+      after its type's pending loads, within the budget (`swap`), releasing
+      the value, or the placeholder, it replaces. The watcher
+      (`watch.rs`): the thread `nadir-assets-watch`, its looks, and each
+      read of a watched path taking its time of change first, if no look
+      or read has (`Shared::before_read`).
+    - Tests: 13 unit tests of the reload state (reads out of order, a
+      reload of an asset still loading, the budget, `finish_now` with a
+      reload out, `drain_swapped`) and of the watcher's looks (a time
+      taken before a read, a read's time taken during a look, a path sent
+      once until it is received, a source that panics or blocks, stopping);
+      18 on real files and threads (`tests/reload.rs`).
+    - The docs: the crate docs, with an example, its README and
+      `Asset::release`'s; the design's "Handles and storage" and "Hot
+      reload (dev)"; the architecture's threading table; the class and
+      game-loop diagrams.
+  - As built:
+    - The public API only grows: `LoadState`, `Source` and `AssetError`
+      keep their shapes. `start_watcher` returns `std::io::Result<()>`.
+    - A change is seen through its time of change alone: on a system that
+      keeps coarse times, two writes within one tick look like one. The
+      tests set times with `File::set_modified`, and write through a
+      rename, as the cook does.
+    - `reload_changed` allocates nothing when nothing changed; a look
+      through a `LooseSource` allocates on the watcher's thread, which
+      makes each file's full path. nadir-assets cannot count allocations:
+      M5.8's facade count checks the drain.
+    - A reload of an asset still loading makes it from the latest read,
+      success or failure.
+    - Linux shortens the thread's name to `nadir-assets-wa` in the tools
+      that read it from the system; Rust's own name for it is whole.
+  - Review: one adversarial round, four lenses with a skeptic each: 34
+    findings, 31 confirmed or partly (several the same across lenses), 3
+    refuted. Fixed: a reload's read took no time first, so one racing the
+    first read could land old bytes the watcher never reported; a read
+    asked the source with the paths locked, so a load could wait for a
+    worker's ask; a panic in `Source::modified` failed a load only when
+    watched; a look could replace a read's newer time with its own older
+    one, and reload twice; a path that changed often was reloaded as
+    often; a drop waited for a whole look; the docs of `Asset::release`,
+    `has_pending`, `finish_completed_loads` and `reload`, the claim that a
+    look allocates nothing, the coarse times, and the crate docs' facade
+    starting the watcher (M5.8); the diagrams. Nine planted bugs survived
+    the first tests; each now has one, and twelve planted one at a time
+    all fail the suite.
 
 - [ ] **M5.17 — render: shader reload; a texture reloaded behind its handle**
   - Note (from M5.8's scoping, ADR-0042):

@@ -27,10 +27,12 @@ shows only a few of its fields and methods: the ones the design rests on.
   error type of a `Result` are left out.
 
 Nothing here is planned work: the diagrams show only what is built. The
-Metal backend, audio, the debug tools, hot reload, bitmap text, gamepads,
-saves and pathfinding are not built yet (see `docs/roadmap.md`), so they do
-not appear. Two members that exist in the code for planned work,
-`ShaderSource::msl` and `Source::modified`, each carry a note.
+Metal backend, audio, the debug tools, the game's hot reload, bitmap text,
+gamepads, saves and pathfinding are not built yet (see `docs/roadmap.md`),
+so they do not appear. The asset server's reload and its watcher (roadmap
+M5.16) are built, and drawn, though the facade does not use them yet
+(M5.8). One member that exists in the code for planned work,
+`ShaderSource::msl`, carries a note.
 
 ## Overview: types across crates
 
@@ -552,6 +554,7 @@ classDiagram
     direction TB
     class AssetServer {
         -workers Workers
+        -watch Option~Watch~
         -source Arc~Source~
         -on_failure OnFailure
         -limits Limits
@@ -569,6 +572,26 @@ classDiagram
         +unload_scope(scope) usize
         +finish_completed_loads(ctx)
         +finish_all_loads(ctx)
+        +reload(path) usize
+        +start_watcher() Result
+        +reload_changed() usize
+        +drain_swapped~T~() Iterator~Handle~T~~
+    }
+    class Watch {
+        -shared Arc~Shared~
+        -changed Mutex~Receiver~
+        -thread Option~JoinHandle~
+        -start(source) Result~Watch~
+        -next_changed() Option~AssetPath~
+    }
+    class Shared["watch::Shared"] {
+        -paths Mutex~FastHashMap~
+        -stop Mutex~bool~
+        -woken Condvar
+        -stopping AtomicBool
+        -watch(path)
+        -before_read(path, source)
+        -retain(keep)
     }
     class Workers {
         -jobs Option~Sender~Job~~
@@ -589,6 +612,9 @@ classDiagram
         -wait()
         -unload(scope) usize
         -has_pending() bool
+        -reload(path, reader) bool
+        -holds(path) bool
+        -paths(each)
     }
     class Assets~T~ {
         -arena GenArena~Entry~T~~
@@ -597,6 +623,8 @@ classDiagram
         -done Sender
         -decoded Mutex~Receiver~
         -in_flight usize
+        -reloading Vec~Handle~T~~
+        -swapped Vec~Handle~T~~
         +get(handle) Option~T~
         +state(handle) Option~LoadState~
         +error(handle) Option~AssetError~
@@ -608,6 +636,9 @@ classDiagram
         -path String
         -scopes Scopes
         -slot Slot~T~
+        -reads u64
+        -landed u64
+        -reloaded Option~Result~
     }
     class Slot~T~ {
         <<enumeration>>
@@ -636,6 +667,8 @@ classDiagram
     }
     class Handle["core::Handle"]
     AssetServer *-- Workers : worker pool
+    AssetServer *-- Watch : once started
+    Watch o-- Shared : Arc, with the thread
     AssetServer *-- Storages
     Storages "1" *-- "0..*" Storage : one per asset type
     Storage <|.. Assets
@@ -654,9 +687,11 @@ result on it, for example by uploading a texture. A `Source` reads the
 bytes: loose files, or the cook's pack `game.kpak`. In builds without the
 `dev` feature, the facade reads the pack when there is one. If the pack is
 there but does not open, the facade's private `Unopened` source fails every
-read with the error that opening gave. `Source::modified` is for hot reload
-(roadmap M5.16), which is not built: no engine code calls it yet, and of
-these sources only `LooseSource` overrides its default, `None`.
+read with the error that opening gave. `Source::modified` gives a file's
+time of change to the asset server's watcher thread, `nadir-assets-watch`,
+which asks it for each loaded path every 250 ms (M5.16); the facade does
+not start the watcher yet (M5.8). Of these sources only `LooseSource`
+overrides its default, `None`.
 
 ```mermaid
 classDiagram
@@ -726,7 +761,7 @@ classDiagram
     Source <|.. PackSource
     Source <|.. Unopened
     Source ..> AssetPath : reads by
-    note for Source "modified is for hot reload, roadmap M5.16, not built yet."
+    note for Source "modified: the times of change the watcher compares, M5.16."
 ```
 
 ## scene: reflection

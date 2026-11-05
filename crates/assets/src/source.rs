@@ -41,8 +41,9 @@ pub trait Source: Send + Sync {
     fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError>;
 
     /// When the file at `path` last changed, if the source can tell, for
-    /// hot reload (roadmap M5.16). Loose files can; a pack cannot. `None` by
-    /// default.
+    /// hot reload: the server's watcher asks it
+    /// ([`AssetServer::start_watcher`](crate::AssetServer::start_watcher)).
+    /// Loose files can; a pack cannot. `None` by default.
     fn modified(&self, path: &AssetPath) -> Option<SystemTime> {
         let _ = path;
         None

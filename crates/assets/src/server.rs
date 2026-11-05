@@ -16,15 +16,18 @@
 //! frame.
 
 use std::any::{Any, TypeId};
+use std::io;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use nadir_codec::Limits;
 use nadir_core::{FastHashMap, Handle};
 
-use crate::assets::{self, Assets, Budget, Slot};
+use crate::assets::{self, Assets, Budget, Decoded, Slot};
+use crate::watch::{self, Watch};
 use crate::workers::Workers;
 use crate::{Asset, AssetError, AssetPath, DecodeCtx, FinalizeCtx, LoadState, LooseSource, Source};
 
@@ -60,6 +63,13 @@ trait Storage: Any {
     fn wait(&mut self);
     fn unload(&mut self, scope: Scope) -> usize;
     fn has_pending(&self) -> bool;
+    /// Queues a read of the asset at `path`, which is lowercased, if this
+    /// type has one there that can be read. Returns whether it did.
+    fn reload(&mut self, path: &str, reader: &Reader<'_>) -> bool;
+    /// Whether this type has an asset at `path`, which is lowercased.
+    fn holds(&self, path: &str) -> bool;
+    /// Calls `each` with the path of each of this type's assets.
+    fn paths(&self, each: &mut dyn FnMut(&str));
 }
 
 /// The assets of each type, in the order their types' first loads came.
@@ -79,6 +89,15 @@ impl Storages {
             .get(*self.index.get(&TypeId::of::<T>())?)?
             .as_ref();
         storage.downcast_ref()
+    }
+
+    /// The assets of type `T`, if any was loaded.
+    fn existing_mut<T: Asset>(&mut self) -> Option<&mut Assets<T>> {
+        let storage: &mut dyn Any = self
+            .list
+            .get_mut(*self.index.get(&TypeId::of::<T>())?)?
+            .as_mut();
+        storage.downcast_mut()
     }
 
     /// The assets of type `T`, made empty if there are none yet.
@@ -126,6 +145,71 @@ impl<T: Asset> Storage for Assets<T> {
     fn has_pending(&self) -> bool {
         Assets::has_pending(self)
     }
+
+    fn reload(&mut self, path: &str, reader: &Reader<'_>) -> bool {
+        // A path that failed its type's check has no file to read again.
+        if !self.holds(path) {
+            return false;
+        }
+        let Ok(checked) = checked::<T>(path) else {
+            return false;
+        };
+        let Some((handle, done, read)) = Assets::reload(self, checked.as_str()) else {
+            return false;
+        };
+        reader.queue(checked, handle, (done, read));
+        true
+    }
+
+    fn holds(&self, path: &str) -> bool {
+        Assets::holds(self, path)
+    }
+
+    fn paths(&self, each: &mut dyn FnMut(&str)) {
+        for path in Assets::paths(self) {
+            each(path);
+        }
+    }
+}
+
+/// What a job needs to read and decode a file: the server's workers,
+/// source and limits, and its watcher's paths if it watches.
+struct Reader<'a> {
+    workers: &'a Workers,
+    source: &'a Arc<dyn Source>,
+    limits: Limits,
+    watch: Option<&'a Arc<watch::Shared>>,
+}
+
+impl<'a> Reader<'a> {
+    fn new(server: &'a AssetServer) -> Self {
+        Self {
+            workers: &server.workers,
+            source: &server.source,
+            limits: server.limits,
+            watch: server.watch.as_ref().map(Watch::shared),
+        }
+    }
+
+    /// Queues the read of `path` for the asset under `handle`, the read
+    /// [`Assets::job`] gave. With a watcher, the path's time of change is
+    /// taken first, if no look and no read has taken it yet: a load's read
+    /// or a reload's, whichever comes first, as either may be the one that
+    /// lands.
+    fn queue<T: Asset>(
+        &self,
+        path: AssetPath,
+        handle: Handle<T>,
+        (done, read): (Sender<Decoded<T>>, u64),
+    ) {
+        let (source, limits) = (Arc::clone(self.source), self.limits);
+        let watch = self.watch.map(Arc::clone);
+        self.workers.run(Box::new(move || {
+            let result = read_and_decode::<T>(source.as_ref(), &path, limits, watch.as_deref());
+            // Fails only once the server is gone, when nothing waits for it.
+            let _ = done.send((handle, read, result));
+        }));
+    }
 }
 
 /// `path` as an [`AssetPath`] of an asset of type `T`: its last part ends
@@ -141,13 +225,19 @@ fn checked<T: Asset>(path: &str) -> Result<AssetPath, AssetError> {
 }
 
 /// Reads the file at `path` from `source` and decodes it, as a worker does.
-/// A panic in either fails the asset, and goes no further.
+/// With `watch`, the path's time of change is taken first, if the watcher
+/// has not taken it yet. A panic in any of them fails the asset, and goes
+/// no further.
 fn read_and_decode<T: Asset>(
     source: &dyn Source,
     path: &AssetPath,
     limits: Limits,
+    watch: Option<&watch::Shared>,
 ) -> Result<T::Decoded, AssetError> {
     panic::catch_unwind(AssertUnwindSafe(|| {
+        if let Some(watch) = watch {
+            watch.before_read(path, source);
+        }
         let bytes = source.read(path)?;
         T::decode(&bytes, &DecodeCtx::new(path.as_str(), limits))
     }))
@@ -181,6 +271,8 @@ const FINISH_BUDGET: Duration = Duration::from_millis(2);
 pub struct AssetServer {
     // Dropped first, so that the workers stop before the assets go.
     workers: Workers,
+    /// The watcher, once [`AssetServer::start_watcher`] started it.
+    watch: Option<Watch>,
     source: Arc<dyn Source>,
     on_failure: OnFailure,
     limits: Limits,
@@ -199,6 +291,7 @@ impl AssetServer {
     pub fn with_source(source: impl Source + 'static, on_failure: OnFailure) -> Self {
         Self {
             workers: Workers::new(Workers::count()),
+            watch: None,
             source: Arc::new(source),
             on_failure,
             limits: Limits::default(),
@@ -238,13 +331,11 @@ impl AssetServer {
             Err(error) => return assets.insert(path, scope, Slot::Pending(Err(error))),
         };
         let handle = assets.insert(path.as_str(), scope, Slot::Decoding);
-        let done = assets.job_sender();
-        let (source, limits) = (Arc::clone(&self.source), self.limits);
-        self.workers.run(Box::new(move || {
-            let result = read_and_decode::<T>(source.as_ref(), &path, limits);
-            // Fails only once the server is gone, when nothing waits for it.
-            let _ = done.send((handle, result));
-        }));
+        let job = assets.job(handle);
+        if let Some(watch) = &self.watch {
+            watch.shared().watch(&path);
+        }
+        Reader::new(self).queue(path, handle, job);
         handle
     }
 
@@ -298,8 +389,17 @@ impl AssetServer {
         let handle = match assets.find(path, scope) {
             Some(handle) => handle,
             None => {
+                let watch = self.watch.as_ref().map(Watch::shared);
                 let result = checked::<T>(path).and_then(|checked| {
-                    read_and_decode::<T>(self.source.as_ref(), &checked, self.limits)
+                    if let Some(watch) = watch {
+                        watch.watch(&checked);
+                    }
+                    read_and_decode::<T>(
+                        self.source.as_ref(),
+                        &checked,
+                        self.limits,
+                        watch.map(Arc::as_ref),
+                    )
                 });
                 assets.insert(path, scope, Slot::Pending(result))
             }
@@ -317,10 +417,21 @@ impl AssetServer {
     /// [`Asset::release`], their placeholders too; one still being read is
     /// dropped once its worker is done with it.
     pub fn unload_scope(&mut self, scope: Scope) -> usize {
-        self.storages
+        let gone = self
+            .storages
             .each(false)
             .map(|storage| storage.unload(scope))
-            .sum()
+            .sum();
+        // A path no asset of any type is at is no longer watched.
+        if gone > 0
+            && let Some(watch) = &self.watch
+        {
+            let list = &self.storages.list;
+            watch
+                .shared()
+                .retain(|path| list.iter().any(|storage| storage.holds(path)));
+        }
+        gone
     }
 
     /// The asset, once loaded. For a failed one, with
@@ -353,9 +464,9 @@ impl AssetServer {
         self.storages.get()
     }
 
-    /// Whether some loads, or some assets of unloaded scopes, wait for
-    /// [`AssetServer::finish_completed_loads`]. When none do, a game need
-    /// not make a [`FinalizeCtx`] at all.
+    /// Whether some loads or reloads, or some assets of unloaded scopes,
+    /// wait for [`AssetServer::finish_completed_loads`]. When none do, a
+    /// game need not make a [`FinalizeCtx`] at all.
     pub fn has_pending(&self) -> bool {
         self.storages
             .list
@@ -377,9 +488,10 @@ impl AssetServer {
     /// frame. It never waits for a worker.
     ///
     /// The assets of a type are made in the order they were loaded, passing
-    /// over those still decoding, so a later load can be made first. The
-    /// types share the budget and take turns at going first, one call after
-    /// another.
+    /// over those still decoding, so a later load can be made first; then
+    /// its reloads, in the order they were asked for, each releasing the
+    /// value it replaces ([`AssetServer::reload`]). The types share the
+    /// budget and take turns at going first, one call after another.
     ///
     /// A failure is logged with the asset's path, and with
     /// [`OnFailure::Placeholder`] the asset gets its type's placeholder.
@@ -402,5 +514,100 @@ impl AssetServer {
             storage.wait();
             storage.finish(ctx, self.on_failure, &mut budget);
         }
+    }
+
+    /// Reads the file at `path` again, for every asset at that path, of any
+    /// type, and returns how many reads it queued: an asset whose path
+    /// failed its type's check has no file to read again. The path is
+    /// lowercased first, as for [`AssetServer::load`].
+    ///
+    /// A worker reads and decodes the file, and a later finish makes the
+    /// new value, within the finish budget, and swaps it in behind the same
+    /// handle; the value it replaces, or a failed asset's placeholder, is
+    /// released with [`Asset::release`] then.
+    /// [`AssetServer::drain_swapped`] gives the handles swapped. Until then
+    /// the asset keeps the value and the [`LoadState`] it has, and
+    /// [`AssetServer::has_pending`] is true.
+    ///
+    /// A reload that fails, to read, decode or make, is logged with its
+    /// path, and the asset keeps the value it had: a failed asset stays
+    /// failed. Of two reloads of a path, the later read's value is the one
+    /// that stays, whichever finishes first. An asset still loading is made
+    /// from the latest read, its reload's, which is then its first value,
+    /// or its failure. An asset unloaded while it reloads is dropped, as a
+    /// load is.
+    pub fn reload(&mut self, path: &str) -> usize {
+        let path = assets::lowercase(path);
+        let reader = Reader {
+            workers: &self.workers,
+            source: &self.source,
+            limits: self.limits,
+            watch: self.watch.as_ref().map(Watch::shared),
+        };
+        let mut reloads = 0;
+        for storage in &mut self.storages.list {
+            if storage.reload(&path, &reader) {
+                reloads += 1;
+            }
+        }
+        reloads
+    }
+
+    /// Starts the watcher, a thread, `nadir-assets-watch`, that asks the
+    /// source when the file of each loaded path last changed
+    /// ([`Source::modified`]) every 250 ms, and hands the paths that changed
+    /// to [`AssetServer::reload_changed`]. Starting it again does nothing.
+    ///
+    /// A path is watched from just before its file is first read, so a
+    /// change after the read is seen if it gives the file a new time of
+    /// change, and until no asset of any type is at it. A path loaded
+    /// before the watcher started is watched from the watcher's first look
+    /// at it. On a system that keeps coarse times, two writes within one
+    /// tick of its clock look like one. A source that cannot tell, such as
+    /// a [`PackSource`](crate::PackSource), shows no change. Dropping the
+    /// server stops the thread.
+    ///
+    /// # Errors
+    ///
+    /// Why the thread could not start.
+    pub fn start_watcher(&mut self) -> io::Result<()> {
+        if self.watch.is_some() {
+            return Ok(());
+        }
+        let watch = Watch::start(Arc::clone(&self.source))?;
+        for storage in &self.storages.list {
+            storage.paths(&mut |path| {
+                // A path that is not an asset path has no file to watch.
+                if let Ok(path) = AssetPath::new(path) {
+                    watch.shared().watch(&path);
+                }
+            });
+        }
+        self.watch = Some(watch);
+        Ok(())
+    }
+
+    /// Reloads the assets at each path the watcher saw change since the
+    /// last call, as [`AssetServer::reload`] does, and returns how many it
+    /// reloaded: none without a watcher. Call it on the main thread, once a
+    /// frame, whether loads are pending or not. It never waits, and when
+    /// nothing changed, it allocates nothing.
+    pub fn reload_changed(&mut self) -> usize {
+        let mut reloads = 0;
+        while let Some(path) = self.watch.as_mut().and_then(Watch::next_changed) {
+            reloads += self.reload(path.as_str());
+        }
+        reloads
+    }
+
+    /// Takes the handles of the assets of type `T` that a reload was swapped
+    /// in for since the last call, each once, in the order they were
+    /// swapped: for what a game copied out of them, such as an atlas's
+    /// regions, to be found again. A handle unloaded since is left out.
+    pub fn drain_swapped<T: Asset>(&mut self) -> impl Iterator<Item = Handle<T>> + '_ {
+        self.storages
+            .existing_mut::<T>()
+            .into_iter()
+            .flat_map(Assets::drain_swapped)
     }
 }

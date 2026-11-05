@@ -72,9 +72,13 @@
 //!   [`LooseSource`], and [`AssetServer::with_source`] through any
 //!   [`Source`].
 //! - **Freeing:** [`AssetServer::unload_scope`].
-//!
-//! Not built yet: hot reload (M5.16). [`Source::modified`] already tells
-//! when a loose file changed, but nothing watches it.
+//! - **Reloading:** [`AssetServer::reload`] reads a path's file again, for
+//!   every type loaded at it, and a later finish swaps the new value in
+//!   behind the same handle; [`AssetServer::drain_swapped`] says which
+//!   were. [`AssetServer::start_watcher`] starts a thread that asks the
+//!   source when each loaded path's file last changed
+//!   ([`Source::modified`]), and [`AssetServer::reload_changed`], once a
+//!   frame, reloads those that did (below, "Hot reload").
 //!
 //! # Example
 //!
@@ -182,12 +186,79 @@
 //! black checker for a texture; its state stays `Failed`.
 //! [`AssetServer::load_now`] returns the error as well.
 //!
+//! # Hot reload
+//!
+//! A reload keeps the handle, and the value it has until a finish makes
+//! the new one, within the budget; the value it replaces, or a failed
+//! asset's placeholder, is then freed with [`Asset::release`]. A reload
+//! that fails, to read, decode or make, is logged with its path, and the
+//! asset keeps its value. Of two reloads of a path, the later read's value
+//! stays, whichever finishes first. [`LoadState`] does not change while an
+//! asset reloads, and [`AssetServer::has_pending`] is true until it is
+//! made.
+//!
+//! The watcher looks every 250 ms. A path is watched from just before its
+//! file is first read, so that a change made after the read is seen if it
+//! gives the file a new time of change, and until no asset of any type is
+//! at it; a path loaded before the watcher started is watched from its
+//! first look. On a system that keeps coarse times, two writes within one
+//! tick of its clock look like one. A source that cannot tell when a file
+//! changed, such as a [`PackSource`], shows no change. The facade does not
+//! start the watcher yet: from roadmap M5.8 it will, under its `dev`
+//! feature.
+//!
+//! ```
+//! # use std::collections::HashMap;
+//! # use std::sync::{Arc, Mutex};
+//! # use nadir_assets::{Asset, AssetError, AssetPath, DecodeCtx, FinalizeCtx, Source};
+//! # struct Note(String);
+//! # impl Asset for Note {
+//! #     type Decoded = String;
+//! #     const EXTENSIONS: &'static [&'static str] = &["txt"];
+//! #     fn decode(bytes: &[u8], _: &DecodeCtx<'_>) -> Result<String, AssetError> {
+//! #         Ok(String::from_utf8_lossy(bytes).into_owned())
+//! #     }
+//! #     fn finalize(text: String, _: &mut FinalizeCtx<'_>) -> Result<Note, AssetError> {
+//! #         Ok(Note(text))
+//! #     }
+//! # }
+//! # struct Memory(Arc<Mutex<HashMap<String, Vec<u8>>>>);
+//! # impl Source for Memory {
+//! #     fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError> {
+//! #         let files = self.0.lock().expect("the files");
+//! #         files.get(path.as_str()).cloned().ok_or(AssetError::NotFound)
+//! #     }
+//! # }
+//! use nadir_assets::{AssetServer, OnFailure};
+//!
+//! let files = Arc::new(Mutex::new(HashMap::from([(
+//!     "notes/hello.txt".to_string(),
+//!     b"hello".to_vec(),
+//! )])));
+//! let mut server = AssetServer::with_source(Memory(Arc::clone(&files)), OnFailure::Nothing);
+//! let hello = server.load::<Note>("notes/hello.txt");
+//! server.finish_all_loads(&mut FinalizeCtx::new());
+//!
+//! let mut edit = files.lock().expect("the files");
+//! edit.insert("notes/hello.txt".to_string(), b"hi".to_vec());
+//! drop(edit);
+//! assert_eq!(server.reload("notes/hello.txt"), 1);
+//! // The old value stays until a finish makes the new one.
+//! assert_eq!(server.get(hello).map(|note| note.0.as_str()), Some("hello"));
+//! server.finish_all_loads(&mut FinalizeCtx::new());
+//! assert_eq!(server.get(hello).map(|note| note.0.as_str()), Some("hi"));
+//! assert_eq!(server.drain_swapped::<Note>().collect::<Vec<_>>(), [hello]);
+//! ```
+//!
 //! # Threads
 //!
 //! - A server starts 1 to 4 worker threads, `nadir-assets-0` and on: two
 //!   fewer than the cores, which leaves the main thread a core and one to
 //!   spare. If none can start, the files are read and decoded on the thread
 //!   that asks for the load.
+//! - [`AssetServer::start_watcher`] starts one more, `nadir-assets-watch`,
+//!   which only asks the source when files changed. Dropping the server
+//!   stops it.
 //! - A [`Source`] is `Send + Sync`: the workers call it from several
 //!   threads at once.
 //! - A panic while a file is read or decoded fails that asset alone.
@@ -208,6 +279,10 @@
 //! A [`FinalizeCtx`] holds up to [`FinalizeCtx::CAPACITY`] resources and
 //! allocates nothing, so a game can make one every frame; when
 //! [`AssetServer::has_pending`] is false, it need not make one at all.
+//! [`AssetServer::reload_changed`] allocates nothing when nothing changed.
+//! The watcher's look keeps its buffer, which grows only when more paths
+//! are watched; a [`LooseSource`] still makes each file's full path, on the
+//! watcher's thread, each time it is asked.
 
 mod asset;
 mod assets;
@@ -215,6 +290,7 @@ mod error;
 mod path;
 mod server;
 mod source;
+mod watch;
 mod workers;
 
 pub use asset::{Asset, DecodeCtx, FinalizeCtx};

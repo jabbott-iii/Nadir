@@ -20,7 +20,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
-use nadir_core::log::{error, warn};
+use nadir_core::log::{error, info, warn};
 use nadir_core::{FastHashMap, GenArena, Handle};
 
 use crate::{Asset, AssetError, FinalizeCtx, OnFailure, Scope};
@@ -48,9 +48,9 @@ pub enum LoadState {
     Failed,
 }
 
-/// What a worker sends back: the asset, and what reading and decoding its
-/// file made.
-pub(crate) type Decoded<T> = (Handle<T>, Result<<T as Asset>::Decoded, AssetError>);
+/// What a worker sends back: the asset, which of its reads this was, and
+/// what reading and decoding its file made.
+pub(crate) type Decoded<T> = (Handle<T>, u64, Result<<T as Asset>::Decoded, AssetError>);
 
 pub(crate) enum Slot<T: Asset> {
     /// Being read and decoded on a worker.
@@ -84,6 +84,15 @@ struct Entry<T: Asset> {
     path: String,
     scopes: Scopes,
     slot: Slot<T>,
+    /// How many reads of its file were asked of the workers: the number of
+    /// the latest.
+    reads: u64,
+    /// The number of the latest read whose result came back, 0 for none. An
+    /// earlier read that comes back after it is dropped.
+    landed: u64,
+    /// A reload's result, waiting to be made in place of the value it has:
+    /// the asset stays as it was until then.
+    reloaded: Option<Result<T::Decoded, AssetError>>,
 }
 
 /// How long one call may spend finalizing assets.
@@ -132,6 +141,10 @@ pub struct Assets<T: Asset> {
     /// The assets of unloaded scopes, with their paths, to free at the next
     /// finish.
     released: Vec<(String, T)>,
+    /// Those with a reload out: being read, decoded, or waiting to be made.
+    reloading: Vec<Handle<T>>,
+    /// Those a reload was made for, once each, until they are drained.
+    swapped: Vec<Handle<T>>,
 }
 
 impl<T: Asset> Assets<T> {
@@ -145,6 +158,8 @@ impl<T: Asset> Assets<T> {
             decoded: Mutex::new(decoded),
             in_flight: 0,
             released: Vec::new(),
+            reloading: Vec::new(),
+            swapped: Vec::new(),
         }
     }
 
@@ -198,10 +213,13 @@ impl<T: Asset> Assets<T> {
         self.arena.is_empty()
     }
 
-    /// Whether some loads, or some assets to free, wait for
+    /// Whether some loads, reloads or assets to free wait for
     /// [`AssetServer::finish_completed_loads`](crate::AssetServer::finish_completed_loads).
     pub fn has_pending(&self) -> bool {
-        !self.pending.is_empty() || !self.released.is_empty() || self.in_flight > 0
+        !self.pending.is_empty()
+            || !self.released.is_empty()
+            || !self.reloading.is_empty()
+            || self.in_flight > 0
     }
 
     /// The asset at `path`, if there is one, now loaded in `scope` too.
@@ -219,17 +237,55 @@ impl<T: Asset> Assets<T> {
             path: path.to_string(),
             scopes: Scopes(Scopes::bit(scope)),
             slot,
+            reads: 0,
+            landed: 0,
+            reloaded: None,
         }));
         self.by_path.insert(path.to_string(), handle);
         self.pending.push(handle);
         handle
     }
 
-    /// Where a job that reads and decodes an asset sends its result. It
-    /// must send one.
-    pub(crate) fn job_sender(&mut self) -> Sender<Decoded<T>> {
+    /// A read of the file of the asset under `handle`, which is there: where
+    /// the job that reads and decodes it sends its result, and the read's
+    /// number, which the result carries. The job must send one.
+    pub(crate) fn job(&mut self, handle: Handle<T>) -> (Sender<Decoded<T>>, u64) {
+        let entry = self
+            .arena
+            .get_mut(handle.id())
+            .expect("a job is asked only for an asset that is there");
+        entry.reads += 1;
         self.in_flight += 1;
-        self.done.clone()
+        (self.done.clone(), entry.reads)
+    }
+
+    /// Asks for the asset at `path`, which is lowercased, to be read again,
+    /// if there is one: its handle, and the read's ends, as
+    /// [`Assets::job`] gives them. Until the read is made, by a finish, the
+    /// asset keeps the value it has.
+    pub(crate) fn reload(&mut self, path: &str) -> Option<(Handle<T>, Sender<Decoded<T>>, u64)> {
+        let handle = *self.by_path.get(path)?;
+        let (done, read) = self.job(handle);
+        if !self.reloading.contains(&handle) {
+            self.reloading.push(handle);
+        }
+        Some((handle, done, read))
+    }
+
+    /// Whether an asset of this type is at `path`, which is lowercased.
+    pub(crate) fn holds(&self, path: &str) -> bool {
+        self.by_path.contains_key(path)
+    }
+
+    /// The paths of the assets of this type.
+    pub(crate) fn paths(&self) -> impl Iterator<Item = &str> {
+        self.by_path.keys().map(String::as_str)
+    }
+
+    /// Takes the handles of the assets a reload was made for since the last
+    /// call, each once, in the order they were made.
+    pub(crate) fn drain_swapped(&mut self) -> std::vec::Drain<'_, Handle<T>> {
+        self.swapped.drain(..)
     }
 
     /// The results the workers send.
@@ -258,13 +314,24 @@ impl<T: Asset> Assets<T> {
         }
     }
 
-    fn take(&mut self, (handle, result): Decoded<T>) {
+    fn take(&mut self, (handle, read, result): Decoded<T>) {
         self.in_flight = self.in_flight.saturating_sub(1);
         // An asset unloaded while it was decoding is no longer there.
-        if let Some(entry) = self.arena.get_mut(handle.id())
-            && matches!(entry.slot, Slot::Decoding)
-        {
-            entry.slot = Slot::Pending(result);
+        let Some(entry) = self.arena.get_mut(handle.id()) else {
+            return;
+        };
+        // Up to four workers read at once, so two reads of a file can come
+        // back out of order: only the later read may land.
+        if read <= entry.landed {
+            return;
+        }
+        entry.landed = read;
+        match entry.slot {
+            // Not made yet: made from the latest read.
+            Slot::Decoding | Slot::Pending(_) => entry.slot = Slot::Pending(result),
+            Slot::Loaded(_) | Slot::Failed { .. } => entry.reloaded = Some(result),
+            // Only while a finish makes it, which holds the assets.
+            Slot::Finalizing => {}
         }
     }
 
@@ -344,12 +411,16 @@ impl<T: Asset> Assets<T> {
         }
         let arena = &self.arena;
         self.pending.retain(|handle| arena.contains(handle.id()));
+        self.reloading.retain(|handle| arena.contains(handle.id()));
+        self.swapped.retain(|handle| arena.contains(handle.id()));
         gone.len()
     }
 
     /// Takes the workers' results, frees the released assets, and
     /// finalizes the decoded ones in the order they were loaded, passing
-    /// over those still decoding, while the budget lasts.
+    /// over those still decoding, while the budget lasts; then makes the
+    /// reloads read, in the order they were asked for, while it still
+    /// lasts.
     pub(crate) fn finish(
         &mut self,
         ctx: &mut FinalizeCtx<'_>,
@@ -377,6 +448,68 @@ impl<T: Asset> Assets<T> {
                 Slot::Loaded(_) | Slot::Failed { .. } | Slot::Finalizing => false,
             }
         });
+        let swapped = &mut self.swapped;
+        self.reloading.retain(|&handle| {
+            let Some(entry) = arena.get_mut(handle.id()) else {
+                return false;
+            };
+            if entry.reloaded.is_some() {
+                if budget.spent() {
+                    return true;
+                }
+                if swap(entry, ctx) && !swapped.contains(&handle) {
+                    swapped.push(handle);
+                }
+            }
+            // A later read is still out, and may change it again.
+            entry.reads > entry.landed
+        });
+    }
+}
+
+/// Makes the value a reload read for the asset in `entry`, and swaps it in
+/// for the one the asset has, which is then released, a failed asset's
+/// placeholder too. A reload that fails is logged with the path, and the
+/// asset keeps its value. Returns whether it swapped.
+fn swap<T: Asset>(entry: &mut Entry<T>, ctx: &mut FinalizeCtx<'_>) -> bool {
+    let Some(result) = entry.reloaded.take() else {
+        return false;
+    };
+    match result.and_then(|decoded| T::finalize(decoded, ctx)) {
+        Ok(asset) => {
+            let replaced = match mem::replace(&mut entry.slot, Slot::Loaded(asset)) {
+                Slot::Loaded(old)
+                | Slot::Failed {
+                    placeholder: Some(old),
+                    ..
+                } => Some(old),
+                // A reload is kept only for a made asset, so these are not
+                // replaced.
+                Slot::Decoding
+                | Slot::Pending(_)
+                | Slot::Failed {
+                    placeholder: None, ..
+                }
+                | Slot::Finalizing => None,
+            };
+            if let Some(old) = replaced
+                && let Err(cause) = old.release(ctx)
+            {
+                warn!(
+                    "asset `{}`: the value it replaced could not be freed: {cause}",
+                    entry.path
+                );
+            }
+            info!("asset `{}`: reloaded", entry.path);
+            true
+        }
+        Err(failure) => {
+            error!(
+                "asset `{}`: its reload failed, so it keeps the value it had: {failure}",
+                entry.path
+            );
+            false
+        }
     }
 }
 
@@ -438,5 +571,208 @@ mod tests {
     fn the_assets_of_a_type_can_be_shared_between_threads() {
         fn shared<A: Send + Sync>() {}
         shared::<Assets<Nothing>>();
+    }
+
+    /// A number, whose releases are counted in the context's `u32`.
+    #[derive(Debug, PartialEq)]
+    struct Number(u32);
+
+    impl Asset for Number {
+        type Decoded = u32;
+        const EXTENSIONS: &'static [&'static str] = &["n"];
+
+        fn decode(_: &[u8], _: &DecodeCtx<'_>) -> Result<u32, AssetError> {
+            Ok(0)
+        }
+
+        fn finalize(n: u32, _: &mut FinalizeCtx<'_>) -> Result<Self, AssetError> {
+            Ok(Self(n))
+        }
+
+        fn release(self, ctx: &mut FinalizeCtx<'_>) -> Result<(), AssetError> {
+            *ctx.get_mut::<u32>()? += 1;
+            Ok(())
+        }
+    }
+
+    /// Finishes with no budget, and returns how many were released.
+    fn finish(assets: &mut Assets<Number>) -> u32 {
+        let mut released = 0u32;
+        assets.finish(
+            &mut FinalizeCtx::new().with(&mut released),
+            OnFailure::Nothing,
+            &mut Budget::until(None),
+        );
+        released
+    }
+
+    fn value(assets: &Assets<Number>, handle: Handle<Number>) -> Option<u32> {
+        assets.get(handle).map(|number| number.0)
+    }
+
+    /// An asset at `a.n` made with the value 1.
+    fn loaded() -> (Assets<Number>, Handle<Number>) {
+        let mut assets = Assets::new();
+        let handle = assets.insert("a.n", Scope::Global, Slot::Pending(Ok(1)));
+        assert_eq!(finish(&mut assets), 0);
+        assert_eq!(value(&assets, handle), Some(1));
+        (assets, handle)
+    }
+
+    #[test]
+    fn of_two_reloads_finished_out_of_order_the_later_read_stays() {
+        let (mut assets, handle) = loaded();
+        let (_, second, read_2) = assets.reload("a.n").expect("an asset at the path");
+        let (_, third, read_3) = assets.reload("a.n").expect("an asset at the path");
+        assert!(read_2 < read_3);
+        third
+            .send((handle, read_3, Ok(3)))
+            .expect("the assets hold the receiver");
+        second
+            .send((handle, read_2, Ok(2)))
+            .expect("the assets hold the receiver");
+        assert_eq!(finish(&mut assets), 1, "the value it had, released once");
+        assert_eq!(value(&assets, handle), Some(3));
+        assert_eq!(assets.drain_swapped().collect::<Vec<_>>(), [handle]);
+        assert!(!assets.has_pending());
+    }
+
+    #[test]
+    fn a_read_that_comes_back_after_a_later_one_was_made_is_dropped() {
+        let (mut assets, handle) = loaded();
+        let (_, second, read_2) = assets.reload("a.n").expect("an asset at the path");
+        let (_, third, read_3) = assets.reload("a.n").expect("an asset at the path");
+        third
+            .send((handle, read_3, Ok(3)))
+            .expect("the assets hold the receiver");
+        assert_eq!(finish(&mut assets), 1);
+        assert_eq!(value(&assets, handle), Some(3));
+        // The earlier read is still out, so the asset waits for it.
+        assert!(assets.has_pending());
+        second
+            .send((handle, read_2, Ok(2)))
+            .expect("the assets hold the receiver");
+        assert_eq!(finish(&mut assets), 0, "nothing was swapped");
+        assert_eq!(value(&assets, handle), Some(3));
+        assert_eq!(assets.drain_swapped().collect::<Vec<_>>(), [handle]);
+        assert!(!assets.has_pending());
+    }
+
+    #[test]
+    fn a_reload_of_an_asset_still_loading_lands_as_its_first_value() {
+        let mut assets = Assets::<Number>::new();
+        let handle = assets.insert("a.n", Scope::Global, Slot::Decoding);
+        let (first, read_1) = assets.job(handle);
+        let (_, second, read_2) = assets.reload("a.n").expect("an asset at the path");
+        second
+            .send((handle, read_2, Ok(2)))
+            .expect("the assets hold the receiver");
+        first
+            .send((handle, read_1, Ok(1)))
+            .expect("the assets hold the receiver");
+        assert_eq!(finish(&mut assets), 0, "nothing was made before it");
+        assert_eq!(value(&assets, handle), Some(2));
+        assert_eq!(
+            assets.drain_swapped().count(),
+            0,
+            "a first value swaps nothing"
+        );
+        assert!(!assets.has_pending());
+    }
+
+    #[test]
+    fn a_reload_waits_for_the_budget_and_keeps_the_value_until_then() {
+        let (mut assets, handle) = loaded();
+        let (_, done, read) = assets.reload("a.n").expect("an asset at the path");
+        done.send((handle, read, Ok(2)))
+            .expect("the assets hold the receiver");
+        // A budget spent at once still makes one, so make two loads wait
+        // in front of it.
+        let other = assets.insert("b.n", Scope::Global, Slot::Pending(Ok(5)));
+        let mut released = 0u32;
+        let past = Instant::now().checked_sub(std::time::Duration::from_secs(1));
+        assets.finish(
+            &mut FinalizeCtx::new().with(&mut released),
+            OnFailure::Nothing,
+            &mut Budget::until(past),
+        );
+        assert_eq!(value(&assets, other), Some(5));
+        assert_eq!(
+            value(&assets, handle),
+            Some(1),
+            "it waits for the next finish"
+        );
+        assert_eq!(assets.state(handle), Some(LoadState::Loaded));
+        assert!(assets.has_pending());
+        assert_eq!(finish(&mut assets), 1);
+        assert_eq!(value(&assets, handle), Some(2));
+    }
+
+    #[test]
+    fn a_handle_swapped_twice_before_a_drain_is_drained_once() {
+        let (mut assets, handle) = loaded();
+        for n in [2, 3] {
+            let (_, done, read) = assets.reload("a.n").expect("an asset at the path");
+            done.send((handle, read, Ok(n)))
+                .expect("the assets hold the receiver");
+            assert_eq!(finish(&mut assets), 1);
+        }
+        assert_eq!(assets.drain_swapped().collect::<Vec<_>>(), [handle]);
+        assert_eq!(assets.drain_swapped().count(), 0);
+    }
+
+    #[test]
+    fn an_earlier_read_made_while_a_later_one_is_out_is_replaced_by_it() {
+        let (mut assets, handle) = loaded();
+        let (_, second, read_2) = assets.reload("a.n").expect("an asset at the path");
+        let (_, third, read_3) = assets.reload("a.n").expect("an asset at the path");
+        second
+            .send((handle, read_2, Ok(2)))
+            .expect("the assets hold the receiver");
+        assert_eq!(finish(&mut assets), 1);
+        assert_eq!(value(&assets, handle), Some(2));
+        assert!(assets.has_pending(), "the later read is still out");
+        third
+            .send((handle, read_3, Ok(3)))
+            .expect("the assets hold the receiver");
+        assert_eq!(finish(&mut assets), 1);
+        assert_eq!(value(&assets, handle), Some(3));
+        assert!(!assets.has_pending());
+    }
+
+    #[test]
+    fn a_reload_out_when_its_asset_is_made_now_stays_out() {
+        let mut assets = Assets::<Number>::new();
+        let handle = assets.insert("a.n", Scope::Global, Slot::Decoding);
+        let (first, read_1) = assets.job(handle);
+        let (_, second, read_2) = assets.reload("a.n").expect("an asset at the path");
+        first
+            .send((handle, read_1, Ok(1)))
+            .expect("the assets hold the receiver");
+        let mut released = 0u32;
+        assert_eq!(
+            assets.finish_now(
+                handle,
+                &mut FinalizeCtx::new().with(&mut released),
+                OnFailure::Nothing
+            ),
+            Ok(())
+        );
+        assert_eq!(value(&assets, handle), Some(1));
+        assert!(assets.has_pending(), "the reload is still out");
+        second
+            .send((handle, read_2, Ok(2)))
+            .expect("the assets hold the receiver");
+        assert_eq!(finish(&mut assets), 1);
+        assert_eq!(value(&assets, handle), Some(2));
+        assert_eq!(assets.drain_swapped().collect::<Vec<_>>(), [handle]);
+        assert!(!assets.has_pending());
+    }
+
+    #[test]
+    fn nothing_is_reloaded_at_a_path_no_asset_is_at() {
+        let (mut assets, _) = loaded();
+        assert!(assets.reload("b.n").is_none());
+        assert!(!assets.has_pending());
     }
 }

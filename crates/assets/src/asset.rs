@@ -32,7 +32,9 @@ use crate::AssetError;
 ///    the GPU there.
 ///
 /// Once every scope it was loaded in is unloaded, [`Asset::release`] frees
-/// it on the main thread.
+/// it on the main thread. A reload
+/// ([`AssetServer::reload`](crate::AssetServer::reload)) makes a new value
+/// the same way, and releases the one it replaces.
 pub trait Asset: Sized + Send + 'static {
     /// What [`Asset::decode`] makes.
     type Decoded: Send + 'static;
@@ -73,7 +75,9 @@ pub trait Asset: Sized + Send + 'static {
     /// texture, once every scope it was loaded in is unloaded. The next
     /// [`AssetServer::finish_completed_loads`](crate::AssetServer::finish_completed_loads)
     /// calls it, with that frame's context; a placeholder is freed the same
-    /// way. By default the asset is only dropped.
+    /// way. A reload's finish calls it too, on the value, or the
+    /// placeholder, that the reload replaces, while the handle stays and
+    /// names the new value. By default the asset is only dropped.
     ///
     /// # Errors
     ///
