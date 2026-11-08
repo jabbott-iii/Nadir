@@ -3587,3 +3587,92 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:**
   - the crates reach 1.0, when a break needs a major version;
   - or the crates stop sharing one version.
+
+## ADR-0045 — M6.1: QOA held to its specification; a frame decoded at a time into the caller's buffer; the encoder goes on from the 16 bits a frame holds
+
+- **Status:** Proposed
+- **Date:** 2026-11-07
+- **Context:**
+  - M6.1 asks for QOA's encoder and decoder "per the spec", with a fuzz
+    target, the round trip's signal-to-noise ratio measured and asserted,
+    and a decoder that never panics. The reference, `qoa.h` (MIT, Dominic
+    Szablewski), describes the format in its comments; qoaformat.org
+    publishes it.
+  - The reference's decoder reads more than the format allows: a frame
+    larger than its slices; a last slice's unused residuals, which the
+    format says must be 0, as anything. At a frame it cannot read, a short
+    frame before the last, or one whose channels or sample rate differ from
+    the first's, it stops and gives the samples before it, as it does for a
+    file cut short. It refuses a file of 0 samples (a stream) and more than
+    8 channels (`QOA_MAX_CHANNELS`), though its comments speak of up to
+    31.
+  - The audio design keeps a track's QOA in memory and decodes it on the
+    audio thread, a frame at a time, allocating nothing (M6.2). Each frame
+    carries its predictors' state, so frames decode alone.
+  - The reference's encoder keeps its LMS weights in a C `int` from frame
+    to frame, but a frame holds 16 bits of each. Where they outgrow 16
+    bits, the decoder starts the frame from other weights than the encoder
+    measured with. Its penalty for large weights keeps them small for most
+    signals, but not all: a pattern of period 4 at full scale carries
+    weights of 57,865 into its second frame.
+- **Decision:**
+  - **The decoder holds a file to the format.** Besides what the reference
+    refuses, it refuses, where the reference stops or reads on: a frame
+    whose channels or sample rate differ from the first's; a frame whose
+    samples, size or place is not the one the file's sample count gives it;
+    a file shorter or longer than its frames; and a last slice whose unused
+    residuals are not 0. The header's
+    sample count gives the file's length, which is checked before anything
+    is allocated.
+  - **The API:** `qoa::header` reads and checks the header and the file's
+    length; `qoa::decode_frame(bytes, &header, offset, &mut out)` decodes
+    the frame at an offset into the caller's buffer, allocating nothing,
+    and says how many samples it wrote and where the next frame is; it
+    takes only the offsets where the file's frames start, so it checks
+    each frame against its place; `qoa::decode` is `header` and a
+    `decode_frame` for each frame; `qoa::encode(&Header, &[i16])` writes a
+    file. `Header` (channels, sample rate, samples a channel), `Sound`,
+    `Frame`, `FRAME_LEN`, `MAX_CHANNELS` and `MAX_SAMPLE_RATE` are public;
+    `CodecError::Qoa` and `CodecError::QoaEncode` carry their errors.
+  - **1 to 8 channels** on both sides, as the reference's encoder and
+    decoder take; sample rates of 1 to 16,777,215 Hz.
+  - **The encoder** is the reference's search, in the reference's 32-bit
+    arithmetic, which wraps where C's `int` does on the machines it runs
+    on. At each frame's start it goes on from the 16 bits of each weight
+    the frame holds, as the decoder will, where the reference goes on from
+    its own.
+  - The tables are computed from the specification's formulas at compile
+    time, but for the 16 scale factors, and a test checks all of them
+    against the formulas in floating point.
+  - The vectors are made by a port of the reference's encoder in Python,
+    which shares no code with the crate: the Rust decoder must give the
+    samples it reconstructed, and the Rust encoder its bytes. Each of seven
+    signals keeps the SNR measured for it, to the dB.
+- **Consequences:**
+  - Good: a damaged or cut file is an error, not a shorter or noisier
+    sound. A music voice keeps an offset into its `Arc<[u8]>` and needs no
+    decoder state, and can seek to any frame by arithmetic. What the
+    encoder measured is what decodes.
+  - Bad: a file another encoder wrote with nonzero unused residuals, or
+    frames larger than their slices, is refused, though the reference plays
+    it; the game's QOA comes only from the cook (M6.6), so this matters only
+    for files from elsewhere. Streams of unknown length are not read. The
+    bytes were compared with a port written from `qoa.h`'s description,
+    not with `qoa.h` itself, which was read but not compiled.
+- **Alternatives considered:**
+  - Decoding as leniently as the reference: a file cut short would play as
+    a shorter sound, and the length check before allocating would go.
+  - A streaming decoder that holds the file: it would borrow the bytes, or
+    own an `Arc`, for state each frame already carries.
+  - The reference's carry-over exactly: the same bytes where its weights
+    outgrow 16 bits, but a file that decodes to other samples than it
+    measured. Loud, regular signals reach the case (the vector
+    `wide_weights`).
+  - 255 channels, as the frame header's byte allows, or 31, as `qoa.h`'s
+    comments say: neither the reference's encoder nor its decoder takes
+    more than 8.
+- **Revisit when:**
+  - a game must read QOA that another encoder wrote, and a file the
+    reference plays is refused;
+  - `qoa.h` changes its format, its limits or its encoder's search;
+  - or the mixer (M6.2) needs state that `decode_frame` does not give.

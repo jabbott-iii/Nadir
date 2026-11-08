@@ -32,6 +32,9 @@ Formats made for the game, which reads them at run time:
   their CRC-32 and decompressed. The cook writes it, and nadir-assets'
   `PackSource` reads it.
 - **KLZ**, Nadir's LZ77 block compression, for the pack's entries.
+- **QOA** sounds, encoded and decoded, whole or a frame at a time into a
+  buffer of your own: 16-bit audio at 3.2 bits a sample, for music and long
+  sounds. The cook does not write them yet (M6.6).
 
 Formats only the cook reads:
 
@@ -52,9 +55,8 @@ with it, and KBJ holds the same value tree.
 Every decoder takes its input as untrusted. It takes a `Limits`, checks
 each size against it before it allocates, returns a `CodecError` for
 anything malformed, and never panics, whatever the bytes. Each has a fuzz
-target in the Nadir repository.
-
-Not built yet: QOA audio (M6.1).
+target in the Nadir repository. QOA's `header` and `decode_frame`, which
+allocate nothing, take no `Limits`; its `decode` does.
 
 ## Usage
 

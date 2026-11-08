@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! File-format codecs for the Nadir engine: Adler-32, inflate, PNG, QOI, WAV,
-//! KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite's
+//! File-format codecs for the Nadir engine: Adler-32, inflate, PNG, QOI, QOA,
+//! WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite's
 //! sprite sheet data, LDtk's projects, the cook's atlas, level and prefab
 //! files, and the pack file.
 //!
@@ -41,6 +41,7 @@
 //! | Module | What it reads | Functions |
 //! | :- | :- | :- |
 //! | [`qoi`] | QOI images (specification 1.0), RGBA8: the game's textures and the atlas pages the cook writes | [`qoi::decode`], [`qoi::encode`] |
+//! | [`qoa`] | QOA sounds: 16-bit samples of 1 to 8 channels at 3.2 bits a sample, whole or a frame at a time, for music and long sounds | [`qoa::decode`], [`qoa::header`], [`qoa::decode_frame`], [`qoa::encode`] |
 //! | [`kbj`] | KBJ, the binary form of a [`json::Value`] tree that cooked data is stored in | [`kbj::decode`], [`kbj::encode`] |
 //! | [`atlas`] | The cook's atlas file, `atlas/<group>.kbj`: each sprite's frames on the pages, and its clips | [`atlas::parse`] |
 //! | [`level`] | The level file, `levels/<name>.klvl`: tile layers, a collision grid, tall tiles, entities | [`level::parse`] |
@@ -52,7 +53,8 @@
 //! files, which the engine's `load_level` loads into the world. The pack
 //! file's reader is built (roadmap M5.13); the cook writes packs, and
 //! nadir-assets' `PackSource` reads them (M5.14), as the engine's release
-//! builds do (M5.7).
+//! builds do (M5.7). QOA's encoder and decoder are built (M6.1); the cook
+//! writes QOA from M6.6, and the mixer plays it from M6.2.
 //!
 //! Read only by the cook:
 //!
@@ -76,8 +78,6 @@
 //! reads its data files and sidecars with it; KBJ, the atlas, level and
 //! prefab files, and the Aseprite and LDtk readers all work on the same
 //! value tree.
-//!
-//! QOA, for compressed audio, is not built yet (M6.1).
 //!
 //! # Example
 //!
@@ -129,7 +129,7 @@
 //! names the format, and says where the problem is:
 //!
 //! - a byte offset in a binary format: [`CodecError::Qoi`],
-//!   [`CodecError::Kbj`], [`CodecError::Klz`], [`CodecError::Kpak`],
+//!   [`CodecError::Qoa`], [`CodecError::Kbj`], [`CodecError::Klz`], [`CodecError::Kpak`],
 //!   [`CodecError::Inflate`], [`CodecError::Wav`] and, with `png`,
 //!   `CodecError::Png`;
 //! - a line and a column, counted in characters from 1, in text:
@@ -142,7 +142,8 @@
 //!
 //! The `ErrorKind` of each module that can fail says what is wrong. An
 //! encoder that refuses a value has a variant of its own,
-//! [`CodecError::QoiEncode`] and [`CodecError::KbjEncode`]. [`CodecError`]
+//! [`CodecError::QoiEncode`], [`CodecError::QoaEncode`] and
+//! [`CodecError::KbjEncode`]. [`CodecError`]
 //! is `#[non_exhaustive]`: which variants exist depends on the features, so
 //! a `match` on it needs a `_` arm.
 //!
@@ -165,7 +166,8 @@
 //! one. It takes a [`Limits`], checks each length and offset against the
 //! input before it uses it, checks each size against the limits before it
 //! allocates, returns a [`CodecError`] for anything malformed, and never
-//! panics. Each has a fuzz target in the repository
+//! panics. [`qoa::header`] and [`qoa::decode_frame`], which allocate
+//! nothing, take no limits; [`qoa::decode`] does. Each has a fuzz target in the repository
 //! (`cargo xtask fuzz-smoke`).
 //!
 //! [`Limits::default`] gives the game's limits: nesting 64 deep, strings of
@@ -195,9 +197,12 @@
 //! - The encoders are deterministic: the same value always gives the same
 //!   bytes. [`kbj::decode`] accepts only the bytes [`kbj::encode`] writes,
 //!   one encoding per value. [`qoi::encode`] writes a file byte for byte as
-//!   the reference encoder does.
+//!   the reference encoder does, and [`qoa::encode`] chooses each slice as
+//!   its reference does (its module says where their bytes may differ).
 //! - Decoders and encoders allocate what they return: they are for loading
-//!   and cooking, not for each frame.
+//!   and cooking, not for each frame. [`qoa::decode_frame`] is the
+//!   exception: it writes into the caller's buffer and allocates nothing,
+//!   for music decoded as it plays.
 //!
 //! # Features
 //!
@@ -220,6 +225,7 @@ mod limits;
 #[cfg(feature = "png")]
 pub mod png;
 pub mod prefab;
+pub mod qoa;
 pub mod qoi;
 pub mod wav;
 

@@ -3973,12 +3973,60 @@ by the batched sprite renderer.
 
 ## M6 — Audio
 
-- [ ] **M6.1 — codec: QOA**
+- [x] **M6.1 — codec: QOA**
   - Depends: M0.5
   - Do: the encoder and decoder per the spec, with a fuzz target.
   - Accept: the round-trip SNR threshold is measured and asserted; the
     decoder never panics.
   - Verify: `cargo test -p nadir-codec`
+  - Built (2026-11-07, ADR-0045):
+    - nadir-codec's `qoa`: `encode(&Header, &[i16])`, `decode(&[u8],
+      Limits)`, `header(&[u8])`, and `decode_frame(&[u8], &Header, offset,
+      &mut [i16])`, which decodes one frame into the caller's buffer and
+      allocates nothing, for M6.2's music; `CodecError::Qoa` and
+      `QoaEncode`. 1 to 8 channels, as `qoa.h` takes. The decoder refuses
+      what the format does not allow and the reference reads or stops at:
+      frames of other samples, sizes, channels or rates than the file's
+      sample count and first frame give them, a file shorter or longer
+      than its frames, unused residuals that are not 0. The encoder is the
+      reference's search in its 32-bit arithmetic, but goes on from the 16
+      bits of each weight a frame holds.
+    - The fuzz target `qoa` in `xtask`, with 9 seeds in
+      `fuzz/corpus/qoa/`; a sound it decodes is encoded and decoded again.
+    - Tests: 13 vectors in `crates/codec/tests/qoa/` from
+      `make_vectors.py`, a Python port of the reference's encoder, each
+      decoded to the port's reconstruction sample for sample and encoded to
+      its bytes; frames decoded alone and in any order; every vector cut
+      short or lengthened; 3,000 damaged; the limit; 13 unit tests beside
+      the codec (the tables against their formulas, the division and the
+      predictor, every error with its offset, the encoder's refusals and
+      its 16-bit carry-over, 300 random round trips, 4,000 random inputs).
+    - The docs: the module's and the crate's docs, the README, `Limits`,
+      the design's "QOA subset", the audio design's tests, `SECURITY.md`.
+  - Measured: the round trip's SNR, a second of each signal, asserted to
+    the dB below: a 440 Hz tone at −6 dBFS 71.51 dB, a chord in stereo
+    58.73, a sweep from 20 Hz to 20 kHz 64.53, a tone at −50 dBFS 39.99,
+    white noise 16.44, a square wave 19.24, plucks of noise 13.48; 3.23 to
+    3.24 bits a sample. `cargo xtask fuzz-smoke --target qoa --secs 60`:
+    38,506,314 inputs, no finding.
+  - Review: one round of four agents, each with a skeptic. Spec: an
+    independent model of `qoa.h` matched the encoder byte for byte on 35
+    stress signals and the decoder on 300 hostile files; no difference
+    but the documented one. 13 findings confirmed, 1 refuted. Fixed: four
+    vectors, for the search's penalty, its restart each frame, each
+    channel's own search, and weights past 16 bits (a full-scale pattern
+    of period 4 carries 57,865 into a frame, which the docs had said no
+    signal does); three seeds of two frames; tests of `decode_frame` past
+    the last frame and against another file's header, of each frame
+    check's other side, of unused residuals in stereo; docs that called
+    the reference's stop at a mid-file change of channels or rate a
+    rejection, said every decoder takes `Limits`, and misdescribed
+    `header`. Of the review's 59 planted bugs, 18 had passed the tests;
+    run again on the fixed tests, 57 fail them, and the other 2 cannot
+    change a result (a search that stops on an equal rank, and a clamp to
+    ±7, which the table quantizes as ±8).
+  - `cargo test -p nadir-codec`: 269 tests passed. `cargo xtask ci`: all
+    12 checks ok, 1,671 tests passed, 1 ignored.
 
 - [ ] **M6.2 — audio: mixer (offline)**
   - Note (from M3.5): for the test that `render` allocates nothing, a

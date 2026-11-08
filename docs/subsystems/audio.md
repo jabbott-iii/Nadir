@@ -110,7 +110,9 @@ pub enum Bus { Music, Sfx, Ui, Ambience }   // all feed Master
     threshold)
 - **QOA:** encode/decode round-trip SNR ≥ the threshold the spec's reference
   results suggest. Set it at implementation time from measured values and
-  record it in the test.
+  record it in the test. M6.1 measured seven signals and asserts each, from
+  13 dB for plucks of noise to 71 dB for a tone
+  (`crates/codec/tests/qoa.rs`).
 - **Resampler:** a sine at 44.1 kHz resampled to 48 kHz keeps its frequency
   (zero-crossing count) and amplitude (±0.5 dB).
 - **Soak** (`xtask soak --audio`, manual or nightly on hardware): 10 minutes

@@ -35,8 +35,8 @@ pub struct Limits {
     /// The widest, or tallest, image a decoder accepts, in pixels.
     pub max_texture_dimension: u32,
     /// The most bytes a decoder may produce for one file. An image takes 4
-    /// bytes a pixel, a sound 4 bytes a sample (as `f32`), and a KLZ
-    /// stream the size it is decoded to.
+    /// bytes a pixel, a WAV sound 4 bytes a sample (as `f32`), a QOA sound
+    /// 2 (as `i16`), and a KLZ stream the size it is decoded to.
     ///
     /// It bounds the output. A decoder may hold more while it works: the
     /// PNG decoder keeps the inflated image data beside the pixels, up to

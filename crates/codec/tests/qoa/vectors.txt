@@ -1,0 +1,13 @@
+mono_one 1 44100 1 16384
+mono_slice 1 48000 20 16384
+stereo_short 2 44100 37 16384
+eight_channels 8 8000 45 16384
+rate_max 1 16777215 64 16384
+extremes 1 22050 120 16384
+mono_frames 1 44100 5170 16384
+stereo_frames 2 48000 5121 16384
+nyquist_frames 1 44100 5420 16384
+clipped_sine 1 44100 2000 16384
+low_frames 1 44100 5420 16384
+penalty_stereo 2 44100 5320 16388
+wide_weights 1 44100 5220 57865

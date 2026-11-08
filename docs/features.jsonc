@@ -232,8 +232,9 @@
     {
       "name": "Audio mixer",
       "area": "Audio",
-      "summary": "A mixer of our own will play WAV and QOA-compressed sound through voices and buses, with constant-power panning, positional attenuation, fades and streaming, and a soak test will count underruns.",
-      "tasks": ["M6.1", "M6.2", "M6.6", "M6.7"]
+      "summary": "Sound is compressed as QOA, with an encoder and decoder of our own, to 3.2 bits a sample: a tone keeps 71 dB of signal over its noise, and white noise 16. A file decodes whole, or a frame at a time into a buffer that is reused, and a damaged or cut file is refused, not played. A mixer of our own will play WAV and QOA sound through voices and buses, with constant-power panning, positional attenuation, fades and music streamed a frame at a time, and a soak test will count underruns.",
+      "tasks": ["M6.1", "M6.2", "M6.6", "M6.7"],
+      "ticked": ["M6.1"]
     },
     {
       "name": "Audio output on every desktop",

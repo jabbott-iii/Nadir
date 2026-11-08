@@ -73,10 +73,10 @@ Nadir treats every file it reads as possibly malformed or hostile: saves,
 mods, downloaded content and corrupted files. In scope:
 
 - **Parsers and loaders**: the codecs in `nadir-codec` (inflate, PNG, QOI,
-  WAV, JSON and JSONC, KBJ, KLZ, BMFont, Aseprite exports, LDtk projects,
-  and the atlas, level, prefab and pack files), the asset server and its
-  sources in `nadir-assets`, and, as the roadmap adds them, QOA sound and
-  saves. For example:
+  QOA, WAV, JSON and JSONC, KBJ, KLZ, BMFont, Aseprite exports, LDtk
+  projects, and the atlas, level, prefab and pack files), the asset server
+  and its sources in `nadir-assets`, and, as the roadmap adds them, saves.
+  For example:
   - a panic, a hang, or a stack overflow on any input;
   - memory use past the limits a parser is given (`Limits`);
   - an asset path that reaches outside the asset folder, such as one with

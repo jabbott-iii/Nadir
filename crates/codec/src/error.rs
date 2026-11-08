@@ -19,7 +19,7 @@ use std::fmt;
 #[cfg(feature = "png")]
 use crate::png;
 use crate::{
-    aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, ldtk, level, prefab, qoi, wav,
+    aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, ldtk, level, prefab, qoa, qoi, wav,
 };
 
 /// Errors produced by `nadir-codec`.
@@ -51,6 +51,19 @@ pub enum CodecError {
     QoiEncode {
         /// Why not.
         kind: qoi::EncodeErrorKind,
+    },
+    /// A QOA file is malformed or exceeds a limit, or a frame cannot be
+    /// decoded where it was asked for ([`qoa::decode_frame`]).
+    Qoa {
+        /// The byte offset of the problem in the file.
+        offset: usize,
+        /// What is wrong.
+        kind: qoa::ErrorKind,
+    },
+    /// Samples cannot be encoded as QOA.
+    QoaEncode {
+        /// Why not.
+        kind: qoa::EncodeErrorKind,
     },
     /// A DEFLATE or zlib stream is malformed or exceeds a limit.
     Inflate {
@@ -171,6 +184,8 @@ impl fmt::Display for CodecError {
             }
             Self::Qoi { offset, kind } => write!(f, "QOI error at byte {offset}: {kind}"),
             Self::QoiEncode { kind } => write!(f, "cannot encode as QOI: {kind}"),
+            Self::Qoa { offset, kind } => write!(f, "QOA error at byte {offset}: {kind}"),
+            Self::QoaEncode { kind } => write!(f, "cannot encode as QOA: {kind}"),
             Self::Inflate { offset, kind } => write!(f, "inflate error at byte {offset}: {kind}"),
             Self::Klz { offset, kind } => write!(f, "KLZ error at byte {offset}: {kind}"),
             Self::Kpak { offset, kind } => write!(f, "pack error at byte {offset}: {kind}"),

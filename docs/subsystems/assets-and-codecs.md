@@ -20,6 +20,8 @@ artists keep their normal tools (ADR-0008, ADR-0012).
 Every decoder:
 
 - takes `&[u8]`, or `&str` for a text format, plus a `Limits` struct
+  (`qoa::header` and `qoa::decode_frame`, which allocate nothing, take
+  none; `qoa::decode` does)
 - returns `Result<_, CodecError>` and **never panics** on any input
 - checks every length and offset against the input size before use
 - checks every allocation size against `Limits` before allocating
@@ -30,7 +32,7 @@ Every decoder:
 | `inflate` | RFC 1950/1951 | — | ✓ | no (cook only) | Stored, fixed and dynamic Huffman blocks; output cap from `Limits`. See below |
 | `png` (feature `png`) | PNG 1.2 / ISO 15948 | — | ✓ | no | See subset below |
 | `qoi` | qoiformat.org spec | ✓ | ✓ | yes | Textures, golden references |
-| `qoa` | qoaformat.org spec | ✓ | ✓ | yes | Music and long SFX; LMS predictor, 20-sample slices. Not built yet (M6.1) |
+| `qoa` | qoaformat.org spec | ✓ | ✓ | yes | Music and long SFX; LMS predictor, 20-sample slices; a frame at a time, for music as it plays. See subset below |
 | `wav` | RIFF/WAVE | — | ✓ | no | PCM 16/24-bit int, 32-bit float; mono/stereo. See subset below |
 | `klz` | Below | ✓ | ✓ | yes | Pack entry compression. See below |
 | `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (settings, dev data) | Order-preserving objects: `Vec<(String, Value)>` |
@@ -455,6 +457,79 @@ interleaved. The cook tool turns them into PCM16 or QOA (M6.6).
   unit tests of `crates/codec/src/wav.rs`.
 - **Fuzz target:** `wav`, with seeds in `fuzz/corpus/wav/` (a selection of
   the vectors).
+
+### QOA subset (documented, tested)
+
+`qoa::encode(&Header, &[i16])` writes a QOA file (qoaformat.org; the
+reference is `qoa.h`) of 16-bit samples, interleaved, at 3.2 bits a
+sample. `qoa::decode(&[u8], Limits)` reads one back into a `Sound`: its
+`Header` (channels, sample rate, samples a channel) and its samples.
+`qoa::header(&[u8])` reads and checks the file's header and its first
+frame's, and that the bytes are the whole file, and
+`qoa::decode_frame(&[u8], &Header, offset, &mut [i16])` decodes one frame, 5120
+samples a channel (`FRAME_LEN`) but the last, into the caller's buffer,
+allocating nothing: each frame carries its predictors' state, so frames
+decode alone and in any order, and the mixer can stream music from the
+file in memory (M6.2). `decode` is a `header` and a `decode_frame` for each
+frame (ADR-0045).
+
+- **Accepted:** 1 to 8 channels, as the reference's `QOA_MAX_CHANNELS`;
+  sample rates of 1 to 16,777,215 Hz; 1 to 2^32 − 1 samples a channel.
+- **Rejected, as by the reference:** a magic other than `qoaf`; a header
+  of 0 samples, which marks a stream whose length its encoder did not know;
+  0 channels or more than 8; a sample rate of 0.
+- **Rejected, where the reference gives the samples of the frames before
+  the fault, or reads more than the format allows** (ADR-0045): a frame
+  whose channels or sample rate are not the first frame's; a frame whose
+  samples, size or place is not the one the file's sample count gives it
+  (every frame but the last holds 5120 samples a channel, and the last the
+  rest, each in exactly the bytes its samples take), where the reference
+  also reads a frame larger than its slices and stops at the first short
+  frame; a file shorter or longer than its frames; a last slice whose
+  unused residuals are not 0, which the reference does not look at and the
+  specification says must be.
+- **The encoder** searches each slice's scale factor as the reference
+  does, from the last slice's on, with its penalty for weights grown large,
+  in the same 32-bit arithmetic, which wraps where C's `int` does. Where
+  the weights it carries into a frame no longer fit in the 16 bits the
+  frame holds, the reference goes on from its own values; this encoder goes
+  on from the 16 bits, as the decoder will (ADR-0045). Loud, regular
+  signals reach the case: a pattern of period 4 at full scale carries
+  weights of 57,865 into its second frame (the vector `wide_weights`); the
+  other vectors carry at most 16,388 into a frame (`vectors.txt`). The
+  encoder refuses 0 samples, channels or a rate outside the above, and
+  samples that are not `samples × channels`.
+- **Limits:** the samples, at 2 bytes each, at most `max_decoded_bytes`.
+  The header's sample count gives the file's length exactly, and the
+  decoder checks it before it allocates, so a file claims at most about 5
+  bytes of samples for each of its own.
+- **Errors:** `CodecError::Qoa { offset, kind }`, with the byte offset of
+  the field or slice at fault; the encoder's are
+  `CodecError::QoaEncode { kind }`.
+- **Vectors:** `crates/codec/tests/qoa/`: 13 sounds, made by
+  `make_vectors.py` there, a port of the reference encoder in Python that
+  shares no code with the crate: the samples encoded (`.src`), the file
+  (`.qoa`), and the samples its encoder reconstructed as it chose each
+  residual (`.i16`), with the largest weight carried into a frame in
+  `vectors.txt`. They cover one sample, one slice, short slices in stereo,
+  8 channels, the highest sample rate, full-scale extremes, two frames in
+  mono and stereo, clipped sines that bring in the search's penalty, a
+  second frame whose search starts again, two channels whose searches go
+  their own ways, and weights past 16 bits at a frame's start. Each decodes
+  to its reconstruction sample for sample, and `qoa::encode` writes each
+  byte for byte. Error cases,
+  the tables against their formulas, and the predictor are in the unit
+  tests of `crates/codec/src/qoa.rs`.
+- **Signal-to-noise ratio** (`crates/codec/tests/qoa.rs`), measured on a
+  second of each signal and asserted to the dB: a 440 Hz tone at −6 dBFS
+  71 dB, a chord in stereo 58 dB, a sweep from 20 Hz to 20 kHz 64 dB, a
+  tone at −50 dBFS 39 dB, white noise 16 dB, a square wave 19 dB, and
+  plucks of noise 13 dB, each at 3.23 to 3.24 bits a sample.
+- **Fuzz target:** `qoa`, with seeds in `fuzz/corpus/qoa/`: the small
+  vectors, and three of two frames. A sound it decodes is encoded again
+  and decoded, which fuzzes the encoder too. Most mutations change a file's
+  length, which the decoder refuses first; the damage tests in
+  `crates/codec/tests/qoa.rs` change bytes in place and reach the frames.
 
 ### BMFont subset (documented, tested)
 
@@ -1565,8 +1640,11 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
   - PNG: a small hand-made image per color type, bit depth, interlace mode
     and filter, committed under `crates/codec/tests/png/` with the script
     that made them
-  - QOI and QOA: round-trip; QOA SNR threshold; QOI byte-exact against
-    hand-computed small images
+  - QOI and QOA: round-trip; QOI byte-exact against hand-computed small
+    images; QOA's vectors from a separate port of the reference encoder,
+    each decoded sample for sample and encoded byte for byte, and the
+    round trip's SNR asserted for seven signals, in
+    `crates/codec/tests/qoa/` with the script that wrote them
   - KLZ: hand-assembled streams and the encoder's own, in
     `crates/codec/tests/klz/`; round-trip on random and repetitive data;
     malformed offsets rejected

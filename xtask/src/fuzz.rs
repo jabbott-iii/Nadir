@@ -34,7 +34,7 @@ use std::time::Duration;
 use nadir_codec::inflate::ErrorKind as InflateError;
 use nadir_codec::{
     CodecError, Limits, adler32, aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, ldtk,
-    level, png, prefab, qoi, wav,
+    level, png, prefab, qoa, qoi, wav,
 };
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
@@ -110,6 +110,10 @@ const TARGETS: &[Target] = &[
     Target {
         name: "kpak",
         run: parse_pack,
+    },
+    Target {
+        name: "qoa",
+        run: decode_qoa,
     },
 ];
 
@@ -269,6 +273,30 @@ fn parse_bmfont(input: &[u8]) {
 /// The `wav` target: `nadir_codec::wav::decode`, with the default limits.
 fn decode_wav(input: &[u8]) {
     let _ = wav::decode(input, Limits::default());
+}
+
+/// The `qoa` target: `nadir_codec::qoa::decode`, with the limits the game
+/// uses. A sound it accepts has every sample its header gives, and its
+/// samples, whatever signal they make, encode again to a file that decodes
+/// to as many, which fuzzes the encoder too.
+fn decode_qoa(input: &[u8]) {
+    let Ok(sound) = qoa::decode(input, Limits::default()) else {
+        return;
+    };
+    let header = sound.header;
+    assert_eq!(
+        sound.samples.len(),
+        header.samples as usize * usize::from(header.channels),
+        "a sound without the samples its header gives"
+    );
+    let file = qoa::encode(&header, &sound.samples).expect("a sound the decoder gave encodes");
+    let again = qoa::decode(&file, Limits::default()).expect("what the encoder wrote decodes");
+    assert_eq!(again.header, header, "the encoder wrote another header");
+    assert_eq!(
+        again.samples.len(),
+        sound.samples.len(),
+        "the encoder lost samples"
+    );
 }
 
 /// The `atlas` target: `nadir_codec::atlas::parse`, with the default
@@ -1650,6 +1678,15 @@ mod tests {
     }
 
     #[test]
+    fn the_qoa_target_takes_any_bytes() {
+        let mut huge = b"qoaf\xff\xff\xff\xff\x08\x00\xac\x44\x14\x00\x40\x88".to_vec();
+        huge.extend_from_slice(&[0x5a; 5000]);
+        for input in [&b""[..], b"qoaf", &huge, &[0xff; 5000]] {
+            decode_qoa(input);
+        }
+    }
+
+    #[test]
     fn the_qoi_target_takes_any_bytes() {
         let mut huge = b"qoif\xff\xff\xff\xff\xff\xff\xff\xff\x04\x00".to_vec();
         huge.extend_from_slice(&[0xfd; 100]);
@@ -2371,6 +2408,15 @@ mod tests {
     fn the_wav_seeds_are_files_the_codec_accepts() {
         for seed in seeds_of("wav") {
             wav::decode(&seed, Limits::default()).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_qoa_seeds_are_files_the_codec_accepts() {
+        // The seeds come from a separate port of the reference encoder,
+        // `crates/codec/tests/qoa/make_vectors.py`.
+        for seed in seeds_of("qoa") {
+            qoa::decode(&seed, Limits::default()).unwrap();
         }
     }
 
