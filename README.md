@@ -36,8 +36,11 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
 - **On Windows and macOS,** everything builds and passes the tests, but the
   window stays empty until the OpenGL contexts land (roadmap tasks M2.6 and
   M2.7).
-- **Not built yet:** audio, text, the debug tools, gamepads, hot reload,
-  saves and the Metal backend.
+- **Audio:** the mixer is built (voices, buses, positional sound, QOA
+  music streamed as it plays), and tested offline; no device plays it
+  yet (roadmap M6.3 to M6.5).
+- **Not built yet:** audio output, text, the debug tools, gamepads, hot
+  reload, saves and the Metal backend.
 
 ## Build and run
 

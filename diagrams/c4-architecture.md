@@ -143,13 +143,12 @@ flowchart LR
 ## 3. Components of the game executable
 
 The crates of the game executable by layer, with an arrow for each entry
-in a crate's `[dependencies]` table. The audio and debug crates have no
-code and no dependencies yet. The two dotted arrows are the edges into
-them still to come: the facade's to audio (roadmap M6.6, which the
-matrix's "all crates above" allows) and the sandbox's to debug, behind
-`dev` (the matrix's row for the sandbox). The edges the matrix allows
-out of them (audio: core, platform, assets, codec; debug: core, ecs,
-scene, render, input) are not drawn.
+in a crate's `[dependencies]` table. The debug crate has no code and no
+dependencies yet. The two dotted arrows are edges still to come: the
+facade's to audio (roadmap M6.6, which the matrix's "all crates above"
+allows) and the sandbox's to debug, behind `dev` (the matrix's row for the
+sandbox). The edges the matrix allows out of debug (core, ecs, scene,
+render, input) are not drawn.
 
 ```mermaid
 flowchart TB
@@ -165,7 +164,7 @@ flowchart TB
     subgraph L3["Layer 3: composed subsystems"]
         n_render["nadir-render<br/>sprite batching, y-sort, tilemap chunks, camera, texture and atlas assets"]
         n_scene["nadir-scene<br/>reflection macros, type registry, world hash, prefabs, a level's entities"]
-        n_audio["nadir-audio<br/>planned M6: mixer, voices, buses, streaming"]
+        n_audio["nadir-audio<br/>the mixer: voices, buses, resampling, positional sound, QOA music streamed a frame at a time, the command and return queues"]
     end
     subgraph L2["Layer 2: base subsystems"]
         n_gfx["nadir-gfx<br/>RHI over OpenGL 3.3 core: device, textures, buffers, render targets, pipelines, passes"]
@@ -201,6 +200,8 @@ flowchart TB
     n_scene --> n_codec
     n_scene --> n_core
     n_scene --> n_ecs
+    n_audio --> n_codec
+    n_audio --> n_core
     n_gfx --> n_core
     n_gfx --> n_platform
     n_gfx --> n_sys
@@ -220,14 +221,15 @@ flowchart TB
     classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
     classDef planned fill:#ffffff,stroke:#888888,stroke-dasharray: 5 5,color:#555555
     class n_sandbox container
-    class n_engine,n_render,n_scene,n_gfx,n_ecs,n_assets,n_input,n_collision,n_platform,n_codec,n_core,n_sys component
-    class n_debug,n_audio planned
+    class n_engine,n_render,n_scene,n_audio,n_gfx,n_ecs,n_assets,n_input,n_collision,n_platform,n_codec,n_core,n_sys component
+    class n_debug planned
 ```
 
 - The game reaches the subsystems through the facade, which re-exports
   assets, collision, ecs, input, render and scene as modules of `nadir`.
 - `nadir_engine` uses `nadir-codec` only in its tests, as a
-  dev-dependency, which the diagram leaves out.
+  dev-dependency, which the diagram leaves out; `nadir-audio`'s tests use
+  `nadir-platform`'s allocation counter the same way.
 - Features along these edges: the sandbox's `dev` turns on `nadir/dev`,
   which turns on `nadir-platform/dev`, the allocation counter. No
   dependency is optional.
@@ -292,6 +294,7 @@ flowchart TB
     bench["nadir-bench<br/>the benchmark harness and its benches"]
     n_engine["nadir_engine"]
     n_render["nadir-render"]
+    n_audio["nadir-audio"]
     n_ecs["nadir-ecs"]
     n_collision["nadir-collision"]
     n_codec["nadir-codec"]
@@ -301,6 +304,7 @@ flowchart TB
     xtask --> n_core
     bench --> n_engine
     bench --> n_render
+    bench --> n_audio
     bench --> n_ecs
     bench --> n_collision
     bench --> n_codec
@@ -309,7 +313,7 @@ flowchart TB
     classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
     classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
     class xtask,bench container
-    class n_engine,n_render,n_ecs,n_collision,n_codec,n_core component
+    class n_engine,n_render,n_audio,n_ecs,n_collision,n_codec,n_core component
 ```
 
 ## The crates
@@ -335,13 +339,13 @@ that no other crate allows it.
 | `nadir-collision` | `crates/collision` | 2, base subsystems | deny | core |
 | `nadir-render` | `crates/render` | 3, composed subsystems | deny | assets, codec, core, gfx |
 | `nadir-scene` | `crates/scene` | 3, composed subsystems | deny | assets, codec, core, ecs |
-| `nadir-audio` | `crates/audio` | 3, composed subsystems | deny | none: planned, no code yet |
+| `nadir-audio` | `crates/audio` | 3, composed subsystems | deny | codec, core |
 | `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | none: planned, no code yet |
 | `nadir_engine` (`nadir` in code) | `crates/engine` | 5, facade | deny | assets, collision, core, ecs, gfx, input, platform, render, scene |
 | `nadir-cook` | `tools/cook` | 6, applications | deny | assets, codec with `png`, core |
 | `xtask` | `xtask` | 6, applications | deny | codec with `png`, core |
 | `sandbox` | `games/sandbox` | 6, applications | deny | `nadir_engine` |
-| `nadir-bench` | `bench` | 6, applications | deny | `nadir_engine`, codec, collision, core, ecs, render |
+| `nadir-bench` | `bench` | 6, applications | deny | `nadir_engine`, audio, codec, collision, core, ecs, render |
 
 ## Sources
 

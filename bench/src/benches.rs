@@ -20,6 +20,7 @@ mod ecs;
 mod facade;
 mod inflate;
 mod json;
+mod mixer;
 mod qoi;
 mod sprite;
 mod tiles;
@@ -85,6 +86,10 @@ pub(crate) const ALL: &[Benchmark] = &[
     Benchmark {
         name: "facade_frame_10k",
         run: facade::frame,
+    },
+    Benchmark {
+        name: "mixer_32_voices",
+        run: mixer::voices,
     },
 ];
 

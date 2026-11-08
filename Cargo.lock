@@ -13,11 +13,17 @@ dependencies = [
 [[package]]
 name = "nadir-audio"
 version = "0.3.0"
+dependencies = [
+ "nadir-codec",
+ "nadir-core",
+ "nadir-platform",
+]
 
 [[package]]
 name = "nadir-bench"
 version = "0.3.0"
 dependencies = [
+ "nadir-audio",
  "nadir-codec",
  "nadir-collision",
  "nadir-core",

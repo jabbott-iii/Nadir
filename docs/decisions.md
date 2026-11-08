@@ -3676,3 +3676,124 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     reference plays is refused;
   - `qoa.h` changes its format, its limits or its encoder's search;
   - or the mixer (M6.2) needs state that `decode_frame` does not give.
+
+## ADR-0046 — M6.2: the mixer takes its sounds as `Arc`s until M6.6's assets; queues that never grow; a stolen voice fades out beside the new one; a track still sounding is brought back; gains move over 16 ms
+
+- **Status:** Proposed
+- **Date:** 2026-11-08
+- **Context:**
+  - M6.2 asks for the mixer, offline: voices, buses, constant-power pan,
+    positional attenuation, fades, the resampler, stealing, the limiter,
+    music streamed from in-memory QOA, and the command and return queues,
+    with every offline test of `docs/subsystems/audio.md` and no
+    allocation in `render`.
+  - The spec's API plays a `Handle<Sound>` and a `Handle<Music>`, but the
+    assets that make them are M6.6's, with the cook's WAV to PCM16 and
+    QOA, and the facade's components.
+  - The spec's command queue is a `Mutex<VecDeque>` with capacity
+    reserved, which the audio thread only `try_lock`s; the audio thread
+    never frees, so what it is done with goes back to the main thread. It
+    sizes the scratch buffers for the largest callback the device reports,
+    ×2; smooths positions per callback; steals with a 5 ms fade; ramps
+    every start and stop over 2 ms at least; and pans by `cos θ, sin θ`.
+  - Three critics of the design, before it was built, found: a queue
+    the main thread may grow grows without bound while nothing renders (no
+    device, an unplugged one, offscreen runs), then floods the first
+    callback; a return queue swapped for a new `Vec` either stops taking
+    returns (capacity 0) or allocates every frame; volumes, positions and
+    samples with no bounds carry NaN and infinities to the device, past
+    what an `f32` limiter bounds; smoothing over one callback is a step on
+    a callback of 64 frames; a crossfade back to a track still fading out
+    restarted it; `√2 · (cos θ, sin θ)` lifts a stereo sound's near side
+    by 3 dB, into the limiter.
+- **Decision:**
+  - **The API:** `nadir_audio::new(AudioConfig) -> (Audio, Mixer)`.
+    `Audio`, for the main thread, has the spec's calls, taking
+    `&Arc<SoundData>` and `&Arc<MusicData>` where the spec takes handles,
+    and `stop_music`; `update`, once a frame, drops what the mixer
+    returned and logs underruns, dropped commands and music that would not
+    decode, once a second at most; `stats` gives the voices sounding,
+    underruns, the last callback's time, the device's rate and the dropped
+    commands. `Mixer::render(out, channels, rate)` and
+    `Mixer::count_underrun` are the audio thread's. M6.6 adds the handles.
+  - **The command queue never grows:** past `AudioConfig::commands`
+    (1,024) a command is dropped on the main thread and counted; changes to
+    a voice and the listener's moves are dropped once it is half full, to
+    keep room for plays and stops. With the mixer dropped, nothing is
+    queued.
+  - **The audio thread neither allocates, frees, blocks nor logs.** It
+    `try_lock`s both queues, a poisoned lock taken as it is, and leaves
+    them for its next callback if it cannot. It locks the command queue
+    only to take each command, so the main thread never waits for one to
+    be carried out, and takes at most a queue's worth a callback. A
+    command still queued when the mixer is dropped is dropped by the next
+    `update`. What it is done with waits in
+    a `Vec` of fixed capacity, `2 · (voices + 2) + commands`, the sounds
+    the slots can hold and a full queue's worth turned away: a command
+    that brings a sound waits, with those after it, while the sounds held
+    and waiting would pass it. `update` swaps the return queue with a
+    spare of the same capacity and drops outside the lock.
+  - **Voices and stealing:** 48 slots. A new voice steals a voice
+    fading out already, whatever its priority, or else the one of the
+    lowest priority no higher than its own, the oldest of those; for a
+    sound at its `max_instances` (0 counts as 1), only among that sound's
+    voices. If there is none, it does not play. The stolen voice fades out
+    over 5 ms in its slot while the new one plays from its start, so for
+    5 ms a slot sounds two, and is not stolen from.
+  - **Gains and fades:** a voice's gains move to a change of volume, pan
+    or position over 16 ms, whatever the callback, not over one callback.
+    Every start, stop and change of a bus's volume ramps linearly over
+    2 ms at least, its length in samples rounded up; a stop of a voice
+    already fading out keeps the sooner end. A sound that ends on its own plays to its last sample, as
+    authored, with no fade: a ramp there would silence a sound shorter
+    than two ramps, and the cook (M6.6) can end sounds at 0.
+  - **Pan:** a mono sound by the constant-power law of the spec; a stereo
+    sound by a balance law, `√2 · (cos θ, sin θ)` capped at 1, which keeps
+    the centre and the near side at unity. Music is not panned.
+  - **Music:** two slots, each with a buffer of a QOA frame and a sample
+    carried from the frame before, decoded on the audio thread; tracks
+    loop. A track sounding in either slot, fading or not, fades back in
+    from where it is when played again; a new track takes a free slot, or
+    the quieter one after a 2 ms fade. `stop_music` fades every track out
+    within its fade. `MusicData::new` decodes every frame once, so a
+    track cannot fail as it plays.
+  - **Bounds:** samples within −1 … 1, rates of 1 to 384,000 Hz, at most
+    2³¹ frames, so that a 32.32 position a step past the end fits;
+    volumes clamped to 0 … 16, pitch to 1/16 … 16; a position that is not
+    finite is silent, and a listener that is not finite ignored; the
+    limiter is the signal to −1 dBFS and `u / (1 + u)` above, capped below
+    1, and gives 0 for NaN.
+  - **Mixing in parts of 512 frames,** whatever the callback, in place
+    of scratch sized from the device's largest callback: a callback of
+    any size allocates nothing.
+- **Consequences:**
+  - Good: the queues' memory is fixed at `new`; a device that stops for
+    minutes costs neither memory nor a flood at its return. A moving
+    sound's gains change smoothly from one frame's position to the next on
+    any device. The device never gets NaN, an infinity or full scale.
+    Crossing back and forth over an area's border does not restart its
+    music.
+  - Bad: the API changes again in M6.6, from `Arc`s to handles (the crate
+    is not published, ADR-0036). A burst of more commands than the queue
+    holds between two callbacks loses the rest, counted and logged. For
+    5 ms after a steal, a slot sounds two voices, so a callback can mix up
+    to twice `voices`. A fade's length is counted in samples at the rate
+    when it starts, so a change of rate mid-fade stretches or shortens it.
+    A sound whose data ends on a nonzero sample clicks at its end.
+- **Alternatives considered:**
+  - Handles in M6.2, as the spec writes: `nadir-assets`' `Sound` and
+    `Music` types and their loaders are M6.6's.
+  - A queue the main thread grows: unbounded while nothing renders.
+  - A lock-free SPSC ring: the spec keeps it for when profiling shows the
+    mutex contended, and it would need `unsafe` in `nadir-platform`.
+  - Stealing into a slot only once the stolen voice is silent: 5 ms of
+    delay, and a voice's slot held by one that never sounded.
+  - Smoothing over one callback, as the spec says: a step on short
+    callbacks, a 170 ms glide on an 8,192-frame one.
+  - Constant power for stereo too: +3 dB on the near side.
+  - A 2 ms fade at every natural end: a 1 ms sound would never be heard.
+- **Revisit when:**
+  - M6.6 makes the sound and music assets (then the API takes handles);
+  - profiling shows the command mutex contended (then the SPSC ring);
+  - a game drops commands in normal play (`AudioStats::dropped`);
+  - or the soak (M6.7) shows a callback near its budget.

@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 nadir.workspace = true
+nadir-audio.workspace = true
 nadir-core.workspace = true
 nadir-codec.workspace = true
 nadir-collision.workspace = true

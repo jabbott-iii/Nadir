@@ -27,9 +27,9 @@ shows only a few of its fields and methods: the ones the design rests on.
   error type of a `Result` are left out.
 
 Nothing here is planned work: the diagrams show only what is built. The
-Metal backend, audio, the debug tools, bitmap text, gamepads, saves and
-pathfinding are not built yet (see `docs/roadmap.md`), so they do not
-appear. The members only the `dev` feature compiles, the facade's hot
+Metal backend, audio's devices and assets, the debug tools, bitmap text,
+gamepads, saves and pathfinding are not built yet (see `docs/roadmap.md`),
+so they do not appear; audio's mixer is (M6.2). The members only the `dev` feature compiles, the facade's hot
 reload's (roadmap M5.8), are marked `dev`. One member that exists in the
 code for planned work, `ShaderSource::msl`, carries a note.
 
@@ -1637,6 +1637,102 @@ classDiagram
     SweepHit *-- Obstacle
 ```
 
+## audio: the mixer and its two sides
+
+`nadir_audio::new` makes the two sides, which share the queues through an
+`Arc`. `Audio`, on the main thread, queues a command for each call;
+`Mixer`, on the audio thread, carries the commands out at the start of
+each `render`, then mixes its voices and music into the buses and the
+master. The sounds it is done with go back through the return queue,
+and `Audio::update` drops them. M6.6 puts sound and music assets over
+`SoundData` and `MusicData`, and the facade's components over `Audio`.
+
+```mermaid
+classDiagram
+    direction TB
+    class Audio {
+        -shared Arc~Shared~
+        -spare Mutex~Vec~Retired~~
+        +play(sound, params) VoiceId
+        +play_at(sound, position, params) VoiceId
+        +stop(voice, fade_ms)
+        +set_voice(voice, change)
+        +set_bus_volume(bus, volume, fade_ms)
+        +set_listener(position)
+        +play_music(track, crossfade_ms)
+        +stop_music(fade_ms)
+        +update()
+        +stats() AudioStats
+    }
+    class Mixer {
+        -slots Box~Slot[]~
+        -music MusicSlot[2]
+        -buses Ramp[4]
+        -retired Vec~Retired~
+        +render(out, channels, rate)
+        +count_underrun()
+    }
+    class Shared {
+        -commands Mutex~VecDeque~Command~~
+        -returns Mutex~Vec~Retired~~
+        -counters atomics
+    }
+    class Slot {
+        <<enumeration>>
+        Free
+        Live(Voice)
+        Handoff(old, new)
+    }
+    class Voice {
+        -id VoiceId
+        -sound Arc~SoundData~
+        -cursor u64
+        -gains Ramp[2]
+        -fade Ramp
+    }
+    class MusicSlot {
+        -state MusicState
+        -buffer Box~i16[]~
+    }
+    class Track {
+        -music Arc~MusicData~
+        -cursor u64
+        -fade Ramp
+    }
+    class SoundData {
+        +new(channels, sample_rate, samples) Result
+    }
+    class MusicData {
+        +new(bytes) Result
+    }
+    class PlayParams {
+        +bus Bus
+        +volume f32
+        +pitch f32
+        +pan f32
+        +looped bool
+        +priority u8
+        +max_instances u8
+    }
+    class Bus {
+        <<enumeration>>
+        Music
+        Sfx
+        Ui
+        Ambience
+    }
+    Audio o-- Shared
+    Mixer o-- Shared
+    Mixer "1" *-- "voices" Slot
+    Slot *-- Voice
+    Mixer "1" *-- "2" MusicSlot
+    MusicSlot *-- Track
+    Voice o-- SoundData
+    Track o-- MusicData
+    Audio ..> PlayParams : play
+    PlayParams *-- Bus
+```
+
 ## engine: the App and what owns it
 
 `App` owns the configuration, the ECS world, the schedule, the input action
@@ -2145,6 +2241,8 @@ The main files these diagrams were drawn from:
 - `crates/platform/src/gpu.rs`, `no_gl.rs`, `linux/x11.rs`
 - `crates/collision/src/world.rs`, `shape.rs`, `grid.rs`, `hash.rs`,
   `slide.rs`, `sweep.rs`, `trigger.rs`
+- `crates/audio/src/lib.rs`, `audio.rs`, `mixer.rs`, `voice.rs`,
+  `music.rs`, `data.rs`, `params.rs`, `shared.rs`
 - `crates/engine/src/app.rs`, `components.rs`, `collisions.rs`,
   `animation.rs`, `level.rs`, `reflected.rs`, `pack.rs`, `error.rs`,
   `hot_reload.rs`

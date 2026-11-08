@@ -4028,7 +4028,7 @@ by the batched sprite renderer.
   - `cargo test -p nadir-codec`: 269 tests passed. `cargo xtask ci`: all
     12 checks ok, 1,671 tests passed, 1 ignored.
 
-- [ ] **M6.2 — audio: mixer (offline)**
+- [x] **M6.2 — audio: mixer (offline)**
   - Note (from M3.5): for the test that `render` allocates nothing, a
     dev-dependency on `nadir-platform` with `features = ["dev"]` installs the
     counter. Read `thread_alloc_counts()` around the calls. Declare no other
@@ -4040,8 +4040,91 @@ by the batched sprite renderer.
   - Accept: every offline test in the audio spec passes; 0 allocations in
     `render`.
   - Verify: `cargo test -p nadir-audio`; `cargo xtask bench mixer`
+  - Built (2026-11-08, ADR-0046):
+    - nadir-audio's first code. `nadir_audio::new(AudioConfig)` gives the
+      main thread's `Audio` and the audio thread's `Mixer`. `Audio` has the
+      spec's calls, taking `&Arc<SoundData>` and `&Arc<MusicData>` until
+      M6.6's handles, and `stop_music`, `update` (once a frame: drops what
+      the mixer returned, logs once a second at most) and `stats`.
+      `Mixer::render(out, channels, rate)` never blocks, allocates, frees
+      or logs, for a callback of any size, mixed in parts of 512 frames;
+      `count_underrun` is the backend's.
+    - 48 voices on four buses; the 32.32 linear resampler; constant-power
+      pan for mono, a balance capped at unity for stereo; positional pan
+      and linear attenuation; gains moved over 16 ms; ramps of 2 ms at
+      least on every start, stop and bus change; stealing of a voice
+      fading out, or else the lowest priority, then the oldest, with a
+      5 ms fade beside the new voice; `max_instances`; the soft limiter;
+      two music voices streaming QOA a frame at a time, looped, with
+      crossfades that bring back a track still sounding.
+    - The command queue never grows (changes dropped past half, all past
+      full, counted); what the mixer is done with waits in a buffer whose
+      room is kept for it, and goes back to be dropped on the main thread.
+    - `MusicData::new` decodes every frame once. Sounds take 1 or 2
+      channels, 1 to 384,000 Hz, at most 2³¹ frames, samples within −1 … 1;
+      volumes, pitches, pans and positions are bounded as they come in.
+    - Tests: 41 offline tests in `crates/audio/tests/mixer.rs` (each the
+      spec lists, and the cases the review asked for), 2 of allocations
+      (`tests/allocations.rs`, counted from a new mixer's first render, one
+      with the mixer holding every sound's last reference), a property test
+      of 300 random sequences with NaN, infinities, `f32::MAX` and
+      `u32::MAX` among their values (`tests/property.rs`), 7 unit tests and
+      the crate's example.
+    - The bench `mixer_32_voices`. The docs: the crate's, the audio design,
+      the quality doc's bench and allocation lists, the C4 and class
+      diagrams, the README and `AGENTS.md`'s status, notes for M6.3, M6.6
+      and M6.7.
+  - Measured on 2026-11-08 (i7-11800H, pinned to a core): `mixer_32_voices`
+    median 88.4 µs (p95 90.4 µs) a callback of 512 frames, 10.7 ms of
+    sound at 48 kHz, so under 1% of real time; added to
+    `bench/baseline.json`, other entries left as they were. The full run
+    that day, with a load average near 4, read the others up to +412%
+    (`ecs_join2_5k`; 17 µs alone, against 8.2) though no code they measure
+    changed.
+  - Review: before the build, three critics of the design (real-time
+    safety, the signal processing, the spec), whose findings shaped
+    ADR-0046: a queue that grew while nothing rendered, a return queue a
+    swap would empty for good, NaN and infinities reaching the device, a
+    smoothing as short as a callback, a crossfade back that restarted its
+    track, +3 dB on a stereo sound's near side. After it, one round of
+    three reviewers with a skeptic for each finding: 25 of 26 findings
+    confirmed, all low. Fixed: the audio thread held the queue's lock
+    while it carried out a callback's commands; commands still queued when
+    the mixer was dropped were never let go; fades rounded down below
+    2 ms at 44.1 kHz; a sound near 2³² frames could overflow a voice's
+    position; docs of stealing, smoothing, dropped commands, a pitch and
+    the limiter; the M6.3 note. The property test had found two more:
+    `stop` could not reach a voice being stolen, and `stop_music` left a
+    crossfade's fade-out to run. Of the review's 45 planted bugs, 18 had
+    passed the tests (among them no fade on a voice's right channel, nor
+    on a stereo track's, and a NaN volume silencing the mix); run again on
+    the fixed tests, with 10 more for the reviewers' findings, all 28 fail
+    them. 2 of the 45 cannot change a result: the carry zeroed at a
+    track's start, always written before it is read, and `<` for `<=` at
+    `min_dist`, where the line gives 1 too. The 25 caught at first were not
+    run again; the tests have only been added to and tightened since.
+  - `cargo test -p nadir-audio`: 52 tests passed. `cargo xtask bench mixer`
+    on the final code: median 81.0 µs (p95 82.0), 8.3% under the baseline.
+    `cargo xtask ci`: all 12 checks ok, 1,723 tests passed, 1 ignored.
 
 - [ ] **M6.3 — platform (Linux): ALSA backend**
+  - Note (from M6.2, ADR-0046):
+    - `nadir_audio::new` makes the `Audio` handle and the `Mixer`, which is
+      `Send`: the audio thread owns it and calls
+      `Mixer::render(out, channels, rate)` for each period, with the
+      device's real rate and channel count, interleaved `f32`. It never
+      blocks, allocates, frees or logs, and mixes a period of any size.
+      Call `Mixer::count_underrun` for each xrun; `Audio::update` logs
+      them, once a second at most.
+    - `nadir-platform` may not depend on `nadir-audio` (the matrix has
+      audio above platform), so the backend takes a callback, and the
+      facade (M6.6) hands it the mixer. The callback needs the underruns
+      too, since only the closure that owns the `Mixer` can count them:
+      say, `FnMut(&mut [f32], channels, rate, underruns)`, the underruns
+      since the last call, which the facade's closure passes to
+      `count_underrun`.
+    - `AudioStats::rate` shows the main thread the rate the device runs
+      at, from the first callback.
   - Depends: M6.2
   - Do: `dlopen` libasound, the audio thread, `snd_pcm_recover`.
   - Accept: sandbox audio plays; unplugging or replugging a device recovers
@@ -4062,6 +4145,24 @@ by the batched sprite renderer.
   - Verify: on macOS, `cargo dev` (manual)
 
 - [ ] **M6.6 — audio assets and facade integration**
+  - Note (from M6.2, ADR-0046):
+    - `Audio::play`, `play_at` and `play_music` take `&Arc<SoundData>`
+      and `&Arc<MusicData>`, where `docs/subsystems/audio.md` takes
+      `Handle<Sound>` and `Handle<Music>`: this task makes the assets, and
+      the handles. `SoundData` takes 1 or 2 channels, 1 to 384,000 Hz and
+      samples within −1 … 1; `MusicData::new` checks the whole QOA file,
+      which suits a worker.
+    - Convert sounds to `AudioStats::rate`, which is 0 until the device's
+      first callback; until then, or after a change of rate, the mixer
+      resamples.
+    - Call `Audio::update` once a frame: it drops what the mixer is done
+      with, and until it runs, the mixer takes no more sounds than its
+      return buffer holds. It allocates nothing in a steady frame.
+    - A sound that ends on its own is not faded: the cook can make each
+      sound end at 0, as a ramp at its start (2 ms) is the mixer's.
+    - Positions go through `VoiceChange::Position` once a frame; the mixer
+      smooths each change over 16 ms. A move of the listener is
+      `set_listener`.
   - Depends: M6.3, M5.4
   - Note (from M5.2): `wav::decode` gives `f32` samples, with floats past
     ±1 kept as they are: the cook clamps them to [−1, 1] and rounds to
@@ -4079,6 +4180,12 @@ by the batched sprite renderer.
     (manual)
 
 - [ ] **M6.7 — soak tooling**
+  - Note (from M6.2): `AudioStats` gives the last callback's mixing time,
+    the underruns `Mixer::count_underrun` counted and the commands
+    dropped; a p99 needs every callback's time, which `render` could keep
+    in a fixed table of atomic buckets without allocating.
+    `mixer_32_voices` mixes 32 voices and a track in 88 µs a 512-frame
+    callback on an i7-11800H (`bench/baseline.json`).
   - Depends: M6.6
   - Do: `xtask soak --audio --minutes N`, which logs underruns, callback
     time p99 and memory.

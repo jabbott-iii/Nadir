@@ -3,8 +3,16 @@ name = "nadir-audio"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-# Not on crates.io until it has code (ADR-0036).
+# Not on crates.io until the facade uses it, from M6.6 (ADR-0036).
 publish = false
+
+[dependencies]
+nadir-codec.workspace = true
+nadir-core.workspace = true
+
+[dev-dependencies]
+# The allocation counter, which the tests of `Mixer::render` read.
+nadir-platform = { workspace = true, features = ["dev"] }
 
 [lints]
 workspace = true

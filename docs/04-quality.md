@@ -300,6 +300,12 @@ pub fn check_sized<T: std::fmt::Debug>(
 - `crates/engine/tests/allocations.rs` holds checks of code outside the
   loop, such as a QOI file too short for its size being refused before
   anything is allocated.
+- `crates/audio/tests/allocations.rs` counts every `Mixer::render` of a
+  new mixer, from its first, through steals, refusals, music frames,
+  loops and crossfades, a change of rate and a main thread that does not
+  call `update` for a while: 0 allocations and 0 deallocations, the audio
+  thread's rule. The test lets go of each sound once it is queued, so that
+  one freed in `render` would be counted (M6.2).
 
 ### Benchmarks — `nadir-bench`
 
@@ -329,7 +335,9 @@ pub fn check_sized<T: std::fmt::Debug>(
     (`facade_tick_5k`, M4.4, ADR-0022), with a frame of 10,000 animated
     sprites (`facade_frame_10k`, M4.6, ADR-0024)
   - A* on 256×256
-  - mixer with 32 voices
+  - mixer with 32 voices (`mixer_32_voices`, M6.2: a callback of 512
+    frames at 48 kHz with 32 looping voices, most resampled and half at a
+    position, and a QOA track streaming)
   - QOI decode 2048² (`qoi_decode_2048`: an RGBA image of five kinds of
     tile, so that every kind of chunk is common)
   - inflate 10 MB (`inflate_10mb`: a zlib stream of 10 MiB, noise in stored
