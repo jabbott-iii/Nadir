@@ -334,34 +334,11 @@ impl Clips {
             return Ok(known.clips.clone());
         }
         let mut made = Vec::new();
-        for sprite in atlas.sprites() {
-            for clip in sprite.clips() {
-                let name = format!("{}/{}", sprite.name(), clip.name());
-                if self.names.contains_key(&name) {
-                    return Err(ClipError::NameTaken(name));
-                }
-                // The atlas reader checked that each step shows a frame of
-                // the sprite, which is on one of the pages.
-                let frames = clip
-                    .frames()
-                    .iter()
-                    .filter_map(|step| {
-                        let page = sprite.frame(step.frame())?.page();
-                        ClipFrame::from_atlas(
-                            *pages.get(page)?,
-                            sprite,
-                            step.frame(),
-                            step.duration(),
-                        )
-                    })
-                    .collect();
-                let playback = if clip.is_looping() {
-                    Playback::Loop
-                } else {
-                    Playback::Once
-                };
-                made.push((name, Clip::try_new(frames, playback)?));
+        for (name, clip) in atlas_clips(atlas, pages) {
+            if self.names.contains_key(&name) {
+                return Err(ClipError::NameTaken(name));
             }
+            made.push((name, clip?));
         }
         let handles: Vec<Handle<Clip>> = made
             .into_iter()
@@ -378,6 +355,85 @@ impl Clips {
             });
         }
         Ok(handles)
+    }
+
+    /// Finds the clips of an atlas added before again, by name, in `atlas`
+    /// as a reload made it, with `pages` its pages' textures: the hot
+    /// reload's, under `dev` (M5.8). The atlas added before is the one of
+    /// `pages`, or else the one with a page among them, as when the
+    /// atlas gains a page or loses one; `None` if there is none, as for an
+    /// atlas whose clips were never added, and nothing changes.
+    ///
+    /// Each clip of `atlas` replaces the one of its name in place, under
+    /// the handle it had, so that animators play it on from their time:
+    /// a looping one wraps it by its new duration, and a finished one
+    /// holds its new last frame ([`Animator`]). A clip new to the atlas is
+    /// added, as [`Clips::add_atlas`] adds one. A clip the atlas no longer
+    /// has stays as it was, so that its handle stays good, and one that
+    /// cannot be made, or whose name another atlas's clip has, is not
+    /// changed: the result names each. The atlas keeps its holds, now known
+    /// by `pages`.
+    #[cfg(feature = "dev")]
+    pub(crate) fn reload_atlas(
+        &mut self,
+        atlas: &Atlas,
+        pages: &[Handle<Texture>],
+    ) -> Option<AtlasReload> {
+        let index = self
+            .atlases
+            .iter()
+            .position(|known| known.pages == pages)
+            .or_else(|| {
+                self.atlases
+                    .iter()
+                    .position(|known| known.pages.iter().any(|page| pages.contains(page)))
+            })?;
+        let made = atlas_clips(atlas, pages);
+        let names: Vec<String> = made.iter().map(|(name, _)| name.clone()).collect();
+        let mut reload = AtlasReload {
+            old_pages: Vec::new(),
+            replaced: 0,
+            added: 0,
+            kept: Vec::new(),
+            refused: Vec::new(),
+        };
+        for (name, clip) in made {
+            let clip = match clip {
+                Ok(clip) => clip,
+                Err(error) => {
+                    reload.refused.push((name, error));
+                    continue;
+                }
+            };
+            match self.names.get(&name).copied() {
+                Some(handle) if self.atlases[index].clips.contains(&handle) => {
+                    if let Some(named) = self.clips.get_mut(handle.id()) {
+                        named.clip = clip;
+                        reload.replaced += 1;
+                    }
+                }
+                Some(_) => reload
+                    .refused
+                    .push((name.clone(), ClipError::NameTaken(name))),
+                None => {
+                    let handle = self
+                        .add_named(name, clip)
+                        .expect("the name was checked as free");
+                    self.atlases[index].clips.push(handle);
+                    reload.added += 1;
+                }
+            }
+        }
+        let known = &mut self.atlases[index];
+        for &handle in &known.clips {
+            if let Some(name) = self.clips.get(handle.id()).and_then(|it| it.name.as_ref())
+                && !names.contains(name)
+            {
+                reload.kept.push(name.clone());
+            }
+        }
+        reload.old_pages = std::mem::replace(&mut known.pages, pages.to_vec());
+        Some(reload)
     }
 
     /// Lets go of one hold of the atlas of `pages`, which
@@ -459,6 +515,52 @@ impl fmt::Debug for Clips {
     }
 }
 
+/// What [`Clips::reload_atlas`] did.
+#[cfg(feature = "dev")]
+#[derive(Debug, PartialEq)]
+pub(crate) struct AtlasReload {
+    /// The pages the atlas was known by before.
+    pub(crate) old_pages: Vec<Handle<Texture>>,
+    /// How many clips were replaced in place.
+    pub(crate) replaced: usize,
+    /// How many were new to the atlas, and added.
+    pub(crate) added: usize,
+    /// The clips the atlas no longer has, which stay as they were.
+    pub(crate) kept: Vec<String>,
+    /// The clips that could not be made, or whose name another atlas's
+    /// clip has, which were not changed.
+    pub(crate) refused: Vec<(String, ClipError)>,
+}
+
+/// Every clip of every sprite of `atlas`, named `<sprite>/<clip>`, in the
+/// atlas's order, its frames placed by [`ClipFrame::from_atlas`] in
+/// `pages`, the textures of its pages: as [`Clips::add_atlas`] makes them.
+fn atlas_clips(atlas: &Atlas, pages: &[Handle<Texture>]) -> Vec<(String, Result<Clip, ClipError>)> {
+    let mut made = Vec::new();
+    for sprite in atlas.sprites() {
+        for clip in sprite.clips() {
+            let name = format!("{}/{}", sprite.name(), clip.name());
+            // The atlas reader checked that each step shows a frame of the
+            // sprite, which is on one of the pages.
+            let frames = clip
+                .frames()
+                .iter()
+                .filter_map(|step| {
+                    let page = sprite.frame(step.frame())?.page();
+                    ClipFrame::from_atlas(*pages.get(page)?, sprite, step.frame(), step.duration())
+                })
+                .collect();
+            let playback = if clip.is_looping() {
+                Playback::Loop
+            } else {
+                Playback::Once
+            };
+            made.push((name, Clip::try_new(frames, playback)));
+        }
+    }
+    made
+}
+
 /// Plays a [`Clip`] on its entity's [`Sprite`](crate::Sprite).
 ///
 /// The system `nadir::animate`, first in the frame stage `Animate`,
@@ -479,6 +581,11 @@ impl fmt::Debug for Clips {
 /// frame into its clip: after a hitch (frames are at most 250 ms), early
 /// frames can be skipped, and a clip that plays once and is no longer than
 /// the step ends on its first frame.
+///
+/// A clip replaced under its handle, as the hot reload replaces an
+/// atlas's under `dev`, plays on from the animator's time: a looping one
+/// wraps it by its new duration, and one that plays once and finished
+/// holds its new last frame, with no second [`AnimationFinished`].
 ///
 /// It is reflected by hand as its clip's name in the [`Clips`], and a read
 /// one starts its clip: its time and finished flag are left out (ADR-0024,
@@ -562,7 +669,13 @@ impl Animator {
                 false
             }
             Playback::Once => {
-                self.elapsed = self.elapsed.saturating_add(by).min(duration);
+                // A finished one holds its clip's last frame, as it does
+                // when a reload makes the clip longer.
+                self.elapsed = if self.finished {
+                    duration
+                } else {
+                    self.elapsed.saturating_add(by).min(duration)
+                };
                 let ended = !self.finished && self.elapsed == duration;
                 self.finished |= ended;
                 ended
@@ -867,9 +980,8 @@ mod tests {
     /// An atlas of two pages: a person whose two frames are trimmed apart,
     /// with two clips, and a tree with none.
     fn atlas() -> Atlas {
-        use nadir_assets::{Asset, DecodeCtx};
-        use nadir_codec::{Limits, json, kbj};
-        let text = r#"{ "version": 2,
+        atlas_of(
+            r#"{ "version": 2,
             "pages": [ { "path": "atlas/sprites_0.qoi", "w": 64, "h": 64 },
                        { "path": "atlas/sprites_1.qoi", "w": 64, "h": 64 } ],
             "sprites": [
@@ -881,7 +993,14 @@ mod tests {
                            { "name": "wave", "loop": false, "frames": [[1, 40], [0, 60]] } ] },
               { "name": "sprites/tree",
                 "frames": [ { "page": 0, "x": 20, "y": 1, "w": 24, "h": 44, "ox": 0, "oy": 4, "sw": 24, "sh": 48 } ],
-                "pivot": [12.0, 48.0] } ] }"#;
+                "pivot": [12.0, 48.0] } ] }"#,
+        )
+    }
+
+    /// The atlas of `text`, as its reader reads it.
+    fn atlas_of(text: &str) -> Atlas {
+        use nadir_assets::{Asset, DecodeCtx};
+        use nadir_codec::{Limits, json, kbj};
         let value = json::parse(text, Limits::default()).expect("the test's JSON");
         let bytes = kbj::encode(&value, Limits::default()).expect("encodable");
         Atlas::decode(
@@ -1008,5 +1127,182 @@ mod tests {
             (sprite.uv, sprite.size, sprite.pivot)
         );
         assert!(ClipFrame::from_atlas(texture(8), person, 2, MS).is_none());
+    }
+
+    /// An atlas reloaded under `dev` (M5.8).
+    #[cfg(feature = "dev")]
+    mod reloaded {
+        use super::*;
+
+        /// The atlas of [`atlas`] as a reload makes it: the person's wave is
+        /// now three steps long, and on the other page first, its stand gone,
+        /// and a sit new; the tree has a clip of its own.
+        const RELOADED: &str = r#"{ "version": 2,
+            "pages": [ { "path": "atlas/sprites_0.qoi", "w": 64, "h": 64 },
+                       { "path": "atlas/sprites_1.qoi", "w": 64, "h": 64 } ],
+            "sprites": [
+              { "name": "sprites/person",
+                "frames": [ { "page": 1, "x": 30, "y": 1, "w": 10, "h": 20, "ox": 1, "oy": 0, "sw": 12, "sh": 20 },
+                            { "page": 0, "x": 40, "y": 1, "w": 9, "h": 18, "ox": 2, "oy": 2, "sw": 12, "sh": 20 } ],
+                "pivot": [6.0, 20.0],
+                "clips": [ { "name": "sit", "loop": true, "frames": [[0, 50]] },
+                           { "name": "wave", "loop": false, "frames": [[1, 40], [0, 60], [1, 100]] } ] },
+              { "name": "sprites/tree",
+                "frames": [ { "page": 0, "x": 20, "y": 1, "w": 24, "h": 44, "ox": 0, "oy": 4, "sw": 24, "sh": 48 } ],
+                "pivot": [12.0, 48.0],
+                "clips": [ { "name": "sway", "loop": true, "frames": [[0, 80]] } ] } ] }"#;
+
+        #[test]
+        fn a_reloaded_atlas_replaces_its_clips_by_name_under_their_handles() {
+            let pages = [texture(7), texture(8)];
+            let mut clips = Clips::new();
+            clips.add_atlas(&atlas(), &pages).expect("the clips");
+            let stand = clips.find("sprites/person/stand").expect("stand");
+            let wave = clips.find("sprites/person/wave").expect("wave");
+
+            let reloaded = atlas_of(RELOADED);
+            let reload = clips
+                .reload_atlas(&reloaded, &pages)
+                .expect("the atlas was added");
+            assert_eq!(reload.old_pages, pages);
+            assert_eq!((reload.replaced, reload.added), (1, 2));
+            assert_eq!(reload.kept, ["sprites/person/stand"]);
+            assert!(reload.refused.is_empty());
+
+            // The wave, under its handle, as the reloaded atlas has it.
+            assert_eq!(clips.find("sprites/person/wave"), Some(wave));
+            let person = reloaded.sprite("sprites/person").expect("the person");
+            let shown: Vec<(Handle<Texture>, Rect, Duration)> = clips
+                .get(wave)
+                .expect("the wave")
+                .frames()
+                .iter()
+                .map(|frame| (frame.texture, frame.uv, frame.duration))
+                .collect();
+            assert_eq!(
+                shown,
+                [
+                    (pages[0], person.frames()[1].uv(), 40 * MS),
+                    (pages[1], person.frames()[0].uv(), 60 * MS),
+                    (pages[0], person.frames()[1].uv(), 100 * MS),
+                ]
+            );
+            // The stand is kept as it was; the sit and the sway are new.
+            assert_eq!(clips.find("sprites/person/stand"), Some(stand));
+            assert_eq!(clips.get(stand).map(Clip::duration), Some(100 * MS));
+            let sit = clips.find("sprites/person/sit").expect("the sit");
+            assert_eq!(clips.get(sit).map(Clip::playback), Some(Playback::Loop));
+            assert!(clips.find("sprites/tree/sway").is_some());
+
+            // They are all the atlas's: its last hold lets go of every one.
+            assert!(clips.release_atlas(&pages));
+            assert!(clips.is_empty());
+        }
+
+        #[test]
+        fn a_reloaded_atlas_on_other_pages_is_known_by_them_from_then_on() {
+            let mut clips = Clips::new();
+            let pages = [texture(7), texture(8)];
+            clips.add_atlas(&atlas(), &pages).expect("the clips");
+            clips.add_atlas(&atlas(), &pages).expect("held twice");
+            let wave = clips.find("sprites/person/wave").expect("wave");
+
+            // A page more: known by the names of its clips.
+            let three = RELOADED.replace(
+                r#"{ "path": "atlas/sprites_1.qoi", "w": 64, "h": 64 } ],"#,
+                r#"{ "path": "atlas/sprites_1.qoi", "w": 64, "h": 64 },
+                   { "path": "atlas/sprites_2.qoi", "w": 64, "h": 64 } ],"#,
+            );
+            let more = [texture(7), texture(8), texture(9)];
+            let reload = clips
+                .reload_atlas(&atlas_of(&three), &more)
+                .expect("found by name");
+            assert_eq!(reload.old_pages, pages);
+            assert_eq!(clips.find("sprites/person/wave"), Some(wave));
+
+            // Its two holds stay, under its new pages.
+            assert!(!clips.release_atlas(&pages));
+            assert!(!clips.release_atlas(&more));
+            assert!(!clips.is_empty());
+            assert_eq!(
+                clips.add_atlas(&atlas_of(&three), &more).map(|it| it.len()),
+                Ok(4)
+            );
+            assert!(!clips.release_atlas(&more));
+            assert!(clips.release_atlas(&more));
+            assert!(clips.is_empty());
+        }
+
+        #[test]
+        fn an_atlas_whose_clips_were_never_added_is_not_reloaded() {
+            let mut clips = Clips::new();
+            let pages = [texture(7), texture(8)];
+            assert_eq!(clips.reload_atlas(&atlas(), &pages), None);
+            assert!(clips.is_empty());
+
+            // Another atlas, of no page of this one's, with clips of its
+            // names, is not taken for it.
+            clips.add_atlas(&atlas(), &pages).expect("the clips");
+            let wave = clips.find("sprites/person/wave").expect("wave");
+            let other = [texture(9), texture(10)];
+            assert_eq!(clips.reload_atlas(&atlas_of(RELOADED), &other), None);
+            assert_eq!(clips.get(wave).map(Clip::duration), Some(100 * MS));
+            assert!(clips.release_atlas(&pages));
+            assert!(clips.is_empty());
+
+            // Another atlas's clip of one of its names is left as it is.
+            let theirs = clips
+                .add_named("sprites/tree/sway", clip(&[5], Playback::Once))
+                .expect("a free name");
+            clips.add_atlas(&atlas(), &pages).expect("the clips");
+            let reload = clips
+                .reload_atlas(&atlas_of(RELOADED), &pages)
+                .expect("the atlas was added");
+            assert_eq!(
+                reload.refused,
+                [(
+                    "sprites/tree/sway".to_string(),
+                    ClipError::NameTaken("sprites/tree/sway".to_string())
+                )]
+            );
+            assert_eq!(clips.find("sprites/tree/sway"), Some(theirs));
+            assert_eq!(clips.get(theirs).map(Clip::duration), Some(5 * MS));
+            // It stays when the atlas goes, with the stand the atlas kept.
+            assert!(clips.release_atlas(&pages));
+            assert_eq!(clips.len(), 1);
+            assert_eq!(clips.find("sprites/tree/sway"), Some(theirs));
+        }
+    }
+
+    #[test]
+    fn an_animator_plays_on_through_a_clip_replaced_under_its_handle() {
+        // A looping clip of 300 ms, 200 ms in, replaced by one of 150 ms:
+        // it wraps by the new duration.
+        let mut looping = Animator::new(handle());
+        looping.advance(&clip(&[100, 100, 100], Playback::Loop), 200 * MS);
+        let (frame, ended) = looping.advance(&clip(&[50, 100], Playback::Loop), 10 * MS);
+        assert_eq!((looping.elapsed(), frame, ended), (60 * MS, 1, false));
+
+        // A finished clip of 100 ms replaced by a longer one holds its new
+        // last frame, and does not end again.
+        let mut once = Animator::new(handle());
+        let (_, ended) = once.advance(&clip(&[100], Playback::Once), 150 * MS);
+        assert!(ended && once.is_finished());
+        let longer = clip(&[100, 100, 100], Playback::Once);
+        let (frame, ended) = once.advance(&longer, 10 * MS);
+        assert_eq!((once.elapsed(), frame, ended), (300 * MS, 2, false));
+        assert!(once.is_finished());
+        // Replaced by a shorter one, it holds that one's last frame.
+        let (frame, ended) = once.advance(&clip(&[20, 20], Playback::Once), 10 * MS);
+        assert_eq!((once.elapsed(), frame, ended), (40 * MS, 1, false));
+
+        // One not finished plays on into the longer clip, and ends at its
+        // end.
+        let mut playing = Animator::new(handle());
+        playing.advance(&clip(&[100], Playback::Once), 50 * MS);
+        let (frame, ended) = playing.advance(&longer, 100 * MS);
+        assert_eq!((playing.elapsed(), frame, ended), (150 * MS, 1, false));
+        let (_, ended) = playing.advance(&longer, 200 * MS);
+        assert!(ended && playing.is_finished());
     }
 }

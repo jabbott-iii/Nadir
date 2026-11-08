@@ -80,7 +80,9 @@
 //!   them through commands
 //!   ([`PrefabLibrary::spawn`]): each component's value is its base's,
 //!   then its own, then the override's. A spawn that fails leaves no
-//!   entity; [`PrefabError`] says why, naming the file.
+//!   entity; [`PrefabError`] says why, naming the file. It keeps each
+//!   prefab it read, which later loads use; [`PrefabLibrary::remove`] takes
+//!   one out, so that the next load reads its file again.
 //! - **Levels.** [`Level`] is the cooked level file as an asset
 //!   ([`level`] re-exports its types), and
 //!   [`PrefabLibrary::spawn_level`] spawns its entities, each with its

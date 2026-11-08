@@ -335,6 +335,40 @@ fn a_missing_base_or_prefab_is_an_error() {
 }
 
 #[test]
+fn a_prefab_removed_is_read_again_by_the_next_load() {
+    let mut server = a_server(&[("enemy", ENEMY), ("slime", SLIME)]);
+    let mut library = PrefabLibrary::new();
+    library
+        .load(&mut server, &types(), "slime", Scope::Level)
+        .expect("slime and its base load");
+    // The level goes, and its files with it: the library keeps its copies.
+    server.unload_scope(Scope::Level);
+    assert!(library.get("enemy").is_some());
+
+    let removed = library.remove("enemy").expect("the base was loaded");
+    assert_eq!(removed.name(), "enemy");
+    assert_eq!(library.remove("enemy"), None);
+    assert!(library.get("enemy").is_none());
+    assert_eq!(
+        library.chain("slime").map(|chain| chain.len()),
+        Err(PrefabError::MissingBase {
+            prefab: "slime".into(),
+            base: "enemy".into()
+        })
+    );
+    // Loaded again, it is read from its file, which is loaded again too.
+    library
+        .load(&mut server, &types(), "slime", Scope::Level)
+        .expect("slime's base reads again");
+    assert_eq!(library.chain("slime").map(|chain| chain.len()), Ok(2));
+    let path = PrefabLibrary::path("enemy");
+    let handle = server
+        .assets::<nadir_scene::PrefabAsset>()
+        .and_then(|it| it.handle(&path));
+    assert!(handle.is_some_and(|it| server.state(it).is_some()));
+}
+
+#[test]
 fn an_unknown_component_is_reported_and_the_spawn_leaves_no_entity() {
     let ghost = r#"{ "name": "ghost", "extends": "enemy", "components": { "PrevTransform": {} } }"#;
     let wraith = r#"{ "name": "wraith", "extends": "ghost", "components": {} }"#;

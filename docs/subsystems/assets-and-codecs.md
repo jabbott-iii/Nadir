@@ -1015,8 +1015,8 @@ toc (toc_size bytes at toc_offset, a multiple of 16, to the end of the file; toc
 ### Hot reload (dev)
 
 Built in four tasks (ADR-0042): M5.15, the cook's side, M5.16
-(nadir-assets) and M5.17 (nadir-render) are built; M5.8 (the game) is not
-yet.
+(nadir-assets), M5.17 (nadir-render) and M5.8, the game's side, in the
+facade (ADR-0043).
 
 - **The cook's side** (M5.15): `cargo xtask cook --watch [--force]` builds
   `nadir-cook` in release once and cooks, `--force` for that first cook
@@ -1040,7 +1040,8 @@ yet.
 - **The game's watcher** (M5.16): a thread polls the times of change of
   the loaded loose cooked files every 250 ms, through `Source::modified`,
   and hands the changed paths to the main thread. It is nadir-assets',
-  compiled in every build, and the facade starts it under `dev` (M5.8).
+  compiled in every build, and the facade starts it under `dev`, in
+  `App::new` (M5.8).
   As built:
   - `AssetServer::start_watcher` starts the thread, `nadir-assets-watch`;
     starting it again does nothing, and dropping the server stops it.
@@ -1095,8 +1096,63 @@ yet.
   it had when they do not compile or do not match its interface, and draws
   a texture reloaded behind its handle from the next frame, with no change
   of its own (`docs/subsystems/render.md`, "Reloading"). Under `dev` the
-  facade is to read render's shader files as they change, and hand them
-  over (M5.8).
+  facade reads render's shader files as they change, and hands them over
+  (M5.8).
+- **The game's side** (M5.8, ADR-0043), in the facade, under `dev`:
+  `App::new` starts the asset watcher, so that the files the game's setup
+  reads are watched from before they are read, and `App::run`, where there
+  is a device, starts the hot reload and its shader watcher, a thread,
+  `nadir-shader-watch`, that looks at the times of change of render's
+  shader files (`SHADER_DIR`) every 250 ms. After each drawn frame:
+  - it takes the atlases, prefabs and level files a reload swapped in
+    (`drain_swapped`). An atlas's clips are replaced in place by name,
+    under the handles they had (`Clips::reload_atlas`): a clip the atlas
+    no longer has stays as it was, with a warning, and an animator plays
+    on from its time, a finished clip that plays once holding the new last
+    frame. The atlas is the one of its pages, or of one of them when it
+    gains or loses a page, and a page it gains is loaded in
+    `Scope::Global`, as the game and a level may share it. A prefab's new
+    file replaces it in the `PrefabLibrary`, under its name, and the bases
+    it now extends are loaded and checked; one naming another prefab is
+    refused, and the prefab stays as it was;
+  - once an atlas, a prefab (one the library has not read too, as one a
+    level could not load before it was cooked) or the current level's
+    file was swapped, and no load or reload is pending, it makes the
+    current level again behind its handles: no scope is unloaded, its
+    tile layers keep their handles, its atlases' clips are held again
+    before the last hold goes, and its entities are spawned anew, with new
+    ids. A level that cannot be made again stays as it was. A cook whose
+    files straddle a look of the watcher makes it twice, the first time
+    maybe refused with half the cook's files, and logged. Before a level's
+    prefabs are read, by a load or a reload, those whose files are no
+    longer loaded, as after the last load unloaded `Scope::Level`, are
+    removed from the library (`PrefabLibrary::remove`), so that they are
+    read, and watched, again;
+  - it rebuilds each program whose files changed, from its files as they
+    are (`Renderer::reload_program`), or logs why not and keeps the last.
+    The renderer was built from the sources compiled in, and the watcher
+    starts from the files' times when the loop starts, so a shader edited
+    before then is seen at its next save;
+  - it hands the paths the watcher saw change to the asset server
+    (`reload_changed`), whose workers read them for the next frames'
+    finishes.
+  - A texture needs nothing: the renderer looks its handle up each frame.
+    Each reload is logged with its time: the server's swap, the clips
+    found again, the prefab, the level and how long it took to make, the
+    shaders and how long they took to build, and, once all are made, how
+    long since the watcher handed them over. With nothing changed, a
+    frame allocates nothing (the facade's count).
+  - `App::offscreen` and `App::update` never reload, so recordings and
+    captures do not change; nor does a build without `dev`. What the game
+    copied out of an asset outside these, such as the sandbox's `Sprites`
+    for its stress scenes, and the entities it spawned of prefabs itself,
+    stay as they were. Under `dev` the facade takes the swapped atlases,
+    prefabs and levels from `drain_swapped`, so the game does not see
+    them there.
+  - Measured on the sandbox, from the save of a source to the game's log
+    line of its reload, which the next frame draws: 0.05 to 0.43 s for a
+    sprite's pixels, an Aseprite export's tags, a prefab, the LDtk level
+    and a shader, the level slowest (M5.8's notes in `docs/roadmap.md`).
 
 ## `nadir-cook` (library + CLI)
 

@@ -114,9 +114,8 @@ flowchart LR
     cook -->|"reads"| src
     cook -->|"writes, skipping jobs and files that did not change"| loose
     cook -->|"packs every output into"| pack
-    game -->|"with dev: reads the loose files"| loose
+    game -->|"with dev: reads the loose files, and reloads those that change"| loose
     game -->|"without dev: reads the pack when it is there, else the loose files"| pack
-    game -.->|"planned M5.8: reloads what changed"| loose
     game -->|"writes"| logs
     game -->|"window, events, OpenGL"| os
     xtask -->|"bench: cargo run --release --package nadir-bench"| bench

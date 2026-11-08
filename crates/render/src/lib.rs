@@ -44,8 +44,8 @@
 //! texture reloaded behind its handle through `nadir-assets` needs nothing
 //! of the renderer: each frame looks its textures up again, so the new
 //! texels are drawn from the first frame after the finish that swaps them
-//! in. The engine's facade is to do both in development builds (roadmap
-//! M5.8).
+//! in. The engine's facade does both in development builds, under its
+//! `dev` feature (roadmap M5.8).
 //!
 //! **What a frame draws.** A [`RenderFrame`] holds the [`Camera2D`], the
 //! clear color, the [`SpriteDraw`]s (each with a [`SortMode`] and a

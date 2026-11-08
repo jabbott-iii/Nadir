@@ -27,12 +27,11 @@ shows only a few of its fields and methods: the ones the design rests on.
   error type of a `Result` are left out.
 
 Nothing here is planned work: the diagrams show only what is built. The
-Metal backend, audio, the debug tools, the game's hot reload, bitmap text,
-gamepads, saves and pathfinding are not built yet (see `docs/roadmap.md`),
-so they do not appear. The asset server's reload and its watcher (roadmap
-M5.16) are built, and drawn, though the facade does not use them yet
-(M5.8). One member that exists in the code for planned work,
-`ShaderSource::msl`, carries a note.
+Metal backend, audio, the debug tools, bitmap text, gamepads, saves and
+pathfinding are not built yet (see `docs/roadmap.md`), so they do not
+appear. The members only the `dev` feature compiles, the facade's hot
+reload's (roadmap M5.8), are marked `dev`. One member that exists in the
+code for planned work, `ShaderSource::msl`, carries a note.
 
 ## Overview: types across crates
 
@@ -689,8 +688,8 @@ bytes: loose files, or the cook's pack `game.kpak`. In builds without the
 there but does not open, the facade's private `Unopened` source fails every
 read with the error that opening gave. `Source::modified` gives a file's
 time of change to the asset server's watcher thread, `nadir-assets-watch`,
-which asks it for each loaded path every 250 ms (M5.16); the facade does
-not start the watcher yet (M5.8). Of these sources only `LooseSource`
+which asks it for each loaded path every 250 ms (M5.16), and which the
+facade starts under `dev` (M5.8). Of these sources only `LooseSource`
 overrides its default, `None`.
 
 ```mermaid
@@ -917,6 +916,7 @@ classDiagram
         +path(name) String
         +get(name) Option~Prefab~
         +insert(source, file)
+        +remove(name) Option~Prefab~
         +load(server, registry, name, scope) Result
         +load_level(server, registry, level, scope) Result
         +chain(name) Result~Vec~Prefab~~
@@ -1642,7 +1642,9 @@ classDiagram
 `App` owns the configuration, the ECS world, the schedule, the input action
 set and the fixed clock. It does not own the GPU: the main loop's private
 `EngineCore` owns a `Graphics` beside it, or none when there is no GPU
-device. `Offscreen` does the same for headless rendering.
+device. `Offscreen` does the same for headless rendering. Under `dev`,
+`EngineCore` also owns the `HotReload`, where there is a `Graphics`, which
+reloads what changed after each drawn frame, and its `ShaderWatch`.
 
 ```mermaid
 classDiagram
@@ -1654,6 +1656,7 @@ classDiagram
         -actions Actions
         -clock FixedClock
         -profile Vec~ScopeRecord~
+        -shader_dir PathBuf, dev
         +new(config) App
         +insert_resource(resource) App
         +add_event~T~() App
@@ -1693,6 +1696,22 @@ classDiagram
         -stopwatch Stopwatch
         -graphics Option~Graphics~
         -error Option~Error~
+        -reload Option~HotReload~, dev
+    }
+    class HotReload {
+        <<dev>>
+        -shaders Option~ShaderWatch~
+        -since Option
+        -level_due bool
+        -start(world, shaders) HotReload
+        -frame(world, renderer, device)
+    }
+    class ShaderWatch {
+        <<dev>>
+        -dir PathBuf
+        -shared Arc~Shared~
+        -thread Option~JoinHandle~
+        -take_changed() u64
     }
     class Graphics {
         -renderer Renderer
@@ -1720,6 +1739,9 @@ classDiagram
     App *-- FixedClock
     EngineCore *-- App
     EngineCore "1" *-- "0..1" Graphics : none without a GPU
+    EngineCore "1" *-- "0..1" HotReload : dev, with a GPU
+    HotReload "1" *-- "0..1" ShaderWatch : if render's shaders/ is there
+    HotReload ..> Renderer : reload_program
     Offscreen *-- App
     Offscreen *-- Graphics
     Graphics *-- Renderer
@@ -1974,6 +1996,7 @@ classDiagram
         +add(clip) Handle~Clip~
         +add_atlas(atlas, pages) Result~Vec~
         +release_atlas(pages) bool
+        -reload_atlas(atlas, pages) Option~AtlasReload~, dev
         +get(handle) Option~Clip~
         +find(name) Option~Handle~Clip~~
     }
@@ -2123,4 +2146,5 @@ The main files these diagrams were drawn from:
 - `crates/collision/src/world.rs`, `shape.rs`, `grid.rs`, `hash.rs`,
   `slide.rs`, `sweep.rs`, `trigger.rs`
 - `crates/engine/src/app.rs`, `components.rs`, `collisions.rs`,
-  `animation.rs`, `level.rs`, `reflected.rs`, `pack.rs`, `error.rs`
+  `animation.rs`, `level.rs`, `reflected.rs`, `pack.rs`, `error.rs`,
+  `hot_reload.rs`

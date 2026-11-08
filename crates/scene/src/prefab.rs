@@ -139,6 +139,16 @@ impl PrefabLibrary {
             .insert(file.name.clone(), Prefab { source, file });
     }
 
+    /// Removes the prefab `name`, and returns it, if it is loaded, so that
+    /// the next [`PrefabLibrary::load`] of it reads its file again: as the
+    /// facade does under `dev`, for a prefab whose file was unloaded, and
+    /// so is no longer watched for hot reload (roadmap M5.8). A prefab that
+    /// extends it keeps its own file, and its chain gives
+    /// [`PrefabError::MissingBase`] until this one is loaded again.
+    pub fn remove(&mut self, name: &str) -> Option<Prefab> {
+        self.prefabs.remove(name)
+    }
+
     /// Loads the prefab `name`, and each prefab it extends, from
     /// [`PrefabLibrary::path`], in `scope`, unless they are loaded; each is
     /// read before this returns ([`AssetServer::load_now_in`]). Then checks

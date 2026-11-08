@@ -33,8 +33,8 @@ use nadir_gfx::{BlendMode, ShaderSource, UniformBlockDesc, VertexAttribute, Vert
 /// The renderer includes the sources when it is compiled, and reads no
 /// file. The folder is for a game that watches the files and gives them to
 /// [`Renderer::reload_program`](crate::Renderer::reload_program) when they
-/// change, as the engine's facade is to do in development builds (roadmap
-/// M5.8). It is the path on the machine that compiled the crate: for a
+/// change, as the engine's facade does in development builds, under its
+/// `dev` feature (roadmap M5.8). It is the path on the machine that compiled the crate: for a
 /// crate taken from crates.io, a folder in cargo's registry, which cargo
 /// does not rebuild when its files change, so that the files edited there
 /// and the sources compiled in drift apart. Edit the shaders of a path dependency, or of a

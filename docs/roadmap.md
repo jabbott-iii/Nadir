@@ -3803,7 +3803,7 @@ by the batched sprite renderer.
     would hide; the code of another, a reading of strings in gfx that the
     line pass makes needless, was removed.
 
-- [ ] **M5.8 — hot reload: the game reloads what changed**
+- [x] **M5.8 — hot reload: the game reloads what changed**
   - Note (from M5.8, ADR-0042): split, it keeps M5.8's number and comes
     after M5.15, M5.16 and M5.17. The session runs its demonstration.
   - Note (from M5.6, ADR-0038): `PrefabLibrary` keeps every prefab a level
@@ -3857,6 +3857,110 @@ by the batched sprite renderer.
     before and after, the reloads' times read from the log, and every
     edit put back; describe what was edited and what was observed;
     `cargo xtask ci`
+  - Built (2026-11-07, ADR-0042, ADR-0043):
+    - The facade, under `dev` only: `App::new` starts the asset watcher,
+      so that what the game's setup reads is watched from before it is
+      read; `App::run`'s loop, where there is a device, starts the hot
+      reload (`hot_reload.rs`) and its shader watcher, the thread
+      `nadir-shader-watch`. After each drawn frame it finds again what the
+      finish swapped in, an atlas's clips by name (`Clips::reload_atlas`)
+      and a prefab in the `PrefabLibrary`; makes the current level again
+      behind its handles (`reload_level`) once an atlas, a prefab or the
+      level's file was swapped and no load or reload is pending; rebuilds
+      the programs whose shader files changed; and hands the paths the
+      watcher saw change to the asset server. Each step is logged with its
+      time. Before a level's prefabs are read, those whose files the asset
+      server no longer holds are removed from the library, so that they
+      are read, and watched, again.
+    - In every build: `Animator::advance` holds a finished play-once
+      clip's new last frame (M4.6's note), and a level holds only an atlas
+      that gave it clips; neither changes anything without a reload.
+    - nadir-scene: `PrefabLibrary::remove`.
+    - Tests: 13 new. `Clips::reload_atlas` (replaced under their handles,
+      a page gained, another atlas's names and pages left alone) and the
+      animator's rule (4, `animation.rs`); `reload_level` and the hot
+      reload's asset half (7, `level.rs`: handles kept and entities anew, a
+      failure partway undone, prefabs read again after a level's load
+      unloaded them, an atlas's first clip, a page gained, the wait for
+      pending loads, a prefab's new base and a renamed file); the run loop
+      on an offscreen context (`app.rs`), where a texture, an atlas, a
+      prefab, the level, a level of a prefab cooked after it, and shaders,
+      good and broken, are rewritten and each seen behind the handles the
+      game holds, then nothing more reloads; `PrefabLibrary::remove`
+      (`prefabs.rs`). The steady-frames test now runs with the hot reload,
+      and still allocates nothing.
+    - The docs: the facade's crate docs ("Hot reload"), README and
+      `App::new` and `App::run`; the sandbox's crate docs; nadir-scene's
+      and nadir-assets' crate docs and READMEs, render's `SHADER_DIR`; the
+      design's "Hot reload (dev)", scene's levels and prefabs, render's
+      reloading; the architecture's threads and features; the class,
+      game-loop (section 11) and C4 diagrams; `AGENTS.md`, `README.md` and
+      `CONTRIBUTING.md` on `cargo dev`.
+  - As built:
+    - The Do line's `PrefabLibrary::remove` for a prefab reloaded became
+      `insert`: removed, the library would lack it until something read it
+      again, and the game's own spawns of it would fail. `remove` serves
+      instead the prefabs whose files a level's load unloaded, which the
+      library kept, unwatched, and which an edit then never reached
+      (ADR-0043).
+    - Sprites' regions are found again by name by making the level again,
+      which spawns its prefabs' and tall tiles' sprites from their names: a
+      `Sprite` keeps no name (ADR-0038). Animated sprites follow their
+      clips. What a game copied itself stays: the sandbox's stress scenes'
+      grass, walls, trees and rocks. The level's entities get new ids.
+    - A page an atlas gains is loaded in `Scope::Global`, as the game and
+      a level may share the atlas; one only a level uses stays until the
+      game ends.
+    - `App::offscreen` and `App::update` never reload, so the demo page's
+      captures and recordings, built without `dev` anyway, do not change.
+      An edit made while the sandbox records under `dev` changes the world,
+      so its replay does not reach the logged hashes (the sandbox's docs).
+    - A shader edited before `App::run`'s loop starts is seen at its next
+      save. A cook whose files straddle a look of the watcher makes the
+      level twice, the first time maybe refused, and logged.
+    - Windows and macOS reload nothing until they draw (M2.6, M2.7): loads
+      finish only in drawn frames. M5's exit criterion, hot reload on all
+      three systems, waits for them.
+  - Measured, the demonstration (2026-11-07, this Linux machine, X11
+    through XWayland, Mesa's llvmpipe): `cargo xtask cook --watch` and
+    `cargo dev` ran, and a script saved six edits in turn, captured the
+    window 1.5 s after each, put the file back byte for byte, and captured
+    it again. From each save, by the file's time of change, to the game's
+    log line of its reload, which the next frame draws:
+    - `sprites/tree.png`, each colour turned round: 0.28 s, the trees drawn
+      in their new colours; put back, 0.23 s.
+    - `sprites/person.json`'s `stand` tag on frame 2: 0.17 s, the clips
+      found again by name and the field made again; the standing person
+      drawn in a walk's pose; put back, 0.37 s.
+    - `data/prefabs/rock.jsonc` tinted `#ff4040`: 0.32 s, the field's rocks
+      drawn red; put back, 0.26 s.
+    - `levels/field.ldtk`, a tree moved 64 pixels: 0.43 s, the field made
+      again with the tree moved; put back, 0.38 s.
+    - `crates/render/shaders/sprite/sprite.frag.glsl` tinted red: 0.11 s,
+      the sprites drawn redder and the tiles not; put back, 0.05 s.
+    - The same file broken: refused in 0.25 s with the compiler's error,
+      and the window as before; put back, rebuilt in 0.20 s.
+    - The cook took 0.01 s of each, 0.11 s after the watch saw the change;
+      a level made again took 0.7 to 1.0 ms. Each capture after a put back
+      matched the capture before the edits but for the flowers' animation,
+      and every source and cooked file was byte for byte as before. With
+      nothing changing, the sandbox's report read "allocated 0 times since
+      the last report".
+  - Review: two agents, one on the code and one planting bugs and
+    checking the docs. The code: 8 findings. Fixed, each with a test: a
+    level refused for a prefab not cooked yet was never made again once it
+    was; a prefab whose file a level's load unloaded was never reloaded
+    again; an atlas that gained its first clip lost it in the level made
+    again; a page gained by an atlas the game shares went with the level;
+    an atlas was found by another's clip names. Documented: the level
+    made twice by a cook, a shader edited before the loop, the 1 s not
+    asserted in the test (measured above). Planted bugs: 23, of which 17
+    failed the tests, 2 could not change a result, and 5 did not fail;
+    each of those 5 now has a test, and fails it. The docs: 9 findings,
+    fixed (the stress scenes' crowds, which follow their clips; the class
+    diagram; a log line that overstated what it timed; what builds without
+    `dev` compile; `reload_level`'s doc; `CONTRIBUTING.md`).
+  - `cargo xtask ci`: all 12 checks ok, 1,648 tests passed, 1 ignored.
 
 **Exit criteria (M5):**
 

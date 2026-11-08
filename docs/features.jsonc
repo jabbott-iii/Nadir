@@ -225,9 +225,9 @@
     {
       "name": "Hot reload",
       "area": "Tools",
-      "summary": "While the cook watches the assets, one saved is cooked again in about a fifth of a second for the sandbox's, by a cook built once, and the cook rewrites only the files whose bytes changed, each atlas page before the file that names it. The asset server reloads a file behind the handles it gave, keeping the value it had when the new one fails, and the later read when two finish out of order, and a watcher thread it starts looks at the loaded files' times of change every 250 ms. The renderer rebuilds a shader program from new sources, keeping the one it had when they do not compile or do not declare its interface, and draws a texture reloaded behind its handle from the next frame. The running game will reload what changed, textures, data, levels and shaders, within a second of the save.",
+      "summary": "An edit saved while the sandbox runs in a development build, beside the cook's watch, is drawn in its window within half a second: a sprite's pixels, an Aseprite export's clips, a prefab, the LDtk level, or a shader. The cook, built once, cooks the edit again in about a fifth of a second and rewrites only the files whose bytes changed; the game's watchers look at the loaded files and the shaders every 250 ms. Each reload lands behind the handles the game holds: a texture draws its new texels, an atlas's clips are replaced by name, a prefab is replaced in its library, and the level is made again around its tile layers, clips and assets, its props spawned anew. A file that fails to load, or a shader that does not compile or fit its program, is logged, and what it would replace stays. With nothing changed, a frame allocates nothing, and release builds hold none of it. On Windows and macOS it comes with drawing there.",
       "tasks": ["M5.15", "M5.16", "M5.17", "M5.8"],
-      "ticked": ["M5.15", "M5.16", "M5.17"]
+      "ticked": ["M5.15", "M5.16", "M5.17", "M5.8"]
     },
     {
       "name": "Audio mixer",

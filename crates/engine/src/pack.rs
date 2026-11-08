@@ -27,7 +27,7 @@ use nadir_core::log::{error, info};
 /// files otherwise. A pack that is there but does not open is logged, and
 /// every load then fails with the error that opening it gave, rather than
 /// reading loose files that may not be its cook's. Without `read_pack`, as
-/// with `dev`, whose hot reload watches them (roadmap M5.8), it reads the
+/// with `dev`, whose hot reload watches them (`App::run`), it reads the
 /// loose files.
 pub(crate) fn asset_server(assets: &Path, on_failure: OnFailure, read_pack: bool) -> AssetServer {
     if !read_pack {

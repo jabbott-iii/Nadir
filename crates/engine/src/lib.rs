@@ -182,6 +182,34 @@
 //!   loads from [`Config::assets`] on worker threads, and frees assets by
 //!   [`Scope`](assets::Scope).
 //!
+//! # Hot reload
+//!
+//! With the `dev` feature, [`App::run`] reloads the files that change while
+//! the game runs, such as those `cargo xtask cook --watch` cooks again, and
+//! nadir-render's shaders, from its `shaders/` folder
+//! ([`SHADER_DIR`](render::SHADER_DIR)). Watchers look at the files' times
+//! of change every 250 ms, and an edit is drawn a frame or two after it is
+//! seen; a shader edited before the loop starts is seen at its next save.
+//! The handles the game holds stay good (ADR-0043):
+//!
+//! - a texture's handle draws its new texels;
+//! - an atlas's clips are replaced by name under their handles, so its
+//!   animators play the new frames on from their time;
+//! - a prefab is replaced in the [`PrefabLibrary`](scene::PrefabLibrary)
+//!   under its name;
+//! - the current level is made again from its files, behind the handles of
+//!   its assets, tile layers and clips, once its file, an atlas or a prefab
+//!   changed; its entities are spawned anew;
+//! - a program is rebuilt from its shader files.
+//!
+//! A file that fails to load, a level that cannot be made again, or shaders
+//! that do not compile or fit their program are logged, and what they
+//! would replace stays. Each reload is logged with its time. What the game
+//! copied out of an asset, such as an atlas's regions into its own sprites,
+//! and the entities it spawned of prefabs itself, do not change.
+//! [`App::offscreen`] and [`App::update`] never reload, so recordings stay
+//! the same, and builds without `dev` hold none of the reload.
+//!
 //! # Replays and determinism
 //!
 //! [`App::play_replay`] plays a recording of the game's actions, made with
@@ -340,7 +368,7 @@
 //! - **Platforms.** On Linux the engine needs X11, or XWayland, and OpenGL
 //!   3.3, which it loads at run time. On Windows and macOS it has no OpenGL
 //!   context yet: [`App::run`] logs that and runs the game without drawing,
-//!   and [`App::offscreen`] fails.
+//!   and so without reloading, and [`App::offscreen`] fails.
 //!
 //! # Features
 //!
@@ -351,8 +379,9 @@
 //!   allocations: the resource `FrameAllocs` holds the last frame's, and
 //!   `thread_alloc_counts` and `process_alloc_counts` give the counts so
 //!   far, as `AllocCounts`. No other crate in the program may then declare
-//!   a `#[global_allocator]`. Turn it on from a feature of the game, never
-//!   from a normal dependency, so that release builds leave it out.
+//!   a `#[global_allocator]`. [`App::run`] reloads what changes while it
+//!   runs ("Hot reload", above). Turn it on from a feature of the game,
+//!   never from a normal dependency, so that release builds leave it out.
 
 // The README's examples are compiled as doc tests too.
 #[cfg(doctest)]
@@ -367,6 +396,8 @@ mod error;
 #[cfg(feature = "dev")]
 mod frame_allocs;
 mod glue;
+#[cfg(feature = "dev")]
+mod hot_reload;
 mod level;
 mod limiter;
 mod log_file;

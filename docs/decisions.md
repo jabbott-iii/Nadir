@@ -3401,3 +3401,140 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   the watch, half of M5.8's 1 s; a renderer needs to keep a replaced
   texture until the GPU is done with it (Metal, M10); or a game needs to
   reload in a release build, such as for mods.
+
+## ADR-0043 — M5.8: the game's hot reload, under `dev` only; the level made again behind its handles; an atlas's clips found again by name; prefabs replaced in place
+
+- **Status:** Proposed
+- **Date:** 2026-11-07
+- **Context:**
+  - ADR-0042 left the game's side of hot reload to M5.8: under `dev`, the
+    facade starts nadir-assets' watcher and watches render's shader
+    files, and each frame reloads textures, atlases (their sprites'
+    regions and clips found again by name), prefabs, the current level
+    and shaders. The roadmap's Do line names `PrefabLibrary::remove`, in
+    nadir-scene, for the prefabs.
+  - A `Sprite` keeps no atlas or sprite name (ADR-0038): a prefab's sprite
+    of an atlas frame, and a tall tile's, copy their regions at spawn.
+    `Sprite`'s fields are public and it is not `#[non_exhaustive]`, so a
+    field more breaks 0.2; `Config` is the same.
+  - `load_level` unloads `Scope::Level`, which ends the handles in it, and
+    makes the tile layers' handles anew, and the clips' when only the
+    level held its atlas. `Clips` knows an atlas by its pages' textures.
+  - The `PrefabLibrary` keeps every prefab a level read, and a later load
+    uses the kept one without reading it again (ADR-0038), while the
+    level's next load unloads its file, which the watcher then stops
+    watching.
+  - `drain_swapped` gives each swapped handle once. The asset watcher's
+    first look is 250 ms after it starts, and a path loaded before it
+    started is watched from that look (M5.16). Render's shader folder,
+    `SHADER_DIR`, is outside `Config::assets`, so outside the asset
+    server's source.
+  - Captures and recordings must not reload: a reload changes the world.
+    M4.6 left open whether an animator that finished a clip that plays
+    once holds the new last frame of a clip replaced under its handle.
+- **Decision:**
+  - **The reload is `dev`'s** (`#[cfg(feature = "dev")]`), so builds
+    without `dev` compile none of it, nor render's `SHADER_DIR` path of the
+    machine that built them. What every build compiles changes nothing
+    there: `PrefabLibrary::remove`, the finished animator's rule below,
+    and a level's hold taken only of an atlas with clips, which is all
+    `Clips` holds. No public API is added but `PrefabLibrary::remove`, and
+    no `Config` field.
+    `App::new` starts the asset watcher, so that the files the game's
+    setup reads are watched from before they are read. `App::run`'s loop,
+    where there is a device, starts the hot reload and a thread,
+    `nadir-shader-watch`, which looks at the times of change of each
+    program's two files every 250 ms and marks the programs that changed
+    in an atomic mask. `App::offscreen` and `App::update` never reload.
+  - **Each drawn frame, after its finish:**
+    1. the atlases, prefabs and level files swapped in are drained; a
+       texture needs nothing, so its swaps are left for the game;
+    2. an atlas's clips are replaced in place by name, under their
+       handles (`Clips::reload_atlas`, the crate's own), in the atlas of
+       its pages, or of one of them when it gains or loses a page: a clip
+       new to it is added, one it no longer has stays as it was, with a
+       warning, so that its handle stays good. A page not loaded yet is
+       loaded in `Scope::Global`, since the game and a level may share the
+       atlas;
+    3. a prefab's new file replaces it in the `PrefabLibrary` under its
+       name (`insert`), and `load` then loads and checks the bases it now
+       extends; a file that names another prefab now is refused, and one
+       the library has not read, as a prefab a level could not load
+       before it was cooked, is left for the level to read;
+    4. once an atlas, a prefab or the current level's file was swapped,
+       and no load or reload is pending, so that the files of one cook
+       seen in one look land together, the current level is made again
+       (`reload_level`, the crate's own);
+    5. the programs whose files changed are rebuilt from them
+       (`Renderer::reload_program`, with no Metal source until M10);
+    6. the paths the watcher saw change are handed to the asset server
+       (`reload_changed`).
+  - **The level made again** keeps what a game may hold of it: it unloads
+    no scope, so its assets keep their handles; its tile layers keep
+    theirs in `TileLayers`, in their order, a layer more added and one
+    fewer removed; its atlases are held again before the last hold goes,
+    so their clips keep theirs. Its entities are spawned anew from its
+    files, which finds their sprites' regions again by name: they get new
+    ids, and what happened to them since the load is undone. A level that
+    cannot be made again stays as it was.
+  - **A level's prefabs whose files were unloaded are read again:** under
+    `dev`, before a level's prefabs are read, by a load or a reload, each
+    of its entities' prefabs, and each base, whose file the asset server
+    no longer holds, as when the last load of a level unloaded
+    `Scope::Level`, is removed from the library (`PrefabLibrary::remove`,
+    new in nadir-scene), so that the level reads it from its file, and the
+    watcher watches that file, again. Without `dev` the library keeps them,
+    as ADR-0038 has it.
+  - **A finished animator holds the new last frame** of a clip that plays
+    once and was replaced, and does not end again (`Animator::advance`).
+  - **Logging:** each step is logged with its time, and once every reload
+    the watcher handed over is made, how long that took.
+- **Consequences:**
+  - Good: the handles a game holds stay good through a reload; a frame
+    with nothing changed allocates nothing (the facade's count); the files
+    of a cook seen in one look make the level once; release builds hold
+    none of it.
+  - Bad: a level made again spawns its entities anew, so their ids and
+    state are lost; what a game copied out of an asset itself (the
+    sandbox's `Sprites`, for its stress scenes) and the entities it
+    spawned of prefabs itself do not change; the facade drains the
+    atlases', prefabs' and levels' swaps, so a game cannot see them; a page
+    an atlas gains is loaded in `Scope::Global`, and stays until the game
+    ends, even for an atlas only a level uses; a cook whose files straddle
+    a look of the watcher makes the level twice, the first time maybe
+    refused, and logged, with half the cook's files; a shader edited
+    before `App::run`'s loop starts is seen at its next save, the renderer
+    having been built from the sources compiled in;
+    `dev` runs one more thread; on Windows and macOS nothing reloads until
+    M2.6 and M2.7, as loads finish only in drawn frames.
+- **Alternatives considered:**
+  - A reloaded prefab removed with `PrefabLibrary::remove`, as the
+    roadmap's Do line has it, and the level made again reading it anew:
+    the library would lack the prefab until something read it again, so
+    the game's own spawns of it would fail; `insert` and `load` keep it
+    whole and check it. `remove` serves the prefabs whose files were
+    unloaded instead.
+  - A page an atlas gains loaded in the level's scope when its other
+    pages are the level's: a game that shares the atlas would hold clips
+    of a page the level frees.
+  - A component, or a `Sprite` field, naming each sprite's atlas frame, to
+    find regions again without making the level again: a field breaks
+    0.2, and a component costs every sprite storage that only `dev` uses.
+  - The level made again at each swap: a cook writes an atlas's pages,
+    then its file, then the level, and the level would be made two or
+    three times.
+  - The asset watcher started by `App::run`: an edit in the first 250 ms
+    would be missed, the setup's files then watched from its first look.
+  - The shaders through the asset server: their folder is outside its
+    source, and a second server starts workers of its own.
+  - The shader files polled on the main thread: system calls in the
+    frame, and a path converted, and so allocated, on Windows.
+  - A public event of what reloaded: no task needs it yet.
+  - Reloading in `App::offscreen` too: recordings would differ from run
+    to run.
+- **Revisit when:** a game needs to learn of a reload, to look up again
+  what it copied (the sandbox's stress scenes, a UI); a level's entities
+  must keep their state through a reload; the Metal sources need
+  reloading (M10.3); a page gained by an atlas only a level uses must be
+  freed with the level; or the level made twice by one cook gets in a
+  game's way.

@@ -381,7 +381,8 @@ OS events ─► platform::Event ─► input (device state, edge accumulation)
 | Main | Window, GPU context, ECS world, renderer, input | Channels to workers; a command queue to audio |
 | Audio (one) | Mixer state, voices, streaming decoders, OS audio device | Command queue in; atomic counters/status out |
 | Workers (N = clamp(cores − 2, 1, 4), the asset server's, ADR-0030) | File reads, decode (QOI, QOA, data) | `std::sync::mpsc` jobs in, results out; GPU uploads happen on main |
-| Hot-reload watcher, `nadir-assets-watch` (M5.16; the facade starts it under `dev`, M5.8, ADR-0042) | Polling of the mtimes of the loaded cooked files every 250 ms, and of the shader files (M5.8); `cargo xtask cook --watch` cooks, in its own process | Channel of changed paths to main |
+| Hot-reload watcher, `nadir-assets-watch` (M5.16; the facade starts it under `dev` in `App::new`, M5.8, ADR-0042) | Polling of the mtimes of the loaded cooked files every 250 ms; `cargo xtask cook --watch` cooks, in its own process | Channel of changed paths to main |
+| Shader watcher, `nadir-shader-watch` (M5.8; the facade's, under `dev`, from `App::run`, ADR-0043) | Polling of the mtimes of render's shader files every 250 ms | An atomic mask of the changed programs, read by main |
 
 - No thread touches the GPU except main.
 - No thread touches the ECS except main.
@@ -392,7 +393,7 @@ OS events ─► platform::Event ─► input (device state, edge accumulation)
 
 | Feature | Crates | Enables |
 | :- | :- | :- |
-| `dev` | `nadir`, `platform`, `sandbox` | A failed asset shows its placeholder; the allocation counter is the global allocator, read through `FrameAllocs` (and `thread_alloc_counts`, `process_alloc_counts`). Still to join it: the debug UI, profiler and console (M7), and hot reload (M5.8) |
+| `dev` | `nadir`, `platform`, `sandbox` | A failed asset shows its placeholder; the allocation counter is the global allocator, read through `FrameAllocs` (and `thread_alloc_counts`, `process_alloc_counts`); hot reload: `App::run` reloads the loose files and shaders that change (M5.8, ADR-0043). Still to join it: the debug UI, profiler and console (M7) |
 | (none) | — | Release behavior: a failed asset shows nothing, there is no allocation counter, and no debug code is compiled in. Assets load from the cook's pack, `game.kpak`, in `Config::assets`, or from its loose files where there is no pack (M5.7, ADR-0041); with `dev`, from the loose files |
 
 Run dev builds with `cargo dev` (the alias above). Release builds never

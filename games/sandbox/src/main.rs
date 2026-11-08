@@ -53,6 +53,21 @@
 //! A recording, when its window is closed, and its replay each log their
 //! ticks and the world's hash after them (`replay.rs`); a recording whose
 //! file failed logs how many ticks reached it.
+//!
+//! With `dev` (`cargo dev`), the game reloads what changes while it runs
+//! (ADR-0043). Run `cargo xtask cook --watch` beside it, and an edit to
+//! `assets/` shows in the window within a second: a sprite's pixels, the
+//! person's clips in `assets/sprites/person.json`, a prop's prefab in
+//! `assets/data/prefabs/`, or the field in `assets/levels/field.ldtk`,
+//! which is made again with its props, the person walking on where they
+//! were. So does an edit to the engine's shaders in
+//! `crates/render/shaders/`. The stress scenes' crowds walk their clips,
+//! which are found again by name, but their grass, walls, trees and rocks
+//! copied their regions out of the atlas at setup, so one of those moved
+//! in the atlas is drawn from its old place there until the sandbox starts
+//! again. An edit made while
+//! `--record` records changes the world mid-run, so a replay of the
+//! recording does not reach the hashes it logged.
 
 mod capture;
 mod map;

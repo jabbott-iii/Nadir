@@ -29,8 +29,9 @@ Built today:
 - asset handles in data, written as their assets' paths, and loaded in a
   scope when read;
 - prefabs: `PrefabLibrary` loads `data/prefabs/<name>.kbj` and the prefabs
-  each extends (at most 16, with no cycle), and spawns entities of them,
-  each component's value its base's, then its own, then an override's;
+  each extends (at most 16, with no cycle), keeps them, until `remove`
+  takes one out to be read again, and spawns entities of them, each
+  component's value its base's, then its own, then an override's;
 - `Level`, the cooked level file as an asset, whose entities
   `PrefabLibrary::spawn_level` spawns through their prefabs.
 

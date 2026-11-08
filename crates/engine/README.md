@@ -37,6 +37,9 @@ Built:
   Aseprite exports and bitmap fonts into atlases, makes level files of
   LDtk projects, and puts all it cooks in one pack file, which release
   builds read;
+- hot reload in development builds: textures, atlases and their clips,
+  prefabs, the current level and shaders, reloaded while the game runs,
+  behind the handles it holds;
 - a world hash, to check that a replay gives the same simulation.
 
 Not built yet:
@@ -44,7 +47,6 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7);
 - audio (M6), text (M7.1), the debug tools (M7), gamepads (M8);
-- hot reload (M5.8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 
@@ -573,6 +575,16 @@ roadmap task M7.1.
     holds what the last frame allocated, and `nadir::thread_alloc_counts`
     and `nadir::process_alloc_counts` give the counts so far. With it on,
     no other crate in the program may declare a `#[global_allocator]`.
+  - `App::run` reloads what changes while it runs: the loaded files, such
+    as those `cargo xtask cook --watch` cooks again, and the engine's
+    shaders. A texture draws its new texels behind its handle; an atlas's
+    clips are replaced by name; a prefab is replaced in the
+    `PrefabLibrary`; the current level is made again, behind the handles
+    of its assets, tile layers and clips, its entities spawned anew; and a
+    shader rebuilds its program. Whatever fails to reload is logged, and
+    what it would replace stays. What the game copied out of an asset
+    itself, such as an atlas's regions, does not change.
+    `App::offscreen` never reloads.
 
 Turn it on from your game's own feature, so that a release build leaves it
 out:
@@ -596,7 +608,7 @@ cargo run --features dev
 - **Windows and macOS:** a game builds, and the engine's tests pass, but its
   window stays empty: there is no OpenGL context there yet (roadmap tasks
   M2.6 and M2.7). `App::run` logs the error and runs the game without
-  drawing; `App::offscreen` returns the error.
+  drawing, and so without reloading; `App::offscreen` returns the error.
 - Call `App::run` on the main thread: macOS opens windows only there.
 
 ## The sandbox

@@ -60,6 +60,21 @@ struct Loaded {
     clear: Color,
 }
 
+impl Loaded {
+    /// Its entities and tile layers counted, for the log.
+    fn counts(&self) -> String {
+        let count = |n: usize, one: &str, many: &str| match n {
+            1 => format!("1 {one}"),
+            n => format!("{n} {many}"),
+        };
+        format!(
+            "{}, {}",
+            count(self.entities.len(), "entity", "entities"),
+            count(self.layers.len(), "tile layer", "tile layers")
+        )
+    }
+}
+
 impl CurrentLevel {
     /// The level's name, as [`load_level`] was given it, if one is loaded.
     pub fn name(&self) -> Option<&str> {
@@ -86,6 +101,26 @@ impl CurrentLevel {
         self.level
             .as_ref()
             .map_or(&[], |level| level.layers.as_slice())
+    }
+
+    /// The path of the level's file, if one is loaded.
+    #[cfg(feature = "dev")]
+    pub(crate) fn path(&self) -> Option<String> {
+        self.name().and_then(level_path)
+    }
+
+    /// Knows the atlas of the level's that was known by `old`, its pages,
+    /// by `new` from now on, as [`Clips`] knows it after a reload
+    /// ([`Clips::reload_atlas`]), so that the level lets go of it there.
+    #[cfg(feature = "dev")]
+    pub(crate) fn replace_atlas_pages(&mut self, old: &[Handle<Texture>], new: &[Handle<Texture>]) {
+        if let Some(level) = &mut self.level {
+            for pages in &mut level.atlases {
+                if pages.as_slice() == old {
+                    *pages = new.to_vec();
+                }
+            }
+        }
     }
 }
 
@@ -242,15 +277,7 @@ pub fn load_level(world: &mut World, name: &str) -> Result<(), LevelError> {
     match make(world, &path, &mut made) {
         Ok(()) => {
             let ms = stopwatch.elapsed().as_secs_f64() * 1000.0;
-            let count = |n: usize, one: &str, many: &str| match n {
-                1 => format!("1 {one}"),
-                n => format!("{n} {many}"),
-            };
-            info!(
-                "loaded the level `{name}` in {ms:.1} ms: {}, {}",
-                count(made.entities.len(), "entity", "entities"),
-                count(made.layers.len(), "tile layer", "tile layers")
-            );
+            info!("loaded the level `{name}` in {ms:.1} ms: {}", made.counts());
             world.resource_mut::<CurrentLevel>().level = Some(made);
             Ok(())
         }
@@ -279,23 +306,91 @@ pub fn unload_level(world: &mut World) -> bool {
     true
 }
 
-/// Removes what `level` made, and unloads [`Scope::Level`].
-fn remove(world: &mut World, level: Loaded) {
-    for &entity in &level.entities {
+/// Makes the level `world` holds again, from its files as they are now,
+/// in place of what it made, and returns whether there was one: the hot
+/// reload's, under `dev` (M5.8). Unlike [`load_level`], it keeps the
+/// handles a game may hold of the level:
+///
+/// - it unloads no scope, so its assets keep their handles, and a file
+///   loaded again gives the value it has now;
+/// - its tile layers keep theirs in [`TileLayers`], in their order: a
+///   layer more is added, and one fewer is removed;
+/// - its atlases' clips keep theirs in [`Clips`]: each atlas is held again
+///   before the last load's hold goes.
+///
+/// Its entities are spawned anew, so their [`Entity`] ids change, and what
+/// happened to them since the level loaded is undone. Its grid and its
+/// background are its new files'; the clear colour it puts back when it
+/// goes is the one from before its load. It logs how long it took.
+///
+/// # Errors
+///
+/// As [`load_level`]: then the level is as it was. Of its new files, the
+/// prefabs they read stay in the library, and the assets they loaded stay
+/// loaded, in [`Scope::Level`], until the level goes.
+#[cfg(feature = "dev")]
+pub(crate) fn reload_level(world: &mut World) -> Result<bool, LevelError> {
+    let Some(old) = world.resource_mut::<CurrentLevel>().level.take() else {
+        return Ok(false);
+    };
+    let stopwatch = Stopwatch::start();
+    let path = level_path(&old.name).expect("a level loaded by its name");
+    let mut made = Loaded {
+        name: old.name.clone(),
+        background: Color::BLACK,
+        entities: Vec::new(),
+        layers: Vec::new(),
+        atlases: Vec::new(),
+        grid: false,
+        clear: old.clear,
+    };
+    if let Err(error) = make(world, &path, &mut made) {
+        // `make` sets the grid last, so a failure left the old one.
+        take_apart(world, &made);
+        world.resource_mut::<CurrentLevel>().level = Some(old);
+        return Err(error);
+    }
+    for &entity in &old.entities {
         world.despawn(entity);
     }
     {
         let mut layers = world.resource_mut::<TileLayers>();
-        for draw in &level.layers {
-            layers.remove(draw.tiles);
+        for (index, draw) in made.layers.iter_mut().enumerate() {
+            let Some(kept) = old.layers.get(index) else {
+                continue;
+            };
+            // A layer the game removed keeps the handle it was added under.
+            if layers.get(kept.tiles).is_some()
+                && let Some(layer) = layers.remove(draw.tiles)
+                && let Some(slot) = layers.get_mut(kept.tiles)
+            {
+                *slot = layer;
+                draw.tiles = kept.tiles;
+            }
+        }
+        for gone in old.layers.iter().skip(made.layers.len()) {
+            layers.remove(gone.tiles);
         }
     }
     {
         let mut clips = world.resource_mut::<Clips>();
-        for pages in &level.atlases {
+        for pages in &old.atlases {
             clips.release_atlas(pages);
         }
     }
+    let ms = stopwatch.elapsed().as_secs_f64() * 1000.0;
+    info!(
+        "reloaded the level `{}` in {ms:.1} ms: {}",
+        made.name,
+        made.counts()
+    );
+    world.resource_mut::<CurrentLevel>().level = Some(made);
+    Ok(true)
+}
+
+/// Removes what `level` made, and unloads [`Scope::Level`].
+fn remove(world: &mut World, level: Loaded) {
+    take_apart(world, &level);
     if level.grid {
         world
             .resource_mut::<Collisions>()
@@ -305,6 +400,25 @@ fn remove(world: &mut World, level: Loaded) {
     world
         .resource_mut::<AssetServer>()
         .unload_scope(Scope::Level);
+}
+
+/// Takes out what `level` made but its grid: despawns its entities, takes
+/// its tile layers out of [`TileLayers`], and lets go of its atlases' clips
+/// in [`Clips`].
+fn take_apart(world: &mut World, level: &Loaded) {
+    for &entity in &level.entities {
+        world.despawn(entity);
+    }
+    {
+        let mut layers = world.resource_mut::<TileLayers>();
+        for draw in &level.layers {
+            layers.remove(draw.tiles);
+        }
+    }
+    let mut clips = world.resource_mut::<Clips>();
+    for pages in &level.atlases {
+        clips.release_atlas(pages);
+    }
 }
 
 /// A tile set of the level: its texture's tiles, and a tile's size in
@@ -346,6 +460,8 @@ fn make(world: &mut World, path: &str, made: &mut Loaded) -> Result<(), LevelErr
     made.background = Color::rgb(file.background[0], file.background[1], file.background[2]);
 
     // Its prefabs, read and checked before anything is made.
+    #[cfg(feature = "dev")]
+    forget_unloaded_prefabs(world, &file);
     {
         let mut server = world.resource_mut::<AssetServer>();
         let registry = world.resource::<TypeRegistry>();
@@ -415,14 +531,17 @@ fn make(world: &mut World, path: &str, made: &mut Loaded) -> Result<(), LevelErr
                 "its tiles across and down are not the level's: cook the level again",
             ));
         }
-        world
+        let held = world
             .resource_mut::<Clips>()
             .add_atlas(&atlas, &pages)
             .map_err(|error| LevelError::Clips {
                 atlas: entry.atlas.clone(),
                 error,
             })?;
-        made.atlases.push(pages);
+        // An atlas of no clip is not held, and is not let go of either.
+        if !held.is_empty() {
+            made.atlases.push(pages);
+        }
         sets.push(Set { tileset, tile });
     }
     // The reader checked that each layer and tall tile names a tile set of
@@ -519,6 +638,41 @@ fn make(world: &mut World, path: &str, made: &mut Loaded) -> Result<(), LevelErr
     world.resource_mut::<Collisions>().set_grid(grid);
     made.grid = true;
     Ok(())
+}
+
+/// Removes from the [`PrefabLibrary`] each prefab the entities of `file`
+/// spawn, and each base it extends as the library has it, whose file the
+/// asset server no longer holds, as when the last load of a level unloaded
+/// it: so that the level reads it from its file again, and the hot reload
+/// watches that file again (M5.8). A prefab the game inserted from
+/// another source is kept.
+#[cfg(feature = "dev")]
+fn forget_unloaded_prefabs(world: &World, file: &LevelFile) {
+    let server = world.resource::<AssetServer>();
+    let loaded = |path: &str| {
+        server
+            .assets::<nadir_scene::PrefabAsset>()
+            .and_then(|assets| assets.handle(path))
+            .is_some()
+    };
+    let mut library = world.resource_mut::<PrefabLibrary>();
+    for entity in &file.entities {
+        let mut next = Some(entity.prefab.clone());
+        // A chain longer than `load` takes, or a cycle, is its to report.
+        for _ in 0..=nadir_scene::MAX_EXTENDS {
+            let Some(name) = next.take() else {
+                break;
+            };
+            let Some(prefab) = library.get(&name) else {
+                break;
+            };
+            next = prefab.extends().map(str::to_string);
+            let path = PrefabLibrary::path(&name);
+            if prefab.source() == path && !loaded(&path) {
+                library.remove(&name);
+            }
+        }
+    }
 }
 
 /// Draws the level's tile layers into the [`RenderFrame`], in their order,
@@ -621,10 +775,10 @@ mod tests {
         .expect("a valid image")
     }
 
-    /// An app whose assets are the files above, with the collision layer
-    /// `World` named if `named`.
-    fn app(named: bool) -> App {
-        let files = HashMap::from([
+    /// The files above, by path, with the prefabs of the stone and the
+    /// ghost.
+    fn files() -> HashMap<String, Vec<u8>> {
+        HashMap::from([
             ("atlas/tiles.kbj".to_string(), kbj(ATLAS)),
             ("atlas/tiles_0.qoi".to_string(), page(64, 64)),
             ("atlas/tiles/ground.tiles.qoi".to_string(), page(32, 16)),
@@ -641,9 +795,16 @@ mod tests {
                 "data/prefabs/ghost.kbj".to_string(),
                 kbj(r#"{ "name": "ghost", "components": { "Health": { "max": 3 } } }"#),
             ),
-        ]);
-        let app = App::new(Config::default())
-            .insert_resource(AssetServer::with_source(Memory(files), OnFailure::Nothing));
+        ])
+    }
+
+    /// An app whose assets are the files above, with the collision layer
+    /// `World` named if `named`.
+    fn app(named: bool) -> App {
+        let app = App::new(Config::default()).insert_resource(AssetServer::with_source(
+            Memory(files()),
+            OnFailure::Nothing,
+        ));
         if named {
             app.collision_layers(&["World"])
         } else {
@@ -860,5 +1021,388 @@ mod tests {
             })
         );
         assert_eq!(unnamed.world().entity_count(), 0);
+    }
+
+    /// A level made again by the hot reload, under `dev` (M5.8).
+    #[cfg(feature = "dev")]
+    mod reloaded {
+        use std::path::Path;
+        use std::sync::{Arc, Mutex, PoisonError};
+
+        use super::*;
+        use crate::hot_reload::{HotReload, Reloads};
+
+        type Files = Arc<Mutex<HashMap<String, Vec<u8>>>>;
+
+        /// The hot reload of `app`, its asset half: no shaders are watched.
+        fn hot(app: &App) -> HotReload {
+            HotReload::start(app.world(), Path::new(""))
+        }
+
+        /// The files above, which a test changes.
+        struct Changing(Files);
+
+        impl Source for Changing {
+            fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError> {
+                let files = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+                files
+                    .get(path.as_str())
+                    .cloned()
+                    .ok_or(AssetError::NotFound)
+            }
+        }
+
+        /// The meadow, loaded, and its files.
+        fn meadow() -> (App, Files) {
+            let files = Arc::new(Mutex::new(files()));
+            let source = Changing(Arc::clone(&files));
+            let mut app = App::new(Config::default())
+                .insert_resource(AssetServer::with_source(source, OnFailure::Nothing))
+                .collision_layers(&["World"]);
+            app.load_level("meadow").expect("the meadow");
+            (app, files)
+        }
+
+        /// Writes `text` as the KBJ file at `path`, and reloads it as the
+        /// watcher would.
+        fn rewrite(app: &App, files: &Files, path: &str, text: &str) {
+            files
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(path.to_string(), kbj(text));
+            let mut server = app.world().resource_mut::<AssetServer>();
+            assert_eq!(server.reload(path), 1, "{path} is loaded once");
+            server.finish_all_loads(&mut FinalizeCtx::new());
+        }
+
+        /// The meadow with each `(from, to)` of `edits` made in its file.
+        fn edited(edits: &[(&str, &str)]) -> String {
+            edits.iter().fold(MEADOW.to_string(), |text, (from, to)| {
+                assert!(text.contains(from), "the meadow has {from}");
+                text.replace(from, to)
+            })
+        }
+
+        #[test]
+        fn a_level_made_again_keeps_its_handles_and_spawns_its_entities_anew() {
+            let (mut app, files) = meadow();
+            let (entities, draw) = {
+                let current = app.world().resource::<CurrentLevel>();
+                (current.entities().to_vec(), current.tile_layers()[0])
+            };
+            let (burn, atlas) = {
+                let world = app.world();
+                let server = world.resource::<AssetServer>();
+                let atlas = server
+                    .assets::<Atlas>()
+                    .and_then(|it| it.handle("atlas/tiles.kbj"));
+                (world.resource::<Clips>().find("tiles/flame/burn"), atlas)
+            };
+            assert!(burn.is_some() && atlas.is_some());
+
+            // The first stone moved, the last cell of the layer emptied,
+            // and a second layer, of one cell.
+            let second = r#", { "tileset": 0, "size": [1, 1], "cell": 16, "origin": [0, 0],
+                    "layer": 2, "depth": 1, "cells": [1] } ],"#;
+            let text = edited(&[
+                (r#""position": [40, 16]"#, r#""position": [44, 20]"#),
+                ("0, 0, 0, 0, 2] } ],", &format!("0, 0, 0, 0, 0] }}{second}")),
+            ]);
+            rewrite(&app, &files, "levels/meadow.klvl", &text);
+            assert_eq!(reload_level(app.world_mut()), Ok(true));
+
+            let world = app.world();
+            let current = world.resource::<CurrentLevel>();
+            // Its first layer under its handle, the second new.
+            let draws = current.tile_layers();
+            assert_eq!(draws.len(), 2);
+            assert_eq!(draws[0], draw);
+            assert_ne!(draws[1].tiles, draw.tiles);
+            let layers = world.resource::<TileLayers>();
+            assert_eq!(layers.len(), 2);
+            let layer = layers.get(draw.tiles).expect("the first layer");
+            assert_eq!(layer.get(IVec2::new(3, 2)), None);
+            assert_eq!(layer.get(IVec2::new(1, 0)).map(|tile| tile.index), Some(1));
+            // Its entities spawned anew, the stone at its new place.
+            assert!(entities.iter().all(|&entity| !world.is_alive(entity)));
+            assert_eq!(world.entity_count(), 3);
+            let stone = current.entities()[1];
+            let at = world.read::<Transform>().get(stone).map(|it| it.position);
+            assert_eq!(at, Some(Vec2::new(44.0, 20.0)));
+            // Its clips and its assets under their handles.
+            assert_eq!(world.resource::<Clips>().find("tiles/flame/burn"), burn);
+            let server = world.resource::<AssetServer>();
+            assert!(atlas.is_some_and(|it| server.state(it).is_some()));
+            drop((current, layers, server));
+
+            // Made again as it first was: the second layer goes.
+            rewrite(&app, &files, "levels/meadow.klvl", MEADOW);
+            assert_eq!(reload_level(app.world_mut()), Ok(true));
+            let world = app.world();
+            assert_eq!(world.resource::<CurrentLevel>().tile_layers(), [draw]);
+            assert_eq!(world.resource::<TileLayers>().len(), 1);
+            assert_eq!(world.entity_count(), 3);
+
+            // The atlas is held once, by the level: its clips go with it.
+            assert!(unload_level(app.world_mut()));
+            assert!(app.world().resource::<Clips>().is_empty());
+            assert!(app.world().resource::<TileLayers>().is_empty());
+            assert_eq!(reload_level(app.world_mut()), Ok(false));
+        }
+
+        #[test]
+        fn a_level_that_cannot_be_made_again_stays_as_it_was() {
+            let (mut app, files) = meadow();
+            let before = {
+                let current = app.world().resource::<CurrentLevel>();
+                (current.entities().to_vec(), current.tile_layers().to_vec())
+            };
+            let burn = app.world().resource::<Clips>().find("tiles/flame/burn");
+            // A stone of a prefab no one cooked: nothing is made.
+            let text = edited(&[(
+                r#""prefab": "stone", "position": [40, 16]"#,
+                r#""prefab": "boulder", "position": [40, 16]"#,
+            )]);
+            rewrite(&app, &files, "levels/meadow.klvl", &text);
+            let error = reload_level(app.world_mut()).expect_err("no boulder");
+            assert!(
+                matches!(&error, LevelError::Prefab(PrefabError::Load { path, .. })
+                    if path == "data/prefabs/boulder.kbj"),
+                "{error}"
+            );
+            assert_eq!(app.world().entity_count(), 3);
+            // A stone whose value does not fit, once its atlas is held again
+            // and its tall tile spawned.
+            let text = edited(&[("[0, -4]", r#""up""#)]);
+            rewrite(&app, &files, "levels/meadow.klvl", &text);
+            let error = reload_level(app.world_mut()).expect_err("a bad offset");
+            assert!(matches!(&error, LevelError::Prefab(_)), "{error}");
+
+            let world = app.world();
+            let current = world.resource::<CurrentLevel>();
+            assert_eq!(current.name(), Some("meadow"));
+            assert_eq!(
+                (current.entities().to_vec(), current.tile_layers().to_vec()),
+                before
+            );
+            assert!(before.0.iter().all(|&entity| world.is_alive(entity)));
+            assert_eq!(world.entity_count(), 3);
+            assert_eq!(world.resource::<TileLayers>().len(), 1);
+            assert_eq!(world.resource::<Clips>().find("tiles/flame/burn"), burn);
+            assert!(world.resource::<Collisions>().grid().is_solid(IVec2::ZERO));
+            drop((world, current));
+
+            // Fixed, it is made again; the failure held nothing.
+            rewrite(&app, &files, "levels/meadow.klvl", MEADOW);
+            assert_eq!(reload_level(app.world_mut()), Ok(true));
+            assert!(unload_level(app.world_mut()));
+            assert!(app.world().resource::<Clips>().is_empty());
+        }
+
+        #[test]
+        fn a_level_loaded_again_reads_the_prefabs_its_last_load_unloaded() {
+            let (mut app, files) = meadow();
+            // The last load's prefab files go with its scope; the stone is
+            // edited meanwhile, its box larger.
+            app.load_level("pond").expect("the pond");
+            files.lock().unwrap_or_else(PoisonError::into_inner).insert(
+                "data/prefabs/stone.kbj".to_string(),
+                kbj(r#"{ "name": "stone", "components": {
+                    "Collider": { "shape": { "Aabb": { "half": [6, 6] } },
+                                  "layer": ["World"], "mask": ["World"] } } }"#),
+            );
+            app.load_level("meadow").expect("the meadow again");
+            let world = app.world();
+            let stone = world.resource::<CurrentLevel>().entities()[1];
+            let shape = world.read::<Collider>().get(stone).map(|it| it.0.shape);
+            assert_eq!(
+                shape,
+                Some(Shape::Aabb {
+                    half: Vec2::splat(6.0)
+                })
+            );
+            // Its file is loaded, and so watched, again.
+            let mut server = world.resource_mut::<AssetServer>();
+            assert_eq!(server.reload("data/prefabs/stone.kbj"), 1);
+        }
+
+        #[test]
+        fn an_atlas_that_gains_its_first_clip_keeps_it_through_the_level() {
+            // The meadow's atlas, its flame of no clip.
+            let still = ATLAS.replace(
+                r#""pivot": [4.0, 8.0],
+            "clips": [ { "name": "burn", "loop": true, "frames": [[0, 100], [1, 100]] } ] },"#,
+                r#""pivot": [4.0, 8.0] },"#,
+            );
+            assert_ne!(still, ATLAS);
+            let files = Arc::new(Mutex::new(files()));
+            files
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert("atlas/tiles.kbj".to_string(), kbj(&still));
+            let source = Changing(Arc::clone(&files));
+            let mut app = App::new(Config::default())
+                .insert_resource(AssetServer::with_source(source, OnFailure::Nothing))
+                .collision_layers(&["World"]);
+            app.load_level("meadow").expect("the meadow");
+            assert!(app.world().resource::<Clips>().is_empty());
+
+            // The flame gains its clip: none of the atlas's was added, so
+            // the level made again adds it.
+            rewrite(&app, &files, "atlas/tiles.kbj", ATLAS);
+            {
+                let world = app.world();
+                let mut server = world.resource_mut::<AssetServer>();
+                let handle = server
+                    .assets::<Atlas>()
+                    .and_then(|it| it.handle("atlas/tiles.kbj"));
+                let atlas = handle
+                    .and_then(|it| server.get(it))
+                    .cloned()
+                    .expect("the atlas");
+                let pages = atlas.load_pages(&mut server, Scope::Level);
+                assert_eq!(
+                    world.resource_mut::<Clips>().reload_atlas(&atlas, &pages),
+                    None
+                );
+            }
+            assert_eq!(reload_level(app.world_mut()), Ok(true));
+            let burn = app.world().resource::<Clips>().find("tiles/flame/burn");
+            assert!(
+                burn.is_some(),
+                "the clip is there after the level is made again"
+            );
+            assert_eq!(reload_level(app.world_mut()), Ok(true));
+            assert_eq!(
+                app.world().resource::<Clips>().find("tiles/flame/burn"),
+                burn
+            );
+            // Held once, by the level.
+            assert!(unload_level(app.world_mut()));
+            assert!(app.world().resource::<Clips>().is_empty());
+        }
+
+        #[test]
+        fn a_level_due_waits_until_no_load_is_pending() {
+            let (mut app, files) = meadow();
+            let mut hot = hot(&app);
+            let longer = ATLAS.replace("[[0, 100], [1, 100]]", "[[0, 100], [1, 300]]");
+            rewrite(&app, &files, "atlas/tiles.kbj", &longer);
+            // A load read, and not made yet.
+            app.world()
+                .resource_mut::<AssetServer>()
+                .load::<Texture>("atlas/elsewhere.qoi");
+            hot.assets(app.world_mut());
+            hot.assets(app.world_mut());
+            let reloads = *app.world().resource::<Reloads>();
+            assert_eq!((reloads.atlases, reloads.levels), (1, 0));
+            // Made: the level is made again, once.
+            app.world()
+                .resource_mut::<AssetServer>()
+                .finish_all_loads(&mut FinalizeCtx::new());
+            hot.assets(app.world_mut());
+            hot.assets(app.world_mut());
+            assert_eq!(app.world().resource::<Reloads>().levels, 1);
+        }
+
+        #[test]
+        fn a_prefab_reloaded_reads_its_new_base_and_one_named_otherwise_is_refused() {
+            let files = Arc::new(Mutex::new(files()));
+            let source = Changing(Arc::clone(&files));
+            let mut app = App::new(Config::default())
+                .insert_resource(AssetServer::with_source(source, OnFailure::Nothing));
+            {
+                let world = app.world();
+                let mut server = world.resource_mut::<AssetServer>();
+                let registry = world.resource::<TypeRegistry>();
+                world
+                    .resource_mut::<PrefabLibrary>()
+                    .load(&mut server, &registry, "stone", Scope::Global)
+                    .expect("the stone");
+            }
+            let mut hot = hot(&app);
+
+            // The stone extends a pebble now, which no one read yet.
+            files.lock().unwrap_or_else(PoisonError::into_inner).insert(
+                "data/prefabs/pebble.kbj".to_string(),
+                kbj(r#"{ "name": "pebble", "components": {} }"#),
+            );
+            let extends = r#"{ "name": "stone", "extends": "pebble", "components": {} }"#;
+            rewrite(&app, &files, "data/prefabs/stone.kbj", extends);
+            hot.assets(app.world_mut());
+            {
+                let world = app.world();
+                let library = world.resource::<PrefabLibrary>();
+                let chain = library.chain("stone").map(|it| it.len());
+                assert_eq!(chain, Ok(2), "the pebble is read");
+                assert_eq!(world.resource::<Reloads>().prefabs, 1);
+            }
+
+            // Its file names another prefab now: the stone stays.
+            let renamed = r#"{ "name": "boulder", "components": {} }"#;
+            rewrite(&app, &files, "data/prefabs/stone.kbj", renamed);
+            hot.assets(app.world_mut());
+            let world = app.world();
+            let library = world.resource::<PrefabLibrary>();
+            assert_eq!(
+                library.get("stone").and_then(|it| it.extends()),
+                Some("pebble")
+            );
+            assert!(library.get("boulder").is_none());
+            assert_eq!(world.resource::<Reloads>().prefabs, 1);
+        }
+
+        #[test]
+        fn an_atlas_on_more_pages_is_let_go_of_by_its_new_ones() {
+            let (mut app, files) = meadow();
+            let burn = app.world().resource::<Clips>().find("tiles/flame/burn");
+            // The atlas gains a page, which the flame's second frame is on.
+            files
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert("atlas/tiles_1.qoi".to_string(), page(64, 64));
+            let text = ATLAS
+                .replace(
+                    r#"{ "path": "atlas/tiles/ground.tiles.qoi", "w": 32, "h": 16 } ],"#,
+                    r#"{ "path": "atlas/tiles/ground.tiles.qoi", "w": 32, "h": 16 },
+                       { "path": "atlas/tiles_1.qoi", "w": 64, "h": 64 } ],"#,
+                )
+                .replace(
+                    r#"{ "page": 0, "x": 11, "y": 1,"#,
+                    r#"{ "page": 2, "x": 11, "y": 1,"#,
+                );
+            assert_ne!(text, ATLAS);
+            let mut hot = hot(&app);
+            rewrite(&app, &files, "atlas/tiles.kbj", &text);
+            // The hot reload finds its clips again with its pages, the new
+            // one loaded, and makes the level again once it is made.
+            hot.assets(app.world_mut());
+            app.world()
+                .resource_mut::<AssetServer>()
+                .finish_all_loads(&mut FinalizeCtx::new());
+            hot.assets(app.world_mut());
+            let world = app.world();
+            assert_eq!(
+                *world.resource::<Reloads>(),
+                Reloads {
+                    started: true,
+                    atlases: 1,
+                    levels: 1,
+                    ..Reloads::default()
+                }
+            );
+            let server = world.resource::<AssetServer>();
+            let page = server
+                .assets::<Texture>()
+                .and_then(|it| it.handle("atlas/tiles_1.qoi"));
+            let clips = world.resource::<Clips>();
+            let frames = burn.and_then(|it| clips.get(it)).map(crate::Clip::frames);
+            assert_eq!(frames.map(|it| Some(it[1].texture)), Some(page));
+            assert_eq!(clips.find("tiles/flame/burn"), burn);
+            drop((server, clips));
+            // The level held it once, through its loads: it goes with it.
+            assert!(unload_level(app.world_mut()));
+            assert!(app.world().resource::<Clips>().is_empty());
+        }
     }
 }

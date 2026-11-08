@@ -128,7 +128,11 @@ cargo dev
 
 `cargo dev` runs the sandbox with the `dev` feature: a development build,
 where a missing asset shows a placeholder, and where the debug tools will
-go (`nadir-debug`). WASD or the arrow keys walk.
+go (`nadir-debug`). WASD or the arrow keys walk. With
+`cargo xtask cook --watch` running beside it, an edit to `assets/`, or to
+the shaders in `crates/render/shaders/`, shows in the running game within
+a second, but for what the game copied at setup (the sandbox's crate
+docs say which).
 
 ## Commands
 

@@ -179,7 +179,9 @@ As built in M5.11 (ADR-0038):
   returns), and checks their components against the registry, at most 16
   of them (`MAX_EXTENDS`): an unknown component, a cycle
   (`slime -> enemy_base -> slime`), a longer chain, a missing base and a
-  file whose prefab is named otherwise are errors (`PrefabError`).
+  file whose prefab is named otherwise are errors (`PrefabError`). It
+  keeps each prefab it read; `remove` takes one out, so that the next
+  `load` reads its file again (M5.8).
 - `PrefabLibrary::spawn(name, overrides, registry, commands, cx)` makes
   each component's value from its layers: the furthest base's, then each
   derived prefab's applied onto it, then the override's
@@ -243,6 +245,22 @@ As built in M5.11 (ADR-0038):
   for the asset server's `has_pending` to clear. The clips of an atlas
   only a prefab names, not a tile set, are not added: the cook lists only
   tile sets' atlases among a level's assets.
+- **Reloaded, under `dev`** (M5.8, ADR-0043): the facade's hot reload
+  makes the current level again once its file, an atlas, or a prefab was
+  reloaded, from its files as they are then. Unlike a load, it keeps the
+  handles a game may hold: it unloads no scope, its tile layers keep
+  their handles in `TileLayers` (a layer more is added, one fewer
+  removed), and its atlases' clips keep theirs, each atlas held again
+  before the last hold goes. Its entities are spawned anew, with new ids,
+  and what happened to them since the load is undone. A level that cannot
+  be made again stays as it was. A prefab reloaded replaces the one of its
+  name in the `PrefabLibrary`, so a level made again, and the game's next
+  spawn, read it; the entities spawned of it outside the level stay as
+  they were. Under `dev`, before a level's prefabs are read, those whose
+  files the asset server no longer holds, as after the last load
+  unloaded `Scope::Level`, are removed from the library
+  (`PrefabLibrary::remove`), so that the level reads them, and the hot
+  reload watches them, again; without `dev` the library keeps them.
 
 ## Saves
 

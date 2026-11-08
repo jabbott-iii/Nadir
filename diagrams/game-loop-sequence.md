@@ -181,6 +181,9 @@ sequenceDiagram
         opt there is Graphics
             Core->>Gfx: draw(world, surface, size)
             Gfx-->>Core: Ok, or an error kept in EngineCore
+            opt dev feature, and the frame drew
+                Core->>Core: HotReload::frame (section 11)
+            end
         end
         opt dev feature
             Core->>Core: FrameAllocs of this frame
@@ -532,13 +535,63 @@ sequenceDiagram
     end
 ```
 
+## 11. Hot reload, under `dev`
+
+With the `dev` feature, `App::new` starts the asset server's watcher, and
+`App::run_loop`, where there is a device, starts the hot reload and its
+shader watcher (M5.8, ADR-0043). After each drawn frame, `HotReload::frame`
+finds again what the frame's finish swapped in, makes the level again once
+no reload is pending, rebuilds the programs whose files changed, and asks
+for the reads of what the watcher saw change, which later frames' finishes
+make (section 7). `App::offscreen` and `App::update` never reload.
+
+```mermaid
+sequenceDiagram
+    box Main thread
+        participant HR as HotReload
+        participant Srv as AssetServer
+        participant Clp as Clips
+        participant Lib as PrefabLibrary
+        participant Lvl as engine level
+        participant Rend as Renderer
+    end
+    box Watcher threads
+        participant AW as nadir-assets-watch
+        participant SW as nadir-shader-watch
+    end
+
+    par every 250 ms
+        AW->>AW: Source::modified of each loaded path
+        AW-)Srv: each path that changed, on a channel
+    and every 250 ms
+        SW->>SW: the times of the shader files
+        SW-)HR: the programs whose files changed, in an atomic mask
+    end
+    HR->>Srv: drain_swapped: atlases, prefabs, levels
+    opt an atlas was swapped
+        HR->>Srv: load_in its pages not loaded yet
+        HR->>Clp: reload_atlas: its clips replaced by name, under their handles
+    end
+    opt a prefab was swapped
+        HR->>Lib: insert the new file, load and check its bases
+    end
+    opt the level is due, and no load or reload is pending
+        HR->>Lvl: reload_level: made again behind its handles
+    end
+    opt a program's files changed
+        HR->>HR: read its two files
+        HR->>Rend: reload_program, or the last one kept
+    end
+    HR->>Srv: reload_changed: a read for each path received
+```
+
+An atlas, a prefab or the current level's file swapped makes the level
+due. A texture needs nothing: the renderer looks its handle up each frame.
+With nothing changed, the frame allocates nothing.
+
 ## Not shown, because it is not built yet
 
 - The audio thread and its mixer (roadmap M6).
-- The game reloading what changed (M5.8). nadir-assets' reload behind a
-  handle and its watcher thread (M5.16), and nadir-render's program
-  rebuilt from new sources (M5.17), are built, but the facade does not
-  start or call them yet, so the loop does not reach them.
 - Gamepads (M8), bitmap text (M7.1), and the debug UI, profiler and console
   (M7.2 to M7.6).
 - Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).
@@ -548,11 +601,12 @@ sequenceDiagram
 
 - `crates/engine/src/app.rs`, `glue.rs`, `level.rs`, `pack.rs`,
   `limiter.rs`, `replay.rs`, `tick_stats.rs`, `frame_allocs.rs`,
-  `collisions.rs`, `animation.rs`, `log_file.rs`
+  `collisions.rs`, `animation.rs`, `log_file.rs`, `hot_reload.rs`
 - `crates/core/src/time.rs`
 - `crates/ecs/src/schedule.rs`, `world.rs`, `events.rs`
 - `crates/input/src/input.rs`
-- `crates/assets/src/server.rs`, `assets.rs`, `workers.rs`, `source.rs`
+- `crates/assets/src/server.rs`, `assets.rs`, `workers.rs`, `source.rs`,
+  `watch.rs`
 - `crates/render/src/renderer.rs`, `batcher.rs`, `plan.rs`, `sort.rs`,
   `frame.rs`, `chunks.rs`, `texture.rs`, `atlas.rs`
 - `crates/gfx/src/device.rs`, `gl/mod.rs`

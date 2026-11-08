@@ -69,7 +69,7 @@ Other ways to run it:
 | :- | :- |
 | `cargo run -p sandbox -- --scene stress-sprites` | 10,000 people walking about in view |
 | `cargo run -p sandbox -- --scene stress-entities` | 5,000 people jostling in a maze of walls |
-| `cargo dev` | A development build: placeholders for missing assets, and allocation counts in the log |
+| `cargo dev` | A development build: placeholders for missing assets, allocation counts in the log, and hot reload of what `cargo xtask cook --watch` cooks |
 
 ## Use it in a game
 

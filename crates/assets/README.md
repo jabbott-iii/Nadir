@@ -42,8 +42,8 @@ Built:
   `reload_changed`, once a frame, reloads those that did; `drain_swapped`
   says which assets were swapped.
 
-Not built yet: the game reloading what changed under the facade's `dev`
-feature (M5.8).
+The engine's facade starts the watcher under its `dev` feature, and its
+`App::run` reloads what changed each frame (M5.8).
 
 The engine's asset types are in nadir-render, `Texture` (`.qoi`) and
 `Atlas` (`.kbj`), and in nadir-scene, `Level` (`.klvl`) and `PrefabAsset`

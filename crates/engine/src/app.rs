@@ -305,6 +305,9 @@ struct EngineCore {
     /// The main thread's heap use at the end of the last frame.
     #[cfg(feature = "dev")]
     allocs_at_frame_end: nadir_platform::AllocCounts,
+    /// The hot reload, where there is a device to draw what it reloads.
+    #[cfg(feature = "dev")]
+    reload: Option<crate::hot_reload::HotReload>,
 }
 
 impl EngineCore {
@@ -313,10 +316,21 @@ impl EngineCore {
     fn frame(&mut self, events: &[Event], window: Option<(GpuSurface<'_>, UVec2)>) {
         let elapsed = self.stopwatch.lap();
         self.app.update(elapsed, events);
-        if let (Some(graphics), Some((surface, size))) = (&mut self.graphics, window)
-            && let Err(error) = graphics.draw(&self.app.world, surface, size)
-        {
-            self.error.get_or_insert(error);
+        if let (Some(graphics), Some((surface, size))) = (&mut self.graphics, window) {
+            let drawn = graphics.draw(&self.app.world, surface, size);
+            #[cfg(feature = "dev")]
+            if drawn.is_ok()
+                && let Some(reload) = &mut self.reload
+            {
+                reload.frame(
+                    &mut self.app.world,
+                    &mut graphics.renderer,
+                    &mut graphics.device,
+                );
+            }
+            if let Err(error) = drawn {
+                self.error.get_or_insert(error);
+            }
         }
         #[cfg(feature = "dev")]
         {
@@ -422,6 +436,10 @@ pub struct App {
     /// `nadir-core`), drained each frame so that the recorder keeps its
     /// buffer. Nothing reads them until the profiler (roadmap M7.3).
     profile: Vec<ScopeRecord>,
+    /// The folder of the shader files the hot reload watches: render's
+    /// `shaders/`, or a test's.
+    #[cfg(feature = "dev")]
+    shader_dir: PathBuf,
 }
 
 impl App {
@@ -429,8 +447,9 @@ impl App {
     /// entities.
     ///
     /// Its [`AssetServer`] loads from [`Config::assets`]. With the `dev`
-    /// feature, it reads the loose files there, and a failed asset shows
-    /// its placeholder. Without it, it reads the cook's pack there,
+    /// feature, it reads the loose files there, watches each file loaded
+    /// from then on for the hot reload of [`App::run`], and a failed asset
+    /// shows its placeholder. Without it, it reads the cook's pack there,
     /// `game.kpak`, when there is one, and the loose files otherwise; a
     /// pack that does not open is logged, and every load then fails with
     /// its error (ADR-0041); and a failed asset shows nothing.
@@ -450,11 +469,18 @@ impl App {
         };
         let mut world = World::new();
         world.insert_resource(Input::new());
-        world.insert_resource(crate::pack::asset_server(
-            &config.assets,
-            on_failure,
-            !cfg!(feature = "dev"),
-        ));
+        #[cfg_attr(not(feature = "dev"), expect(unused_mut))]
+        let mut server =
+            crate::pack::asset_server(&config.assets, on_failure, !cfg!(feature = "dev"));
+        // Watched from before the game's setup reads a file, so that the
+        // hot reload of `App::run` sees an edit made after the read.
+        #[cfg(feature = "dev")]
+        if let Err(cause) = server.start_watcher() {
+            nadir_core::log::warn!(
+                "the assets will not reload: their watcher did not start: {cause}"
+            );
+        }
+        world.insert_resource(server);
         world.insert_resource(RenderFrame::new());
         world.insert_resource(TileLayers::new());
         world.insert_resource(FrameStats::default());
@@ -467,6 +493,8 @@ impl App {
         world.insert_resource(AnimationClock::default());
         #[cfg(feature = "dev")]
         world.insert_resource(crate::FrameAllocs::default());
+        #[cfg(feature = "dev")]
+        world.insert_resource(crate::hot_reload::Reloads::default());
         world.add_event::<TriggerEnter>();
         world.add_event::<TriggerExit>();
         world.add_event::<AnimationFinished>();
@@ -516,6 +544,8 @@ impl App {
             actions: Actions::none(),
             clock: FixedClock::new(TICK_HZ, MAX_FRAME),
             profile: Vec::new(),
+            #[cfg(feature = "dev")]
+            shader_dir: PathBuf::from(nadir_render::SHADER_DIR),
         }
     }
 
@@ -793,6 +823,10 @@ impl App {
     /// roadmap M2.6 and M2.7), the error is logged and the game runs
     /// without drawing.
     ///
+    /// With the `dev` feature, it reloads what changes while it runs: the
+    /// loaded assets' files and render's shaders, after each drawn frame
+    /// (the crate's docs, "Hot reload").
+    ///
     /// # Errors
     ///
     /// Fails if the window cannot be opened, the renderer cannot start, or
@@ -838,6 +872,10 @@ impl App {
         for system in self.schedule.describe() {
             debug!("  {system}");
         }
+        #[cfg(feature = "dev")]
+        let reload = graphics
+            .is_some()
+            .then(|| crate::hot_reload::HotReload::start(&self.world, &self.shader_dir));
         let mut limiter = FrameLimiter::new(self.config.frame_rate_limit, Instant::now());
         let core = Rc::new(RefCell::new(EngineCore {
             app: self,
@@ -846,6 +884,8 @@ impl App {
             error: None,
             #[cfg(feature = "dev")]
             allocs_at_frame_end: nadir_platform::thread_alloc_counts(),
+            #[cfg(feature = "dev")]
+            reload,
         }));
         let modal_core = Rc::clone(&core);
         window.set_modal_frame_callback(Box::new(move |_frame| {
@@ -2419,9 +2459,431 @@ mod tests {
         }
     }
 
+    /// The hot reload, under `dev` (M5.8): files rewritten while the loop
+    /// runs reach the game behind the handles it holds.
+    #[cfg(feature = "dev")]
+    mod hot_reload {
+        use std::fs::{self, File};
+        use std::path::{Path, PathBuf};
+        use std::time::SystemTime;
+        use std::{env, process};
+
+        use nadir_assets::Handle;
+        use nadir_codec::qoi::{self, Channels, ColorSpace, Header};
+        use nadir_core::Rect;
+        use nadir_platform::HeadlessGl;
+        use nadir_render::{Atlas, Program, SHADER_DIR, Texture, TileLayer};
+
+        use super::steady_frames::{headless, write_kbj};
+        use super::*;
+        use crate::hot_reload::Reloads;
+        use crate::{Clip, Clips};
+
+        /// The atlas `atlas/sprites.kbj`: a hero of two frames, who walks
+        /// in `walk`'s steps; a rock, its frame at `rock` pixels across;
+        /// and a tile set of two tiles of 8 pixels, on a page of its own.
+        fn atlas(walk: &str, rock: u32) -> String {
+            format!(
+                r#"{{ "version": 2,
+                     "pages": [ {{ "path": "atlas/sprites_0.qoi", "w": 32, "h": 32 }},
+                                {{ "path": "atlas/ground.qoi", "w": 16, "h": 8 }} ],
+                     "sprites": [
+                       {{ "name": "sprites/hero", "pivot": [4.0, 8.0],
+                          "frames": [ {{ "page": 0, "x": 0, "y": 0, "w": 8, "h": 8, "ox": 0, "oy": 0, "sw": 8, "sh": 8 }},
+                                      {{ "page": 0, "x": 8, "y": 0, "w": 8, "h": 8, "ox": 0, "oy": 0, "sw": 8, "sh": 8 }} ],
+                          "clips": [ {{ "name": "walk", "loop": true, "frames": [{walk}] }} ] }},
+                       {{ "name": "sprites/rock", "pivot": [4.0, 8.0],
+                          "frames": [ {{ "page": 0, "x": {rock}, "y": 8, "w": 8, "h": 8, "ox": 0, "oy": 0, "sw": 8, "sh": 8 }} ] }},
+                       {{ "name": "tiles/ground", "tiles": [8, 8],
+                          "frames": [ {{ "page": 1, "x": 0, "y": 0, "w": 16, "h": 8, "ox": 0, "oy": 0, "sw": 16, "sh": 8 }} ] }} ] }}"#
+            )
+        }
+
+        /// The prefab `name`: a sprite of the atlas's rock, in `layer`.
+        fn rock(name: &str, layer: u8) -> String {
+            format!(
+                r#"{{ "name": "{name}", "components": {{ "Transform": {{}},
+                     "Sprite": {{ "atlas": "atlas/sprites.kbj", "sprite": "sprites/rock", "frame": 0,
+                                  "layer": {layer} }} }} }}"#
+            )
+        }
+
+        /// The level `yard`: a layer of 4 × 2 cells of the tile `tile`, and
+        /// an entity of the prefab `prop`.
+        fn yard(tile: u16, prop: &str) -> String {
+            let cells = vec![(tile + 1).to_string(); 8].join(", ");
+            format!(
+                r#"{{ "version": 1, "size": [32, 16], "background": [0, 0, 255],
+                     "assets": ["atlas/sprites.kbj"],
+                     "tilesets": [ {{ "atlas": "atlas/sprites.kbj", "sprite": "tiles/ground",
+                                      "columns": 2, "rows": 1, "animations": [] }} ],
+                     "layers": [ {{ "tileset": 0, "size": [4, 2], "cell": 8, "origin": [-16, -8],
+                                    "layer": 0, "depth": 0, "cells": [{cells}] }} ],
+                     "tall": [],
+                     "entities": [ {{ "prefab": "{prop}", "position": [0, 0], "overrides": {{}} }} ] }}"#
+            )
+        }
+
+        /// A QOI texture of `size`, of one color.
+        fn texture(size: UVec2) -> Vec<u8> {
+            let header = Header {
+                width: size.x,
+                height: size.y,
+                channels: Channels::Rgba,
+                color_space: ColorSpace::Srgb,
+            };
+            let pixels = [200, 80, 40, 255].repeat((size.x * size.y) as usize);
+            qoi::encode(&header, &pixels).expect("a valid image")
+        }
+
+        /// What the last frame saw.
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        struct Seen {
+            /// The size of the atlas's first page.
+            page: Option<UVec2>,
+            /// How long the walk lasts, under the handle the game holds.
+            walk: Option<Duration>,
+            /// The level's rock: its region, and its layer.
+            rock: Option<(Rect, u8)>,
+            /// The level's first layer, and the tile of its first cell.
+            layer: Option<(Handle<TileLayer>, Option<u16>)>,
+            reloads: Reloads,
+        }
+
+        type SharedSeen = Rc<RefCell<Seen>>;
+
+        /// The game's handles, which `look` reads.
+        struct Game {
+            page: Handle<Texture>,
+            walk: Handle<Clip>,
+        }
+
+        fn look(world: &World, _: &Frame) {
+            let game = world.resource::<Game>();
+            let server = world.resource::<AssetServer>();
+            let current = world.resource::<CurrentLevel>();
+            let rock = current.entities().first().and_then(|&rock| {
+                let sprites = world.read::<Sprite>();
+                sprites.get(rock).map(|sprite| (sprite.uv, sprite.layer))
+            });
+            let layer = current.tile_layers().first().map(|draw| {
+                let layers = world.resource::<TileLayers>();
+                let tile = layers
+                    .get(draw.tiles)
+                    .and_then(|layer| layer.get(nadir_core::IVec2::ZERO))
+                    .map(|tile| tile.index);
+                (draw.tiles, tile)
+            });
+            *world.resource::<SharedSeen>().borrow_mut() = Seen {
+                page: server.get(game.page).map(Texture::size),
+                walk: world.resource::<Clips>().get(game.walk).map(Clip::duration),
+                rock,
+                layer,
+                reloads: *world.resource::<Reloads>(),
+            };
+        }
+
+        /// An edit, and what shows it was reloaded.
+        struct Step {
+            name: &'static str,
+            edit: fn(&Files),
+            done: fn(&Seen, &Seen) -> bool,
+        }
+
+        /// Where the game's files are.
+        struct Files {
+            assets: PathBuf,
+            shaders: PathBuf,
+        }
+
+        impl Files {
+            /// Writes `bytes` at `path` as the cook does, through a file
+            /// beside it and a rename, with a time of change `ahead`
+            /// seconds from now, so that a system that keeps coarse times
+            /// sees each write.
+            fn write(path: &Path, bytes: &[u8], ahead: u64) {
+                let temporary = path.with_extension("tmp");
+                fs::write(&temporary, bytes).expect("write the file");
+                File::options()
+                    .write(true)
+                    .open(&temporary)
+                    .and_then(|file| {
+                        file.set_modified(SystemTime::now() + Duration::from_secs(ahead))
+                    })
+                    .expect("set its time");
+                fs::rename(&temporary, path).expect("rename it into place");
+            }
+
+            fn kbj(&self, path: &str, json: &str, ahead: u64) {
+                let temporary = self.assets.join("edit.kbj");
+                write_kbj(&temporary, json);
+                let bytes = fs::read(&temporary).expect("the file just written");
+                fs::remove_file(&temporary).expect("remove it");
+                Self::write(&self.assets.join(path), &bytes, ahead);
+            }
+
+            fn sprite_shader(&self) -> PathBuf {
+                self.shaders.join(Program::Sprite.fragment_file())
+            }
+        }
+
+        /// The edits, one after another, each waited for.
+        const STEPS: &[Step] = &[
+            Step {
+                name: "a texture of another size",
+                edit: |files| {
+                    let page = files.assets.join("atlas/sprites_0.qoi");
+                    Files::write(&page, &texture(UVec2::new(64, 64)), 10);
+                },
+                done: |_, now| now.page == Some(UVec2::new(64, 64)),
+            },
+            Step {
+                name: "an atlas whose walk is longer and whose rock moved",
+                edit: |files| {
+                    files.kbj(
+                        "atlas/sprites.kbj",
+                        &atlas("[0, 50], [1, 50], [0, 50]", 24),
+                        20,
+                    )
+                },
+                done: |first, now| {
+                    now.walk == Some(Duration::from_millis(150))
+                        && now.rock.map(|rock| rock.0) != first.rock.map(|rock| rock.0)
+                },
+            },
+            Step {
+                name: "a prefab in another layer",
+                edit: |files| files.kbj("data/prefabs/rock.kbj", &rock("rock", 3), 30),
+                done: |_, now| now.rock.map(|rock| rock.1) == Some(3),
+            },
+            Step {
+                name: "a level of other tiles",
+                edit: |files| files.kbj("levels/yard.klvl", &yard(1, "rock"), 40),
+                done: |first, now| {
+                    now.layer.map(|layer| layer.1) == Some(Some(1))
+                        && now.layer.map(|layer| layer.0) == first.layer.map(|layer| layer.0)
+                },
+            },
+            Step {
+                name: "a level of a prefab not cooked yet",
+                edit: |files| files.kbj("levels/yard.klvl", &yard(1, "boulder"), 50),
+                done: |_, now| now.reloads.levels_refused == 1,
+            },
+            Step {
+                name: "the prefab cooked after its level",
+                edit: |files| files.kbj("data/prefabs/boulder.kbj", &rock("boulder", 5), 60),
+                done: |_, now| now.rock.map(|rock| rock.1) == Some(5),
+            },
+            Step {
+                name: "a shader edited",
+                edit: |files| {
+                    let path = files.sprite_shader();
+                    let mut text = fs::read_to_string(&path).expect("the shader");
+                    text.push_str("\n// Edited.\n");
+                    Files::write(&path, text.as_bytes(), 70);
+                },
+                done: |_, now| now.reloads.shaders == 1,
+            },
+            Step {
+                name: "a shader that does not compile",
+                edit: |files| {
+                    let broken =
+                        "#version 330 core\nout vec4 color;\nvoid main() { color = oops; }\n";
+                    Files::write(&files.sprite_shader(), broken.as_bytes(), 80);
+                },
+                done: |_, now| now.reloads.shaders_refused == 1,
+            },
+        ];
+
+        /// The window: an offscreen context, which makes each edit once the
+        /// last is seen, and closes after the last, or once one is not seen
+        /// in [`PATIENCE`].
+        struct Editing {
+            gl: Option<HeadlessGl>,
+            seen: SharedSeen,
+            files: Files,
+            /// What the first frame that drew the page saw.
+            first: Option<Seen>,
+            /// The step being waited for, and when its edit was made.
+            step: usize,
+            since: Option<Instant>,
+            /// How long each step took to be seen.
+            took: Vec<Duration>,
+            started: Instant,
+            /// When the last step was seen.
+            quiet: Option<Instant>,
+        }
+
+        /// How long the loop runs on after the last edit is seen: more than
+        /// two looks of the watchers.
+        const QUIET: Duration = Duration::from_millis(600);
+
+        /// How long an edit may take to be seen, which a loaded machine
+        /// running the tests stretches: the watchers look every 250 ms.
+        const PATIENCE: Duration = Duration::from_secs(5);
+
+        impl EventSource for Editing {
+            fn pump_events(&mut self, out: &mut Vec<Event>) {
+                let seen = *self.seen.borrow();
+                let Some(first) = self.first else {
+                    // The first frames make the assets loaded at setup.
+                    if seen.page.is_some() {
+                        self.first = Some(seen);
+                    } else if self.started.elapsed() > PATIENCE {
+                        out.push(Event::CloseRequested);
+                    }
+                    return;
+                };
+                let Some(step) = STEPS.get(self.step) else {
+                    // A while with no edit, in which nothing more reloads.
+                    let quiet = self.quiet.get_or_insert_with(Instant::now);
+                    if quiet.elapsed() > QUIET {
+                        out.push(Event::CloseRequested);
+                    }
+                    return;
+                };
+                match self.since {
+                    None => {
+                        (step.edit)(&self.files);
+                        self.since = Some(Instant::now());
+                    }
+                    Some(since) if (step.done)(&first, &seen) => {
+                        self.took.push(since.elapsed());
+                        self.step += 1;
+                        self.since = None;
+                    }
+                    Some(since) if since.elapsed() > PATIENCE => out.push(Event::CloseRequested),
+                    Some(_) => {}
+                }
+            }
+
+            fn set_modal_frame_callback(&mut self, _callback: Box<dyn FnMut(ModalFrame)>) {}
+
+            fn gpu_surface(&self) -> Option<GpuSurface<'_>> {
+                self.gl.as_ref().map(|gl| GpuSurface::Gl(gl))
+            }
+
+            fn window_size(&self) -> UVec2 {
+                UVec2::new(64, 36)
+            }
+        }
+
+        #[test]
+        fn files_rewritten_while_the_game_runs_reach_it_behind_its_handles() {
+            let expected = env::var("NADIR_EXPECT_GL_RENDERER").unwrap_or_default();
+            let Some(gl) = headless(&expected) else {
+                return;
+            };
+            let root = env::temp_dir().join(format!("nadir-engine-hot-reload-{}", process::id()));
+            let files = Files {
+                assets: root.join("assets"),
+                shaders: root.join("shaders"),
+            };
+            for &program in Program::ALL {
+                for file in [program.vertex_file(), program.fragment_file()] {
+                    let to = files.shaders.join(file);
+                    fs::create_dir_all(to.parent().expect("a folder")).expect("make the folder");
+                    fs::copy(Path::new(SHADER_DIR).join(file), to).expect("copy the shader");
+                }
+            }
+            let assets = &files.assets;
+            fs::create_dir_all(assets.join("atlas")).expect("make the folder");
+            fs::write(
+                assets.join("atlas/sprites_0.qoi"),
+                texture(UVec2::splat(32)),
+            )
+            .expect("write the page");
+            fs::write(assets.join("atlas/ground.qoi"), texture(UVec2::new(16, 8)))
+                .expect("write the page");
+            write_kbj(
+                &assets.join("atlas/sprites.kbj"),
+                &atlas("[0, 100], [1, 100]", 16),
+            );
+            write_kbj(&assets.join("data/prefabs/rock.kbj"), &rock("rock", 1));
+            write_kbj(&assets.join("levels/yard.klvl"), &yard(0, "rock"));
+
+            let seen = Rc::new(RefCell::new(Seen::default()));
+            let mut app = App::new(Config {
+                assets: assets.clone(),
+                virtual_resolution: UVec2::new(32, 18),
+                ..Config::default()
+            })
+            .insert_resource(Rc::clone(&seen))
+            .add_frame_system(FrameStage::Ui, "look", look);
+            app.shader_dir = files.shaders.clone();
+            // The game adds the atlas's clips, as the sandbox does, and
+            // holds the walk's handle and the first page's.
+            let game = {
+                let world = app.world();
+                let mut server = world.resource_mut::<AssetServer>();
+                let handle = server
+                    .load_now::<Atlas>("atlas/sprites.kbj", &mut FinalizeCtx::new())
+                    .expect("the atlas");
+                let atlas = server.get(handle).cloned().expect("the atlas");
+                let pages = atlas.load_pages(&mut server, nadir_assets::Scope::Global);
+                world
+                    .resource_mut::<Clips>()
+                    .add_atlas(&atlas, &pages)
+                    .expect("the clips");
+                let walk = world
+                    .resource::<Clips>()
+                    .find("sprites/hero/walk")
+                    .expect("walk");
+                Game {
+                    page: pages[0],
+                    walk,
+                }
+            };
+            app = app.insert_resource(game);
+            app.load_level("yard").expect("the yard");
+
+            let mut device = Device::new(GpuSurface::Gl(&gl)).expect("a device");
+            let config = RenderConfig {
+                virtual_resolution: UVec2::new(32, 18),
+            };
+            let renderer = Renderer::new(&mut device, &config).expect("a renderer");
+            let mut window = Editing {
+                gl: Some(gl),
+                seen: Rc::clone(&seen),
+                files,
+                first: None,
+                step: 0,
+                since: None,
+                took: Vec::new(),
+                started: Instant::now(),
+                quiet: None,
+            };
+            app.run_loop(&mut window, Some(Graphics { renderer, device }))
+                .expect("the frames draw");
+            fs::remove_dir_all(&root).expect("remove the test's folder");
+
+            let first = window.first.expect("the page loaded");
+            assert!(first.reloads.started, "the hot reload started");
+            for (step, took) in STEPS.iter().zip(&window.took) {
+                nadir_core::log::info!("{}: seen after {} ms", step.name, took.as_millis());
+            }
+            let missed = STEPS.get(window.took.len()).map(|step| step.name);
+            assert_eq!(missed, None, "an edit was not seen within {PATIENCE:?}");
+            let reloads = seen.borrow().reloads;
+            assert_eq!(reloads.atlases, 1, "{reloads:?}");
+            assert_eq!(reloads.prefabs, 1, "{reloads:?}");
+            assert_eq!(
+                (reloads.levels, reloads.levels_refused),
+                (4, 1),
+                "{reloads:?}"
+            );
+            assert_eq!(
+                (reloads.shaders, reloads.shaders_refused),
+                (1, 1),
+                "{reloads:?}"
+            );
+        }
+    }
+
     /// A steady frame of 10,000 sprites allocates nothing (roadmap M3.5),
     /// now drawn from entities, over a level's tile layer, which the
-    /// engine's `nadir::extract_level` draws (M5.6).
+    /// engine's `nadir::extract_level` draws (M5.6), with the hot reload
+    /// watching its files and nothing changing (M5.8).
     #[cfg(feature = "dev")]
     mod steady_frames {
         use std::env;
@@ -2469,6 +2931,8 @@ mod tests {
         struct Seen {
             frames: Vec<(AllocCounts, FrameStats, u64)>,
             ticks: u64,
+            /// Whether the hot reload ran.
+            reloading: bool,
         }
 
         type SharedSeen = Rc<RefCell<Seen>>;
@@ -2504,7 +2968,7 @@ mod tests {
         /// make one yet (Windows and macOS, until M2.6 and M2.7) and no
         /// renderer is asked for in `NADIR_EXPECT_GL_RENDERER`, as for the
         /// gfx and render tests. Any other failure fails the test.
-        fn headless(expected: &str) -> Option<HeadlessGl> {
+        pub(super) fn headless(expected: &str) -> Option<HeadlessGl> {
             match create_headless_gl() {
                 Ok(gl) => Some(gl),
                 Err(PlatformError::Unsupported) if expected.is_empty() => None,
@@ -2574,7 +3038,7 @@ mod tests {
         }
 
         /// Writes `json` as KBJ at `path`.
-        fn write_kbj(path: &std::path::Path, json: &str) {
+        pub(super) fn write_kbj(path: &std::path::Path, json: &str) {
             let value = json::parse(json, Limits::default()).expect("the test's JSON");
             let bytes = kbj::encode(&value, Limits::default()).expect("KBJ");
             fs::create_dir_all(path.parent().expect("a folder")).expect("make the folder");
@@ -2624,6 +3088,7 @@ mod tests {
                 seen.ticks,
             );
             seen.frames.push(entry);
+            seen.reloading = world.resource::<crate::hot_reload::Reloads>().started;
             // In a warm-up frame, a known allocation, which that frame's
             // count must show.
             if seen.frames.len() == 5 {
@@ -2707,6 +3172,7 @@ mod tests {
             let seen = Rc::new(RefCell::new(Seen {
                 frames: Vec::with_capacity(WARM_UP + COUNTED),
                 ticks: 0,
+                reloading: false,
             }));
             let app = scene(assets.clone(), &seen);
 
@@ -2729,6 +3195,11 @@ mod tests {
             app.run_loop(&mut window, graphics)
                 .expect("the frames draw");
             fs::remove_dir_all(&assets).expect("remove the asset folder");
+            assert_eq!(
+                seen.borrow().reloading,
+                drawn,
+                "the hot reload runs where it draws"
+            );
             let seen = &seen.borrow().frames;
 
             // Frame f runs after pump f; `seen[f - 1]` is what frame f saw,

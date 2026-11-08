@@ -374,8 +374,8 @@ impl Program {
 
 - **Who reads the files:** not the renderer, which has no feature and no
   file reading for it. The caller reads the sources and hands them to
-  `Renderer::reload_program`; under `dev` the facade is to watch
-  `SHADER_DIR`'s files and do so (M5.8). `SHADER_DIR` is the path on the
+  `Renderer::reload_program`; under `dev` the facade watches
+  `SHADER_DIR`'s files and does so (M5.8). `SHADER_DIR` is the path on the
   machine that compiled the crate. For a crate taken from crates.io it is
   in cargo's registry, which the package's files reach but which cargo
   does not rebuild when its files change: edit the shaders of a path

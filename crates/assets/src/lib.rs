@@ -203,9 +203,9 @@
 //! at it; a path loaded before the watcher started is watched from its
 //! first look. On a system that keeps coarse times, two writes within one
 //! tick of its clock look like one. A source that cannot tell when a file
-//! changed, such as a [`PackSource`], shows no change. The facade does not
-//! start the watcher yet: from roadmap M5.8 it will, under its `dev`
-//! feature.
+//! changed, such as a [`PackSource`], shows no change. The engine's
+//! facade starts the watcher under its `dev` feature, and reloads what
+//! changed each frame (roadmap M5.8).
 //!
 //! ```
 //! # use std::collections::HashMap;
