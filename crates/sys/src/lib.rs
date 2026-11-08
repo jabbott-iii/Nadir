@@ -48,13 +48,19 @@
 //!
 //! - `linux::libc`: the dynamic loader, `dlopen`, `dlsym` and `dlerror`.
 //!   There is no `dlclose`: a library stays loaded until the process exits,
-//!   so the function pointers of a table never dangle.
+//!   so the function pointers of a table never dangle. Also the three error
+//!   numbers of ALSA's that the engine tells apart: `EAGAIN`, too little
+//!   room to write in a stream that does not block, `EPIPE`, an underrun,
+//!   and `ESTRPIPE`, a suspend.
 //! - `linux::x11`: the Xlib types, constants and events the engine uses,
 //!   and `Xlib`, the table of its functions in `libX11.so.6`.
 //! - `linux::egl`: the EGL types and constants, `Egl`, the table of its
 //!   functions of EGL 1.4 and earlier in `libEGL.so.1`, and the type of
 //!   EGL 1.5's `eglGetPlatformDisplay`, which is looked up apart, after a
 //!   version check, so that an older library still loads.
+//! - `linux::alsa`: ALSA's PCM types and constants, and `Asound`, the
+//!   table of the functions in `libasound.so.2` that open a device and
+//!   play interleaved `f32` frames through it.
 //! - `linux::evdev`: the kernel's key codes. An X server whose keyboard
 //!   rules are `evdev`, as on every current Linux desktop, reports each one
 //!   plus 8.
@@ -75,10 +81,10 @@
 //! A system's module exists only on that system. docs.rs documents this
 //! crate for Linux, Windows and macOS: choose the platform there to see one.
 //!
-//! Not declared yet: WGL and NSOpenGL (roadmap tasks M2.6 and M2.7), the
-//! audio APIs (ALSA, WASAPI and CoreAudio, M6.3 to M6.5), the gamepad APIs
-//! (evdev's, XInput and GameController, M8.1 to M8.3), Metal (M10.1), and X
-//! input methods for typed text (M7.2).
+//! Not declared yet: WGL and NSOpenGL (roadmap tasks M2.6 and M2.7), WASAPI
+//! and CoreAudio (M6.4 and M6.5), the gamepad APIs (evdev's, XInput and
+//! GameController, M8.1 to M8.3), Metal (M10.1), and X input methods for
+//! typed text (M7.2).
 //!
 //! # Examples
 //!

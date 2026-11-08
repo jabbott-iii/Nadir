@@ -1,0 +1,39 @@
+// Copyright 2026 Joseph Anthony Abbott III
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The stand-in for audio output on a system that has none yet: Windows
+//! until roadmap task M6.4, macOS until M6.5.
+
+use std::time::Duration;
+
+use crate::PlatformError;
+use crate::audio::{AudioOutputConfig, AudioRender};
+
+/// The audio thread of a stream on a system that cannot open one. It has no
+/// values.
+pub(crate) enum Stream {}
+
+impl Stream {
+    pub(crate) fn latency(&self) -> Option<Duration> {
+        match *self {}
+    }
+}
+
+/// Always [`PlatformError::Unsupported`].
+pub(crate) fn open(
+    _config: &AudioOutputConfig,
+    _render: Box<dyn AudioRender>,
+) -> Result<Stream, PlatformError> {
+    Err(PlatformError::Unsupported)
+}

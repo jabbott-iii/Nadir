@@ -89,12 +89,13 @@ jobs:
 
       # The OpenGL tests of nadir-platform and nadir-gfx (feature
       # headless-test, which the checks turn on) need EGL and Mesa's
-      # software renderer, llvmpipe.
-      - name: Install EGL and Mesa
+      # software renderer, llvmpipe; nadir-platform's ALSA tests need
+      # libasound, whose file device plays nothing.
+      - name: Install EGL, Mesa and ALSA
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libegl1 libgl1-mesa-dri
+          sudo apt-get install --no-install-recommends -y libegl1 libgl1-mesa-dri libasound2t64
 
       - name: Run the checks
         id: checks

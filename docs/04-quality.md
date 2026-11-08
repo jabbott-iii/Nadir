@@ -45,6 +45,10 @@ pub fn check_sized<T: std::fmt::Debug>(
 
 - The default seed comes from `NADIR_SEED`, or else from a fixed value, so
   runs are reproducible.
+- `nadir-platform`'s tests of a device that does not exist and of a
+  format the device refuses make alsa-lib print its own `ALSA lib ...`
+  lines to stderr, which the test harness does not capture: they are
+  meant, and say nothing of a failure.
 - `NADIR_EXPECT_GL_RENDERER`, when set and not empty, makes the headless
   OpenGL tests of `nadir-platform`, `nadir-gfx`, `nadir-render` and the
   facade fail unless the renderer's name contains it (`llvmpipe` in CI).
@@ -306,6 +310,14 @@ pub fn check_sized<T: std::fmt::Debug>(
   call `update` for a while: 0 allocations and 0 deallocations, the audio
   thread's rule. The test lets go of each sound once it is queued, so that
   one freed in `render` would be counted (M6.2).
+- `nadir-platform`'s audio thread (`crates/platform/src/linux/alsa.rs`,
+  M6.3) allocates nothing as it plays: a period with underruns and waits
+  for room, against a fake device, and the real thread writing ALSA's
+  `file` device, counted from inside the render (with `headless-test` and
+  `dev`; with `headless-test` alone there is no counter, and that half of
+  the test checks nothing).
+  libasound allocates through the C library, which the counter does not
+  see. A device lost or opened again allocates, once a second at most.
 
 ### Benchmarks — `nadir-bench`
 
@@ -372,7 +384,9 @@ understood.
   (`.github/workflows/ci.yml`):
   1. Install the pinned toolchain (from `rust-toolchain.toml`).
   2. Linux only: install EGL and Mesa (`libegl1`, `libgl1-mesa-dri`; from
-     M2.2, because `cargo xtask ci` runs the headless OpenGL tests).
+     M2.2, because `cargo xtask ci` runs the headless OpenGL tests), and
+     ALSA (`libasound2t64`; from M6.3, for `nadir-platform`'s tests through
+     ALSA's file device, which plays nothing).
   3. `cargo xtask ci`, with `LIBGL_ALWAYS_SOFTWARE=1` and, on Linux,
      `NADIR_EXPECT_GL_RENDERER=llvmpipe`: the OpenGL tests fail on any other
      renderer. Its `cook` check cooks `assets/` into `target/cooked` before
@@ -394,8 +408,7 @@ understood.
      (ADR-0028).
 
   The images already have `libx11-6`, through `xvfb`, which their
-  software lists include. ALSA (`libasound2t64` on Ubuntu 24.04) waits
-  for a test that needs it, from M6.3.
+  software lists include.
 
   Before the checkout, the workflow turns Git's `core.autocrlf` off. A
   Windows runner would otherwise check the files out with CRLF line

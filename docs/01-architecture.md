@@ -379,7 +379,7 @@ OS events ─► platform::Event ─► input (device state, edge accumulation)
 | Thread | Owns | Talks to others via |
 | :- | :- | :- |
 | Main | Window, GPU context, ECS world, renderer, input | Channels to workers; a command queue to audio |
-| Audio (one) | Mixer state, voices, streaming decoders, OS audio device | Command queue in; atomic counters/status out |
+| Audio (one), `nadir-audio`: started by `nadir_platform::open_audio` (on Linux from M6.3, ADR-0047), which calls the mixer through `AudioRender` | Mixer state, voices, streaming decoders, OS audio device | Command queue in; atomic counters/status out; logs only when the device is lost and when it opens again |
 | Workers (N = clamp(cores − 2, 1, 4), the asset server's, ADR-0030) | File reads, decode (QOI, QOA, data) | `std::sync::mpsc` jobs in, results out; GPU uploads happen on main |
 | Hot-reload watcher, `nadir-assets-watch` (M5.16; the facade starts it under `dev` in `App::new`, M5.8, ADR-0042) | Polling of the mtimes of the loaded cooked files every 250 ms; `cargo xtask cook --watch` cooks, in its own process | Channel of changed paths to main |
 | Shader watcher, `nadir-shader-watch` (M5.8; the facade's, under `dev`, from `App::run`, ADR-0043) | Polling of the mtimes of render's shader files every 250 ms | An atomic mask of the changed programs, read by main |

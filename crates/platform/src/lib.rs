@@ -13,8 +13,8 @@
 // limitations under the License.
 
 //! The OS layer of the Nadir engine: a window and its events, OpenGL
-//! contexts, the user's folders, an error dialog and a precise sleep, with
-//! one safe API on Linux, Windows and macOS.
+//! contexts, audio output, the user's folders, an error dialog and a
+//! precise sleep, with one safe API on Linux, Windows and macOS.
 //!
 //! # Where it fits
 //!
@@ -82,6 +82,24 @@
 //!   has a [`GlContextId`] ([`GlContext::context_id`]), which says whether
 //!   the context still exists, so that a user can keep the id in place of a
 //!   borrow. The stand-in of Windows and macOS (below) has none.
+//!
+//! # Audio
+//!
+//! - [`open_audio`] opens the default output device, as an
+//!   [`AudioOutputConfig`] asks (48 kHz stereo, 30 ms of latency by
+//!   default), and starts an audio thread that feeds it until the
+//!   [`AudioStream`] it returns is dropped. [`AudioStream::latency`] is the
+//!   device's buffer, or `None` while there is no device.
+//! - The thread calls an [`AudioRender`], given to `open_audio`, a period
+//!   at a time: [`AudioRender::render`] fills it, and
+//!   [`AudioRender::underrun`] hears of each time the device ran dry. It
+//!   must not block, allocate, free or log, as `nadir-audio`'s mixer does
+//!   not; a panic in it ends the stream.
+//! - A device that stops working, as one unplugged does, or that is not
+//!   there at the start, is logged, and the thread renders on in time while
+//!   it tries to open it again once a second, and logs when it has. It logs
+//!   nothing else.
+//! - It needs no window: open it before [`Platform::new`], or without one.
 //!
 //! # The game's files, errors and timing
 //!
@@ -174,7 +192,8 @@
 //! what went wrong and, where the player can fix it, how: which library or
 //! function is missing, or that a Wayland session needs XWayland turned on.
 //! The calls that change the window, such as [`Platform::set_title`],
-//! return nothing, and log what fails.
+//! return nothing, and log what fails. [`PlatformError`] is
+//! `#[non_exhaustive]`: new kinds of error can join it.
 //!
 //! # Threads
 //!
@@ -182,6 +201,11 @@
 //! context. On macOS that must be the main thread: on any other,
 //! [`Platform::new`] fails with [`PlatformError::NotMainThread`]. A
 //! [`HeadlessGl`] is neither `Send` nor `Sync`.
+//!
+//! [`open_audio`] starts a thread of its own, `nadir-audio`, which alone
+//! calls the [`AudioRender`] and the system's audio functions. The
+//! [`AudioStream`] it returns is `Send` and `Sync` on every system, and can
+//! be opened and dropped on any thread.
 //!
 //! # Counting allocations (feature `dev`)
 //!
@@ -219,30 +243,35 @@
 //! # Platforms
 //!
 //! - **Linux**, on X11: everything above. A Wayland session runs the window
-//!   through XWayland. Xlib (`libX11.so.6`) and EGL (`libEGL.so.1`) are
-//!   loaded while the program runs, not linked, so that a machine without
-//!   them gets [`PlatformError::LibraryNotFound`] or
+//!   through XWayland. Xlib (`libX11.so.6`), EGL (`libEGL.so.1`) and ALSA
+//!   (`libasound.so.2`) are loaded while the program runs, not linked, so
+//!   that a machine without them gets [`PlatformError::LibraryNotFound`] or
 //!   [`PlatformError::MissingSymbols`]. The window's context and
 //!   [`create_headless_gl`] are OpenGL 3.3 core through EGL; the headless
 //!   one needs `EGL_MESA_platform_surfaceless`, which Mesa and NVIDIA have.
 //!   The scale factor is read once, from `Xft.dpi`, when the window opens.
+//!   Audio goes to ALSA's `default` device, which PipeWire or PulseAudio
+//!   usually provides.
 //! - **Windows** 10 and later: a Win32 window, aware of each monitor's DPI,
 //!   with borderless fullscreen. It builds and passes its tests in CI, and
 //!   still awaits its checks by hand (roadmap task M1.5). It has no OpenGL
 //!   context yet (M2.6): [`Platform::gpu_surface`] is a stand-in with no
 //!   functions, whose swaps fail with [`PlatformError::Unsupported`], and
 //!   [`create_headless_gl`] returns that error. [`WindowConfig::vsync`] is
-//!   ignored there for now.
+//!   ignored there for now, and [`open_audio`] returns
+//!   [`PlatformError::Unsupported`] until M6.4.
 //! - **macOS** 12 and later: an AppKit window, whose fullscreen is the
 //!   system's own, in a Space of its own. It builds and passes its tests in
 //!   CI, and still awaits its checks by hand (M1.6). It has no OpenGL context
 //!   yet (M2.7): the same stand-in as on Windows, and `vsync` is ignored.
-//! - On any other system, [`Platform::new`], [`user_dirs`] and
-//!   [`create_headless_gl`] return [`PlatformError::Unsupported`].
+//!   Nor has it audio output yet (M6.5).
+//! - On any other system, [`Platform::new`], [`user_dirs`],
+//!   [`create_headless_gl`] and [`open_audio`] return
+//!   [`PlatformError::Unsupported`].
 //!
 //! Not built yet on any system: typed text (M7.2), gamepads (M8.1 to M8.3),
-//! audio output (M6.3 to M6.5), Metal (M10.1), noticing that the window was
-//! minimized, holding the pointer inside the window, and native Wayland.
+//! Metal (M10.1), noticing that the window was minimized, holding the
+//! pointer inside the window, and native Wayland.
 
 // One of the three crates allowed to contain `unsafe` (AGENTS.md, rule 3). The
 // workspace denies `unsafe_code` everywhere else.
@@ -255,6 +284,7 @@ struct ReadmeDoctests;
 
 #[cfg(feature = "dev")]
 mod alloc_counter;
+mod audio;
 mod dialog;
 mod error;
 mod event;
@@ -267,6 +297,8 @@ mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(not(target_os = "linux"))]
+mod no_audio;
+#[cfg(not(target_os = "linux"))]
 mod no_gl;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 mod unsupported;
@@ -277,6 +309,7 @@ use nadir_core::UVec2;
 
 #[cfg(feature = "dev")]
 pub use alloc_counter::{AllocCounts, process_alloc_counts, thread_alloc_counts};
+pub use audio::{AudioOutputConfig, AudioRender, AudioStream, open_audio};
 pub use dialog::show_error_dialog;
 pub use error::PlatformError;
 pub use event::Event;

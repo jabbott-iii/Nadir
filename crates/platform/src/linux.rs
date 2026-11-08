@@ -15,6 +15,7 @@
 //! The Linux backend: X11 through Xlib, which is loaded when the window is
 //! opened. A Wayland session runs it through XWayland.
 
+pub(crate) mod alsa;
 mod egl;
 mod keymap;
 mod library;

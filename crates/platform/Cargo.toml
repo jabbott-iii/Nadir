@@ -3,7 +3,7 @@ name = "nadir-platform"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "OS layer of the Nadir engine: windows, the event loop, input devices, GL surfaces and paths."
+description = "OS layer of the Nadir engine: windows, the event loop, input devices, GL surfaces, audio output and paths."
 authors.workspace = true
 readme = "README.md"
 homepage.workspace = true
@@ -27,8 +27,9 @@ nadir-sys.workspace = true
 # carries it. The facade's `dev` turns it on.
 dev = []
 # Builds the tests that need an EGL driver with OpenGL 3.3 (core profile),
-# which then fail, not skip, if there is none. Linux only: elsewhere it adds
-# nothing. `cargo xtask ci` turns it on, as it does every feature.
+# or libasound (ALSA's file device, which plays nothing), which then fail,
+# not skip, if there is none. Linux only: elsewhere it adds nothing.
+# `cargo xtask ci` turns it on, as it does every feature.
 headless-test = []
 
 [lints]

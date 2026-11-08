@@ -4127,11 +4127,88 @@ by the batched sprite renderer.
       at, from the first callback.
   - Depends: M6.2
   - Do: `dlopen` libasound, the audio thread, `snd_pcm_recover`.
-  - Accept: sandbox audio plays; unplugging or replugging a device recovers
-    or logs clearly.
-  - Verify: `cargo dev` (manual)
+  - Accept: the platform's example plays its beeps on the default device;
+    unplugging or replugging a device recovers or logs clearly. (The
+    sandbox's sound moved to M6.6 on 2026-11-08, ADR-0047.)
+  - Verify: `cargo run -p nadir-platform --example audio` (manual), and with
+    `NADIR_ALSA_DEVICE` naming a USB device for the unplug
+  - Built (2026-11-08, ADR-0047):
+    - `nadir_platform::open_audio(&AudioOutputConfig, Box<dyn
+      AudioRender>)`, a free function, with the config checked on every
+      system; `AudioRender::render` of any length and
+      `AudioRender::underrun`; `AudioStream`, `Send` and `Sync`, with
+      `latency()`, whose drop waits for its thread 2 s at most.
+      `PlatformError` is `#[non_exhaustive]`, with `InvalidAudioConfig`
+      and `AudioCallFailed`. Windows and macOS: `Unsupported`.
+    - nadir-sys's `linux::alsa`: the PCM types and constants, the `Asound`
+      table (`snd_pcm_open`, `close`, `set_params`, `get_params`, `writei`,
+      `wait`, `recover`, `snd_strerror`), and `snd_lib_error_set_local`,
+      looked up apart; `EAGAIN`, `EPIPE` and `ESTRPIPE` in `linux::libc`.
+    - The audio thread opens ALSA's `default`, or `NADIR_ALSA_DEVICE`, with
+      `SND_PCM_NONBLOCK`, and `open_audio` waits for it 2 s at most: it
+      writes what fits, waits 20 ms at a time for room, holds a device with
+      no clock (`null`) to the system's, recovers underruns (counted) and
+      suspends, and loses the device on an error it cannot recover, four in
+      a row, or 2 s without a frame taken. Then, as when no device opens at
+      the start, it renders on in time and tries every second, quietly, and
+      logs once at the loss, once when the device opens, and once when it
+      opens but refuses the format. `latency()` is `None` once the thread
+      has ended, by a panic too.
+    - An example, `cargo run -p nadir-platform --example audio`: beeps on
+      the left, then the right, and once a second the periods, underruns
+      and latency.
+    - CI's Linux runner installs `libasound2t64`, for the tests through
+      ALSA's `file` device.
+  - Measured on 2026-11-08 (PipeWire 1.6.8's ALSA plugin as `default`):
+    the device took 1,440 frames of buffer and 360 a period (30 and
+    7.5 ms); the example played about 133 periods a second with no
+    underrun, on `default` and on `null`; a period 140 ms late gave its
+    underrun right after it. Before the rework below, the example at
+    −40 dBFS, recorded from the sink's monitor, gave 440 Hz on the left
+    alone and 660 Hz on the right alone, at the level written (the
+    recording was deleted); on the final code, the file device's test
+    checks every sample's place.
+  - Review: before the build, three critics of the design, whose findings
+    reshaped it: a blocking open and blocking writes, which wait for ever
+    on a busy device or a stalled sound server, a device absent at the
+    start that ended the stream, stale accessors, a name taken by
+    nadir-audio. After it, three reviewers with a skeptic for each
+    finding: 15 of 21 confirmed, all fixed (`open_audio` could still wait
+    for ever on a plugin's open; `latency()` outlived a render's panic;
+    the render's drop fell outside the drop's limit; `null` ran unpaced; a
+    refused format on a retry went untold; `snd_pcm_recover` printed;
+    docs). Of 24 planted bugs, 9 passed the tests at first; with the
+    tests added since and 6 bugs more for the fixes, 29 of the 30 fail
+    them. The one that passes leaves the first device's latency to be
+    stored after `open_audio` returns, a race that only the ignored
+    default-device test sees, which found it.
+  - Tests: `cargo test -p nadir-platform --features dev,headless-test`
+    and `-p nadir-sys`; the ignored default-device test, run here with
+    `--ignored`.
+  - Note: "sandbox audio plays" and `cargo dev` were this task's Accept and
+    Verify. They need the facade to open audio with the mixer, which is
+    M6.6's Do, and M6.6 depends on this task, so on 2026-11-08 the user
+    moved them to M6.6, and made the example this task's check
+    (ADR-0047).
+  - ⏳ needs speakers or headphones: `cargo run -p nadir-platform --example
+    audio` plays a beep of 440 Hz on the left, then one of 660 Hz on the
+    right, each second.
+  - ⏳ needs a USB audio device: with `NADIR_ALSA_DEVICE=plughw:CARD=<its
+    name, from aplay -L>`, while the sound server leaves the card alone,
+    run the example, unplug the device during the beeps (one warning, with
+    ALSA's reason), and plug it in again (the log says the device is open,
+    and the beeps go on). Through `default`, PipeWire moves the stream
+    instead, and ALSA reports nothing.
 
 - [ ] **M6.4 — platform (Windows): WASAPI backend**
+  - Note (from M6.3, ADR-0047): keep `open_audio`'s contract, as
+    `docs/03-platforms.md` lists it: `render` of any length (a wake's
+    `buffer − padding`), `underrun` for a wake with nothing left to play,
+    rendering in time with no device and a try every second, a panic
+    ending the stream, `AudioStream` `Send` and `Sync` with a drop that
+    waits 2 s at most, and `latency()`. `no_audio.rs` is the stand-in to
+    replace; `cargo run -p nadir-platform --example audio` is the check by
+    ear.
   - Depends: M6.2
   - Do: COM vtables, event-driven shared mode, avrt, device invalidation
     reopen.
@@ -4139,6 +4216,12 @@ by the batched sprite renderer.
   - Verify: on Windows, `cargo dev` (manual)
 
 - [ ] **M6.5 — platform (macOS): AudioUnit backend**
+  - Note (from M6.3, ADR-0047): as M6.4's note. CoreAudio owns the
+    callback's thread and varies its frames; a panic must be caught there,
+    as unwinding out of an `extern "C"` callback aborts; the processor
+    overload notification comes on another thread, and reaches the next
+    callback through an atomic; with no device CoreAudio calls nothing, so
+    keeping time needs a thread of the backend's.
   - Depends: M6.2
   - Do: the DefaultOutput unit, stream format, render callback.
   - Accept: as M6.3.
@@ -4164,6 +4247,21 @@ by the batched sprite renderer.
       smooths each change over 16 ms. A move of the listener is
       `set_listener`.
   - Depends: M6.3, M5.4
+  - Note (from M6.3, ADR-0047):
+    - Wrap the mixer: `struct MixerOutput(Mixer)` implementing
+      `nadir_platform::AudioRender`, whose `render` calls
+      `Mixer::render(out, usize::from(channels), sample_rate)` and whose
+      `underrun` calls `Mixer::count_underrun`. `open_audio` with
+      `AudioOutputConfig::default()`: a missing device is no error (the
+      stream starts without one), and an `Err` should leave the game
+      running without sound, logged. The `App` owns the `AudioStream` and
+      drops it at exit.
+    - The sandbox's `.deb` then needs `libasound2` among the libraries it
+      loads (`SANDBOX_LOADS` in `xtask/src/dist.rs`, and
+      `docs/05-release.md`): `dpkg-shlibdeps` cannot see a library opened
+      with `dlopen`. Ubuntu 24.04's `libasound2t64` provides `libasound2`.
+    - "Sandbox audio plays" and `cargo dev` came from M6.3's Accept and
+      Verify on 2026-11-08 (ADR-0047).
   - Note (from M5.2): `wav::decode` gives `f32` samples, with floats past
     ±1 kept as they are: the cook clamps them to [−1, 1] and rounds to
     `i16` for PCM16 and QOA. At 4 bytes a sample, the default
@@ -4174,8 +4272,8 @@ by the batched sprite renderer.
   - Do: cook WAV → PCM16/QOA by sidecar; `Sound`/`Music` assets;
     `AudioEmitter`/`AudioListener` components; music crossfade; bus volumes
     from settings.
-  - Accept: footsteps follow the player positionally; music crossfades
-    between areas.
+  - Accept: sandbox audio plays; footsteps follow the player positionally;
+    music crossfades between areas.
   - Verify: `cargo test -p nadir-audio -p nadir-cook`; `cargo dev`
     (manual)
 
@@ -4186,6 +4284,11 @@ by the batched sprite renderer.
     in a fixed table of atomic buckets without allocating.
     `mixer_32_voices` mixes 32 voices and a track in 88 µs a 512-frame
     callback on an i7-11800H (`bench/baseline.json`).
+  - Note (from M6.3): `AudioStream::latency()` is the device's buffer, as
+    it opened, for the M6 exit criterion's latency, besides what a sound
+    server adds; the platform's ignored test
+    `the_default_device_reports_the_underrun_of_a_late_period_and_plays_on`
+    shows how to drive the default device from a test.
   - Depends: M6.6
   - Do: `xtask soak --audio --minutes N`, which logs underruns, callback
     time p99 and memory.

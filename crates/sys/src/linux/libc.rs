@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The C library on Linux (glibc): the dynamic loader.
+//! The C library on Linux (glibc): the dynamic loader, and the error
+//! numbers that ALSA's functions return and the engine tells apart.
 //!
-//! Source: `<dlfcn.h>`, and `<bits/dlfcn.h>` for the flag values.
+//! Sources: `<dlfcn.h>`, and `<bits/dlfcn.h>` for the flag values; the
+//! kernel's `<asm-generic/errno-base.h>` and `<asm-generic/errno.h>` for the
+//! error numbers, which x86_64 and aarch64 both use.
 //!
 //! The engine keeps every library it loads until the process exits, so
 //! `dlclose` is not declared.
@@ -30,6 +33,21 @@ pub const RTLD_NOW: c_int = 0x00002;
 /// libraries loaded after it. This is the default.
 /// `bits/dlfcn.h`: `#define RTLD_LOCAL 0`.
 pub const RTLD_LOCAL: c_int = 0;
+
+/// Try again: for an ALSA stream that does not block, no room to write in
+/// yet (`snd_pcm_writei` returns it negated).
+/// `asm-generic/errno-base.h`: `#define EAGAIN 11 /* Try again */`
+pub const EAGAIN: c_int = 11;
+
+/// Broken pipe: for an ALSA stream, an underrun, when the device ran out of
+/// samples (`snd_pcm_writei` returns it negated).
+/// `asm-generic/errno-base.h`: `#define EPIPE 32 /* Broken pipe */`
+pub const EPIPE: c_int = 32;
+
+/// Streams pipe error: for an ALSA stream, the system was suspended
+/// (`snd_pcm_writei` returns it negated).
+/// `asm-generic/errno.h`: `#define ESTRPIPE 86 /* Streams pipe error */`
+pub const ESTRPIPE: c_int = 86;
 
 // Before glibc 2.34 these functions are in libdl. From 2.34 on they are in
 // libc itself, and libdl is an empty library kept so that this still links.

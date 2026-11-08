@@ -108,8 +108,6 @@ impl Platform {
     pub fn poll_gamepads(&mut self, out: &mut Vec<Event>);       // connect/disconnect + state changes
     pub fn gamepad_state(&self, id: GamepadId) -> Option<&GamepadState>;
     pub fn set_modal_frame_callback(&mut self, cb: Box<dyn FnMut(ModalFrame)>);
-    pub fn open_audio(&mut self, cfg: AudioConfig, render: Box<dyn AudioRender>)
-        -> Result<AudioStream, PlatformError>;
 }
 
 pub enum Event {
@@ -152,10 +150,31 @@ impl GlContextId {
     pub fn is_current(self) -> bool;   // the context exists, and is current on this thread
 }
 
+// Audio output (Linux from M6.3; ADR-0047). A free function: no backend
+// needs the window, and a tool can open audio without one.
+pub fn open_audio(cfg: &AudioOutputConfig, render: Box<dyn AudioRender>)
+    -> Result<AudioStream, PlatformError>;
+
+pub struct AudioOutputConfig {
+    pub sample_rate: u32,      // 8,000..=384,000; 48,000
+    pub channels: u16,         // 1..=8; 2
+    pub latency_ms: u32,       // 5..=500; 30: the device's buffer
+}
+
 pub trait AudioRender: Send + 'static {
-    /// Fill `out` with interleaved f32 frames. Called on the audio thread.
-    /// Must not block, allocate, or panic.
+    /// Fill all of `out` with interleaved f32 frames, which follow those of
+    /// the last call; its length can change from call to call. Called on
+    /// the audio thread. Must not block, allocate, free or log; a panic ends
+    /// the stream.
     fn render(&mut self, out: &mut [f32], channels: u16, sample_rate: u32);
+    /// Each underrun the system reports, before the next render: the
+    /// facade's wrapper of the mixer calls `Mixer::count_underrun`.
+    fn underrun(&mut self);
+}
+
+pub struct AudioStream { /* Send + Sync; dropping it stops the thread */ }
+impl AudioStream {
+    pub fn latency(&self) -> Option<Duration>;   // the device's buffer; None while there is none
 }
 
 pub fn user_dirs(studio: &str, game: &str) -> Result<UserDirs, PlatformError>;  // config, data, logs
@@ -234,8 +253,11 @@ it requires `unsafe impl GlobalAlloc`.
   process and is never terminated: one `eglTerminate` would end it for
   every thread. The window's X11 EGL display is terminated before its X
   connection closes.
-- The audio thread is created by `open_audio`. Dropping `AudioStream` stops
-  and joins it.
+- The audio thread is created by `open_audio`, and makes every call of the
+  system's audio API. `open_audio` waits for the device to open 2 s at
+  most. Dropping `AudioStream` stops the thread and joins it, waiting up to
+  2 s. A device that is lost, absent at the start or slow to open is tried
+  again every second while the thread renders on in time (ADR-0047).
 - `user_dirs` only works out paths; it creates no folder. It rejects a
   studio or game name that is not a valid folder name on all three OSes,
   whichever OS it runs on, so a name that works on one works on all.
@@ -255,5 +277,35 @@ it requires `unsafe impl GlobalAlloc`.
   `headless-test` feature, which `cargo xtask ci` turns on, fail without a
   working driver. `NADIR_EXPECT_GL_RENDERER` (such as `llvmpipe`) makes
   them also require that renderer.
+- **Audio output** (M6.3):
+  - the audio thread's loop against a fake device and a fake clock: every
+    sample written once, in order; full buffers and writes that take
+    nothing waited for; underruns counted before the next render; suspends
+    and signals recovered; a device lost on an error of a write or a wait,
+    on four errors in a row, or on a 2 s stall, though not when frames are
+    taken between them; then rendered on in time and tried every retry, a
+    slow try losing only its own periods, a stop seen at its period; a
+    stream with no device at the start, or the first device's own period;
+    a device that never makes the loop wait held a buffer ahead of the
+    clock; a refusal of the format told once; a drop that waits for its
+    thread only so long; no allocation in a period, with underruns and
+    waits (feature `dev`);
+  - with `headless-test`, libasound through ALSA's `null` and `file`
+    devices, which play nothing (`file` writes what it gets to a file): the
+    file holds every sample in order, and the audio thread allocates
+    nothing as it plays (with `dev` too); `null` is played in time; a
+    device that does not exist starts the stream without one; one slow to
+    open (a FIFO with no reader) is waited for 2 s at most, and plays once
+    it opens; a format the device refuses fails; a render that panics ends
+    the stream, `latency()` is then `None`, and its drop returns;
+    `quietly` puts the thread's own handler of alsa-lib's messages back; a
+    real PCM's errors come back negative. Some print alsa-lib's own
+    `ALSA lib ...` lines;
+  - an ignored test on the default device, which plays a second of
+    silence with one period late by three buffers, and needs the
+    underrun right after it;
+  - a manual example, `cargo run -p nadir-platform --example audio`, of
+    beeps on the left, then the right, with `NADIR_ALSA_DEVICE` to play on
+    a device past the sound server, for unplugging and replugging it.
 - **The window's context:** an ignored test, run with `--ignored` on an X11
   or XWayland session, opens a window three times.

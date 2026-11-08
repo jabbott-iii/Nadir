@@ -17,6 +17,10 @@
 use std::fmt;
 
 /// Errors produced by `nadir-platform`.
+///
+/// New kinds of error can join it in a minor version (ADR-0047), so a
+/// `match` on it needs a `_` arm.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlatformError {
     /// This operating system has no backend yet.
@@ -85,6 +89,22 @@ pub enum PlatformError {
     /// [`create_headless_gl`](crate::create_headless_gl). A thread can have
     /// one at a time.
     GlContextExists,
+    /// A field of an [`AudioOutputConfig`](crate::AudioOutputConfig) is out
+    /// of its range.
+    InvalidAudioConfig {
+        /// The field, such as `channels`.
+        field: &'static str,
+        /// Its range, such as `1 to 8`.
+        expected: &'static str,
+    },
+    /// A call to set up the audio output failed. See
+    /// [`open_audio`](crate::open_audio).
+    AudioCallFailed {
+        /// The function that failed, such as `snd_pcm_set_params`.
+        call: &'static str,
+        /// What went wrong, as the system said it, and which device.
+        error: String,
+    },
 }
 
 impl fmt::Display for PlatformError {
@@ -132,6 +152,10 @@ impl fmt::Display for PlatformError {
                 "the graphics driver does not offer OpenGL 3.3 (core profile): it gave `{found}`"
             ),
             Self::GlContextExists => f.write_str("this thread already has an OpenGL context"),
+            Self::InvalidAudioConfig { field, expected } => {
+                write!(f, "the audio output's `{field}` must be from {expected}")
+            }
+            Self::AudioCallFailed { call, error } => write!(f, "{call} failed: {error}"),
         }
     }
 }
@@ -219,6 +243,20 @@ mod tests {
             (
                 PlatformError::GlContextExists,
                 "this thread already has an OpenGL context",
+            ),
+            (
+                PlatformError::InvalidAudioConfig {
+                    field: "channels",
+                    expected: "1 to 8",
+                },
+                "the audio output's `channels` must be from 1 to 8",
+            ),
+            (
+                PlatformError::AudioCallFailed {
+                    call: "snd_pcm_set_params",
+                    error: "Invalid argument (the ALSA device `default`)".to_string(),
+                },
+                "snd_pcm_set_params failed: Invalid argument (the ALSA device `default`)",
             ),
         ];
         for (error, message) in cases {

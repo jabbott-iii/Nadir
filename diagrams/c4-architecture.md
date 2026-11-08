@@ -43,7 +43,7 @@ flowchart TB
     os["OS window and input APIs<br/>X11 on Linux, Win32 on Windows, AppKit on macOS"]
     gpu["GPU driver<br/>OpenGL 3.3 core through EGL, on Linux"]
     gpu_planned["GPU on Windows and macOS<br/>WGL and NSOpenGL contexts, then Metal: planned"]
-    audio_api["OS audio APIs<br/>ALSA, WASAPI, CoreAudio: planned"]
+    audio_api["OS audio APIs<br/>ALSA, which nadir-platform drives on Linux; WASAPI, CoreAudio: planned"]
     pad_api["Gamepad APIs<br/>evdev, XInput, GameController: planned"]
     gha["GitHub Actions<br/>workflows CI, CodeQL, Pages and Release"]
     pages["GitHub Pages<br/>the demo page at jabbott.dev/Nadir"]
@@ -63,7 +63,7 @@ flowchart TB
     game -->|"opens a window, reads its events"| os
     game -->|"draws through OpenGL 3.3 core"| gpu
     game -.->|"planned M2.6, M2.7, M10"| gpu_planned
-    game -.->|"planned M6"| audio_api
+    game -.->|"planned M6.4 to M6.6"| audio_api
     game -.->|"planned M8"| pad_api
     gha -->|"runs cargo xtask"| tools
     gha -->|"deploys the demo page"| pages
@@ -174,12 +174,12 @@ flowchart TB
         n_collision["nadir-collision<br/>shapes, tile grids, spatial hash, move-and-slide, sweeps, queries, triggers"]
     end
     subgraph L1["Layer 1: OS behavior and formats"]
-        n_platform["nadir-platform<br/>window and events, GL context through EGL on Linux, user folders, error dialog, precise sleep, dev allocation counter"]
+        n_platform["nadir-platform<br/>window and events, GL context through EGL on Linux, audio output through ALSA on Linux, user folders, error dialog, precise sleep, dev allocation counter"]
         n_codec["nadir-codec<br/>inflate, PNG behind the png feature, QOI, WAV, KLZ, JSON and JSONC, KBJ, BMFont, Aseprite, LDtk, atlas, level, prefab and pack files"]
     end
     subgraph L0["Layer 0: foundations"]
         n_core["nadir-core<br/>math, color, rects, time, logging, RNG, hashing, handles, keys, profile scopes, CLI parser"]
-        n_sys["nadir-sys<br/>raw FFI: Win32, Cocoa and objc, X11, EGL, evdev key codes, OpenGL types, dynamic loading"]
+        n_sys["nadir-sys<br/>raw FFI: Win32, Cocoa and objc, X11, EGL, ALSA, evdev key codes, OpenGL types, dynamic loading"]
     end
 
     n_sandbox --> n_engine

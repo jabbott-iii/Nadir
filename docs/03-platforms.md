@@ -113,7 +113,8 @@ releases build on `ubuntu-24.04`, whose symbols set their glibc floor
    `GetDefaultAudioEndpoint(eRender, eConsole)` → `Activate(IAudioClient)`.
 3. Call `Initialize` with `AUDCLNT_SHAREMODE_SHARED`,
    `AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM`,
-   requesting 48 kHz stereo `f32`.
+   requesting `f32` at the rate and channels of `AudioOutputConfig` (48 kHz
+   stereo by default).
 4. `SetEventHandle`, then `GetService(IAudioRenderClient)`, then `Start`.
 5. Loop: `WaitForSingleObject` → `GetCurrentPadding` → `GetBuffer` → mix →
    `ReleaseBuffer`.
@@ -254,8 +255,9 @@ we call, with the full slot ordering preserved.
 
 1. `AudioComponentFindNext` with `{kAudioUnitType_Output, kAudioUnitSubType_DefaultOutput, kAudioUnitManufacturer_Apple}`.
 2. `AudioComponentInstanceNew`.
-3. Set `kAudioUnitProperty_StreamFormat` (input scope, element 0) to 48 kHz
-   interleaved `f32` stereo.
+3. Set `kAudioUnitProperty_StreamFormat` (input scope, element 0) to
+   interleaved `f32` at the rate and channels of `AudioOutputConfig`
+   (48 kHz stereo by default).
 4. Set `kAudioUnitProperty_SetRenderCallback`.
 5. `AudioUnitInitialize`, then `AudioOutputUnitStart`.
 
@@ -395,13 +397,59 @@ directly: no locks that can block, and no allocation.
 
 ### Audio (ALSA via `dlopen("libasound.so.2")`)
 
-1. `snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0)`.
-2. `snd_pcm_set_params(FLOAT_LE, RW_INTERLEAVED, 2, 48000, soft_resample=1, latency_us=30_000)`.
-3. The audio thread loops `snd_pcm_writei`.
-4. On `-EPIPE`/`-ESTRPIPE`, call `snd_pcm_recover`.
+Built in M6.3 (ADR-0047), in `crates/platform/src/linux/alsa.rs`. The audio
+thread, `nadir-audio`, makes every ALSA call, and `open_audio` and the
+stream's drop each wait for it 2 s at most:
+
+1. `snd_pcm_open(&pcm, name, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK)`,
+   where `name` is `default`, or `NADIR_ALSA_DEVICE` when it is set and not
+   empty (such as `plughw:CARD=Device`). A blocking open waits for ever on
+   a device that another program holds; this one fails with `-EBUSY`. A
+   plugin's open, as PipeWire's, can still wait for a server that does not
+   answer: `open_audio` returns after 2 s, and the stream starts without
+   the device, which the thread goes on opening.
+2. `snd_pcm_set_params(FLOAT_LE, RW_INTERLEAVED, channels, rate,
+   soft_resample=1, latency_us)`, 2, 48,000 and 30,000 by default, then
+   `snd_pcm_get_params` for the buffer and the period (1,440 and 360
+   frames). `set_params` fails unless the device takes exactly the rate
+   and channels asked for, so the mixer gets what it asked for.
+3. A period at a time: render it, then `snd_pcm_writei` what fits. On
+   `-EAGAIN`, or 0 frames taken, `snd_pcm_wait(pcm, 20)`, and look at the
+   stop flag after each wait. A blocking `snd_pcm_writei` on a plugin,
+   which `default` always is, waits for ever on a sound server that stops
+   taking samples: alsa-lib polls again after each timeout. A device that
+   never makes the thread wait, as `null`, which takes samples as fast as
+   they come, is held to the clock: the thread sleeps while it is more than
+   a buffer ahead.
+4. `-EPIPE` (an underrun, from the write or the wait) is
+   `AudioRender::underrun`, then `snd_pcm_recover`; `-ESTRPIPE` and
+   `-EINTR` are recovered too. `snd_pcm_recover` waits, a second at a
+   time, for a suspended system to resume. Its messages, which it prints
+   when it cannot prepare the device again, are silenced as in step 5.
+5. The device is lost on any error that `snd_pcm_recover` does not handle
+   (`-ENODEV` for one unplugged), on four errors in a row, or when it takes
+   no frames for 2 s. The thread closes it, logs a warning with ALSA's
+   reason, and renders on in time with no device (sleeping a period at a
+   time), so that voices end and sounds go back to the main thread, while
+   it tries to open the device again every second, with alsa-lib's own
+   stderr messages silenced on that thread (`snd_lib_error_set_local`,
+   looked up apart, as older libraries lack it). It logs again when the
+   device opens, or when a try opens it but it refuses the format, once
+   until that changes. A device that does not open at the start is treated
+   the same way; only one that opens and refuses the format, within the
+   2 s, fails `open_audio`.
+6. Dropping the stream sets the stop flag and joins the thread, waiting
+   up to 2 s for it and for the render's own drop; past that (a suspend
+   that does not end, or a plugin's open that hangs) the thread is left to
+   end with the process. `snd_pcm_close` drops what was not played. However
+   the thread ends, even by a panic, `latency()` is `None` from then.
 
 On modern distros, `default` routes to PipeWire or PulseAudio through their
-ALSA plugins. A native PipeWire backend is backlog.
+ALSA plugins. Then unplugging a device moves the stream to another device,
+and ALSA never reports it: the recovery of step 5 runs on a device opened
+past the server, such as `NADIR_ALSA_DEVICE=plughw:CARD=<name>` while the
+server leaves the card alone, or when the server itself stops. A native
+PipeWire backend is backlog.
 
 ### Paths
 
@@ -432,5 +480,25 @@ ALSA plugins. A native PipeWire backend is backlog.
   without the engine agreeing.
 - Focus loss releases all held keys and buttons (a synthetic release event for
   each), so nothing sticks "held".
-- The audio device opens at 48 kHz stereo `f32`, or the backend converts, and
-  reports the real rate to the mixer.
+- The audio device opens at the rate and channels of `AudioOutputConfig`
+  (48 kHz stereo by default), in `f32`, or the backend converts, and the
+  mixer gets what it asked for.
+- Audio output keeps one contract on every system (`nadir_platform::open_audio`,
+  ADR-0047), which M6.4 and M6.5 must keep too, and which only Linux tests
+  until they land:
+  - `AudioRender::render` fills a buffer of any length, which can change
+    from one call to the next, in frames that follow those of the call
+    before;
+  - `AudioRender::underrun` hears of each underrun the system reports:
+    `-EPIPE` on ALSA; on WASAPI, a wake with nothing left to play; on
+    macOS, the processor-overload notification, which comes on another
+    thread and reaches the next callback through an atomic;
+  - with no device, the backend goes on rendering in time while it tries
+    to open one again every second, and logs once when it loses one and
+    once when one opens;
+  - a render that panics ends the stream: nothing more plays, and the
+    panic hook reports it (in a callback of the system's, the backend
+    catches the panic, as unwinding out of it aborts);
+  - `open_audio` waits for the device 2 s at most, then starts without it;
+  - `AudioStream` is `Send` and `Sync`, and its drop waits for the thread
+    at most 2 s.

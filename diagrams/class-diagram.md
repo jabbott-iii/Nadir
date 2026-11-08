@@ -27,9 +27,10 @@ shows only a few of its fields and methods: the ones the design rests on.
   error type of a `Result` are left out.
 
 Nothing here is planned work: the diagrams show only what is built. The
-Metal backend, audio's devices and assets, the debug tools, bitmap text,
-gamepads, saves and pathfinding are not built yet (see `docs/roadmap.md`),
-so they do not appear; audio's mixer is (M6.2). The members only the `dev` feature compiles, the facade's hot
+Metal backend, audio's output on Windows and macOS and its assets, the
+debug tools, bitmap text, gamepads, saves and pathfinding are not built yet
+(see `docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2),
+and its output on Linux (M6.3). The members only the `dev` feature compiles, the facade's hot
 reload's (roadmap M5.8), are marked `dev`. One member that exists in the
 code for planned work, `ShaderSource::msl`, carries a note.
 
@@ -1733,6 +1734,50 @@ classDiagram
     PlayParams *-- Bus
 ```
 
+## platform: audio output
+
+`open_audio` starts the audio thread, which opens the device (ALSA's, on
+Linux) and calls the `AudioRender` for each period, until the
+`AudioStream` is dropped. Nothing joins it to the mixer yet: M6.6's facade
+wraps the `Mixer` in an `AudioRender`, whose `underrun` calls
+`Mixer::count_underrun`.
+
+```mermaid
+classDiagram
+    direction TB
+    class open_audio["platform::open_audio"] {
+        <<function>>
+        +open_audio(config, render) Result~AudioStream~
+    }
+    class AudioOutputConfig {
+        +sample_rate u32
+        +channels u16
+        +latency_ms u32
+    }
+    class AudioRender {
+        <<trait>>
+        +render(out, channels, sample_rate)
+        +underrun()
+    }
+    class AudioStream {
+        +latency() Option~Duration~
+    }
+    class Stream["linux::alsa::Stream"] {
+        -stop Arc~AtomicBool~
+        -thread JoinHandle
+        -buffer_frames Arc~AtomicUsize~
+    }
+    class Pcm["linux::alsa::Pcm"] {
+        -pcm NonNull~snd_pcm_t~
+    }
+    open_audio ..> AudioOutputConfig : takes
+    open_audio ..> AudioRender : moves to the thread
+    open_audio ..> AudioStream : returns
+    AudioStream *-- Stream
+    Stream ..> Pcm : its thread opens, writes and closes
+    Stream ..> AudioRender : its thread calls
+```
+
 ## engine: the App and what owns it
 
 `App` owns the configuration, the ECS world, the schedule, the input action
@@ -2180,6 +2225,7 @@ classDiagram
         Unsupported
         NoDisplay
         LibraryNotFound
+        AudioCallFailed
     }
     class PrefabError {
         <<enumeration>>
@@ -2238,7 +2284,8 @@ The main files these diagrams were drawn from:
 - `crates/render/src/renderer.rs`, `frame.rs`, `batcher.rs`, `plan.rs`,
   `sort.rs`, `tiles.rs`, `chunks.rs`, `atlas.rs`, `texture.rs`, `view.rs`
 - `crates/gfx/src/device.rs`, `types.rs`, `pod.rs`, `gl/mod.rs`
-- `crates/platform/src/gpu.rs`, `no_gl.rs`, `linux/x11.rs`
+- `crates/platform/src/gpu.rs`, `no_gl.rs`, `linux/x11.rs`, `audio.rs`,
+  `linux/alsa.rs`
 - `crates/collision/src/world.rs`, `shape.rs`, `grid.rs`, `hash.rs`,
   `slide.rs`, `sweep.rs`, `trigger.rs`
 - `crates/audio/src/lib.rs`, `audio.rs`, `mixer.rs`, `voice.rs`,

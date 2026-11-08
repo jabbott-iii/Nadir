@@ -591,7 +591,8 @@ With nothing changed, the frame allocates nothing.
 
 ## Not shown, because it is not built yet
 
-- The audio thread and its mixer (roadmap M6).
+- The audio thread and its mixer: the mixer (M6.2) and the Linux output
+  (M6.3) are built, and the facade starts neither until M6.6.
 - Gamepads (M8), bitmap text (M7.1), and the debug UI, profiler and console
   (M7.2 to M7.6).
 - Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).

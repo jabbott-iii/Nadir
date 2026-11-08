@@ -44,8 +44,9 @@ Audio (handle) ──► CommandQueue ──try_lock──► Mixer::render(out,
     scratch buffers are allocated at init. A command still queued when
     the mixer is dropped is dropped by the next `Audio::update`. The mix is made in parts of 512
     frames, so a callback of any size allocates nothing.
-  - The audio thread never logs either: it counts, and `Audio::update`
-    logs, once a second at most.
+  - The mixer never logs either: it counts, and `Audio::update` logs, once
+    a second at most. The platform's audio thread logs only when the device
+    is lost and when it opens again (ADR-0047).
   - The dev allocation counter asserts this in a test
     (`crates/audio/tests/allocations.rs`).
 
@@ -158,8 +159,14 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
 - When the platform reopens a device (default-device change on Windows,
   ALSA recovery), the mixer keeps all state. Only the output rate may
   change; voices then resample.
+- While there is no device, lost or not yet there, `nadir_platform::open_audio`'s
+  thread goes on calling the mixer in time, a period at a time, and tries
+  the device every second (M6.3, ADR-0047): voices end, music moves on,
+  and sounds come back to the main thread as they would with one.
 - Underruns are counted and exposed in `AudioStats`, and logged once per
-  second at most.
+  second at most. The platform's `AudioRender::underrun` reports each, on
+  the audio thread, and the facade's wrapper of the mixer passes it to
+  `Mixer::count_underrun` (M6.6).
 
 ## Tests
 

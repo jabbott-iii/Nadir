@@ -1,8 +1,8 @@
 # nadir-sys
 
 Hand-written raw FFI declarations for the systems the Nadir engine runs on:
-Win32, the Objective-C runtime and AppKit, Xlib, EGL, the Linux key codes,
-and the types of OpenGL 3.3. It declares and does nothing else, and almost
+Win32, the Objective-C runtime and AppKit, Xlib, EGL, ALSA, the Linux key
+codes, and the types of OpenGL 3.3. It declares and does nothing else, and almost
 every function in it is `unsafe` to call.
 
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine for
@@ -25,16 +25,17 @@ Declared today:
   (`gl`), and the symbol tables' `Library` trait and `MissingSymbols` error
   (`dynlib`).
 - Linux: the dynamic loader (`dlopen`, `dlsym`, `dlerror`), Xlib
-  (`libX11.so.6`), EGL (`libEGL.so.1`) and the kernel's key codes.
+  (`libX11.so.6`), EGL (`libEGL.so.1`), ALSA's PCM output
+  (`libasound.so.2`) and the kernel's key codes.
 - Windows: the Win32 types and functions of `kernel32`, `user32`, `gdi32`,
   `shell32` and `ole32` that a window, its messages, the user's folders and
   a message box need.
 - macOS: the Objective-C runtime with a `msg_send!` macro, and the numbers
   of Foundation, AppKit and HIToolbox's key codes.
 
-Not declared yet: WGL and NSOpenGL (roadmap tasks M2.6 and M2.7), the
-audio APIs (M6.3 to M6.5), the gamepad APIs (M8.1 to M8.3), Metal (M10.1),
-and X input methods for typed text (M7.2).
+Not declared yet: WGL and NSOpenGL (roadmap tasks M2.6 and M2.7), WASAPI
+and CoreAudio (M6.4 and M6.5), the gamepad APIs (M8.1 to M8.3), Metal
+(M10.1), and X input methods for typed text (M7.2).
 
 ## Usage
 

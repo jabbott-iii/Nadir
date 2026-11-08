@@ -99,7 +99,7 @@ held up on:
 
 | System | You need |
 | :- | :- |
-| Linux (x86_64 or arm64) | An X11 session, or Wayland with XWayland, and OpenGL 3.3 through EGL. The engine loads `libX11`, `libEGL` and the GL library at run time, so no development packages are needed. For the OpenGL tests and golden images without a GPU: `libegl1` and `libgl1-mesa-dri` (Mesa's llvmpipe). |
+| Linux (x86_64 or arm64) | An X11 session, or Wayland with XWayland, and OpenGL 3.3 through EGL. The engine loads `libX11`, `libEGL`, the GL library and `libasound` at run time, so no development packages are needed. For the OpenGL tests and golden images without a GPU: `libegl1` and `libgl1-mesa-dri` (Mesa's llvmpipe); for the audio tests, `libasound2t64` (`libasound2` before Ubuntu 24.04), and no sound card. |
 | Windows 10+ (x64 or Arm) | The MSVC build tools and the Windows SDK (Visual Studio Build Tools). |
 | macOS 12+ | The Xcode command-line tools (`xcode-select --install`). Full Xcode is not needed. |
 

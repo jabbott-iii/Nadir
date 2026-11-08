@@ -3797,3 +3797,151 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - profiling shows the command mutex contended (then the SPSC ring);
   - a game drops commands in normal play (`AudioStats::dropped`);
   - or the soak (M6.7) shows a callback near its budget.
+
+## ADR-0047 — M6.3: audio output is `open_audio`, a free function, which waits on ALSA 2 s at most; a device lost or absent is played on in time and tried every second
+
+- **Status:** Proposed; its move of M6.3's acceptance to M6.6 accepted by
+  the user on 2026-11-08
+- **Date:** 2026-11-08
+- **Context:**
+  - `docs/subsystems/sys-and-platform.md` had `Platform::open_audio(&mut
+    self, AudioConfig, Box<dyn AudioRender>)`, with only
+    `render(out, channels, sample_rate)`, and `docs/03-platforms.md` a
+    blocking `snd_pcm_open` (mode 0) and a loop of blocking
+    `snd_pcm_writei`, with `snd_pcm_recover` on `-EPIPE` and `-ESTRPIPE`.
+    M6.2's note asks for the underruns to reach the callback, since only
+    the closure that owns nadir-audio's `Mixer` can call
+    `Mixer::count_underrun` (ADR-0046).
+  - alsa-lib 1.2.11's source, which the design critique read:
+    - A blocking `snd_pcm_open` of a device that another program holds
+      waits until it is free (`pcm.c`, `snd_pcm_open`'s mode).
+    - A blocking `snd_pcm_writei` on a plugin, which `default` always is
+      (PipeWire's, PulseAudio's, or `plug` over `dmix`), polls again after
+      each timeout, for ever, when the sound server stops taking samples
+      (`snd_pcm_write_areas`, `pcm.c:7691-7702`, and
+      `snd_pcm_wait_nocheck`, `pcm.c:2928-3022`). A stop flag is then never
+      read, and a drop that joins hangs the game's exit.
+    - `snd_pcm_set_params` fails unless the device takes exactly the rate
+      and channels asked for; `snd_pcm_recover` handles `-EINTR`, `-EPIPE`
+      and `-ESTRPIPE`, and waits, a second at a time, for a suspended
+      system to resume.
+    - alsa-lib prints its own errors to stderr; `snd_lib_error_set_local`
+      sets a handler for one thread, with a `va_list` that both Linux
+      targets pass as a pointer, but is not in every libasound.
+    - `SND_PCM_NONBLOCK` keeps the kernel's device and the writes from
+      waiting, but not a plugin's own open: PipeWire's plugin waits for
+      its server's answer with no time limit (`pw_thread_loop_wait`, the
+      review found), and a file device on a FIFO with no reader waits too.
+    - ALSA's `null` device, the usual way to silence ALSA, takes samples as
+      fast as they come and never returns `-EAGAIN`: a loop paced only by
+      the device renders thousands of times faster than real time.
+  - Under PipeWire, unplugging a device moves the stream to another one,
+    and ALSA reports nothing.
+  - `nadir_audio::AudioConfig` already exists (ADR-0046), and the facade
+    will name both. `PlatformError` is not `#[non_exhaustive]`; v0.3.0,
+    the next release (ADR-0044), is not out yet.
+  - M6.3's Accept, "sandbox audio plays", and its Verify, `cargo dev`,
+    need the facade to open audio with the mixer, which is M6.6's Do, and
+    M6.6 depends on M6.3. nadir-audio is not published (ADR-0036), so the
+    published facade cannot depend on it before M6.6 makes it publishable.
+- **Decision:**
+  - **The API** (`nadir-platform`, every system):
+    - `open_audio(&AudioOutputConfig, Box<dyn AudioRender>) ->
+      Result<AudioStream, PlatformError>`, a free function: no backend
+      needs the window, and a tool or a test opens audio without one, as
+      `create_headless_gl` does GL.
+    - `AudioOutputConfig { sample_rate, channels, latency_ms }`: 8,000 to
+      384,000 (48,000), 1 to 8 (2), 5 to 500 ms (30), checked before any
+      backend sees it, on every system (`InvalidAudioConfig`).
+    - `AudioRender::render(out, channels, sample_rate)` fills a buffer of
+      any length, which can change from call to call;
+      `AudioRender::underrun()` hears of each underrun the system reports,
+      before the next render. A render that panics ends the stream.
+    - `open_audio` waits for the device to open 2 s at most, then starts
+      the stream without it, as for a device that is not there.
+    - `AudioStream` is `Send` and `Sync` (asserted at compile time), and
+      has `latency() -> Option<Duration>`, the device's buffer, `None`
+      while there is no device, and once the thread has ended, however.
+      Its drop stops the thread and waits for it, and for the render's own
+      drop, up to 2 s, then leaves it to end with the process.
+    - `PlatformError` becomes `#[non_exhaustive]`, with
+      `InvalidAudioConfig { field, expected }` and `AudioCallFailed {
+      call, error }`: a break for a `match` on it with no `_` arm, which
+      lands in 0.3.0. Windows and macOS return `Unsupported` until M6.4
+      and M6.5.
+  - **The Linux backend** (`crates/platform/src/linux/alsa.rs`): the audio
+    thread opens the device with `SND_PCM_NONBLOCK`, and no ALSA call
+    waits. It renders a period, writes what fits, and on `-EAGAIN` waits
+    with `snd_pcm_wait` 20 ms at a time, reading the stop flag after each.
+    `-EPIPE` is an underrun, then `snd_pcm_recover`, as are `-ESTRPIPE`
+    and `-EINTR`. The device is lost on any error that `snd_pcm_recover`
+    does not handle, on four errors in a row, or when it takes no frames
+    for 2 s: the thread closes it, warns once, with ALSA's reason, and
+    renders on in time with no device while it tries to open it again
+    every second, with alsa-lib's messages silenced on that thread where
+    `snd_lib_error_set_local` exists (and around `snd_pcm_recover`, which
+    prints a failure to prepare whatever its `silent`); it logs once more
+    when the device opens, and once when a try opens it but it refuses
+    the format, until that changes. A device that does not open at the
+    start, or not within the 2 s, is treated the same way; only a device
+    that opens and refuses the format within them fails `open_audio`. A
+    device that never makes the thread wait is held to the clock: the
+    thread sleeps while it is more than a buffer ahead.
+    `NADIR_ALSA_DEVICE`, set and not empty, names the ALSA device in place
+    of `default`.
+  - **One contract for M6.4 and M6.5** (`docs/03-platforms.md`): a render
+    of any length, underruns as each system reports them, rendering in
+    time with no device and a try every second, a panic ending the
+    stream, an open that waits at most 2 s, a `Send` and `Sync` stream
+    whose drop waits at most 2 s.
+  - **M6.3's acceptance** (the user's decision, 2026-11-08): the
+    platform's example, `cargo run -p nadir-platform --example audio`, is
+    M6.3's check, by ear, with `NADIR_ALSA_DEVICE` naming a USB device for
+    the unplug; "sandbox audio plays" and `cargo dev` moved to M6.6, whose
+    Accept already asks for the sandbox's footsteps and music. The Accept
+    of M6.4 and M6.5, "as M6.3", now means the example too; their Verify
+    still names `cargo dev`, which plays sound only once M6.6 has landed.
+- **Consequences:**
+  - Good: neither the start nor the exit of a game waits on ALSA more
+    than 2 s; a device unplugged, busy, slow or not there yet is played on
+    and found again, and the mixer's time goes on meanwhile, on a device
+    with no clock too; one contract for the three systems; the tests run
+    through libasound's `null` and `file` devices in CI, which installs
+    `libasound2t64` on its Linux runner.
+  - Bad: a device that has stopped is noticed after 2 s, while the mixer's
+    time stands still; a stalled device wakes the thread every 20 ms; a
+    suspend that never ends, or a plugin's open that hangs, leaves the
+    thread running after its drop;
+    the first open's failure still prints alsa-lib's lines, as do retries
+    on a libasound without `snd_lib_error_set_local`; under PipeWire, the
+    recovery runs only on a device opened past the server
+    (`NADIR_ALSA_DEVICE`) or when the server itself stops; the thread
+    asks for no real-time priority, as PipeWire's and PulseAudio's own
+    threads have it and the 30 ms buffer covers ours.
+- **Alternatives considered:**
+  - `Platform::open_audio(&mut self, ...)`, as the spec had it: nothing
+    about audio needs the window, and a soak tool or a test would need
+    one.
+  - Blocking writes, with a watchdog thread to unblock them: nothing
+    unblocks a `snd_pcm_writei` that polls for ever but closing the PCM
+    under it, from another thread.
+  - Failing `open_audio` when the device does not open: the render, with
+    the mixer, is gone with the thread, and the game has no sound for the
+    session even once the device is plugged in.
+  - Giving the render back in the error: every caller would have to
+    retry, and each backend the same way.
+  - The format's numbers as accessors (rate, channels, period, buffer):
+    the rate and channels only echo the config, and the period and buffer
+    go stale when the device opens again with others.
+  - `AudioConfig` as the name: two types of that name in the facade.
+  - `snd_lib_error_set_handler`: its handler is variadic, which stable
+    Rust cannot define, and process-wide.
+  - Falling back to `S16_LE` when `FLOAT_LE` is refused: `default`'s
+    `plug` converts already, and a device that opens and refuses the
+    format is an error the player can fix by choosing another.
+- **Revisit when:**
+  - a native PipeWire backend lands (the roadmap's backlog);
+  - a game needs to choose its output device in its settings;
+  - the soak (M6.7) shows underruns that the thread's scheduling causes
+    (then real-time priority);
+  - or M6.4 or M6.5 finds the contract cannot be kept.
