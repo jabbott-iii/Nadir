@@ -1014,9 +1014,9 @@ toc (toc_size bytes at toc_offset, a multiple of 16, to the end of the file; toc
 
 ### Hot reload (dev)
 
-Built in four tasks (ADR-0042): M5.15, the cook's side, and M5.16
-(nadir-assets) are built; M5.17 (nadir-render) and M5.8 (the game) are
-not yet.
+Built in four tasks (ADR-0042): M5.15, the cook's side, M5.16
+(nadir-assets) and M5.17 (nadir-render) are built; M5.8 (the game) is not
+yet.
 
 - **The cook's side** (M5.15): `cargo xtask cook --watch [--force]` builds
   `nadir-cook` in release once and cooks, `--force` for that first cook
@@ -1090,10 +1090,13 @@ not yet.
   - `AssetServer::drain_swapped::<T>()` gives the handles of type `T` that
     a reload was swapped in for since the last call, each once, so that a
     game can find again what it copied out of them (M5.8).
-- **Shaders** (M5.17, M5.8): under `dev` the facade reads render's shader
-  files as they change, and nadir-render rebuilds the program from them,
-  keeping the one it had when they do not compile or do not match its
-  interface.
+- **Shaders and textures** (M5.17, M5.8): nadir-render rebuilds a program
+  from sources it is given (`Renderer::reload_program`), keeping the one
+  it had when they do not compile or do not match its interface, and draws
+  a texture reloaded behind its handle from the next frame, with no change
+  of its own (`docs/subsystems/render.md`, "Reloading"). Under `dev` the
+  facade is to read render's shader files as they change, and hand them
+  over (M5.8).
 
 ## `nadir-cook` (library + CLI)
 

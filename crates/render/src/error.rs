@@ -21,7 +21,8 @@ use nadir_gfx::GfxError;
 /// Errors produced by `nadir-render`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenderError {
-    /// The GPU refused a call.
+    /// The GPU refused a call, or, as [`GfxError::Interface`], the shaders
+    /// do not fit their pipeline.
     Gfx(GfxError),
     /// The renderer's configuration cannot work.
     BadConfig(&'static str),
@@ -30,6 +31,9 @@ pub enum RenderError {
 impl fmt::Display for RenderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Gfx(error @ GfxError::Interface { .. }) => {
+                write!(f, "the shaders do not fit their pipeline: {error}")
+            }
             Self::Gfx(error) => write!(f, "the GPU refused: {error}"),
             Self::BadConfig(reason) => write!(f, "the render configuration cannot work: {reason}"),
         }
@@ -64,5 +68,14 @@ mod tests {
         let error = RenderError::from(GfxError::NoPipeline);
         assert!(error.to_string().starts_with("the GPU refused: "));
         assert!(std::error::Error::source(&error).is_some());
+        let error = RenderError::from(GfxError::Interface {
+            label: "sprite".to_string(),
+            reason: "uniform block `View` is not one of the program's".to_string(),
+        });
+        assert_eq!(
+            error.to_string(),
+            "the shaders do not fit their pipeline: pipeline `sprite`: uniform block `View` is \
+             not one of the program's"
+        );
     }
 }

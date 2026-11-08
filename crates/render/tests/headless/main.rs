@@ -28,6 +28,7 @@
 
 mod common;
 mod golden;
+mod reload;
 mod sprites;
 mod textures;
 mod tiles;

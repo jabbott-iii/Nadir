@@ -15,16 +15,18 @@
 //! The renderer: draws a frame's sprites and tile layers into the virtual
 //! image, then scales that up into the output.
 
+use std::mem;
+
 use nadir_assets::{AssetServer, LoadState};
 use nadir_core::{UVec2, Vec2};
 use nadir_gfx::{
-    BlendMode, BufferDesc, BufferId, BufferKind, BufferUsage, Device, PassTarget, PipelineDesc,
-    PipelineId, RenderTargetId, Sampler, TextureFormat, TextureId, Topology, VertexLayout,
-    VertexStep,
+    BufferDesc, BufferId, BufferKind, BufferUsage, Device, GfxError, PassTarget, PipelineDesc,
+    PipelineId, RenderTargetId, Sampler, ShaderSource, TextureFormat, TextureId, Topology,
+    VertexLayout, VertexStep,
 };
 
 use crate::chunks::{self, ChunkDraw, Step, TileCache};
-use crate::shader::{BLIT, SPRITE, TILE_CHUNK, packed};
+use crate::shader::{BLIT, Interface, Program, SPRITE, TILE_CHUNK, packed};
 use crate::view::{self, Upscale, View};
 use crate::{
     Camera2D, RenderError, RenderFrame, SPRITE_INSTANCE_FLOATS, SpriteBatcher, Texture, TileLayers,
@@ -79,6 +81,10 @@ const BLIT_QUAD: [f32; 16] = [
     -1.0, 1.0, 0.0, 1.0, //
     1.0, 1.0, 1.0, 1.0,
 ];
+
+/// The most attributes a vertex buffer slot of a program has room for: as
+/// many as OpenGL 3.3 has in all.
+const ATTRIBUTES: usize = 16;
 
 /// The instances the buffer holds at first. It grows by doubling, and
 /// never shrinks.
@@ -150,67 +156,9 @@ impl Renderer {
             return Err(RenderError::BadConfig("the virtual resolution is empty"));
         }
 
-        let (instance_attributes, instance_stride) = packed::<6>(SPRITE.instance);
-        let (corner, corner_stride) = packed::<1>(SPRITE.vertex_attributes);
-        let sprite = device.create_pipeline(&PipelineDesc {
-            label: SPRITE.name,
-            shader: SPRITE.source(),
-            vertex_layouts: &[
-                VertexLayout {
-                    stride: instance_stride,
-                    step: VertexStep::Instance,
-                    attributes: &instance_attributes,
-                },
-                VertexLayout {
-                    stride: corner_stride,
-                    step: VertexStep::Vertex,
-                    attributes: &corner,
-                },
-            ],
-            uniform_blocks: SPRITE.uniform_blocks,
-            textures: SPRITE.textures,
-            blend: BlendMode::Alpha,
-            topology: Topology::TriangleStrip,
-            target_format: TextureFormat::Rgba8Srgb,
-        })?;
-        let (tile_attributes, tile_stride) = packed::<2>(TILE_CHUNK.instance);
-        let (tile_corner, tile_corner_stride) = packed::<1>(TILE_CHUNK.vertex_attributes);
-        let tile_chunk = device.create_pipeline(&PipelineDesc {
-            label: TILE_CHUNK.name,
-            shader: TILE_CHUNK.source(),
-            vertex_layouts: &[
-                VertexLayout {
-                    stride: tile_stride,
-                    step: VertexStep::Instance,
-                    attributes: &tile_attributes,
-                },
-                VertexLayout {
-                    stride: tile_corner_stride,
-                    step: VertexStep::Vertex,
-                    attributes: &tile_corner,
-                },
-            ],
-            uniform_blocks: TILE_CHUNK.uniform_blocks,
-            textures: TILE_CHUNK.textures,
-            blend: BlendMode::Alpha,
-            topology: Topology::TriangleStrip,
-            target_format: TextureFormat::Rgba8Srgb,
-        })?;
-        let (blit_attributes, blit_stride) = packed::<2>(BLIT.vertex_attributes);
-        let blit = device.create_pipeline(&PipelineDesc {
-            label: BLIT.name,
-            shader: BLIT.source(),
-            vertex_layouts: &[VertexLayout {
-                stride: blit_stride,
-                step: VertexStep::Vertex,
-                attributes: &blit_attributes,
-            }],
-            uniform_blocks: BLIT.uniform_blocks,
-            textures: BLIT.textures,
-            blend: BlendMode::Opaque,
-            topology: Topology::TriangleStrip,
-            target_format: TextureFormat::Rgba8Srgb,
-        })?;
+        let sprite = pipeline(device, &SPRITE, SPRITE.source())?;
+        let tile_chunk = pipeline(device, &TILE_CHUNK, TILE_CHUNK.source())?;
+        let blit = pipeline(device, &BLIT, BLIT.source())?;
 
         let quad = device.create_buffer(&BufferDesc {
             label: "unit quad",
@@ -245,6 +193,66 @@ impl Renderer {
             positions: Vec::new(),
             steps: Vec::new(),
         })
+    }
+
+    /// Builds `program` again from `source`, for shaders edited while the
+    /// game runs: the next [`Renderer::render`] draws with it, and the
+    /// program it replaces is destroyed. Call it between frames, or in one
+    /// before `render`.
+    ///
+    /// The sources may change anything but the program's interface, which
+    /// the sources it was compiled with declare, its files under
+    /// [`SHADER_DIR`](crate::SHADER_DIR) as they were:
+    ///
+    /// - each `in` variable of the vertex shader is one of the program's
+    ///   attributes, with its location and no other layout qualifier, its
+    ///   type and its name;
+    /// - each uniform block, in either shader, is one of its blocks, whose
+    ///   members must stay as they are: the device checks a block by its
+    ///   size alone;
+    /// - each other uniform is one of its samplers, a `sampler2D`, or has a
+    ///   value of its own (`= …`);
+    /// - the fragment shader has one output, an `out vec4` at location 0
+    ///   and index 0, and writes no `gl_FragColor` or `gl_FragData`.
+    ///
+    /// An attribute, a block or a sampler the sources leave out is taken.
+    /// The declarations are read as written, before a macro is expanded or
+    /// a branch of an `#if` chosen: a declaration a macro makes is not
+    /// seen, and every branch is read. Sources whose braces do not pair up,
+    /// or whose branches do not each hold whole declarations, are refused.
+    ///
+    /// The renderer reads no file: the caller reads the sources, and gives
+    /// them here. A device without Metal reads only the GLSL.
+    ///
+    /// # Errors
+    ///
+    /// [`RenderError::Gfx`] with [`GfxError::Interface`] saying what differs
+    /// when the sources declare another interface, or a uniform block of
+    /// another size; with [`GfxError::Shader`] and the driver's log when
+    /// they do not compile or link; with another [`GfxError`] when the
+    /// device refuses a call. The renderer keeps the program it had, and
+    /// the next frame draws as the last did.
+    pub fn reload_program(
+        &mut self,
+        device: &mut Device,
+        program: Program,
+        source: ShaderSource<'_>,
+    ) -> Result<(), RenderError> {
+        let interface = program.interface();
+        interface
+            .check(source.glsl_vs, source.glsl_fs)
+            .map_err(|reason| GfxError::Interface {
+                label: interface.name.to_string(),
+                reason,
+            })?;
+        let rebuilt = pipeline(device, interface, source)?;
+        let slot = match program {
+            Program::Sprite => &mut self.sprite,
+            Program::TileChunk => &mut self.tile_chunk,
+            Program::Blit => &mut self.blit,
+        };
+        device.destroy(mem::replace(slot, rebuilt));
+        Ok(())
     }
 
     /// Draws `frame` into `output`, with the tile layers its
@@ -434,6 +442,56 @@ impl Renderer {
     }
 }
 
+/// Makes the pipeline of the program `interface` from `source`: its
+/// instances, if it has any, in vertex buffer slot 0, and its vertices in
+/// the next.
+fn pipeline(
+    device: &mut Device,
+    interface: &Interface,
+    source: ShaderSource<'_>,
+) -> Result<PipelineId, RenderError> {
+    let (instance, instance_stride) = packed::<ATTRIBUTES>(interface.instance);
+    let (vertex, vertex_stride) = packed::<ATTRIBUTES>(interface.vertex_attributes);
+    let layouts = [
+        VertexLayout {
+            stride: instance_stride,
+            step: VertexStep::Instance,
+            attributes: &instance[..interface.instance.len()],
+        },
+        VertexLayout {
+            stride: vertex_stride,
+            step: VertexStep::Vertex,
+            attributes: &vertex[..interface.vertex_attributes.len()],
+        },
+    ];
+    let vertex_layouts = if interface.instance.is_empty() {
+        &layouts[1..]
+    } else {
+        &layouts[..]
+    };
+    const {
+        assert!(
+            SPRITE.instance.len() <= ATTRIBUTES
+                && SPRITE.vertex_attributes.len() <= ATTRIBUTES
+                && TILE_CHUNK.instance.len() <= ATTRIBUTES
+                && TILE_CHUNK.vertex_attributes.len() <= ATTRIBUTES
+                && BLIT.instance.len() <= ATTRIBUTES
+                && BLIT.vertex_attributes.len() <= ATTRIBUTES,
+            "a program has more attributes than a slot has room for"
+        );
+    }
+    Ok(device.create_pipeline(&PipelineDesc {
+        label: interface.name,
+        shader: source,
+        vertex_layouts,
+        uniform_blocks: interface.uniform_blocks,
+        textures: interface.textures,
+        blend: interface.blend,
+        topology: Topology::TriangleStrip,
+        target_format: TextureFormat::Rgba8Srgb,
+    })?)
+}
+
 fn instance_buffer(device: &mut Device, capacity: usize) -> Result<BufferId, RenderError> {
     Ok(device.create_buffer(&BufferDesc {
         label: "sprite instances",
@@ -441,4 +499,93 @@ fn instance_buffer(device: &mut Device, capacity: usize) -> Result<BufferId, Ren
         usage: BufferUsage::Dynamic,
         size: capacity * SPRITE_INSTANCE_FLOATS * size_of::<f32>(),
     })?)
+}
+
+/// Reloads on a GPU: what is destroyed, and what is kept.
+#[cfg(all(test, feature = "headless-test"))]
+mod gpu_tests {
+    use nadir_gfx::{GfxError, ResourceKind};
+
+    use super::*;
+
+    /// A device on an offscreen context, or `None` where this system has
+    /// none yet and no renderer is asked for, as the headless tests do.
+    fn device() -> Option<Device> {
+        let expected = std::env::var("NADIR_EXPECT_GL_RENDERER").unwrap_or_default();
+        match Device::new_headless() {
+            Ok(device) => {
+                let renderer = &device.caps().renderer;
+                assert!(
+                    renderer.contains(&expected),
+                    "the renderer is `{renderer}`, not `{expected}`"
+                );
+                Some(device)
+            }
+            Err(GfxError::NoOffscreenContext) if expected.is_empty() => None,
+            Err(error) => panic!("no headless device: {error}"),
+        }
+    }
+
+    /// The renderer's programs, in the order of `Program::ALL`.
+    fn programs(renderer: &Renderer) -> [PipelineId; 3] {
+        [renderer.sprite, renderer.tile_chunk, renderer.blit]
+    }
+
+    #[test]
+    fn a_reload_destroys_the_program_it_replaces_and_a_refused_one_keeps_it() {
+        let Some(mut device) = device() else { return };
+        let size = UVec2::new(4, 4);
+        let mut renderer = Renderer::new(
+            &mut device,
+            &RenderConfig {
+                virtual_resolution: size,
+            },
+        )
+        .expect("a renderer");
+        let target = device
+            .create_render_target(size, TextureFormat::Rgba8Srgb)
+            .expect("a target");
+        let alive = |device: &mut Device, pipeline: PipelineId| {
+            device.begin_offscreen_frame().expect("a frame");
+            let set = device
+                .begin_pass(target.into(), None)
+                .expect("a pass")
+                .set_pipeline(pipeline);
+            device.end_offscreen_frame().expect("the end of the frame");
+            match set {
+                Ok(()) => true,
+                Err(GfxError::StaleHandle(ResourceKind::Pipeline)) => false,
+                Err(error) => panic!("{error}"),
+            }
+        };
+        assert_eq!(Program::ALL.len(), 3);
+        for (index, &program) in Program::ALL.iter().enumerate() {
+            let before = programs(&renderer);
+            let source = program.interface().source();
+            renderer
+                .reload_program(&mut device, program, source)
+                .expect("the program rebuilt");
+            let after = programs(&renderer);
+            for (slot, (old, new)) in before.iter().zip(&after).enumerate() {
+                if slot == index {
+                    assert_ne!(old, new, "{}", program.name());
+                    assert!(!alive(&mut device, *old), "{}: the old one", program.name());
+                } else {
+                    assert_eq!(old, new, "{}: another program", program.name());
+                }
+                assert!(alive(&mut device, *new));
+            }
+
+            let broken = ShaderSource {
+                glsl_fs: "#version 330 core\nout vec4 out_color;\nvoid main() { oops }",
+                ..source
+            };
+            assert!(matches!(
+                renderer.reload_program(&mut device, program, broken),
+                Err(RenderError::Gfx(GfxError::Shader { .. }))
+            ));
+            assert_eq!(programs(&renderer), after, "{}: refused", program.name());
+            assert!(alive(&mut device, after[index]));
+        }
+    }
 }

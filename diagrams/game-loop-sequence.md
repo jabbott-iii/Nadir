@@ -535,9 +535,10 @@ sequenceDiagram
 ## Not shown, because it is not built yet
 
 - The audio thread and its mixer (roadmap M6).
-- The game reloading what changed (M5.8, M5.17). nadir-assets' reload
-  behind a handle and its watcher thread are built (M5.16), but the facade
-  does not start or call them yet, so the loop does not reach them.
+- The game reloading what changed (M5.8). nadir-assets' reload behind a
+  handle and its watcher thread (M5.16), and nadir-render's program
+  rebuilt from new sources (M5.17), are built, but the facade does not
+  start or call them yet, so the loop does not reach them.
 - Gamepads (M8), bitmap text (M7.1), and the debug UI, profiler and console
   (M7.2 to M7.6).
 - Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).

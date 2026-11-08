@@ -3685,7 +3685,7 @@ by the batched sprite renderer.
     the first tests; each now has one, and twelve planted one at a time
     all fail the suite.
 
-- [ ] **M5.17 — render: shader reload; a texture reloaded behind its handle**
+- [x] **M5.17 — render: shader reload; a texture reloaded behind its handle**
   - Note (from M5.8's scoping, ADR-0042):
     - The renderer looks each texture handle's `TextureId` up every frame,
       so a texture swapped behind its handle needs no renderer change,
@@ -3711,6 +3711,97 @@ by the batched sprite renderer.
     scenes are unchanged.
   - Verify: `cargo test -p nadir-render`; `cargo xtask golden`;
     `cargo xtask ci`
+  - Built (2026-11-06, ADR-0042):
+    - nadir-render: `Renderer::reload_program(device, program, source)`,
+      the `Program` enum (`ALL`, `name`, `vertex_file`, `fragment_file`)
+      and `SHADER_DIR`, this crate's `shaders/` where it was compiled. The
+      parity check moved from the tests into the crate
+      (`Interface::check`, a reader of the GLSL's top-level declarations),
+      run on the sources given before the device builds them; `new` and
+      the reload build a program through one function, `pipeline`. A
+      refusal of the check reads "the shaders do not fit their pipeline".
+    - Tests: 11 unit tests of the check, its reader and `SHADER_DIR`, 10
+      of them new, which replace the parser's test (the files under
+      `SHADER_DIR` are those included; the reader as the preprocessor
+      reads, GLSL integers, branches and braces, 4,000 random inputs that
+      never make it panic; refusals that say what differs; edits taken);
+      one GPU unit test (a reload destroys the program it replaces, and a
+      refused one nothing); 4 headless tests (`tests/headless/reload.rs`):
+      each program rebuilt with its colors swapped, drawn from the next
+      frame, then from its files as they are; sources that do not
+      compile, at each stage, or do not link, and sources of another
+      interface, refused with the last program drawn after; a sprite's
+      texture, of another size, and a tile set's reloaded behind their
+      handles, drawn from the finish on, the sprite's old texture
+      destroyed, and a broken file keeping its texels.
+    - The docs: the crate docs, with an example, and its README; the
+      design's "Reloading"; gfx's shader conventions; the assets design's
+      hot reload; the class and game-loop diagrams.
+  - As built:
+    - The public API only grows: a refusal is `RenderError::Gfx`, with
+      `GfxError::Interface` (the check's, or the device's for a block's
+      size) or `GfxError::Shader` (the stage and the driver's log).
+      `Program` is `#[non_exhaustive]`, and `Program::ALL` a slice, so
+      that a program added later breaks neither.
+    - The renderer reads no file and needs no feature to reload: the
+      facade is to read the files under `SHADER_DIR` and hand them over
+      (M5.8).
+    - The texture reload needed no renderer change, only its test: each
+      frame looks the handles' `TextureId`s up again.
+    - The check refuses what differs, and takes what the sources leave
+      out, as the device takes an attribute, block or sampler the program
+      does not use. It reads the declarations as the preprocessor reads
+      the text before its directives, in one pass, the lines of `#pragma`,
+      `#error` and `#extension` raw, as Mesa's are, but neither expands
+      macros nor chooses a branch of an `#if`: a macro's declaration is not
+      seen, every branch is read, and sources whose braces do not pair up,
+      or whose branches do not each hold whole statements, are refused. A
+      block's members are the device's to check, by size alone. It does
+      not see an edit that keeps the interface and draws wrong: Mesa links
+      a fragment shader reading an input the vertex shader does not
+      write, which GLSL 330 leaves undefined.
+    - `SHADER_DIR` is the compiling machine's path: from crates.io, a
+      registry folder that cargo does not rebuild when its files change,
+      so the shaders are edited in a path dependency or a `[patch]`.
+    - The old program is destroyed as soon as the new one is built; Metal
+      (M10) may need to keep it until the GPU is done.
+  - Review: one review agent, then a workflow of 9 agents (planted bugs,
+    a probe of the reader on Mesa, a docs check, a skeptic for each docs
+    finding). They found sources that pass the check and gfx yet draw
+    wrong on Mesa:
+    - `attribute`; a uniform struct; `gl_FragColor` and `gl_FragData`;
+    - lines joined by a `\`, comments opened on directive lines (a
+      `#pragma`'s raw), lone `\r`s and `\n\r`s, vertical tabs, and joins
+      that read their own output again;
+    - fragment outputs at another location or index, two of them, or an
+      array; an attribute with another layout qualifier (`component`);
+    - braces, or `#if` branches, that split or hide a declaration.
+  - They also found refusals of what GLSL takes: `LOCATION`, `0x6`, the
+    same declaration in two branches, a uniform with a value, an
+    initializer's commas, and an attribute or sampler left out. Further:
+    six planted bugs that survived the tests, the old program never
+    shown to be destroyed, and docs that overstated. Three docs findings
+    were refuted. All of the rest is fixed, each with a test; the six,
+    and five planted against the fixes, now fail the tests.
+  - Found in passing, and fixed with this task at the user's request:
+    gfx's own scan for `#extension` (`has_extension_directive`) missed
+    one behind a `/*` on a `#pragma` or `#error` line, after a lone `\r`,
+    or after a join that read its own output again, which Mesa enabled.
+    It now reads the text as the preprocessor does, in one pass, with a
+    test of each. A workflow of 3 agents checked the fix: a probe on Mesa
+    found two more ways, older than the fix, that Mesa enabled an
+    extension gfx missed: a name only starting with `extension`
+    (`#extensionGL_…`), and a `/*` in a string, or on an unknown
+    directive's line in a skipped `#if` group. Four planted bugs
+    survived. gfx now takes a name's start, keeps the line of every
+    directive Mesa does not take apart raw, and also reads each line on
+    its own, so an `#extension` line in a block comment is refused too.
+    render's reader now reads strings, keeps those lines raw, and finds a
+    directive's name after comments, without crossing a newline. Each
+    has a test. Of 21 bugs planted against the two scans, all fail the
+    tests but one, which is equivalent, as the line pass finds what it
+    would hide; the code of another, a reading of strings in gfx that the
+    line pass makes needless, was removed.
 
 - [ ] **M5.8 — hot reload: the game reloads what changed**
   - Note (from M5.8, ADR-0042): split, it keeps M5.8's number and comes

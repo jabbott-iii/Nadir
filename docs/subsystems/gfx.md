@@ -201,8 +201,18 @@ pub struct ShaderSource<'a> {
   - Shader compile/link failures return `GfxError::Shader { label, stage, log }`
     with the driver log. The first line of each GLSL source must be
     `#version 330 core`, and no `#extension` directive may follow: an
-    extension could give a shader resources that no draw checks. A vertex
-    stride is at most 2048 bytes.
+    extension could give a shader resources that no draw checks. The
+    directive is looked for as the preprocessor reads the text, in one
+    pass: a `\` before a newline joins the lines, `\r\n`, `\n\r` and a
+    `\r` or `\n` alone are each one newline, each comment is a space, a
+    directive's `#` comes first on its line and its name after spaces and
+    comments, and, as Mesa's preprocessor reads them, a name that starts
+    with `extension` is one, and the rest of the line of a directive it
+    does not take apart (`#pragma`, `#error`, or one it does not know) is
+    kept as it is. Each line is also read on its own, whatever comes
+    before it, so that a comment, a string or a skipped `#if` group that a
+    driver reads otherwise hides none: an `#extension` line in a block
+    comment is refused too. A vertex stride is at most 2048 bytes.
   - In debug builds (`cfg(debug_assertions)`, ADR-0016), `glGetError` is
     checked after every call, and an error is `GfxError::Gl { call, code }`.
   - In release it's checked once per frame, and the first failure is logged
@@ -250,14 +260,19 @@ pub struct ShaderSource<'a> {
   the sources it is given (M5.17, M5.8; ADR-0042).
 - Every shader has a Rust "interface" constant: attributes with locations,
   uniform blocks with sizes, texture slots. Both sources must agree with it.
-  A parity test parses the GLSL `layout(location = N) in` lines and the MSL
-  `[[attribute(N)]]` annotations and checks both against the constant.
+  A parity check reads the GLSL's declarations (the vertex inputs, the
+  uniform blocks, the other uniforms and the fragment output) and, from
+  M10.3, the MSL `[[attribute(N)]]` annotations, and checks them against
+  the constant.
+  As built (M5.17), the GLSL half is in nadir-render itself: the tests run
+  it on the included sources, and `Renderer::reload_program` on sources
+  given while the game runs, before the device builds them.
 - As built (M3.3), `sprite` and `blit` exist, in `crates/render`, and
   since M4.5 `tile_chunk` (ADR-0023), whose `TileLayer` uniform block has
-  a `uvec4` that Rust fills as `u32`s. Render's parity test checks each
-  `layout(location = N) in` line of their GLSL against the interface
-  constant, and that each uniform block and sampler is declared. MSL comes
-  with M10.3.
+  a `uvec4` that Rust fills as `u32`s. Render's parity test runs the
+  check on their GLSL (since M5.17; it read each `layout(location = N)
+  in` line before), and checks that they declare each attribute, uniform
+  block and sampler of the constant. MSL comes with M10.3.
 - Expected programs:
   - `sprite` (instanced quads)
   - `tile_chunk`

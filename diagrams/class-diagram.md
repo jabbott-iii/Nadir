@@ -1009,7 +1009,9 @@ classDiagram
 The `Renderer` draws one `RenderFrame` with the textures the asset server
 holds and the tile layers in `TileLayers`. It draws the world at the
 virtual resolution, then scales it up to the window by a whole number, the
-`Upscale`.
+`Upscale`. While the game runs, it can rebuild one of its `Program`s
+from new GLSL sources, keeping the one it had when they do not build or
+do not declare the program's interface.
 
 ```mermaid
 classDiagram
@@ -1025,6 +1027,7 @@ classDiagram
         -tiles TileCache
         +new(device, config) Result~Renderer~
         +render(device, assets, tiles, frame, output) Result~FrameStats~
+        +reload_program(device, program, source) Result
         +upscale(size) Upscale
         +screen_to_world(camera, size, screen) Vec2
         +world_to_screen(camera, size, world) Vec2
@@ -1047,18 +1050,29 @@ classDiagram
         +factor u32
         +rect IRect
     }
+    class Program {
+        <<enumeration>>
+        Sprite
+        TileChunk
+        Blit
+        +Program[] ALL$
+        +name() str
+        +vertex_file() str
+        +fragment_file() str
+    }
     class RenderFrame
     class TileLayers
     class Device["gfx::Device"]
     class AssetServer["assets::AssetServer"]
     Renderer ..> RenderConfig : new
-    Renderer ..> Device : new, render
+    Renderer ..> Device : new, render, reload_program
     Renderer ..> AssetServer : render finds textures
     Renderer ..> TileLayers : render
     Renderer ..> RenderFrame : render
     Renderer ..> Output : render
     Renderer ..> FrameStats : render returns
     Renderer ..> Upscale : upscale
+    Renderer ..> Program : reload_program
 ```
 
 ## render: batching and tile chunks

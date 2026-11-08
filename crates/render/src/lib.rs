@@ -37,6 +37,16 @@
 //! [`Renderer::screen_to_world`] and [`Renderer::world_to_screen`] map
 //! points between the two. Failures are [`RenderError`]s.
 //!
+//! **Reloading.** [`Renderer::reload_program`] builds one of the renderer's
+//! [`Program`]s again from GLSL it is given, such as its files under
+//! [`SHADER_DIR`] after an edit, and keeps the program it had when the
+//! sources do not build or do not declare the program's interface. A
+//! texture reloaded behind its handle through `nadir-assets` needs nothing
+//! of the renderer: each frame looks its textures up again, so the new
+//! texels are drawn from the first frame after the finish that swaps them
+//! in. The engine's facade is to do both in development builds (roadmap
+//! M5.8).
+//!
 //! **What a frame draws.** A [`RenderFrame`] holds the [`Camera2D`], the
 //! clear color, the [`SpriteDraw`]s (each with a [`SortMode`] and a
 //! [`Flip`]), the [`TileLayerDraw`]s, and the time that animated tiles
@@ -146,6 +156,47 @@
 //! }
 //! ```
 //!
+//! # Example: reloading a shader
+//!
+//! The renderer reads no file. A game that watches its shader files reads
+//! the one that changed, and gives the program's sources to the renderer:
+//!
+//! ```
+//! use std::fs;
+//! use std::path::Path;
+//!
+//! use nadir_gfx::{Device, ShaderSource};
+//! use nadir_render::{Program, Renderer, SHADER_DIR};
+//!
+//! /// Builds `program` again from its files, or says why it could not, in
+//! /// which case the renderer goes on drawing with the program it had.
+//! fn reload(
+//!     renderer: &mut Renderer,
+//!     device: &mut Device,
+//!     program: Program,
+//! ) -> Result<(), String> {
+//!     let read = |file: &str| {
+//!         fs::read_to_string(Path::new(SHADER_DIR).join(file)).map_err(|error| error.to_string())
+//!     };
+//!     let vertex = read(program.vertex_file())?;
+//!     let fragment = read(program.fragment_file())?;
+//!     let source = ShaderSource {
+//!         glsl_vs: &vertex,
+//!         glsl_fs: &fragment,
+//!         msl: "",
+//!     };
+//!     renderer
+//!         .reload_program(device, program, source)
+//!         .map_err(|error| error.to_string())
+//! }
+//!
+//! // Each program's files are in the folder.
+//! for &program in Program::ALL {
+//!     assert!(Path::new(SHADER_DIR).join(program.vertex_file()).is_file());
+//!     assert!(Path::new(SHADER_DIR).join(program.fragment_file()).is_file());
+//! }
+//! ```
+//!
 //! # Order
 //!
 //! Sprites are drawn by [`SpriteDraw::layer`], lowest first; within a
@@ -198,7 +249,10 @@
 //! [`Renderer::new`] and [`Renderer::render`] fail with
 //! [`RenderError::Gfx`] when the device refuses a call, and
 //! [`Renderer::new`] with [`RenderError::BadConfig`] for an empty virtual
-//! resolution. [`TileLayer::new`] panics on a tile size that is not a finite
+//! resolution. [`Renderer::reload_program`] fails with
+//! [`RenderError::Gfx`] when the sources declare another interface, do not
+//! compile or link, or the device refuses, and keeps the program it had.
+//! [`TileLayer::new`] panics on a tile size that is not a finite
 //! number above 0, and [`TileLayer::set`] on a cell outside the layer.
 //!
 //! # Allocation and threading
@@ -218,8 +272,8 @@
 //! # Not built yet
 //!
 //! Bitmap text (roadmap M7.1), debug draw (M7.6), UI sprites, post effects,
-//! camera rotation, the smooth-camera and native-resolution modes, shader
-//! hot reload (M5.17), and the Metal shaders (M10.3).
+//! camera rotation, the smooth-camera and native-resolution modes, and the
+//! Metal shaders (M10.3).
 //!
 //! # Features
 //!
@@ -254,6 +308,7 @@ pub use error::RenderError;
 pub use frame::{Camera2D, Flip, RenderFrame, SortMode, SpriteDraw};
 pub use instance::SPRITE_INSTANCE_FLOATS;
 pub use renderer::{FrameStats, Output, RenderConfig, Renderer};
+pub use shader::{Program, SHADER_DIR};
 pub use texture::{DecodedTexture, Texture};
 pub use tiles::{TILE_INSTANCE_FLOATS, Tile, TileLayer, TileLayerDraw, TileLayers, TileSet};
 pub use view::Upscale;

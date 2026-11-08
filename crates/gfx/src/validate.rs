@@ -18,7 +18,9 @@
 //! what the draw calls' safety rests on, for every read that the device sets
 //! up. What a shader's own code indexes is the shader's to keep in bounds.
 
+use core::iter::Peekable;
 use core::ops::Range;
+use core::str::Chars;
 
 use nadir_core::{IRect, IVec2, UVec2};
 
@@ -140,47 +142,132 @@ pub(crate) fn write_range(
 }
 
 /// Whether a GLSL source has an `#extension` directive, which could give its
-/// shaders resources that no description names, and no draw checks. The
-/// source is read as the preprocessor reads it: a backslash before a newline
-/// joins the lines, and each comment is a space.
+/// shaders resources that no description names, and no draw checks.
+///
+/// The source is read as the preprocessor reads it, in one pass that never
+/// reads again what it made: a backslash before a newline joins the lines;
+/// `\r\n`, `\n\r`, and a `\r` or a `\n` alone, are each one newline; each
+/// comment is a space; and a directive is a `#` first on its line, after
+/// spaces and comments, then its name, after more of them. As Mesa's
+/// preprocessor reads them, a directive whose name starts with `extension`
+/// is one, and the rest of the line of a directive it does not take apart,
+/// such as `#pragma` and `#error`, is kept as it is, so that a `/*` there
+/// hides no line after it.
+///
+/// Each line is also read on its own, whatever comes before it, so that a
+/// comment, a string (which Mesa's preprocessor reads, a `/*` in it opening
+/// no comment) or a skipped `#if` group, read otherwise than a driver reads
+/// it, hides no `#extension` from the check: such a line in a block comment
+/// is found too.
 pub(crate) fn has_extension_directive(source: &str) -> bool {
-    let joined = source.replace("\\\r\n", "").replace("\\\n", "");
-    let mut text = String::with_capacity(joined.len());
-    let mut chars = joined.chars().peekable();
-    while let Some(c) = chars.next() {
-        match (c, chars.peek()) {
-            ('/', Some('/')) => {
-                while chars.next_if(|&c| c != '\n').is_some() {}
-                text.push(' ');
+    // `\r\n` and `\n\r` are one newline: the second of the pair goes with
+    // the first.
+    fn newline(first: char, chars: &mut Peekable<Chars<'_>>) {
+        chars.next_if_eq(&if first == '\r' { '\n' } else { '\r' });
+    }
+    // Past a block comment whose `/*` was read.
+    fn comment(chars: &mut Peekable<Chars<'_>>) {
+        let mut last = ' ';
+        for c in chars.by_ref() {
+            if last == '*' && c == '/' {
+                break;
             }
-            ('/', Some('*')) => {
-                chars.next();
-                let mut last = ' ';
-                for c in chars.by_ref() {
-                    if last == '*' && c == '/' {
-                        break;
-                    }
-                    // The lines go on, so that a directive after the
-                    // comment is still found.
-                    if c == '\n' {
-                        text.push('\n');
-                    }
-                    last = c;
-                }
-                text.push(' ');
-            }
-            _ => text.push(c),
+            last = c;
         }
     }
-    text.lines().any(|line| {
-        let Some(directive) = line.trim_start().strip_prefix('#') else {
-            return false;
-        };
-        directive
-            .trim_start()
-            .strip_prefix("extension")
-            .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_'))
-    })
+    // Whether a block comment starts here, and if so, past its `/*`.
+    fn opens_comment(chars: &mut Peekable<Chars<'_>>) -> bool {
+        let mut ahead = chars.clone();
+        if ahead.next() == Some('/') && ahead.next() == Some('*') {
+            *chars = ahead;
+            true
+        } else {
+            false
+        }
+    }
+    // Past spaces, but not a newline, and block comments.
+    fn spaces(chars: &mut Peekable<Chars<'_>>) {
+        loop {
+            while chars.next_if(|&c| c.is_whitespace() && c != '\n').is_some() {}
+            if !opens_comment(chars) {
+                break;
+            }
+            comment(chars);
+        }
+    }
+    // The name of a directive whose `#` was read.
+    fn name(chars: &mut Peekable<Chars<'_>>) -> String {
+        spaces(chars);
+        let mut name = String::new();
+        while let Some(c) = chars.next_if(|&c| c.is_ascii_alphanumeric() || c == '_') {
+            name.push(c);
+        }
+        name
+    }
+
+    let mut joined = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\'
+            && let Some(first) = chars.next_if(|&c| c == '\r' || c == '\n')
+        {
+            newline(first, &mut chars);
+        } else if c == '\r' || c == '\n' {
+            newline(c, &mut chars);
+            joined.push('\n');
+        } else {
+            joined.push(c);
+        }
+    }
+
+    for line in joined.split('\n') {
+        let mut chars = line.chars().peekable();
+        spaces(&mut chars);
+        if chars.next() == Some('#') && name(&mut chars).starts_with("extension") {
+            return true;
+        }
+    }
+
+    let mut chars = joined.chars().peekable();
+    // Whether only spaces and comments have come since the last newline.
+    let mut line_start = true;
+    while let Some(&c) = chars.peek() {
+        if c == '\n' {
+            chars.next();
+            line_start = true;
+        } else if opens_comment(&mut chars) {
+            comment(&mut chars);
+        } else if c == '/' && chars.clone().nth(1) == Some('/') {
+            while chars.next_if(|&c| c != '\n').is_some() {}
+        } else if c == '#' && line_start {
+            chars.next();
+            line_start = false;
+            let name = name(&mut chars);
+            if name.starts_with("extension") {
+                return true;
+            }
+            let taken_apart = matches!(
+                name.as_str(),
+                "" | "define"
+                    | "undef"
+                    | "if"
+                    | "ifdef"
+                    | "ifndef"
+                    | "elif"
+                    | "else"
+                    | "endif"
+                    | "line"
+                    | "version"
+            );
+            if !taken_apart {
+                while chars.next_if(|&c| c != '\n').is_some() {}
+            }
+        } else {
+            chars.next();
+            line_start &= c.is_whitespace();
+        }
+    }
+    false
 }
 
 /// The widest vertex stride: GL 4.4's least `GL_MAX_VERTEX_ATTRIB_STRIDE`,
@@ -195,7 +282,11 @@ pub(crate) fn check_pipeline_desc(desc: &PipelineDesc<'_>) -> Result<(), String>
     }
     if has_extension_directive(desc.shader.glsl_vs) || has_extension_directive(desc.shader.glsl_fs)
     {
-        return Err("GLSL 330 core shaders may not enable extensions (`#extension`)".into());
+        return Err(
+            "GLSL 330 core shaders may not enable extensions (`#extension`, looked for on every \
+             line, in comments too)"
+                .into(),
+        );
     }
     if desc.vertex_layouts.len() > MAX_VERTEX_BUFFERS as usize {
         return Err(format!(
@@ -899,6 +990,38 @@ mod tests {
             "#ext\\\nension X : enable",
             "/* a\nb */ # extension X : enable",
             "void f();\n#extension X : enable\n",
+            // Mesa takes a name that starts with `extension` as one.
+            "#extensionGL_ARB_shader_storage_buffer_object : enable",
+            "#extensions",
+            // A `/*` on a `#pragma` or `#error` line, or on the line of a
+            // directive Mesa does not know, is the line's text, and hides
+            // nothing after it.
+            "#pragma /*\n#extension GL_ARB_enhanced_layouts : enable\n#pragma */\n",
+            "#error /*\n#extension X : enable\n",
+            "# /**/ pragma /*\n#extension X : enable\n",
+            "#if 0\n#errorX /*\n#endif\n#extension X : enable\n",
+            // Nor does one in a string.
+            "#define S \"/*\"\n#extension X : enable\n",
+            "#if 0\n#line 2 \"/*\"\n#endif\n#extension X : enable\n",
+            // A `\r` alone, and `\n\r`, are newlines.
+            "#pragma x\r#extension GL_ARB_enhanced_layouts : enable\n",
+            "void f();\n\r#extension X : enable",
+            // One join never makes another: the first `\` stays, the second
+            // joins its `\r\n`, and the comment ends at the next newline.
+            "// \\\\\r\n\n#extension GL_ARB_enhanced_layouts : enable\n",
+            "// \\\\\n\n#extension X : enable\n",
+            // A vertical tab or a form feed is a space.
+            "\x0B#\x0Cextension X : enable",
+            // `/*/` opens a comment and does not close it; a `/*` in a line
+            // comment opens none; a `#` alone is a directive of its own.
+            "/*/x */#extension X : enable",
+            "// a /* b\n#extension X : enable",
+            "#\n#extension X : enable",
+            // Each line is read on its own too: one in a comment is found,
+            // by the start of its name too.
+            "/*\n#extension X : enable\n*/",
+            "/*\n#extensions\n*/",
+            "#define EXT /*\n#extension X : enable\n*/",
         ];
         for source in found {
             assert!(has_extension_directive(source), "{source:?}");
@@ -907,8 +1030,15 @@ mod tests {
             "// #extension X : enable",
             "/* #extension X : enable */",
             "int extension_count;",
-            "#extensions",
             "#define EXT 1",
+            // A joined line's `#` is not first on its line.
+            "#define A \\\n#extension X : enable",
+            "#define A \\\r\n#extension X : enable",
+            "#define A \\\n\r#extension X : enable",
+            "int a; #extension X : enable",
+            "#pragma x // #extension X : enable",
+            "#\nextension X : enable",
+            "\"#extension X : enable\"",
         ];
         for source in not_found {
             assert!(!has_extension_directive(source), "{source:?}");

@@ -40,10 +40,12 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
     `animated_tiles_350ms`
 - M5.9: the `Atlas` asset, a cooked atlas's regions (ADR-0033), below
 - M5.5: the atlas's clips, and flips about the pivot (ADR-0035), below
+- M5.17: a program rebuilt from new sources, and a texture reloaded behind
+  its handle drawn (ADR-0042), in "Reloading" below
 - Not built yet:
   - text, UI sprites, debug draw and post
   - the smooth-camera and native-resolution modes
-  - shader hot reload (M5.17), and the Metal sources (M10.3)
+  - the Metal sources (M10.3)
 
 ```rust
 impl Renderer {
@@ -52,6 +54,8 @@ impl Renderer {
     /// blit into `output` (the window, or a render target; Rgba8Srgb).
     pub fn render(&mut self, device: &mut Device, assets: &AssetServer, tiles: &TileLayers,
                   frame: &RenderFrame, output: Output) -> Result<FrameStats, RenderError>;
+    pub fn reload_program(&mut self, device: &mut Device, program: Program,
+                          source: ShaderSource<'_>) -> Result<(), RenderError>;  // "Reloading"
     pub fn upscale(&self, output_size: UVec2) -> Upscale;          // factor + where the image lands
     pub fn screen_to_world(&self, camera: &Camera2D, output_size: UVec2, screen: Vec2) -> Vec2;
     pub fn world_to_screen(&self, camera: &Camera2D, output_size: UVec2, world: Vec2) -> Vec2;
@@ -352,6 +356,92 @@ pub struct TileLayerDraw { pub tiles: Handle<TileLayer>, pub layer: u8, pub dept
   - a pixel-UI scale (an integer multiple of virtual pixels), or
   - a free scale from the settings UI-scale value.
 
+## Reloading
+
+As built (M5.17, ADR-0042):
+
+```rust
+pub const SHADER_DIR: &str;                  // this crate's shaders/, where it was compiled
+#[non_exhaustive]
+pub enum Program { Sprite, TileChunk, Blit }
+impl Program {
+    pub const ALL: &'static [Program];
+    pub fn name(self) -> &'static str;           // its folder, and its pipeline's label
+    pub fn vertex_file(self) -> &'static str;    // under SHADER_DIR: "sprite/sprite.vert.glsl"
+    pub fn fragment_file(self) -> &'static str;
+}
+```
+
+- **Who reads the files:** not the renderer, which has no feature and no
+  file reading for it. The caller reads the sources and hands them to
+  `Renderer::reload_program`; under `dev` the facade is to watch
+  `SHADER_DIR`'s files and do so (M5.8). `SHADER_DIR` is the path on the
+  machine that compiled the crate. For a crate taken from crates.io it is
+  in cargo's registry, which the package's files reach but which cargo
+  does not rebuild when its files change: edit the shaders of a path
+  dependency or a `[patch]`, or the files and the sources compiled in
+  drift apart.
+- **The check:** before the device builds them, the sources are checked
+  against the program's interface constant (`Interface::check`, in
+  `shader.rs`), the parity check the tests ran before. Nothing they
+  declare may differ from it:
+  - each `in` variable of the vertex shader (`attribute` too) is one of
+    its attributes, with its location and no other layout qualifier (a
+    `component` binds it elsewhere), its GLSL type and its name;
+  - each uniform block of either shader is one of its blocks;
+  - each other uniform of either shader is one of its samplers, a
+    `sampler2D`, unless it has a value of its own (`= …`): the renderer
+    sets no plain uniform, and a uniform struct is refused;
+  - the fragment shader has one output, an `out vec4`, not an array, at
+    location 0 and index 0, and writes no `gl_FragColor` or
+    `gl_FragData`: the renderer draws into one color.
+  - An attribute, block or sampler the sources leave out is taken, as the
+    device takes one the program does not use: it enables the attribute,
+    and warns of the block or the sampler. The parity test runs the check
+    on the included sources, and checks that they declare all of it.
+  - It reads the declarations at the top level as the preprocessor reads
+    the text before its directives, in one pass: a `\` before a newline
+    joins the lines, `\r\n`, `\n\r` and a `\r` alone are each one
+    newline, each comment is a space, and a `"` starts a string, to the
+    next `"` or the end of its line, in which no comment starts. As Mesa's
+    preprocessor does, the line of a directive it does not take apart
+    (`#pragma`, `#error`, `#extension`, or one it does not know; its name
+    found after spaces and comments) keeps its text. Each line that
+    starts with `#` is then left out.
+    It neither expands macros nor chooses a branch of an `#if`: a
+    declaration a macro makes is not seen, and every branch is read (the
+    same declaration in each is one). Sources whose braces do not pair
+    up, or whose branches do not each hold whole statements at the top
+    level and end with the braces as deep as the others, are refused.
+    Locations are GLSL integers: `010` is 8, and `0x6` is 6. An
+    initializer's commas, inside its parentheses, part no declarations.
+  - The device then compiles and links the sources, checks the blocks'
+    sizes, and refuses an active block the description leaves out. A
+    block's members are checked by its size alone: they must keep their
+    types and order, which Rust packs.
+- **A refusal** keeps the program it had, and the next frame draws as the
+  last did. It is `RenderError::Gfx`, with `GfxError::Interface` saying
+  what differs, with the attribute or the blocks the program has (the
+  check's, or the device's for a block's size), or `GfxError::Shader`
+  with the stage and the driver's log. `RenderError` is exhaustive in
+  0.2, so a refusal has no variant of its own; its message reads "the
+  shaders do not fit their pipeline" for an `Interface` one.
+- **A success:** the next `render` draws with the new program, and the
+  old one is destroyed at once; OpenGL deletes a program in use once it is
+  no longer current. Metal (M10) may need to keep it until the GPU is done
+  with it, as ADR-0042's "Revisit when" says of a replaced texture.
+- **What the check does not see:** an edit that keeps the interface and
+  draws something wrong, such as a fragment shader reading an input the
+  vertex shader does not write, which GLSL 330 leaves undefined and Mesa
+  links.
+- **Textures:** each frame looks each texture handle's `TextureId` up in
+  the asset server, so a texture reloaded behind its handle
+  (`AssetServer::reload`, M5.16) is drawn with its new texels from the
+  first frame after the finish that swaps it in, and with the old ones
+  until then, with no renderer change. Its size may change: a sprite's uv
+  is a fraction of the texture. A reload that fails keeps the texels it
+  had.
+
 ## Text
 
 - The font asset is a BMFont (text format), cooked into our font asset:
@@ -411,6 +501,35 @@ Measured on min-spec; see `docs/00-overview.md`.
   - debug draw primitives
 - **Benchmarks:** sort+batch for 10k sprites; chunk rebuild
   (`tile_chunk_rebuild`, M4.5).
+- As built (M5.17), the interface check has unit tests:
+  - the included sources pass and declare all of their interface, and
+    the files under `SHADER_DIR` are those included;
+  - the reader finds declarations through comments, directives, joined
+    lines, newlines of every kind, spacing, bodies, arrays, values and
+    GLSL integers, and the raw lines of `#pragma`, `#error` and
+    `#extension`; braces, or branches, that do not hold whole
+    declarations are refused; and 4,000 inputs strung at random from a
+    fixed seed never make it panic;
+  - a moved, retyped or added attribute (`attribute` too, or one with
+    another layout qualifier), a renamed sampler or block, a block in
+    either shader, a sampler of another type, a plain uniform in either
+    shader, a uniform struct, and a fragment output that is not one
+    `out vec4` at location 0 and index 0, or `gl_FragColor` and
+    `gl_FragData`, are refused, each saying what differs, once;
+  - an edit inside the interface, every qualifier the reader passes
+    over, an `#if` with the same declaration in each branch, varyings in
+    a block, uniforms with values, and an attribute or sampler left out
+    are taken.
+- A GPU unit test checks that a reload destroys the program it replaces,
+  and no other, and that a refused one destroys nothing.
+- The headless tests rebuild each program with its colors swapped, drawn
+  from the next frame, then rebuild it from its files as they are, which
+  brings the colors back; refuse sources that do not compile (each
+  stage), do not link, or declare another interface (a moved attribute,
+  a renamed sampler, a larger block), each drawing the last program
+  after; and reload a sprite's texture, of another size, and a tile
+  set's, drawn from the finish on, the sprite's old texture destroyed and
+  a broken file keeping its texels.
 - As built (M4.5), the unit tests cover the chunks' revisions, packing,
   culling, the uniform's words, the clock's wrap and the order of tile
   layers among sprites. The headless tests draw placement, a change, a

@@ -115,7 +115,7 @@ pub(crate) struct Stage {
     pub(crate) renderer: Renderer,
     pub(crate) server: AssetServer,
     pub(crate) tiles: TileLayers,
-    root: PathBuf,
+    pub(crate) root: PathBuf,
     pub(crate) device: Device,
 }
 

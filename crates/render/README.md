@@ -29,14 +29,17 @@ Built:
   resolution, scaled up into the window by a whole factor, with bars
   around it, and the mapping between screen and world for the mouse;
 - the `Texture` asset, a QOI file uploaded to the GPU, and the `Atlas`
-  asset, a cooked atlas's sprites, frames and clips.
+  asset, a cooked atlas's sprites, frames and clips;
+- a program rebuilt from new GLSL sources while the game runs, the one it
+  had kept when they do not compile or do not declare its interface, and
+  textures reloaded behind their handles drawn from the next frame.
 
 Not yet:
 
 - bitmap text (roadmap M7.1) and debug draw (M7.6);
 - UI sprites, post effects, camera rotation, and the smooth-camera and
   native-resolution modes;
-- shader hot reload (M5.17) and the Metal shaders (M10.3).
+- the Metal shaders (M10.3).
 
 ## Usage
 
