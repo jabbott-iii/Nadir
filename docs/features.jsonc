@@ -239,8 +239,9 @@
     {
       "name": "Audio output on every desktop",
       "area": "Platform",
-      "summary": "Sound will go out through ALSA on Linux, WASAPI on Windows and AudioUnit on macOS, and recover when a device is unplugged or plugged back in.",
-      "tasks": ["M6.3", "M6.4", "M6.5"]
+      "summary": "On Linux, sound goes out through ALSA, which the engine loads while it runs, on an audio thread of its own: about 30 ms from the mix to the device, with each underrun recovered and counted. A device that is unplugged, busy, slow to open or not there yet is logged once and tried again every second, while what plays keeps its time, and the game never waits on the device more than 2 s, to start or to quit. Windows will play through WASAPI and macOS through AudioUnit, behind the same API.",
+      "tasks": ["M6.3", "M6.4", "M6.5"],
+      "ticked": ["M6.3"]
     },
     {
       "name": "Bitmap text",

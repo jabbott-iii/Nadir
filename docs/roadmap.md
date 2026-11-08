@@ -4107,7 +4107,7 @@ by the batched sprite renderer.
     on the final code: median 81.0 µs (p95 82.0), 8.3% under the baseline.
     `cargo xtask ci`: all 12 checks ok, 1,723 tests passed, 1 ignored.
 
-- [ ] **M6.3 — platform (Linux): ALSA backend**
+- [x] **M6.3 — platform (Linux): ALSA backend**
   - Note (from M6.2, ADR-0046):
     - `nadir_audio::new` makes the `Audio` handle and the `Mixer`, which is
       `Send`: the audio thread owns it and calls
@@ -4190,15 +4190,16 @@ by the batched sprite renderer.
     M6.6's Do, and M6.6 depends on this task, so on 2026-11-08 the user
     moved them to M6.6, and made the example this task's check
     (ADR-0047).
-  - ⏳ needs speakers or headphones: `cargo run -p nadir-platform --example
-    audio` plays a beep of 440 Hz on the left, then one of 660 Hz on the
-    right, each second.
-  - ⏳ needs a USB audio device: with `NADIR_ALSA_DEVICE=plughw:CARD=<its
-    name, from aplay -L>`, while the sound server leaves the card alone,
-    run the example, unplug the device during the beeps (one warning, with
-    ALSA's reason), and plug it in again (the log says the device is open,
-    and the beeps go on). Through `default`, PipeWire moves the stream
-    instead, and ALSA reports nothing.
+  - Checked by the user on 2026-11-08, by hand, who reported "M6.3 checks
+    good for audio tests" for the two checks that were left:
+    - `cargo run -p nadir-platform --example audio` plays a beep of 440 Hz
+      on the left, then one of 660 Hz on the right, each second;
+    - with `NADIR_ALSA_DEVICE=plughw:CARD=<its name, from aplay -L>`, while
+      the sound server leaves the card alone, a USB device unplugged during
+      the beeps gives one warning, with ALSA's reason, and plugged in
+      again, the log says the device is open, and the beeps go on.
+      Through `default`, PipeWire moves the stream instead, and ALSA
+      reports nothing.
 
 - [ ] **M6.4 — platform (Windows): WASAPI backend**
   - Note (from M6.3, ADR-0047): keep `open_audio`'s contract, as
