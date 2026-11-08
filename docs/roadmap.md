@@ -4213,7 +4213,9 @@ by the batched sprite renderer.
   - Do: COM vtables, event-driven shared mode, avrt, device invalidation
     reopen.
   - Accept: as M6.3.
-  - Verify: on Windows, `cargo dev` (manual)
+  - Verify: on Windows, `cargo run -p nadir-platform --example audio`
+    (manual), with a USB device unplugged and plugged in again while it
+    plays (`cargo dev` until 2026-11-08, ADR-0047)
 
 - [ ] **M6.5 — platform (macOS): AudioUnit backend**
   - Note (from M6.3, ADR-0047): as M6.4's note. CoreAudio owns the
@@ -4225,7 +4227,9 @@ by the batched sprite renderer.
   - Depends: M6.2
   - Do: the DefaultOutput unit, stream format, render callback.
   - Accept: as M6.3.
-  - Verify: on macOS, `cargo dev` (manual)
+  - Verify: on macOS, `cargo run -p nadir-platform --example audio`
+    (manual), with a USB device unplugged and plugged in again while it
+    plays (`cargo dev` until 2026-11-08, ADR-0047)
 
 - [ ] **M6.6 — audio assets and facade integration**
   - Note (from M6.2, ADR-0046):

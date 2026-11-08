@@ -3800,8 +3800,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0047 — M6.3: audio output is `open_audio`, a free function, which waits on ALSA 2 s at most; a device lost or absent is played on in time and tried every second
 
-- **Status:** Proposed; its move of M6.3's acceptance to M6.6 accepted by
-  the user on 2026-11-08
+- **Status:** Proposed; its move of M6.3's acceptance to M6.6, and of
+  M6.4's and M6.5's verification to the example, accepted by the user on
+  2026-11-08
 - **Date:** 2026-11-08
 - **Context:**
   - `docs/subsystems/sys-and-platform.md` had `Platform::open_audio(&mut
@@ -3899,8 +3900,10 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     M6.3's check, by ear, with `NADIR_ALSA_DEVICE` naming a USB device for
     the unplug; "sandbox audio plays" and `cargo dev` moved to M6.6, whose
     Accept already asks for the sandbox's footsteps and music. The Accept
-    of M6.4 and M6.5, "as M6.3", now means the example too; their Verify
-    still names `cargo dev`, which plays sound only once M6.6 has landed.
+    of M6.4 and M6.5, "as M6.3", now means the example too, and their
+    Verify is the example on Windows and on macOS, with a USB device
+    unplugged and plugged in again, in place of `cargo dev`, which plays
+    sound only once M6.6 has landed.
 - **Consequences:**
   - Good: neither the start nor the exit of a game waits on ALSA more
     than 2 s; a device unplugged, busy, slow or not there yet is played on
