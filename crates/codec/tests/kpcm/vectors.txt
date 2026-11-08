@@ -1,0 +1,23 @@
+mono ok 1 48000 4
+stereo ok 2 44100 3
+one_frame ok 1 1 1
+extremes ok 2 384000 2
+silence ok 2 22050 5
+tone ok 2 48000 100
+not_magic error NotKpcm 0
+qoa error NotKpcm 0
+empty error UnexpectedEnd 0
+magic_only error UnexpectedEnd 4
+header_cut error UnexpectedEnd 15
+version_0 error Version 4
+version_2 error Version 4
+channels_0 error BadChannels 6
+channels_3 error BadChannels 6
+reserved error Reserved 7
+rate_0 error BadSampleRate 8
+rate_384001 error BadSampleRate 8
+no_frames error NoFrames 12
+samples_cut error UnexpectedEnd 19
+no_samples error UnexpectedEnd 16
+trailing error TrailingBytes 20
+too_many error TooManyBytes 12

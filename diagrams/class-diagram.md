@@ -1645,8 +1645,9 @@ classDiagram
 `Mixer`, on the audio thread, carries the commands out at the start of
 each `render`, then mixes its voices and music into the buses and the
 master. The sounds it is done with go back through the return queue,
-and `Audio::update` drops them. M6.6 puts sound and music assets over
-`SoundData` and `MusicData`, and the facade's components over `Audio`.
+and `Audio::update` drops them. M6.9 puts sound and music assets over
+`SoundData` and `MusicData`, and M6.6 the facade's components over
+`Audio`.
 
 ```mermaid
 classDiagram

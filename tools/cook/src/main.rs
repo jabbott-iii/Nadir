@@ -23,7 +23,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use nadir_codec::{Limits, kpak};
-use nadir_cook::{Counts, Options, PACK, Report};
+use nadir_cook::{Counts, Options, PACK, Report, SoundEncoding};
 use nadir_core::cli::Args;
 use nadir_core::hash::fnv1a64;
 
@@ -39,10 +39,12 @@ const USAGE: &str = "Usage: nadir-cook [--force] SOURCE OUT
 
 Cooks the files below SOURCE into OUT: each folder's PNG images, Aseprite
 exports and BMFont fonts into an atlas, `atlas/<group>_<n>.qoi` and
-`atlas/<group>.kbj`, with each font's `atlas/<font>.font.kbj`; and each
-JSONC file below `data/` into KBJ, `data/<name>.kbj`; and every file it
-writes into one pack, `game.kpak`. A job whose files did not change since
-the last cook into OUT is left as it is.
+`atlas/<group>.kbj`, with each font's `atlas/<font>.font.kbj`; each WAV
+below `audio/` into `audio/<name>.kpcm` or `audio/<name>.qoa`; each JSONC
+file below `data/` into KBJ, `data/<name>.kbj`; each LDtk project's levels
+into `levels/<name>.klvl`; and every file it writes into one pack,
+`game.kpak`. A job whose files did not change since the last cook into OUT
+is left as it is.
 
 Options:
   --force    Cook every job, whatever the cache in OUT says
@@ -159,6 +161,21 @@ fn describe(report: &Report, out: &str) -> (String, String) {
                     count(levels, "level")
                 )
             }
+            Some(Counts::Sound {
+                encoding,
+                frames,
+                sample_rate,
+            }) => {
+                let encoding = match encoding {
+                    SoundEncoding::Qoa => "QOA",
+                    _ => "PCM16",
+                };
+                let seconds = frames as f64 / f64::from(sample_rate.max(1));
+                format!(
+                    "cook: {}: {encoding}, {seconds:.2} s at {sample_rate} Hz\n",
+                    job.name
+                )
+            }
             Some(_) => format!("cook: {}: cooked\n", job.name),
             None => format!("cook: {}: up to date\n", job.name),
         };
@@ -256,6 +273,26 @@ mod tests {
                     counts: None,
                 },
                 JobReport {
+                    name: "audio/music/theme".to_string(),
+                    cooked: true,
+                    files: 1,
+                    counts: Some(Counts::Sound {
+                        encoding: SoundEncoding::Qoa,
+                        frames: 96_000,
+                        sample_rate: 48_000,
+                    }),
+                },
+                JobReport {
+                    name: "audio/sfx/step".to_string(),
+                    cooked: true,
+                    files: 1,
+                    counts: Some(Counts::Sound {
+                        encoding: SoundEncoding::Pcm16,
+                        frames: 11_025,
+                        sample_rate: 22_050,
+                    }),
+                },
+                JobReport {
                     name: "data/items".to_string(),
                     cooked: true,
                     files: 1,
@@ -283,9 +320,11 @@ mod tests {
             "cook: atlas/fonts: 1 sprite on 1 page, 1 font\n\
              cook: atlas/sprites: 5 sprites on 1 page, 2 clips\n\
              cook: atlas/ui: up to date\n\
+             cook: audio/music/theme: QOA, 2.00 s at 48000 Hz\n\
+             cook: audio/sfx/step: PCM16, 0.50 s at 22050 Hz\n\
              cook: data/items: cooked\n\
              cook: ldtk/levels/world: 2 levels, 1 entity\n\
-             cook: 4 jobs cooked, 1 up to date, into target/cooked\n"
+             cook: 6 jobs cooked, 1 up to date, into target/cooked\n"
         );
         assert_eq!(
             warnings,

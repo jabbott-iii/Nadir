@@ -13,9 +13,9 @@
 // limitations under the License.
 
 //! File-format codecs for the Nadir engine: Adler-32, inflate, PNG, QOI, QOA,
-//! WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite's
-//! sprite sheet data, LDtk's projects, the cook's atlas, level and prefab
-//! files, and the pack file.
+//! WAV, the sound file (KPCM) and a resampler, KLZ block compression,
+//! JSON(C), binary JSON (KBJ), BMFont, Aseprite's sprite sheet data, LDtk's
+//! projects, the cook's atlas, level and prefab files, and the pack file.
 //!
 //! # Where it fits
 //!
@@ -42,6 +42,7 @@
 //! | :- | :- | :- |
 //! | [`qoi`] | QOI images (specification 1.0), RGBA8: the game's textures and the atlas pages the cook writes | [`qoi::decode`], [`qoi::encode`] |
 //! | [`qoa`] | QOA sounds: 16-bit samples of 1 to 8 channels at 3.2 bits a sample, whole or a frame at a time, for music and long sounds | [`qoa::decode`], [`qoa::header`], [`qoa::decode_frame`], [`qoa::encode`] |
+//! | [`kpcm`] | The sound file, `audio/<path>.kpcm`: 16-bit samples of 1 or 2 channels as they are, for short sounds | [`kpcm::decode`], [`kpcm::encode`] |
 //! | [`kbj`] | KBJ, the binary form of a [`json::Value`] tree that cooked data is stored in | [`kbj::decode`], [`kbj::encode`] |
 //! | [`atlas`] | The cook's atlas file, `atlas/<group>.kbj`: each sprite's frames on the pages, and its clips | [`atlas::parse`] |
 //! | [`level`] | The level file, `levels/<name>.klvl`: tile layers, a collision grid, tall tiles, entities | [`level::parse`] |
@@ -53,8 +54,14 @@
 //! files, which the engine's `load_level` loads into the world. The pack
 //! file's reader is built (roadmap M5.13); the cook writes packs, and
 //! nadir-assets' `PackSource` reads them (M5.14), as the engine's release
-//! builds do (M5.7). QOA's encoder and decoder are built (M6.1); the cook
-//! writes QOA from M6.6, and the mixer plays it from M6.2.
+//! builds do (M5.7). QOA's encoder and decoder are built (M6.1), and the
+//! sound file's (M6.8): the cook writes both, and the mixer plays QOA
+//! (M6.2); the game loads them as assets from M6.9.
+//!
+//! [`pcm`] changes a sound's rate, with a windowed sinc that gives the same
+//! bits on every system and keeps a loop's seam ([`pcm::resample`]), and
+//! makes 16-bit samples of `f32` ones ([`pcm::to_i16`]): the cook resamples
+//! sounds to 48 kHz with it.
 //!
 //! Read only by the cook:
 //!
@@ -67,9 +74,6 @@
 //! | [`bmfont`] | BMFont fonts in the text format | [`bmfont::parse`] |
 //! | [`ldtk`] | LDtk 1.5.3 projects (`.ldtk`) and level files (`.ldtkl`) | [`ldtk::parse_project`], [`ldtk::parse_level`] |
 //! | [`wav`] | WAV sounds: PCM of 16 and 24 bits, float of 32, mono or stereo, to `f32` samples | [`wav::decode`] |
-//!
-//! The cook does not call the WAV reader yet: its audio pipeline comes with
-//! M6.6.
 //!
 //! [`json`] reads JSON (RFC 8259) with the JSONC extensions, `//` and
 //! `/* */` comments and trailing commas, into a [`json::Value`]
@@ -130,8 +134,8 @@
 //!
 //! - a byte offset in a binary format: [`CodecError::Qoi`],
 //!   [`CodecError::Qoa`], [`CodecError::Kbj`], [`CodecError::Klz`], [`CodecError::Kpak`],
-//!   [`CodecError::Inflate`], [`CodecError::Wav`] and, with `png`,
-//!   `CodecError::Png`;
+//!   [`CodecError::Kpcm`], [`CodecError::Inflate`], [`CodecError::Wav`]
+//!   and, with `png`, `CodecError::Png`;
 //! - a line and a column, counted in characters from 1, in text:
 //!   [`CodecError::Json`] and [`CodecError::BmFont`];
 //! - a member path, such as `sprites[2].frames[0].w`, in a file checked
@@ -142,8 +146,9 @@
 //!
 //! The `ErrorKind` of each module that can fail says what is wrong. An
 //! encoder that refuses a value has a variant of its own,
-//! [`CodecError::QoiEncode`], [`CodecError::QoaEncode`] and
-//! [`CodecError::KbjEncode`]. [`CodecError`]
+//! [`CodecError::QoiEncode`], [`CodecError::QoaEncode`],
+//! [`CodecError::KpcmEncode`] and [`CodecError::KbjEncode`]; samples
+//! [`pcm::resample`] refuses are [`CodecError::Pcm`]. [`CodecError`]
 //! is `#[non_exhaustive]`: which variants exist depends on the features, so
 //! a `match` on it needs a `_` arm.
 //!
@@ -219,9 +224,11 @@ pub mod json;
 pub mod kbj;
 pub mod klz;
 pub mod kpak;
+pub mod kpcm;
 pub mod ldtk;
 pub mod level;
 mod limits;
+pub mod pcm;
 #[cfg(feature = "png")]
 pub mod png;
 pub mod prefab;

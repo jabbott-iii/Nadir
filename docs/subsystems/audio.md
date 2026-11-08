@@ -53,8 +53,8 @@ Audio (handle) ──► CommandQueue ──try_lock──► Mixer::render(out,
 ## Game-facing API
 
 Built in M6.2 as below, but taking `&Arc<SoundData>` and `&Arc<MusicData>`
-where it takes handles here: M6.6 makes the `Sound` and `Music` assets,
-and the handles (ADR-0046).
+where it takes handles here: M6.9 makes the `Sound` and `Music` assets,
+and the handles (ADR-0046, ADR-0048).
 
 ```rust
 pub fn new(config: AudioConfig) -> Result<(Audio, Mixer), AudioError>;
@@ -96,8 +96,11 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
 ## Mixer details
 
 - **Format:** interleaved `f32` stereo at the device rate (normally 48 kHz).
-  Sounds are converted to the device rate **at load time**, on a worker, so
-  most voices play without resampling.
+  The cook resamples sounds and music to 48 kHz unless their sidecars say
+  otherwise, with a windowed sinc (M6.8, ADR-0049); sounds at another rate
+  than the device's are converted to it **at load time**, on a worker
+  (M6.9), so most voices play without resampling. Music is streamed, and
+  the mixer resamples it as it plays when its rate is not the device's.
 - **Pitch:** a linear-interpolation resampler with a 32.32 fixed-point
   position. Good enough for SFX pitch variance (±20%).
 - **Pan:** constant-power for a mono sound: `l = cos(θ)`, `r = sin(θ)`,
@@ -129,7 +132,9 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
   least a 2 ms ramp; a stop of a voice already fading out keeps the
   sooner end. A sound that ends on its own plays to its last sample, with
   no ramp: one would silence sounds shorter than two ramps, so a sound's
-  data should end at 0 (M6.6's cook can see to it).
+  data should end at 0. The cook does not change it, as a fade would break
+  a loop's seam, but warns of a sound that does not loop and ends above
+  −48 dBFS (M6.8).
 - **Master limiter:** a cheap soft clip (`x / (1 + |x|)`-shaped curve above
   −1 dBFS). It's never hit in normal mixes; it's there to protect speakers
   on stacking. Its output stays below 1 for any input, and NaN gives 0.
@@ -151,8 +156,8 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
 
 | Asset | Source | Cooked | Runtime representation |
 | :- | :- | :- | :- |
-| `Sound` (SFX) | WAV PCM 16/24-bit or float, mono/stereo | PCM16 (`.kpcm`) or QOA, chosen per asset in cook config | `Arc<SoundData>`: `f32` interleaved at device rate |
-| `Music` | WAV | QOA (`.qoa`) | `Arc<[u8]>` compressed + per-voice streaming decoder state |
+| `Sound` (SFX) | WAV PCM 16/24-bit or float, mono/stereo, below `audio/` | The sound file (`.kpcm`, PCM16) or QOA, by its sidecar, or by its folder (QOA below `audio/music/`), at 48 kHz unless the sidecar gives a rate (M6.8) | `Arc<SoundData>`: `f32` interleaved at device rate |
+| `Music` | WAV, below `audio/` (`audio/music/` by default) | QOA (`.qoa`), looped | `Arc<[u8]>` compressed + per-voice streaming decoder state |
 
 ## Device events
 

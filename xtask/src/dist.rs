@@ -100,9 +100,9 @@ const COOK_DEB: Deb = Deb {
     name: "nadir-cook",
     section: "devel",
     summary: "offline asset pipeline of the Nadir game engine",
-    details: " Cooks a folder of PNG images, Aseprite exports, BMFont fonts, LDtk\n \
-              levels and JSONC data into the atlases, level files and binary\n \
-              files the Nadir engine loads.\n",
+    details: " Cooks a folder of PNG images, Aseprite exports, BMFont fonts, WAV\n \
+              sounds, LDtk levels and JSONC data into the Nadir engine's\n \
+              atlases, sound files, level files and binary files.\n",
 };
 
 /// The sandbox, in `/usr/lib/games/nadir-sandbox` with its cooked
@@ -340,9 +340,9 @@ fn readme(release: &Release, glibc: Option<&str>) -> String {
     let cook = run("nadir-cook");
     let mut programs = String::from(
         "  nadir-cook   the offline asset pipeline. It cooks a folder of PNG\n               \
-         images, Aseprite exports, BMFont fonts, LDtk levels and\n               \
-         JSONC data into the atlases, level files and binary\n               \
-         files the engine loads.\n",
+         images, Aseprite exports, BMFont fonts, WAV sounds, LDtk\n               \
+         levels and JSONC data into the engine's atlases, sound\n               \
+         files, level files and binary files.\n",
     );
     programs.push_str(
         "  sandbox      the game that drives the engine's requirements, with its\n               \

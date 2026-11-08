@@ -24,6 +24,7 @@ mod ldtk;
 mod output;
 mod pack;
 mod rules;
+mod sounds;
 mod workspace;
 
 use std::path::Path;

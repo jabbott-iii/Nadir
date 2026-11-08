@@ -3948,3 +3948,151 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - the soak (M6.7) shows underruns that the thread's scheduling causes
     (then real-time priority);
   - or M6.4 or M6.5 finds the contract cannot be kept.
+
+## ADR-0048 — M6.6 split into three tasks: the cook's sounds (M6.8), the audio assets and handles (M6.9), the game's sound (M6.6); bus volumes in `Config` until the settings file
+
+- **Status:** Accepted: the user chose the split on 2026-11-08
+- **Date:** 2026-11-08
+- **Context:**
+  - Roadmap task M6.6 asks for the cook's WAV to PCM16 or QOA, the
+    `Sound` and `Music` assets, the `AudioEmitter` and `AudioListener`
+    components, music crossfades and bus volumes from settings. A scoping
+    pass found that it changes nadir-codec (`.kpcm`, which does not exist
+    yet, and its fuzz target, which xtask registers), nadir-cook,
+    nadir-audio (the assets, the handles in its API, and what crates.io
+    needs of it), the facade, the sandbox (which has no sound yet) and
+    xtask (the `.deb`'s `libasound2`): more than the three packages
+    `CLAUDE.md` allows a task.
+  - "Bus volumes from settings" needs the settings file, which is M9.3,
+    two milestones later.
+  - nadir-audio is off crates.io "until the facade uses it, from M6.6"
+    (ADR-0036), and the published facade cannot depend on a crate that is
+    not published (`cargo xtask crates`).
+  - ADR-0038, ADR-0041 and ADR-0042 split M5.6, M5.7 and M5.8 the same way.
+- **Decision:** run in this order, each at most three packages:
+  1. **M6.8** (nadir-codec, nadir-cook, xtask): the `.kpcm` format and its
+     reader and writer, with a fuzz target; the cook's WAV job, PCM16 or
+     QOA by a `<stem>.sound.jsonc` sidecar; the cache and the pack.
+  2. **M6.9** (nadir-audio): `Sound` and `Music` as nadir-assets assets,
+     converted to the device's rate; `Audio::play`, `play_at` and
+     `play_music` taking handles, as ADR-0046 foresaw; nadir-audio ready
+     for crates.io, published from the next release, before the facade
+     uses it, so that M6.6 stays within three packages.
+  3. **M6.6** (the facade, the sandbox, xtask): the game opens audio and
+     plays it, with the components, the music between areas, the
+     sandbox's own sounds and the `.deb`'s `libasound2`. It keeps M6.6's
+     number, its Accept, and a Verify of `cargo test -p nadir_engine -p
+     sandbox` and `cargo dev`.
+  - **Bus volumes** are a field of the facade's `Config` in M6.6; M9.3's
+    settings file sets them.
+  - New numbers rather than `M6.6a`, which `cargo xtask features` refuses;
+    M6.8 and M6.9 go before M6.6 in the roadmap, and join the "Audio mixer"
+    feature.
+- **Consequences:**
+  - Good: each task stays within three packages and has a check of its
+    own; the cook's and the assets' parts land and are tested before the
+    game uses them.
+  - Bad: three tasks where there was one, and nadir-audio on crates.io a
+    task before the facade uses it; the bus volumes are set in code until
+    M9.3.
+- **Alternatives considered:**
+  - M6.6 whole: six or seven packages in one change.
+  - Two tasks, the cook with the assets: four packages.
+  - Publishing nadir-audio in M6.6: a fourth package there.
+  - Bus volumes waiting for M9.3: the game would have no way to set them
+    meanwhile.
+- **Revisit when:** a task of the three finds it needs a fourth package.
+
+## ADR-0049 — M6.8: the sound file `.kpcm`; sounds cooked below `audio/`, by folder or sidecar, resampled to 48 kHz by a deterministic windowed sinc in nadir-codec
+
+- **Status:** Accepted: the user accepted it on 2026-11-08, with M6.8's
+  Accept as it reworded it
+- **Date:** 2026-11-08
+- **Context:**
+  - M6.8 (ADR-0048) asks for `.kpcm`, PCM16 sounds, with a reader, a writer
+    and a fuzz target, and the cook's WAV job, "PCM16 or QOA by a sidecar,
+    with the resample policy the spec names". The spec's row: "Resample
+    policy from the sidecar; long or music → QOA, short SFX → PCM16". No
+    layout of `.kpcm` existed. A level file names sounds by their cooked
+    paths, `"music": "audio/field.qoa"`.
+  - nadir-audio takes 1 or 2 channels at 1 to 384,000 Hz, for sounds and
+    music alike (`SoundData`, `MusicData`); the game's assets read within
+    `Limits::default()`, 256 MiB, as the pack's writer does.
+  - The mixer streams music, compressed, and resamples it as it plays by
+    linear interpolation: at 44.1 to 48 kHz, the design critique measured
+    −6.3 dB at 20 kHz and aliases up to −15 dB. Sounds, M6.9 converts at
+    load. A resampler in the cook alone would be out of M6.9's reach:
+    nadir-audio may depend on nadir-codec, not on the cook.
+  - The cook's output must be the same bytes on every system, and a
+    system's `sin`, `exp` and `powi` may differ in their last bit.
+  - Resampling a loop with zeros past its ends, and a rounded length,
+    breaks its seam: −33 dB at each pass, measured.
+  - `CookError` is not `#[non_exhaustive]`; `Counts` is (ADR-0038).
+- **Decision:**
+  - **`.kpcm`, version 1:** a 16-byte header, `KPCM`, version `u16`,
+    channels `u8` (1 or 2), a reserved `u8` (0), the rate `u32` (1 to
+    384,000), the frames `u32` (1 or more); then the samples, `i16`,
+    interleaved; little-endian, exactly that long. Canonical and lossless;
+    no loop points (a sound loops whole, per play); a loop point would be
+    version 2 and a change of `kpcm::Header`. `kpcm::decode` checks the
+    magic first, then the header, the version, each field, the limit, the
+    length; `kpcm::encode` refuses what a file cannot hold. Vectors written
+    apart, a fuzz target that asserts the file encodes back to its bytes.
+  - **Sounds are the WAVs below `audio/`**, each a job `audio/<path>`, its
+    output at its path: `.kpcm`, or `.qoa`. A WAV or a sound's sidecar
+    elsewhere is listed, not read; a sound's sidecar with no WAV is
+    `CookError::Config` (no new variant). The cook owns `OUT/audio/`.
+  - **The sidecar** `<stem>.sound.jsonc`: `format` (`"pcm16"` or `"qoa"`),
+    `rate` (8,000 to 384,000), `loop` (true or false), strict. **Defaults
+    by folder, never by length:** below `audio/music/`, QOA and looped;
+    elsewhere PCM16, not looped; the rate 48,000, the engine's output's.
+    A sound of 10 s or more kept as PCM16 by default gets a warning.
+  - **The resampler is nadir-codec's `pcm`**, for the cook and M6.9: a
+    windowed sinc (32 zero crossings, Kaiser β = 9, −6 dB at 0.91 of the
+    lower Nyquist frequency, tabulated), weights normalized, a looped sound
+    resampled as periodic with its length exact, 0 past a one-shot's ends;
+    rates of 1 to 384,000 Hz falling by 48 times at most, which bounds
+    its reach; `f64` with `+ − × ÷ sqrt floor` only, `sin(πx)` a
+    polynomial of its own and I₀ a running product, so the same bits on
+    every system, which pinned hashes of its output and of its kernel's
+    `f64` bits check on CI's three systems. `pcm::to_i16` rounds half away
+    from 0 and clamps.
+  - **Bounds:** a WAV read within 512 MiB as `f32`, which its reader
+    checks before it allocates; then, before the resample or the encoder
+    allocates, no samples refused, a rate above 384,000 Hz refused
+    whatever the sidecar, the resampled output within `u32::MAX` frames
+    and 512 MiB, and PCM16 within the game's 256 MiB. Each written file is
+    read back with the game's reader and limits (QOA a frame at a time).
+  - **The end:** the cook does not change a sound's last samples (a fade
+    would break a loop's seam, and ADR-0046 left the end to the data); it
+    warns of a one-shot whose last frame is above −48 dBFS, and of samples
+    clipped past full scale.
+  - **`Counts::Sound { encoding, frames, sample_rate }`** of the output,
+    with `SoundEncoding { Pcm16, Qoa }`, `#[non_exhaustive]`.
+- **Consequences:**
+  - Good: an output's name follows only its path and sidecar, so code and
+    levels can name it; music reaches the mixer at the device's usual rate,
+    resampled once, well; a loop keeps its seam; the cook is the same bytes
+    everywhere; M6.9 can convert sounds with the same code.
+  - Bad: every WAV not at 48 kHz is resampled by default, a few tenths of a
+    second for ten seconds of sound; a sound longer than 23 minutes is
+    refused; a job of a large sound holds up to about 1.5 GiB; a one-shot
+    that starts or ends loud and is resampled has its edges against zeros;
+    nadir-codec holds a resampler, which is not a file format.
+  - M6.8's Accept, which ADR-0048's split wrote as "each WAV of
+    `assets/`", says a source's `audio/`, as only those WAVs are sounds.
+- **Alternatives considered:**
+  - The format by length (10 s or more, QOA): the output's extension, and
+    so its asset path, would change when a sound crossed 10 s, and every
+    reference would go missing at run time with no error from the cook.
+  - Keeping the WAV's rate by default: music would play through the
+    mixer's linear interpolation at every callback.
+  - The resampler in nadir-cook: M6.9 could not use it.
+  - A fade at every sound's end: it breaks loops, and the cook cannot tell
+    which sounds loop without a sidecar.
+  - A new `CookError` variant for a sound's orphan sidecar: a break, as
+    `CookError` is not `#[non_exhaustive]`.
+- **Revisit when:**
+  - a game needs loop points, or sounds longer than 23 minutes;
+  - M6.9's conversion at load needs another trade of quality for time;
+  - or a system's CI gives another hash for the pinned resample.

@@ -25,8 +25,8 @@
 //!
 //! # What it cooks
 //!
-//! So far (roadmap M5.4, M5.5, M5.12, M5.14), [`cook`] reads a source
-//! folder and writes, into an output folder:
+//! So far (roadmap M5.4, M5.5, M5.12, M5.14, M6.8), [`cook`] reads a
+//! source folder and writes, into an output folder:
 //!
 //! - each atlas group's QOI pages, `atlas/<group>_<n>.qoi`, and a KBJ of
 //!   where each frame went, `atlas/<group>.kbj`, from its folder's PNG
@@ -34,6 +34,11 @@
 //!   `<name>.sprite.jsonc` sidecar), Aseprite exports (whose tags become
 //!   clips) and BMFont fonts, with a file of each font's glyphs,
 //!   `atlas/<font>.font.kbj`;
+//! - each sound below `audio/`, a WAV, as 16-bit samples, `audio/<path>.kpcm`,
+//!   or as QOA, `audio/<path>.qoa`, as its `<name>.sound.jsonc` sidecar says,
+//!   or else its folder (QOA below `audio/music/`), resampled to 48 kHz
+//!   unless the sidecar gives another rate, with a windowed sinc that
+//!   keeps a loop's seam;
 //! - each data file below `data/`, JSONC, as KBJ, `data/<path>.kbj`, the
 //!   prefabs of `data/prefabs/` checked as prefab files;
 //! - each level of each LDtk 1.5.3 project, `.ldtk`, and of its level files,
@@ -48,8 +53,8 @@
 //!   files did not change.
 //!
 //! An image's folder names its atlas group, unless the folder's
-//! `atlas.jsonc` names another. Files no pipeline cooks yet are listed in
-//! the [`Report`] and left alone; audio comes with roadmap M6.6. The rules,
+//! `atlas.jsonc` names another. Files no pipeline cooks are listed in the
+//! [`Report`] and left alone, as is a WAV outside `audio/`. The rules,
 //! formats and LDtk conventions (ADR-0038) are in
 //! [`docs/subsystems/assets-and-codecs.md`](https://github.com/jabbott-iii/Nadir/blob/main/docs/subsystems/assets-and-codecs.md),
 //! "`nadir-cook` (library + CLI)".
@@ -113,7 +118,7 @@
 //!   cooker wrote is not used, so a new build cooks everything once. The
 //!   `nadir-cook` command gives its version and a hash of its executable.
 //! - **What it owns:** the cook removes every file below the output's
-//!   `atlas/`, `data/` and `levels/` that no job wrote, and writes
+//!   `atlas/`, `audio/`, `data/` and `levels/` that no job wrote, and writes
 //!   [`PACK`] over whatever is there; keep nothing of your own there. The
 //!   output folder and the source folder may not hold each other.
 //! - **Errors:** [`cook`]'s `# Errors` says what a failure leaves in the
@@ -126,9 +131,14 @@
 //!   and [`Report::warnings`] to whoever made the files.
 //! - **Limits:** sources are decoded within nadir-codec's default
 //!   `Limits`, but for an image's width and height, which only its decoded
-//!   size bounds, since a sheet is cut up. A frame larger than a page of
-//!   4096 pixels, with its edge extrusion, is an error
-//!   ([`CookError::TooBig`]).
+//!   size bounds, since a sheet is cut up, and a WAV's samples, which may
+//!   take 512 MiB as `f32`, 23 minutes of 48 kHz stereo. A frame larger
+//!   than a page of 4096 pixels, with its edge extrusion, is an error
+//!   ([`CookError::TooBig`]), and so is a sound that, resampled, would pass
+//!   that limit, or as PCM16 the game's ([`CookError::Config`]).
+//! - **Warnings:** a sound whose samples are clipped to full scale, one
+//!   that does not loop and ends loud, so that it clicks when it stops, and
+//!   one of 10 s or more stored as PCM16 by default.
 //! - **Determinism:** the output depends only on the source files: the
 //!   same files cook to the same bytes on every run and every system.
 //!   Sources are taken in sorted order, never in the order the system
@@ -149,6 +159,7 @@ mod kpak;
 mod level;
 mod pack;
 mod scan;
+mod sound;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -162,6 +173,7 @@ use nadir_core::hash::fnv1a64;
 use crate::cache::{Cache, Hashes, Job};
 use crate::config::{Layout, Sprite};
 use crate::scan::{Plan, Source};
+use crate::sound::Settings;
 
 pub use error::CookError;
 
@@ -176,6 +188,10 @@ pub const PACK: &str = nadir_assets::PackSource::FILE_NAME;
 /// The folder of the output folder that the atlas pipeline owns: a file in
 /// it that the cache does not list is removed.
 const ATLAS: &str = "atlas";
+
+/// The folder of the output folder that the sound pipeline owns, as the
+/// atlas pipeline owns [`ATLAS`].
+const AUDIO: &str = "audio";
 
 /// The folder of the output folder that the data pipeline owns, as the
 /// atlas pipeline owns [`ATLAS`].
@@ -210,9 +226,9 @@ pub struct Options {
 /// What a job did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobReport {
-    /// Its name: `atlas/<group>` for an atlas group, `data/<path>` for a
-    /// data file, `ldtk/<path>` for an LDtk project (each without its
-    /// extension).
+    /// Its name: `atlas/<group>` for an atlas group, `audio/<path>` for a
+    /// sound, `data/<path>` for a data file, `ldtk/<path>` for an LDtk
+    /// project (each without its extension).
     pub name: String,
     /// Whether it was cooked; otherwise its files were up to date.
     pub cooked: bool,
@@ -246,6 +262,25 @@ pub enum Counts {
         /// The entities they spawn.
         entities: usize,
     },
+    /// A sound.
+    Sound {
+        /// How it is stored.
+        encoding: SoundEncoding,
+        /// Its frames, as cooked, at `sample_rate`.
+        frames: usize,
+        /// The frames a second it was cooked to.
+        sample_rate: u32,
+    },
+}
+
+/// How a sound is stored, as its sidecar's `format` says, or its folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SoundEncoding {
+    /// 16-bit samples as they are, `.kpcm`: for short sounds.
+    Pcm16,
+    /// QOA, `.qoa`, at 3.2 bits a sample: for music and long sounds.
+    Qoa,
 }
 
 /// What a cook did.
@@ -378,6 +413,35 @@ struct Found<'a, 'p> {
     prefabs: &'a BTreeMap<String, &'p Source>,
 }
 
+/// A sound's job: its name, which its output's path is made of, its WAV and
+/// sidecar, and how to cook it.
+struct SoundJob<'p> {
+    job: String,
+    file: &'p Source,
+    sidecar: Option<&'p Source>,
+    settings: Settings,
+}
+
+/// The job of the sound `file`, its path without `.wav`, cooked with
+/// `settings`: an asset path, as the cache keeps it, and so is its output.
+fn sound_job(file: &Source, settings: &Settings) -> Result<String, CookError> {
+    let job = stem(&file.path).to_string();
+    if !AssetPath::new(&job).is_ok_and(|checked| checked.as_str() == job) {
+        return Err(CookError::BadPath {
+            path: file.found.clone(),
+            reason: "its name without `.wav` ends in a dot or a space",
+        });
+    }
+    // `.kpcm` is a byte longer than `.wav`.
+    if AssetPath::new(&sound::output(&job, settings.encoding)).is_err() {
+        return Err(CookError::BadPath {
+            path: file.found.clone(),
+            reason: "its output, with `.kpcm` for `.wav`, would be longer than 1024 bytes",
+        });
+    }
+    Ok(job)
+}
+
 /// What a file of a folder makes: a sprite of an image, an export or a font.
 #[derive(Clone, Copy)]
 enum Made<'p> {
@@ -388,11 +452,12 @@ enum Made<'p> {
 
 /// Cooks the files below `source` into `out`, which it makes if needed.
 ///
-/// Each atlas group is a job, and so is each data file and each LDtk
-/// project. A job is skipped when the cache in `out` says the same cooker
-/// cooked the same files (by their hashes) into files still there as it
-/// wrote them, unless [`Options::force`] says to cook everything. Then
-/// every file below `out/atlas`, `out/data` or `out/levels` that no job
+/// Each atlas group is a job, and so is each sound, each data file and each
+/// LDtk project. A job is skipped when the cache in `out` says the same
+/// cooker cooked the same files (by their hashes) into files still there as
+/// it wrote them, unless [`Options::force`] says to cook everything. Then
+/// every file below `out/atlas`, `out/audio`, `out/data` or `out/levels`
+/// that no job
 /// wrote is removed, then the pack, [`PACK`], is made of the files the jobs
 /// wrote, and the cache last. Each file, as every output, is written only
 /// when its bytes change, so a cook that changes nothing writes no file
@@ -585,9 +650,37 @@ pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, Cook
         .map(|file| (stem(&file.path).to_string(), file))
         .collect();
     data.sort();
+    // The sounds, by their jobs' names, which are their outputs' too, each
+    // with how its sidecar, or its folder, says to cook it.
+    let mut sounds: Vec<SoundJob<'_>> = Vec::new();
+    for (file, sidecar) in &plan.sounds {
+        let given = match sidecar {
+            Some(sidecar) => {
+                let bytes = &take(&source, &mut reads, sidecar)?.bytes;
+                config::sound(bytes).map_err(|reason| CookError::Config {
+                    path: sidecar.found.clone(),
+                    reason,
+                })?
+            }
+            None => config::Sound::default(),
+        };
+        let settings = Settings::of(&file.path, &given);
+        sounds.push(SoundJob {
+            job: sound_job(file, &settings)?,
+            settings,
+            file,
+            sidecar: sidecar.as_ref(),
+        });
+    }
+    sounds.sort_by(|a, b| a.job.cmp(&b.job));
     let font_names: Vec<&str> = fonts.iter().map(|font| stem(&font.file.path)).collect();
-    let data_files: Vec<String> = data.iter().map(|(job, _)| format!("{job}.kbj")).collect();
-    check_names(&groups, &sprites, &font_names, &data_files)?;
+    let mut outputs: Vec<String> = data.iter().map(|(job, _)| format!("{job}.kbj")).collect();
+    outputs.extend(
+        sounds
+            .iter()
+            .map(|sound| sound::output(&sound.job, sound.settings.encoding)),
+    );
+    check_names(&groups, &sprites, &font_names, &outputs)?;
 
     // The LDtk projects, their level files, and what their levels draw and
     // spawn.
@@ -740,6 +833,59 @@ pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, Cook
         cache.jobs.insert(job, Job { inputs, outputs });
     }
 
+    // Each sound: a WAV below `audio/`, written as PCM16 or QOA at its path.
+    for SoundJob {
+        job,
+        file,
+        sidecar,
+        settings,
+    } in sounds
+    {
+        let output = sound::output(&job, settings.encoding);
+        let bytes = read(&source.join(&file.found))?;
+        let mut inputs = vec![(file.path.clone(), fnv1a64(&bytes))];
+        if let Some(sidecar) = sidecar {
+            // Read with the sidecars, before the jobs.
+            let hash = reads
+                .get(&sidecar.path)
+                .expect("a sound's sidecar is read before the jobs")
+                .hash;
+            inputs.push((sidecar.path.clone(), hash));
+        }
+        inputs.sort();
+        if let Some(kept) = kept(&previous, &job, &inputs, &out, fresh) {
+            report.jobs.push(JobReport {
+                name: job.clone(),
+                cooked: false,
+                files: kept.outputs.len(),
+                counts: None,
+            });
+            cache.jobs.insert(job, kept.clone());
+            continue;
+        }
+        let cooked = sound::cook(&file.path, &file.found, &bytes, &settings, &output)?;
+        drop(bytes);
+        write(&out, &output, &cooked.file)?;
+        report.warnings.extend(cooked.warnings);
+        report.jobs.push(JobReport {
+            name: job.clone(),
+            cooked: true,
+            files: 1,
+            counts: Some(Counts::Sound {
+                encoding: settings.encoding,
+                frames: cooked.frames,
+                sample_rate: settings.rate,
+            }),
+        });
+        cache.jobs.insert(
+            job,
+            Job {
+                inputs,
+                outputs: vec![(output, fnv1a64(&cooked.file))],
+            },
+        );
+    }
+
     // Each data file: JSONC, written as KBJ below `data/`, at its path.
     for (job, file) in data {
         let output = format!("{job}.kbj");
@@ -861,7 +1007,7 @@ pub fn cook(source: &Path, out: &Path, options: &Options) -> Result<Report, Cook
         .values()
         .flat_map(|job| job.outputs.iter().map(|(path, _)| path.clone()))
         .collect();
-    for owned in [ATLAS, DATA, LEVELS] {
+    for owned in [ATLAS, AUDIO, DATA, LEVELS] {
         remove_others(&out, owned, &written)?;
     }
     // The pack of what the cache lists, as the jobs left it: written only
@@ -1342,14 +1488,14 @@ fn folder(path: &str) -> &str {
 }
 
 /// Checks that no two of the groups' atlas files, the tile sets' pages, the
-/// fonts' files (of the sprites `fonts`) and the data files' outputs
-/// (`data`), nor the folders they are in, are one, or would be on a system
-/// that ignores case.
+/// fonts' files (of the sprites `fonts`) and the data files' and the
+/// sounds' outputs (`files`), nor the folders they are in, are one, or
+/// would be on a system that ignores case.
 fn check_names(
     groups: &BTreeMap<String, Group<'_>>,
     sprites: &BTreeMap<String, Sprite>,
     fonts: &[&str],
-    data: &[String],
+    files: &[String],
 ) -> Result<(), CookError> {
     let groups = groups.keys().map(|group| format!("{ATLAS}/{group}.kbj"));
     let tile_sets = sprites
@@ -1363,7 +1509,7 @@ fn check_names(
     for name in groups
         .chain(tile_sets)
         .chain(fonts)
-        .chain(data.iter().cloned())
+        .chain(files.iter().cloned())
     {
         let folders = name
             .match_indices('/')
@@ -1430,6 +1576,44 @@ fn remove_others(out: &Path, owned: &str, written: &BTreeSet<String>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sound_jobs_output_is_an_asset_path_too() {
+        // 1,024 bytes, as long as an asset path may be, which no test can
+        // write as a file: macOS refuses paths that long whole.
+        let path = format!("audio/{}.wav", "a".repeat(1014));
+        let file = Source {
+            found: path.to_uppercase(),
+            path,
+        };
+        let settings = |encoding| Settings {
+            encoding,
+            chosen: true,
+            rate: 48_000,
+            looped: false,
+        };
+        // As QOA, its output is as long as the WAV's path.
+        let qoa = sound_job(&file, &settings(SoundEncoding::Qoa));
+        assert_eq!(qoa.map(|job| job.len()), Ok(1020));
+        assert_eq!(
+            sound_job(&file, &settings(SoundEncoding::Pcm16)),
+            Err(CookError::BadPath {
+                path: file.found.clone(),
+                reason: "its output, with `.kpcm` for `.wav`, would be longer than 1024 bytes",
+            })
+        );
+        let dotted = Source {
+            found: "audio/Beep..wav".to_string(),
+            path: "audio/beep..wav".to_string(),
+        };
+        assert_eq!(
+            sound_job(&dotted, &settings(SoundEncoding::Qoa)),
+            Err(CookError::BadPath {
+                path: "audio/Beep..wav".to_string(),
+                reason: "its name without `.wav` ends in a dot or a space",
+            })
+        );
+    }
 
     #[test]
     fn an_atlas_job_writes_its_pages_before_the_files_that_name_them() {

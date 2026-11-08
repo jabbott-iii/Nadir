@@ -189,7 +189,7 @@ pub struct AudioStats {
     /// How long the last callback took to mix.
     pub callback_time: Duration,
     /// The device's rate, in frames a second, at the last callback: 0
-    /// before the first. M6.6's sounds are converted to it as they load.
+    /// before the first. M6.9's sounds are converted to it as they load.
     pub rate: u32,
     /// The commands dropped on the main thread: a change to a voice or a
     /// move of the listener once the queue is half full, and anything once

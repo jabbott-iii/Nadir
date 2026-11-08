@@ -2,9 +2,9 @@
 
 The offline asset pipeline of Nadir: the `nadir-cook` command, and the
 library it is built on. It cooks the files artists make (PNG images,
-Aseprite exports, BMFont fonts, LDtk levels and JSONC data) into the few
-formats the game loads: QOI atlas pages, KBJ files and level files, and a
-pack that holds them all, `game.kpak`.
+Aseprite exports, BMFont fonts, WAV sounds, LDtk levels and JSONC data)
+into the few formats of the engine: QOI atlas pages, sound files and QOA,
+KBJ files and level files, and a pack that holds them all, `game.kpak`.
 
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine
 for top-down games on Windows, macOS and Linux, written in Rust with no
@@ -19,10 +19,11 @@ Version 0.3: the API will change before 1.0, and so may the formats it
 writes.
 
 The cook reads PNG images with their sidecars, Aseprite exports, BMFont
-fonts, LDtk 1.5.3 projects and JSONC data, and keeps a cache so that the
-next cook does only what changed. Not yet:
+fonts, WAV sounds with theirs, LDtk 1.5.3 projects and JSONC data, and
+keeps a cache so that the next cook does only what changed. Not yet:
 
-- audio (roadmap M6.6);
+- the sound and music assets in the game (roadmap M6.9): the cook writes
+  them, but the game does not load them yet;
 - a reader for the font files in the game (roadmap M7.1): the cook writes
   them, but the game does not read them yet.
 
@@ -62,7 +63,9 @@ cook: 4 jobs cooked, 0 up to date, into target/cooked
 cook: game.kpak: 6 files in 5304 bytes
 ```
 
-Warnings, and the files it did not cook with why, go to standard error.
+A sound's line says how it was stored, how long it is and at what rate,
+as `cook: audio/sfx/step: PCM16, 0.25 s at 48000 Hz`. Warnings, and the
+files it did not cook with why, go to standard error.
 It exits with 0 when the cook is done, 1 when it failed, with the error on
 standard error, and 2 when the command line was not understood or an
 argument is not valid Unicode.
@@ -78,6 +81,7 @@ group `sprites`. A group's sprites are packed into its pages.
 | `*.png` with a `<name>.sprite.jsonc` sidecar | A sheet of frames, or a tile set, as the sidecar says |
 | `*.json`, an Aseprite export, and its sheet | A sprite of its frames, with each tag a clip |
 | `*.fnt`, a BMFont font in the text format, and its pages | A sprite of its glyphs, and a font file |
+| `audio/**/*.wav`, with a `<name>.sound.jsonc` sidecar or not | 16-bit samples, `audio/<path>.kpcm`, or QOA, `audio/<path>.qoa`, at 48 kHz |
 | `data/**/*.jsonc` | The same value, in KBJ; `data/prefabs/<name>.jsonc` is read as a prefab too |
 | `*.ldtk`, an LDtk 1.5.3 project, and its `.ldtkl` level files | A level file of each level: its tile layers, collision grid, tall tiles and entities |
 
@@ -125,6 +129,23 @@ assets/                          target/cooked/
 - **Aseprite exports** are written by
   `aseprite -b in.aseprite --sheet out.png --data out.json --format json-array --list-tags`.
   Every `.json` file is read as one.
+- **Sounds** below `audio/` keep their paths: `audio/sfx/step.wav` cooks
+  to `audio/sfx/step.kpcm`, 16-bit samples as they are, and
+  `audio/music/field.wav` to `audio/music/field.qoa`, QOA, which the game
+  plays music from, at 3.2 bits a sample. Each is resampled to 48 kHz, the
+  rate the game's output opens at, unless its sidecar gives another, and a
+  sound below `audio/music/` loops. The WAV may be 16 or 24 bits, or float
+  of 32, mono or stereo (not 8 bits, which jsfxr writes unless told
+  otherwise). A sidecar `<name>.sound.jsonc` changes any of it:
+
+  ```jsonc
+  { "format": "qoa", "rate": 22050, "loop": true }
+  ```
+
+  The cook warns of a sound clipped past full scale, of one that does not
+  loop and ends loud, which clicks when it stops, and of one of 10 s or
+  more left as 16-bit samples. A WAV outside `audio/` is listed as not
+  cooked.
 - **Data** below `data/` keeps its path: `data/items.jsonc` cooks to
   `data/items.kbj`. What the value means is checked where the game loads
   it. A prefab, `data/prefabs/<name>.jsonc`, must be a prefab file of that
@@ -154,14 +175,14 @@ outputs' are lowercase.
 
 ## The output and the cache
 
-- Each atlas group is a job, and so is each data file and each LDtk
-  project. A job is left as it is when its files have not changed since
+- Each atlas group is a job, and so is each sound, each data file and
+  each LDtk project. A job is left as it is when its files have not changed since
   the last cook into the same output folder, by their hashes, and its
   outputs are still there as the cook wrote them. `--force` cooks every
   job.
 - The cache is `.cache.kbj` in the output folder. A cook of another
   version, or built anew, cooks everything once.
-- The cook owns the output's `atlas/`, `data/` and `levels/`: it removes
+- The cook owns the output's `atlas/`, `audio/`, `data/` and `levels/`: it removes
   every file there that no job wrote. It owns `game.kpak` too, which it
   writes over whatever is there.
 - Each file is written to a `.tmp` beside it and then renamed, the pack

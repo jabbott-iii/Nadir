@@ -92,7 +92,7 @@ before its roadmap task is ticked: check before assuming.
 | `crates/sys` | `nadir-sys` | Hand-written raw FFI declarations (Win32, Cocoa/objc, X11, EGL, GL, ALSA, CoreAudio, WASAPI, XInput, evdev) | allowed |
 | `crates/platform` | `nadir-platform` | Windows, event loop, input devices, GL/Metal surfaces, audio device output, paths, dynamic loading | allowed |
 | `crates/gfx` | `nadir-gfx` | Small render hardware interface (RHI) with an OpenGL 3.3 core backend and, from M10, a Metal backend | allowed |
-| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite exports and LDtk projects (cook only), the cook's atlas and level files, prefab files, pack files | deny |
+| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, the sound file (KPCM) and a resampler, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite exports and LDtk projects (cook only), the cook's atlas and level files, prefab files, pack files | deny |
 | `crates/ecs` | `nadir-ecs` | Generational entities, sparse-set storage, resources, events, commands, schedule | deny |
 | `crates/input` | `nadir-input` | Physical keys, device state, action maps, per-tick latching, bindings | deny |
 | `crates/render` | `nadir-render` | Sprite batching, y-sort, tilemap chunks, camera, bitmap text, debug draw, passes | deny |
@@ -122,7 +122,7 @@ before its roadmap task is ticked: check before assuming.
 | `cargo xtask features` | Fails if a ticked roadmap task belongs to no feature in `docs/features.jsonc`, or a feature's `ticked` is not what the roadmap ticks |
 | `cargo xtask golden [--bless] [--backend gl\|metal]` | Renders golden scenes offscreen and compares them to references |
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the dependency-free mutation fuzzer over every parser, or over one |
-| `cargo xtask cook [--force] [--watch]` | Cooks `assets/` into `target/cooked/`, skipping the jobs (atlas groups, data files, LDtk projects) whose files did not change, unless `--force`, and packs all its outputs into `target/cooked/game.kpak`, writing only the files whose bytes changed. `--watch` keeps cooking, with a cook built once, whenever a file in `assets/` changes, until stopped (ADR-0042) |
+| `cargo xtask cook [--force] [--watch]` | Cooks `assets/` into `target/cooked/`, skipping the jobs (atlas groups, sounds, data files, LDtk projects) whose files did not change, unless `--force`, and packs all its outputs into `target/cooked/game.kpak`, writing only the files whose bytes changed. `--watch` keeps cooking, with a cook built once, whenever a file in `assets/` changes, until stopped (ADR-0042) |
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
 | `cargo xtask dist [--out DIR]` | Builds this machine's release files into `target/dist`: runs the laid-out programs, then packs the archive and, on Linux, the `.deb`s (needs `dpkg-dev`; ADR-0036) |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |

@@ -24,8 +24,9 @@
 //!
 //! Jobs are in name order, and their files in path order. Every path must
 //! be an asset path as [`AssetPath`] writes it, and every output a `.qoi`
-//! or `.kbj` below `atlas/`, a `.kbj` below `data/`, or a `.klvl` below
-//! `levels/`: a cache that says anything else is not used.
+//! or `.kbj` below `atlas/`, a `.kpcm` or `.qoa` below `audio/`, a `.kbj`
+//! below `data/`, or a `.klvl` below `levels/`: a cache that says anything
+//! else is not used.
 
 use std::collections::BTreeMap;
 
@@ -73,10 +74,12 @@ fn asset_path(path: &str) -> bool {
 }
 
 /// Whether `path` is a file the cook may write: a `.qoi` or `.kbj` below
-/// `atlas/`, a `.kbj` below `data/`, or a `.klvl` below `levels/`.
+/// `atlas/`, a `.kpcm` or `.qoa` below `audio/`, a `.kbj` below `data/`,
+/// or a `.klvl` below `levels/`.
 pub(crate) fn output_path(path: &str) -> bool {
     asset_path(path)
         && ((path.starts_with("atlas/") && (path.ends_with(".qoi") || path.ends_with(".kbj")))
+            || (path.starts_with("audio/") && (path.ends_with(".kpcm") || path.ends_with(".qoa")))
             || (path.starts_with("data/") && path.ends_with(".kbj"))
             || (path.starts_with("levels/") && path.ends_with(".klvl")))
 }
@@ -259,6 +262,12 @@ mod tests {
             "levels/x.kbj",
             "levels/Field.klvl",
             "data/x.klvl",
+            "audio/x.wav",
+            "audio/X.qoa",
+            "audio/x.kbj",
+            "data/x.qoa",
+            "atlas/x.kpcm",
+            "levels/x.qoa",
         ] {
             let bytes = changed(|value| *first_output(value) = Value::String(path.to_string()));
             let result = Cache::read(&bytes);
@@ -267,11 +276,13 @@ mod tests {
     }
 
     #[test]
-    fn outputs_are_the_atlas_s_the_data_s_and_the_levels() {
+    fn outputs_are_the_atlas_s_the_sounds_the_data_s_and_the_levels() {
         for path in [
             "atlas/sprites.kbj",
             "atlas/sprites_0.qoi",
             "atlas/fonts/pixel.font.kbj",
+            "audio/step.kpcm",
+            "audio/music/field.qoa",
             "data/items/sword.kbj",
             "levels/field.klvl",
         ] {

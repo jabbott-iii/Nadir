@@ -17,8 +17,10 @@
 //! cook does not know is an error, not ignored.
 
 use nadir_assets::AssetPath;
-use nadir_codec::Limits;
 use nadir_codec::json::{self, Value};
+use nadir_codec::{Limits, kpcm};
+
+use crate::SoundEncoding;
 
 /// How an image is cut, from its sidecar.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -50,6 +52,21 @@ impl Default for Sprite {
         }
     }
 }
+
+/// A sound's sidecar: each key it gives. The defaults, which depend on
+/// where the sound is, are the sound pipeline's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Sound {
+    /// How it is stored.
+    pub(crate) format: Option<SoundEncoding>,
+    /// The rate to resample it to, 8,000 to 384,000.
+    pub(crate) rate: Option<u32>,
+    /// Whether it loops.
+    pub(crate) looped: Option<bool>,
+}
+
+/// The lowest rate a sound's sidecar may ask for.
+pub(crate) const MIN_RATE: u32 = 8_000;
 
 /// The object `bytes` holds, as JSONC.
 fn object(bytes: &[u8]) -> Result<Vec<(String, Value)>, String> {
@@ -133,6 +150,51 @@ pub(crate) fn sprite(bytes: &[u8]) -> Result<Sprite, String> {
         (None, None) => Layout::Whole,
     };
     Ok(sprite)
+}
+
+/// Reads a sound's sidecar.
+///
+/// ```jsonc
+/// { "format": "qoa", "rate": 22050, "loop": true }
+/// ```
+///
+/// # Errors
+///
+/// What is wrong with it, for [`CookError::Config`](crate::CookError).
+pub(crate) fn sound(bytes: &[u8]) -> Result<Sound, String> {
+    let mut sound = Sound::default();
+    for (key, value) in object(bytes)? {
+        match key.as_str() {
+            "format" => {
+                sound.format = Some(match value.as_str() {
+                    Some("pcm16") => SoundEncoding::Pcm16,
+                    Some("qoa") => SoundEncoding::Qoa,
+                    _ => return Err("`format` must be `\"pcm16\"` or `\"qoa\"`".to_string()),
+                });
+            }
+            "rate" => {
+                let rate = value
+                    .as_i64()
+                    .and_then(|rate| u32::try_from(rate).ok())
+                    .filter(|rate| (MIN_RATE..=kpcm::MAX_SAMPLE_RATE).contains(rate));
+                sound.rate = Some(rate.ok_or_else(|| {
+                    format!(
+                        "`rate` must be a whole number of {MIN_RATE} to {}",
+                        kpcm::MAX_SAMPLE_RATE
+                    )
+                })?);
+            }
+            "loop" => {
+                sound.looped = Some(value.as_bool().ok_or("`loop` must be true or false")?);
+            }
+            other => {
+                return Err(format!(
+                    "`{other}` is not a key of a sound: `format`, `rate` or `loop`"
+                ));
+            }
+        }
+    }
+    Ok(sound)
 }
 
 /// Reads a folder's `atlas.jsonc`: the group its images join, if it names
@@ -267,6 +329,58 @@ mod tests {
             );
         }
         assert!(sprite(b"{ \"trim\": tru }").is_err());
+    }
+
+    #[test]
+    fn a_sound_s_sidecar_gives_its_keys() {
+        assert_eq!(sound(b"{}"), Ok(Sound::default()));
+        assert_eq!(
+            sound(b"// Music.\n{ \"format\": \"qoa\", \"rate\": 8000, \"loop\": true, }"),
+            Ok(Sound {
+                format: Some(SoundEncoding::Qoa),
+                rate: Some(8000),
+                looped: Some(true),
+            })
+        );
+        assert_eq!(
+            sound(br#"{ "format": "pcm16", "rate": 384000, "loop": false }"#),
+            Ok(Sound {
+                format: Some(SoundEncoding::Pcm16),
+                rate: Some(384_000),
+                looped: Some(false),
+            })
+        );
+    }
+
+    #[test]
+    fn a_wrong_sound_sidecar_says_what_is_wrong() {
+        let format = "`format` must be `\"pcm16\"` or `\"qoa\"`";
+        let rate = "`rate` must be a whole number of 8000 to 384000";
+        for (text, error) in [
+            (&b"[]"[..], "it is not an object"),
+            (b"\xff", "it is not UTF-8"),
+            (
+                br#"{ "pitch": 2 }"#,
+                "`pitch` is not a key of a sound: `format`, `rate` or `loop`",
+            ),
+            (br#"{ "format": "wav" }"#, format),
+            (br#"{ "format": "QOA" }"#, format),
+            (br#"{ "format": 1 }"#, format),
+            (br#"{ "rate": 7999 }"#, rate),
+            (br#"{ "rate": 384001 }"#, rate),
+            (br#"{ "rate": 48000.5 }"#, rate),
+            (br#"{ "rate": "48000" }"#, rate),
+            (br#"{ "rate": -1 }"#, rate),
+            (br#"{ "loop": 1 }"#, "`loop` must be true or false"),
+        ] {
+            assert_eq!(
+                sound(text),
+                Err(error.to_string()),
+                "{}",
+                String::from_utf8_lossy(text)
+            );
+        }
+        assert!(sound(br#"{ "rate": }"#).is_err());
     }
 
     #[test]

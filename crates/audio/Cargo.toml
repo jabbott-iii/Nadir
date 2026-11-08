@@ -3,7 +3,7 @@ name = "nadir-audio"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-# Not on crates.io until the facade uses it, from M6.6 (ADR-0036).
+# Not on crates.io until M6.9 makes it ready for it (ADR-0036, ADR-0048).
 publish = false
 
 [dependencies]

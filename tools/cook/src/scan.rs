@@ -44,6 +44,13 @@ pub(crate) const LDTK_LEVEL: &str = ".ldtkl";
 const DATA_FOLDER: &str = "data/";
 /// The extension of a data file.
 pub(crate) const DATA: &str = ".jsonc";
+/// The folder of the sounds, below the source folder: each `.wav` in it, or
+/// below it, is a sound.
+pub(crate) const AUDIO_FOLDER: &str = "audio/";
+/// The extension of a sound.
+pub(crate) const SOUND: &str = ".wav";
+/// The extension of a sound's sidecar.
+pub(crate) const SOUND_SIDECAR: &str = ".sound.jsonc";
 
 /// Something the walk found below the source folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,6 +95,8 @@ pub(crate) struct Plan {
     pub(crate) ldtk_levels: Vec<Source>,
     /// The data files, by path.
     pub(crate) data: Vec<Source>,
+    /// The sounds, by path, each with its sidecar if it has one.
+    pub(crate) sounds: Vec<(Source, Option<Source>)>,
     /// The folders' `atlas.jsonc` files, by path.
     pub(crate) configs: Vec<Source>,
     /// What is not cooked, by path as found, and why.
@@ -154,6 +163,8 @@ enum Role {
     Project,
     LdtkLevel,
     Data,
+    Sound,
+    SoundSidecar,
     Other,
 }
 
@@ -162,6 +173,10 @@ fn role(path: &str) -> Role {
     let name = path.rsplit('/').next().unwrap_or(&path);
     if path.starts_with(DATA_FOLDER) && name.ends_with(DATA) {
         Role::Data
+    } else if path.starts_with(AUDIO_FOLDER) && name.ends_with(SOUND) {
+        Role::Sound
+    } else if path.starts_with(AUDIO_FOLDER) && name.ends_with(SOUND_SIDECAR) {
+        Role::SoundSidecar
     } else if name == FOLDER_CONFIG {
         Role::Config
     } else if name.ends_with(SIDECAR) {
@@ -200,20 +215,23 @@ pub(crate) fn fold(name: &str) -> String {
 /// Applies the rules to what [`walk`] found, in any order.
 ///
 /// - A file the cook reads (an image, a sidecar, an `atlas.jsonc`, an
-///   Aseprite export, a font, an LDtk project or level file, a data file)
-///   must have an asset path and a
+///   Aseprite export, a font, an LDtk project or level file, a data file, a
+///   sound below `audio/` or its sidecar) must have an asset path and a
 ///   name that is UTF-8, and not be a symbolic link; and no other name in a
 ///   folder that holds it, or in its folders, may equal its own once
 ///   [`fold`]ed. Other files with such names are skipped, and say why.
 /// - An image, an export or a font must be in a folder, and a sidecar
-///   beside its export, or else its image, of the same name.
+///   beside its export, or else its image, of the same name; a sound's
+///   sidecar beside its sound. A sound or a sound's sidecar outside
+///   `audio/` is skipped, and says so.
 ///
 /// # Errors
 ///
 /// [`CookError::CaseCollision`] first, for the first pair in path order;
 /// then [`CookError::BadPath`], [`CookError::Link`] and
 /// [`CookError::ImageAtRoot`], for the first file in path order; then
-/// [`CookError::OrphanSidecar`].
+/// [`CookError::OrphanSidecar`]; then [`CookError::Config`] for a sound's
+/// sidecar with no sound.
 pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
     let mut entries = entries.to_vec();
     entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -274,6 +292,8 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
     let mut projects = Vec::new();
     let mut ldtk_levels = Vec::new();
     let mut data = Vec::new();
+    let mut sounds = Vec::new();
+    let mut sound_sidecars = Vec::new();
     for entry in &entries {
         let read = role(&entry.path) != Role::Other;
         let reason = match entry.kind {
@@ -333,10 +353,18 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
             Role::Project => projects.push(source),
             Role::LdtkLevel => ldtk_levels.push(source),
             Role::Data => data.push(source),
+            Role::Sound => sounds.push(source),
+            Role::SoundSidecar => sound_sidecars.push(source),
             Role::Sidecar => sidecars.push(source),
             Role::Config => configs.push(source),
             Role::Other => {
-                skipped.insert(source.found, "no pipeline cooks it yet".to_string());
+                let reason = if source.path.ends_with(SOUND) || source.path.ends_with(SOUND_SIDECAR)
+                {
+                    "a sound is cooked only below `audio/`"
+                } else {
+                    "no pipeline cooks it yet"
+                };
+                skipped.insert(source.found, reason.to_string());
             }
         }
     }
@@ -375,6 +403,25 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
     };
     let images = with_sidecars(images);
     let exports = with_sidecars(exports);
+
+    // A sound's sidecar goes with the sound of its name.
+    let mut sounds: BTreeMap<String, (Source, Option<Source>)> = sounds
+        .into_iter()
+        .map(|sound| (sound.path.clone(), (sound, None)))
+        .collect();
+    for sidecar in sound_sidecars {
+        let stem = &sidecar.path[..sidecar.path.len() - SOUND_SIDECAR.len()];
+        match sounds.get_mut(&format!("{stem}{SOUND}")) {
+            Some((_, slot)) => *slot = Some(sidecar),
+            None => {
+                let name = stem.rsplit('/').next().unwrap_or(stem);
+                return Err(CookError::Config {
+                    path: sidecar.found,
+                    reason: format!("there is no `{name}{SOUND}` beside it"),
+                });
+            }
+        }
+    }
     Ok(Plan {
         images,
         exports,
@@ -382,6 +429,7 @@ pub(crate) fn plan(entries: &[Entry]) -> Result<Plan, CookError> {
         projects,
         ldtk_levels,
         data,
+        sounds: sounds.into_values().collect(),
         configs,
         skipped: skipped.into_iter().collect(),
     })
@@ -599,6 +647,67 @@ mod tests {
             collision(&[folder("s"), file("s/É.png"), file("s/é.png")]),
             ("s/É.png".to_string(), "s/é.png".to_string())
         );
+    }
+
+    #[test]
+    fn sounds_below_audio_are_read_with_their_sidecars_and_others_listed() {
+        let plan = plan(&[
+            folder("audio"),
+            file("audio/Step.WAV"),
+            file("audio/step.sound.jsonc"),
+            folder("audio/music"),
+            file("audio/music/theme.wav"),
+            folder("sfx"),
+            file("sfx/jump.wav"),
+            file("sfx/jump.sound.jsonc"),
+            folder("data"),
+            file("data/hum.sound.jsonc"),
+        ])
+        .expect("a plan");
+        assert_eq!(
+            plan.sounds,
+            [
+                (source("audio/music/theme.wav"), None),
+                (
+                    source("audio/Step.WAV"),
+                    Some(source("audio/step.sound.jsonc"))
+                ),
+            ]
+        );
+        // Below `data/`, every `.jsonc` is data.
+        assert_eq!(plan.data, [source("data/hum.sound.jsonc")]);
+        let outside = "a sound is cooked only below `audio/`".to_string();
+        assert_eq!(
+            plan.skipped,
+            [
+                ("sfx/jump.sound.jsonc".to_string(), outside.clone()),
+                ("sfx/jump.wav".to_string(), outside),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_sound_s_sidecar_needs_its_sound_and_a_sound_its_name() {
+        assert_eq!(
+            plan(&[
+                folder("audio"),
+                file("audio/a.wav"),
+                file("audio/b.sound.jsonc")
+            ]),
+            Err(CookError::Config {
+                path: "audio/b.sound.jsonc".to_string(),
+                reason: "there is no `b.wav` beside it".to_string()
+            })
+        );
+        // Read now, a sound's name is held to the rules of what is read.
+        assert!(matches!(
+            plan(&[
+                folder("audio"),
+                file("audio/Jump.wav"),
+                file("audio/jump.wav")
+            ]),
+            Err(CookError::CaseCollision { .. })
+        ));
     }
 
     #[test]

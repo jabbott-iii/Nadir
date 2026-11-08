@@ -74,7 +74,9 @@ pub enum CookError {
     },
     /// A sidecar, an `atlas.jsonc`, an Aseprite export, a font or a data
     /// file that says something wrong, or names a sheet or page that is not
-    /// there.
+    /// there; a sound's sidecar with no sound beside it; or a sound the
+    /// cook cannot take: of no samples, of a rate above 384,000 Hz, or too
+    /// long for the limits, resampled or as PCM16.
     Config {
         /// The file, as found.
         path: String,
@@ -89,8 +91,8 @@ pub enum CookError {
         /// What does not fit.
         reason: String,
     },
-    /// A file a decoder refused: a PNG, an Aseprite export, a font or a
-    /// data file.
+    /// A file a decoder refused: a PNG, an Aseprite export, a font, a WAV
+    /// (8-bit ones among them) or a data file.
     Decode {
         /// The file, lowercased.
         path: String,
@@ -126,8 +128,9 @@ pub enum CookError {
         size: (u32, u32),
     },
     /// Two outputs, or folders of outputs, that are one, or would be on a
-    /// system that ignores case: groups' atlas files, tile sets' pages, or
-    /// fonts' files; or two outputs whose paths have one hash in the pack
+    /// system that ignores case: groups' atlas files, tile sets' pages,
+    /// fonts' files, data files' or sounds' outputs; or two outputs whose
+    /// paths have one hash in the pack
     /// ([`PACK`](crate::PACK)).
     OutputCollision {
         /// One, below the output folder.
@@ -135,9 +138,9 @@ pub enum CookError {
         /// The other.
         second: String,
     },
-    /// An encoder refused what the cook made, or the game's atlas or pack
-    /// reader refused the file it wrote: a pivot past what an `f32` holds,
-    /// say, or an output larger than the game reads from a pack.
+    /// An encoder refused what the cook made, or the game's atlas, sound or
+    /// pack reader refused the file it wrote: a pivot past what an `f32`
+    /// holds, say, or an output larger than the game reads from a pack.
     Encode {
         /// The output, below the output folder.
         path: String,

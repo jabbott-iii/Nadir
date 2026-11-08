@@ -19,7 +19,8 @@ use std::fmt;
 #[cfg(feature = "png")]
 use crate::png;
 use crate::{
-    aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, ldtk, level, prefab, qoa, qoi, wav,
+    aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, kpcm, ldtk, level, pcm, prefab, qoa,
+    qoi, wav,
 };
 
 /// Errors produced by `nadir-codec`.
@@ -87,6 +88,23 @@ pub enum CodecError {
         offset: u64,
         /// What is wrong.
         kind: kpak::ErrorKind,
+    },
+    /// A sound file is malformed or exceeds a limit ([`kpcm`](crate::kpcm)).
+    Kpcm {
+        /// The byte offset of the problem in the file.
+        offset: usize,
+        /// What is wrong.
+        kind: kpcm::ErrorKind,
+    },
+    /// Samples cannot be encoded as a sound file.
+    KpcmEncode {
+        /// Why not.
+        kind: kpcm::EncodeErrorKind,
+    },
+    /// Samples cannot be resampled ([`pcm::resample`]).
+    Pcm {
+        /// Why not.
+        kind: pcm::ErrorKind,
     },
     /// A KBJ file is malformed or exceeds a limit.
     Kbj {
@@ -189,6 +207,9 @@ impl fmt::Display for CodecError {
             Self::Inflate { offset, kind } => write!(f, "inflate error at byte {offset}: {kind}"),
             Self::Klz { offset, kind } => write!(f, "KLZ error at byte {offset}: {kind}"),
             Self::Kpak { offset, kind } => write!(f, "pack error at byte {offset}: {kind}"),
+            Self::Kpcm { offset, kind } => write!(f, "KPCM error at byte {offset}: {kind}"),
+            Self::KpcmEncode { kind } => write!(f, "cannot encode as KPCM: {kind}"),
+            Self::Pcm { kind } => write!(f, "cannot resample: {kind}"),
             Self::Kbj { offset, kind } => write!(f, "KBJ error at byte {offset}: {kind}"),
             Self::KbjEncode { kind } => write!(f, "cannot encode as KBJ: {kind}"),
             Self::Atlas { at, kind } if at.is_empty() => {

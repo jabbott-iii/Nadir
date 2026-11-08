@@ -34,6 +34,8 @@ Every decoder:
 | `qoi` | qoiformat.org spec | ✓ | ✓ | yes | Textures, golden references |
 | `qoa` | qoaformat.org spec | ✓ | ✓ | yes | Music and long SFX; LMS predictor, 20-sample slices; a frame at a time, for music as it plays. See subset below |
 | `wav` | RIFF/WAVE | — | ✓ | no | PCM 16/24-bit int, 32-bit float; mono/stereo. See subset below |
+| `kpcm` | The sound file, version 1, below | ✓ | ✓ | yes | 16-bit samples of 1 or 2 channels as they are, for short sounds (M6.8, ADR-0049). See below |
+| `pcm` | Below | — | — | no (cook; M6.9's assets) | `resample`, a windowed sinc the same bits on every system, and `to_i16`. See below |
 | `klz` | Below | ✓ | ✓ | yes | Pack entry compression. See below |
 | `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (settings, dev data) | Order-preserving objects: `Vec<(String, Value)>` |
 | `kbj` | Below | ✓ | ✓ | yes | Binary form of the JSON value tree for cooked data. See below |
@@ -407,7 +409,8 @@ file  := "KBJ1" value
 
 `wav::decode(&[u8], Limits)` reads a WAV file into a `Wave`: its sample
 rate, its channels, how it stored its samples, and the samples as `f32`,
-interleaved. The cook tool turns them into PCM16 or QOA (M6.6).
+interleaved. The cook turns those below `audio/` into the sound file or
+QOA (M6.8; below, "Sounds").
 
 - **Supported:** `WAVE_FORMAT_PCM` at 16 and 24 bits,
   `WAVE_FORMAT_IEEE_FLOAT` at 32 bits, and `WAVE_FORMAT_EXTENSIBLE` with
@@ -422,7 +425,8 @@ interleaved. The cook tool turns them into PCM16 or QOA (M6.6).
   its pad byte or not.
 - **Rejected:** other sample formats (8-bit, 32-bit integer, 64-bit float,
   compressed ones), with an error that says to export again as one of the
-  supported ones; more than two channels, or none; a sample rate of 0; RF64
+  supported ones: jsfxr, among others, writes 8-bit WAVs unless it is told
+  to write 16; more than two channels, or none; a sample rate of 0; RF64
   and BW64; a NaN or infinite float sample; a RIFF size that is not the
   file's; a chunk past the end of the form; a missing `fmt ` or `data`, a
   second `fmt `, or `data` before `fmt `; a `fmt ` too short for its
@@ -440,7 +444,7 @@ interleaved. The cook tool turns them into PCM16 or QOA (M6.6).
   exported again than cooked.
 - **Limits:** the samples, at 4 bytes each as `f32`, at most
   `max_decoded_bytes`: with the default, about 11.6 minutes of stereo at
-  48 kHz. The cook raises it for music (M6.6).
+  48 kHz. The cook reads WAVs within 512 MiB, about 23 minutes (M6.8).
 - **Errors:** `CodecError::Wav { offset, kind }`, with the byte offset of
   the chunk or field at fault (for an extensible format, the subformat's
   tag or its valid bits), or of the sample for a NaN.
@@ -530,6 +534,91 @@ frame (ADR-0045).
   and decoded, which fuzzes the encoder too. Most mutations change a file's
   length, which the decoder refuses first; the damage tests in
   `crates/codec/tests/qoa.rs` change bytes in place and reach the frames.
+
+### Sound file reader and writer (documented, tested)
+
+`kpcm::encode(&Header, &[i16])` writes the sound file, `.kpcm` (below,
+"Sound file"), of 16-bit samples, interleaved; `kpcm::decode(&[u8], Limits)`
+reads one back into a `Sound`, its header and its samples. The format is
+lossless and canonical: a file that decodes encodes back to its own bytes.
+As built in M6.8 (ADR-0049).
+
+- **Accepted:** version 1; 1 or 2 channels, the mixer's; a sample rate of 1
+  to 384,000 Hz (`kpcm::MAX_SAMPLE_RATE`, nadir-audio's); 1 frame or more;
+  the reserved byte 0; exactly the samples the header gives, and nothing
+  after them.
+- **The checks run in this order**, and the first that fails is the error:
+  the magic, `KPCM`, or as much of it as there is (so a short file of
+  another kind is "not a sound file", not "cut short"); the header's 16
+  bytes; the version (any other is "not supported"); the channels; the
+  reserved byte; the rate; the frames; the samples' bytes, 2 each, against
+  `max_decoded_bytes`; the length. Nothing is allocated before.
+- **The encoder** refuses, in this order, channels other than 1 or 2, a
+  rate of 0 or above 384,000, no frames, and samples that are not frames ×
+  channels of them.
+- **Errors:** `CodecError::Kpcm { offset, kind }`, with the byte offset of
+  the field, or of the input's end where it is cut short, or of the first
+  byte after the samples; the encoder's `CodecError::KpcmEncode { kind }`.
+- **Vectors:** `crates/codec/tests/kpcm/`: 23 files, made by
+  `make_vectors.py` there field by field with Python's `struct`, sharing no
+  code with the reader. Six read, each with its samples written apart
+  (`.i16`), chosen so that bytes or channels swapped would read otherwise
+  (mono, stereo, one frame, the extremes of 16 bits at 384,000 Hz, silence,
+  100 frames); the encoder writes each byte for byte. Seventeen each break
+  one rule (versions 0 and 2, channels 0 and 3, rates 0 and 384,001, a
+  3-byte file that is not one, a QOA header, cut in the header or the
+  samples, a byte after them, the limit), with the kind and the offset.
+  Every prefix of a good file, and one byte more, is refused; 3,000
+  damaged ones are read or refused without a panic, and those read encode
+  back to their bytes.
+- **Fuzz target:** `kpcm`, with seeds in `fuzz/corpus/kpcm/` (the six good
+  vectors): a file it decodes has the samples its header gives, and
+  encodes back to its own bytes.
+
+### Resampler (documented, tested)
+
+`pcm::resample(&[f32], channels, from, to, looped, Limits)` changes a
+sound's rate; `pcm::resampled_frames` says how many frames it gives;
+`pcm::to_i16` makes a 16-bit sample of an `f32` one. As built in M6.8
+(ADR-0049), for the cook, and for M6.9's conversion at load.
+
+- **The filter:** a windowed sinc over 32 zero crossings each side, under a
+  Kaiser window of β = 9, its −6 dB cutoff at 0.91 of the lower of the two
+  rates' Nyquist frequencies, tabulated at 512 points a zero crossing and
+  interpolated; each output sample's weights are divided by their sum, so a
+  constant stays the constant. Measured, alike at every ratio tried, from
+  384,000 Hz to 8,000 and back: a tone up to 0.82 of the lower Nyquist
+  frequency keeps its level within 0.00021 dB and stays 92 dB or more below
+  the tone itself; 0.84 of it loses 0.015 dB, and 0.86, 0.24 dB; a tone 1%
+  above the output's Nyquist frequency is down by 91 dB. Ten seconds of
+  mono at 44.1 kHz take about 0.4 s to 48 kHz, optimized.
+- **Rates:** 1 to 384,000 Hz (`pcm::MAX_RATE`, the sound file's), falling
+  by 48 times at most (`pcm::MAX_FALL`, 384,000 Hz to 8,000), which bounds
+  the kernel's reach to 1,688 input frames each side of a point.
+- **Length and place:** `frames × to / from` frames, rounded to the
+  nearest, 1 or more; output frame `n` is at input frame `n × frames /
+  output frames`, as a whole number and a remainder, so nothing drifts.
+- **Edges:** 0 past either end of a sound; a looped one goes on from its
+  other end, so its seam is resampled as any other point, and the loop's
+  length is exact (its pitch moves by at most half an output frame over
+  the loop): a tone looped in 10,000 frames at 44.1 kHz keeps its seam
+  within −100 dB at 48 kHz.
+- **Equal rates** give the samples as they are.
+- **Determinism:** `f64` with `+ − × ÷`, `sqrt` and `floor` only, which IEEE
+  754 fixes and Rust neither fuses nor reorders; `sin(πx)` is a polynomial
+  of the module's, exact at whole and half numbers, and the Kaiser window's
+  I₀ a running product, as a system's `sin`, `exp` and `powi` may differ in
+  their last bit. Tests pin the hashes of two resampled signals and of the
+  kernel's own `f64` bits, which the `f32` output can hide, and CI checks
+  them on Linux, Windows and arm64 macOS.
+- **The output** can pass ±1 where the input's peaks fell between its
+  samples: `to_i16` (`× 32768`, rounded half away from 0, clamped to
+  −32768 … 32767, so a sample read from 16 bits comes back as it was)
+  clamps them, and the cook counts them.
+- **Errors:** `CodecError::Pcm { kind }`, for no channels, a rate of 0 or
+  above 384,000 Hz, a fall of more than 48 times, samples that are not
+  whole frames, or an output past `max_decoded_bytes` at 4 bytes a sample,
+  before anything is allocated.
 
 ### BMFont subset (documented, tested)
 
@@ -1231,11 +1320,11 @@ facade (ADR-0043).
 
 ## `nadir-cook` (library + CLI)
 
-As built in M5.4, M5.5, M5.12 and M5.14 (ADR-0031, ADR-0035, ADR-0038,
-ADR-0041): the atlas pipeline, with PNGs, Aseprite exports and BMFont
-fonts; data, its prefabs checked; LDtk projects' levels; the pack of
-every output (above, "Pack file"); the cache; and the CLI. The audio
-pipeline comes with M6.6.
+As built in M5.4, M5.5, M5.12, M5.14 and M6.8 (ADR-0031, ADR-0035,
+ADR-0038, ADR-0041, ADR-0049): the atlas pipeline, with PNGs, Aseprite
+exports and BMFont fonts; sounds; data, its prefabs checked; LDtk
+projects' levels; the pack of every output (above, "Pack file"); the
+cache; and the CLI.
 
 ### Pipelines
 
@@ -1244,7 +1333,7 @@ pipeline comes with M6.6.
 | `*.png` (+ optional `*.sprite.jsonc` sidecar: sheet frames, pivot, trim, tile set) | Decode → cut into frames → trim → atlas pack → QOI | Atlas pages `atlas/<group>_<n>.qoi`, tile sets' pages `atlas/<sprite>.tiles.qoi`, and `atlas/<group>.kbj` (where each frame went) |
 | `*.json`, an Aseprite export (`aseprite -b in.aseprite --sheet out.png --data out.json --format json-array --list-tags`) | Parse frames and tags (above, "Aseprite subset") → its sheet's frames join the atlas group, placed in their canvas, then trimmed; each tag a clip of them, a tag's direction and repeat count expanded to the frames Aseprite plays. `Clips::add_atlas` makes them `Clip`s (ADR-0024, ADR-0035) | The sprite's frames and clips in `atlas/<group>.kbj` |
 | `*.ldtk` (LDtk 1.5.3 project, and its `.ldtkl` level files) | Read (above, "LDtk subset") → by ADR-0038's conventions (below, "LDtk levels"): tile layers → a level's layers of cells; the IntGrid `Collision` → its grid; tall tiles → its tall sprites; entities → prefab names and field overrides | `levels/<name>.klvl` (below, "Level file"), one a level |
-| `*.wav` | Resample policy from the sidecar; long or music → QOA, short SFX → PCM16 | `.qoa` / `.kpcm` |
+| `audio/**/*.wav` (+ optional `*.sound.jsonc` sidecar: format, rate, loop) | Decode → resample to 48 kHz, or the sidecar's rate → 16 bits → the sound file, or QOA below `audio/music/` or by the sidecar (below, "Sounds") | `audio/<path>.kpcm` (below, "Sound file") or `audio/<path>.qoa` |
 | `*.fnt` + pages (BMFont text) | Parse, check the pages, pack each glyph into the atlas group (below, "Font file") | `atlas/<font>.font.kbj` + the sprite's frames in `atlas/<group>.kbj` |
 | `data/**/*.jsonc` data (prefabs, items, input defaults) | Validate syntax → KBJ; each `data/prefabs/<name>.jsonc` read as a prefab file too (below, "Prefab file"); what the values mean is checked at game load, by reflection | `data/<path>.kbj` |
 
@@ -1258,9 +1347,11 @@ symbolic links. Names starting with `.` are left out.
 - What the cook reads, by name: `*.png` images, `*.sprite.jsonc`
   sidecars, folders' `atlas.jsonc`, every `*.json` as an Aseprite export,
   `*.fnt` fonts, `*.ldtk` LDtk projects and `*.ldtkl` their level files
-  (never read as exports), and every `*.jsonc` below `data/` as data
+  (never read as exports), every `*.wav` below `audio/` as a sound, and its
+  `*.sound.jsonc` sidecar, and every `*.jsonc` below `data/` as data
   (sidecars and `atlas.jsonc` there are data too). Any other file is
-  listed, not read.
+  listed, not read: a WAV or a sound's sidecar outside `audio/`, as "a
+  sound is cooked only below `audio/`".
 - A file the cook reads must have
   an asset path (`AssetPath`: lowercased, then checked) and a name that is
   UTF-8, and not be a symbolic link. No other name in a folder above or
@@ -1415,6 +1506,67 @@ in this order:
 - The game's reader of it comes with M7.1: the cook cannot yet read back
   what it writes, as it does the atlas file.
 
+### Sounds `audio/<path>.kpcm` and `audio/<path>.qoa`
+
+As built in M6.8 (ADR-0049). Each `.wav` below the source's `audio/` is a
+job of its own, `audio/<path without .wav>`, whose inputs are the WAV and
+its sidecar, `<stem>.sound.jsonc` beside it, if it has one. Its output has
+its path, with the extension of how it is stored: `audio/sfx/step.wav`
+cooks to `audio/sfx/step.kpcm`, and `audio/music/field.wav` to
+`audio/music/field.qoa`, as a level's `music` names it. The cook owns
+`OUT/audio/`.
+
+```jsonc
+{
+  "format": "qoa",  // "pcm16", the sound file, or "qoa" (default: "qoa" below audio/music/, else "pcm16")
+  "rate": 22050,    // the rate to cook it to, 8000 to 384000 (default: 48000, the engine's output's)
+  "loop": true      // it loops: resampled as a loop (default: true below audio/music/, else false)
+}
+```
+
+- **What is cooked:** the WAV's samples (16 or 24 bits, or float of 32;
+  mono or stereo; above, "WAV subset"), within 512 MiB as `f32`; then, if
+  its rate is not the one to cook to, resampled (above, "Resampler"), as a
+  loop where it loops; then each sample made 16 bits (`pcm::to_i16`, so a
+  16-bit WAV at 48 kHz cooks to the sound file sample for sample); then
+  encoded, and read back with the game's reader and limits (a QOA file a
+  frame at a time, as the game's music plays it) before it is written.
+- **Why by folder, not by length:** the output's name is its path, which
+  code and levels name; one that changed with the sound's length would
+  move under them. A sound of 10 s or more kept as PCM16 by default gets a
+  warning instead, which suggests QOA, about a fifth the size.
+- **Refused, naming the WAV:** a WAV the reader refuses
+  (`CookError::Decode`, an 8-bit one among them, as jsfxr writes unless it
+  is told otherwise); one of no samples; one of a rate above 384,000 Hz,
+  the game's, whatever the sidecar says; one that resampled would have more
+  than `u32::MAX` frames, or take more than 512 MiB as `f32`; one that as
+  PCM16 would be larger than the 256 MiB the game reads (`CookError::Config`,
+  each checked once the WAV is read, before the resample or the encoder
+  allocates). A WAV whose name without `.wav` ends in a dot or a space, or
+  whose output's path, with `.kpcm` for `.wav`, would be longer than 1024
+  bytes, is `CookError::BadPath`, and a sidecar with no WAV of its name
+  beside it is `CookError::Config`, each before anything is written.
+- **Warnings:** samples past full scale, which the 16 bits clip, after a
+  resample or in a float WAV; a sound that does not loop and whose own last
+  frame, the WAV's, is above −48 dBFS, which clicks when it stops (the WAV's,
+  as a resample rings past it; the mixer fades a sound in, not at its end:
+  ADR-0046); and the long PCM16 sound, above. Nothing changes a sound's
+  last samples: a fade would break a loop's seam.
+
+### Sound file `audio/<path>.kpcm` (version 1)
+
+```text
+header (16 bytes):
+  "KPCM" | version u16 (1) | channels u8 (1 or 2) | reserved u8 (0) |
+  sample_rate u32 (1 to 384000) | frames u32 (1 or more)
+samples: frames × channels i16, interleaved (left, then right)
+```
+
+Little-endian, and exactly `16 + frames × channels × 2` bytes: nothing
+follows the samples (above, "Sound file reader and writer"). A sound plays
+whole, and loops whole when the game asks: version 1 holds no loop points,
+and adding them would be version 2, and a change of `kpcm::Header`.
+
 ### Data `data/<path>.kbj`
 
 Each `.jsonc` below the source's `data/` is a job of its own,
@@ -1565,27 +1717,29 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
               "outputs": [["atlas/sprites.kbj", "…"], …] } ] }                    // by path
 ```
 
-- Each atlas group is a job, and so is each data file and each LDtk
-  project. A job is skipped
+- Each atlas group is a job, and so is each sound, each data file and each
+  LDtk project. A job is skipped
   when its files' hashes, the cooker and the options are the cache's, and
   its outputs are there as written; `--force` skips none. A cook built
   anew cooks everything once. The options string holds the options that
   change output: none yet.
 - An atlas job's files are every file it read: its images, its exports
   and their sheets, its fonts and their pages, the sidecars, and its
-  folders' `atlas.jsonc`. An LDtk job's are as above, "LDtk levels".
+  folders' `atlas.jsonc`. A sound's are its WAV and its sidecar. An LDtk
+  job's are as above, "LDtk levels".
 - Each file is read once, so its hash and what is cooked come from the same
   bytes.
 - A cache that cannot be read, has another version, or names a path the
   cook would not write (not an asset path as written, or an output not a
-  `.qoi` or `.kbj` below `atlas/`, a `.kbj` below `data/`, or a `.klvl`
-  below `levels/`) is not used, with a warning.
+  `.qoi` or `.kbj` below `atlas/`, a `.kpcm` or `.qoa` below `audio/`, a
+  `.kbj` below `data/`, or a `.klvl` below `levels/`) is not used, with a
+  warning.
 - Each output is written through a `.tmp` and a rename, then the pack,
   and the cache last, each only when its bytes change, so that a file
   keeps its time of change unless they do; within an atlas job, the
   pages come before the atlas file, which names them, and the fonts'
-  files after it (M5.15, ADR-0042). The cook owns `OUT/atlas/`, `OUT/data/` and
-  `OUT/levels/`: every file there that no job wrote is removed; and it
+  files after it (M5.15, ADR-0042). The cook owns `OUT/atlas/`, `OUT/audio/`,
+  `OUT/data/` and `OUT/levels/`: every file there that no job wrote is removed; and it
   writes `OUT/game.kpak`, above, over whatever is there. The output folder and the source folder may not hold
   each other. Two outputs of one name, or of names that fold alike, are
   an error.
@@ -1595,7 +1749,8 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
 - `nadir-cook [--force] SOURCE OUT`: exit 0, 1 for a failed cook, 2 for a
   command line not understood, or with an argument that is not valid
   Unicode. It prints each job, cooked (an atlas group's sprites, pages,
-  clips and fonts; a project's levels and their entities) or up to date,
+  clips and fonts; a sound's encoding, length and rate, as `PCM16, 0.25 s
+  at 48000 Hz`; a project's levels and their entities) or up to date,
   then the pack's files and size, read from its header, and warns on
   standard error.
 - `cargo xtask cook [--force]` runs it, built in release mode, on
@@ -1632,6 +1787,11 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
 | Max array or object entries | 1,000,000 |
 | Max pack entries (`max_entries`, as for an array) | 1,000,000 |
 
+The cook raises `max_texture_dimension` for its source PNGs, and
+`max_decoded_bytes` to 512 MiB for its WAVs and their resampled samples; a
+job of a sound that size holds at most about 1.5 GiB at once (the WAV's
+bytes, its samples, the resampled ones, and the file).
+
 ## Tests
 
 - **Test vectors:**
@@ -1652,6 +1812,13 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
     random values and the JSON documents
   - WAV: 21 files from a separate RIFF writer, which libsndfile decodes to
     the same samples, in `crates/codec/tests/wav/`
+  - The sound file: files assembled field by field, with their samples
+    written apart, and each rule broken once, in `crates/codec/tests/kpcm/`
+    with the script that wrote them
+  - The resampler: tones against themselves, above the new Nyquist
+    frequency, a loop's seam, stereo channels kept apart, a constant kept,
+    `sin(πx)` at exact values, I₀, and the hash of two resampled signals
+    pinned, in `crates/codec/src/pcm.rs`
   - BMFont: hand-written files in each generator's dialect, in
     `crates/codec/tests/bmfont/`
   - LDtk: projects and level files of LDtk 1.5.3, from its JSON schema, in
@@ -1663,8 +1830,8 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
 - **Fuzz targets** (fuzz smoke): every decoder above, the atlas file reader
   (`atlas`, M5.9), the Aseprite reader (`aseprite`, M5.5), the LDtk reader
   (`ldtk`), the level file reader (`level`) and the prefab file reader
-  (`prefab`, all three M5.10), the pack file reader (`kpak`, M5.13) and,
-  from M9.4, the save reader.
+  (`prefab`, all three M5.10), the pack file reader (`kpak`, M5.13), the
+  sound file reader (`kpcm`, M6.8) and, from M9.4, the save reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   read every cooked file through `PackSource` and `LooseSource`, and find
   the same bytes (`tools/cook/tests/cook/workspace.rs`, M5.14).
@@ -1679,7 +1846,9 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
   pixels, cell by cell, into a file the game's reader takes, with the
   person's clips; Aseprite exports placed in their canvas, their clips,
   their sidecars and their mistakes; fonts' frames and files, their
-  fallbacks and their mistakes; data files and prefabs; and edits to an
+  fallbacks and their mistakes; sounds, by their folders and sidecars,
+  resampled, as loops, their warnings and their mistakes
+  (`tests/cook/sounds.rs`); data files and prefabs; and edits to an
   export, a font or a page, each cooking its group again to what a clean
   cook writes. LDtk projects made by hand (`tests/cook/ldtk.rs`): each
   layer type, tall and animated tiles, entities and their fields, a level

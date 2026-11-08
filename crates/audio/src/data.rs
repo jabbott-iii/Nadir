@@ -39,7 +39,7 @@ fn check_rate(rate: u32) -> Result<(), AudioError> {
 
 /// A sound, decoded: `f32` samples, interleaved, of 1 or 2 channels, at a
 /// sample rate of its own. The mixer plays it at any rate, resampling it
-/// if the device's differs; M6.6's assets convert sounds to the device's
+/// if the device's differs; M6.9's assets convert sounds to the device's
 /// rate when they load, so that most play without.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundData {

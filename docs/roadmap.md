@@ -4232,7 +4232,87 @@ by the batched sprite renderer.
     (manual), with a USB device unplugged and plugged in again while it
     plays (`cargo dev` until 2026-11-08, ADR-0047)
 
-- [ ] **M6.6 — audio assets and facade integration**
+- [x] **M6.8 — codec and cook: sounds and music cooked**
+  - Split from M6.6 on 2026-11-08 (ADR-0048).
+  - Note (from M5.2): `wav::decode` gives `f32` samples, with floats past
+    ±1 kept as they are: the cook clamps them to [−1, 1] and rounds to
+    `i16` for PCM16 and QOA. At 4 bytes a sample, the default
+    `max_decoded_bytes` (256 MiB) holds about 11.6 minutes of 48 kHz
+    stereo; the cook raises it for music, as M5.4 raises the PNG dimension
+    limit. jsfxr exports 8-bit WAV unless asked otherwise, which the reader
+    refuses (ADR-0028): say so where the asset docs list the formats.
+  - Note (from M6.2, ADR-0046): a sound that ends on its own is not faded,
+    as a ramp at its start (2 ms) is the mixer's: the cook can make each
+    sound end at 0.
+  - Depends: M6.1, M5.4
+  - Do: the `.kpcm` format (PCM16 sounds) and its reader and writer in
+    nadir-codec, with a fuzz target; the cook's WAV job, PCM16 or QOA by a
+    `<stem>.sound.jsonc` sidecar, with the resample policy the spec names;
+    the cache and the pack.
+  - Accept: each WAV below a source's `audio/` cooks to `.kpcm` or `.qoa`,
+    as its sidecar or its folder's default says; `.kpcm` round-trips, and
+    its reader refuses what is not one without panicking; a WAV the reader
+    refuses is an error naming it.
+  - Verify: `cargo test -p nadir-codec -p nadir-cook`; `cargo xtask
+    fuzz-smoke --target kpcm`
+  - Built (2026-11-08, ADR-0049):
+    - nadir-codec's `kpcm`, the sound file, version 1: a 16-byte header
+      (`KPCM`, the version, 1 or 2 channels, a reserved 0, the rate of 1 to
+      384,000 Hz, 1 or more frames), then the interleaved little-endian
+      `i16` samples, nothing after. `decode` within `Limits`, the magic
+      checked first; `encode`; canonical, so a file that decodes encodes
+      back to its bytes. 23 vectors written field by field by
+      `tests/kpcm/make_vectors.py`, and the fuzz target `kpcm`, seeded with
+      the 6 that read, which checks that canon.
+    - nadir-codec's `pcm`: `resample`, a windowed sinc (32 zero crossings,
+      Kaiser β = 9, −6 dB at 0.91 of the lower Nyquist frequency,
+      tabulated), for rates of 1 to 384,000 Hz falling 48 times at most, a
+      looped sound resampled as periodic with its length exact;
+      `resampled_frames`; `to_i16`. The same bits on every system by
+      construction, which hashes of its output and of its kernel pin.
+    - The cook's sound job: each WAV below `audio/` is the job
+      `audio/<path>`, cooked to `.kpcm` (PCM16) or `.qoa` as its
+      `<stem>.sound.jsonc` (`format`, `rate`, `loop`) or its folder says
+      (below `audio/music/`, QOA and looped; elsewhere PCM16, not looped),
+      at 48 kHz unless the sidecar gives a rate; read back with the game's
+      reader and limits; cached by the WAV's and the sidecar's hashes;
+      packed; `out/audio/` the cook's. `Counts::Sound`, with
+      `SoundEncoding`. A WAV elsewhere is skipped, saying why; each refusal
+      names the WAV; warnings of clipping, of a one-shot whose own last
+      frame is above −48 dBFS, and of 10 s or more of PCM16 by default.
+  - Measured on 2026-11-08 (x86_64 Linux, optimized), alike at every ratio
+    tried from 384,000 Hz to 8,000 and back: a tone up to 0.82 of the lower
+    Nyquist frequency keeps its level within 0.00021 dB, and its error is
+    92.2 dB below it at worst; −0.015 dB at 0.84, −0.24 dB at 0.86; a tone 1%
+    above the output's Nyquist frequency down 91.3 to 91.5 dB; a loop's
+    seam 100.8 dB below the tone; 10 s of mono, 44.1 kHz to 48, in 0.37 s.
+    `fuzz-smoke --target kpcm`: 123.6 million inputs in 60 s, no finding.
+  - Review: three critics of the design, by format and codec, DSP and
+    policy, and the cook: 30 findings, 5 of them high, which reshaped it
+    (the resampler moved to nadir-codec, for M6.9; its output and kernel
+    bounded before it allocates; a loop's seam resampled as periodic; the
+    format chosen by folder, not by length, as the output's name is its
+    path; QOA held to 384,000 Hz; an xtask test the target broke). After
+    the build, three reviewers with a skeptic for each finding: 19 of 23
+    confirmed, all fixed, the feature's summary at the tick (the
+    resampler's rates and fall unbounded in the codec; a hash that the
+    `f32` output kept blind to the kernel's bits; a sound's output path
+    unchecked; the "ends loud" warning taken after the resample; "−0
+    dBFS"; the filter's figures, re-measured above; tests the music's loop
+    and short loops lacked; docs); then a checker per lens, which found
+    the fixes complete but for wording, since fixed. Of 26 planted bugs,
+    11 passed the tests at first; with the tests added since, all 26 fail
+    them, and so do 9 bugs more planted in the fixes.
+  - Tests: `cargo test -p nadir-codec -p nadir-cook` (the cook's sounds
+    from sources in temporary folders), and xtask's `kpcm` tests; `cargo
+    xtask fuzz-smoke --target kpcm`; `cargo xtask ci`.
+  - Note: the Accept said "each WAV of `assets/`"; the design cooks only
+    those below a source's `audio/` (ADR-0049), so since the review it says
+    that. `assets/` holds no sound yet: the cook's tests check the Accept,
+    cooking sources of their own in temporary folders.
+
+- [ ] **M6.9 — audio: `Sound` and `Music` assets; the API takes handles**
+  - Split from M6.6 on 2026-11-08 (ADR-0048).
   - Note (from M6.2, ADR-0046):
     - `Audio::play`, `play_at` and `play_music` take `&Arc<SoundData>`
       and `&Arc<MusicData>`, where `docs/subsystems/audio.md` takes
@@ -4243,15 +4323,30 @@ by the batched sprite renderer.
     - Convert sounds to `AudioStats::rate`, which is 0 until the device's
       first callback; until then, or after a change of rate, the mixer
       resamples.
+  - Depends: M6.8, M6.2
+  - Do: `Sound` (from `.kpcm` or `.qoa`) and `Music` (`.qoa`) as
+    nadir-assets assets, decoded on a worker and converted to the device's
+    rate; `Audio::play`, `play_at` and `play_music` taking `Handle<Sound>`
+    and `Handle<Music>`; a failed sound as silence where placeholders are
+    on; nadir-audio ready for crates.io (its description, a README whose
+    examples `src/lib.rs` tests, `LICENSE` and `NOTICE`), published from
+    the next release (ADR-0048).
+  - Accept: cooked sounds and music load through the asset server and play
+    through the mixer offline; the mixer's tests pass on handles; `cargo
+    xtask crates` takes nadir-audio.
+  - Verify: `cargo test -p nadir-audio`; `cargo xtask crates`
+
+- [ ] **M6.6 — facade and sandbox: the game plays sound**
+  - Split on 2026-11-08 (ADR-0048): the cook's part is M6.8, the assets'
+    M6.9; this task keeps M6.6's number, and the rest.
+  - Note (from M6.2, ADR-0046):
     - Call `Audio::update` once a frame: it drops what the mixer is done
       with, and until it runs, the mixer takes no more sounds than its
       return buffer holds. It allocates nothing in a steady frame.
-    - A sound that ends on its own is not faded: the cook can make each
-      sound end at 0, as a ramp at its start (2 ms) is the mixer's.
     - Positions go through `VoiceChange::Position` once a frame; the mixer
       smooths each change over 16 ms. A move of the listener is
       `set_listener`.
-  - Depends: M6.3, M5.4
+  - Depends: M6.9, M6.3
   - Note (from M6.3, ADR-0047):
     - Wrap the mixer: `struct MixerOutput(Mixer)` implementing
       `nadir_platform::AudioRender`, whose `render` calls
@@ -4267,20 +4362,17 @@ by the batched sprite renderer.
       with `dlopen`. Ubuntu 24.04's `libasound2t64` provides `libasound2`.
     - "Sandbox audio plays" and `cargo dev` came from M6.3's Accept and
       Verify on 2026-11-08 (ADR-0047).
-  - Note (from M5.2): `wav::decode` gives `f32` samples, with floats past
-    ±1 kept as they are: the cook clamps them to [−1, 1] and rounds to
-    `i16` for PCM16 and QOA. At 4 bytes a sample, the default
-    `max_decoded_bytes` (256 MiB) holds about 11.6 minutes of 48 kHz
-    stereo; the cook raises it for music, as M5.4 raises the PNG dimension
-    limit. jsfxr exports 8-bit WAV unless asked otherwise, which the reader
-    refuses (ADR-0028): say so where the asset docs list the formats.
-  - Do: cook WAV → PCM16/QOA by sidecar; `Sound`/`Music` assets;
-    `AudioEmitter`/`AudioListener` components; music crossfade; bus volumes
-    from settings.
+    - A level file already has optional `music` and `ambience` asset paths
+      (`docs/subsystems/assets-and-codecs.md`, "Level file").
+  - Do: the `App` opens audio with the mixer (above) and calls
+    `Audio::update` once a frame; `AudioEmitter`/`AudioListener`
+    components and their systems; music crossfade between areas; bus
+    volumes in `Config`, which M9.3's settings file will set (ADR-0048);
+    the sandbox's footsteps and its areas' music, sounds of our own;
+    `libasound2` for the sandbox's `.deb`.
   - Accept: sandbox audio plays; footsteps follow the player positionally;
     music crossfades between areas.
-  - Verify: `cargo test -p nadir-audio -p nadir-cook`; `cargo dev`
-    (manual)
+  - Verify: `cargo test -p nadir_engine -p sandbox`; `cargo dev` (manual)
 
 - [ ] **M6.7 — soak tooling**
   - Note (from M6.2): `AudioStats` gives the last callback's mixing time,
@@ -4520,6 +4612,8 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir_engine`; `cargo dev` (manual)
 
 - [ ] **M9.3 — settings file**
+  - Note (from M6.6, ADR-0048): the bus volumes, which M6.6 puts in the
+    facade's `Config`, come from the settings file here.
   - Note (from M4.2): apply settings field by field (`fields()` and
     `field_mut()`), so that an invalid value can fall back alone. Keep the
     source `Value` to preserve unknown keys: `apply_value` warns about them

@@ -33,8 +33,8 @@ use std::time::Duration;
 
 use nadir_codec::inflate::ErrorKind as InflateError;
 use nadir_codec::{
-    CodecError, Limits, adler32, aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, ldtk,
-    level, png, prefab, qoa, qoi, wav,
+    CodecError, Limits, adler32, aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, kpcm,
+    ldtk, level, png, prefab, qoa, qoi, wav,
 };
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
@@ -114,6 +114,10 @@ const TARGETS: &[Target] = &[
     Target {
         name: "qoa",
         run: decode_qoa,
+    },
+    Target {
+        name: "kpcm",
+        run: decode_kpcm,
     },
 ];
 
@@ -297,6 +301,23 @@ fn decode_qoa(input: &[u8]) {
         sound.samples.len(),
         "the encoder lost samples"
     );
+}
+
+/// The `kpcm` target: `nadir_codec::kpcm::decode`, with the limits the game
+/// uses. The format is canonical: a file that reads holds the samples its
+/// header gives, and encodes back to its own bytes.
+fn decode_kpcm(input: &[u8]) {
+    let Ok(sound) = kpcm::decode(input, Limits::default()) else {
+        return;
+    };
+    let header = sound.header;
+    assert_eq!(
+        sound.samples.len(),
+        header.frames as usize * usize::from(header.channels),
+        "a sound without the samples its header gives"
+    );
+    let file = kpcm::encode(&header, &sound.samples).expect("a sound the decoder gave encodes");
+    assert_eq!(file, input, "the file does not encode back to its bytes");
 }
 
 /// The `atlas` target: `nadir_codec::atlas::parse`, with the default
@@ -1687,6 +1708,18 @@ mod tests {
     }
 
     #[test]
+    fn the_kpcm_target_takes_any_bytes() {
+        // A header that claims more samples than the limit, then filler.
+        let mut huge = b"KPCM\x01\x00\x02\x00\x80\xbb\x00\x00\xff\xff\xff\xff".to_vec();
+        huge.extend_from_slice(&[0x5a; 5000]);
+        let mut small = b"KPCM\x01\x00\x01\x00\x80\xbb\x00\x00\x02\x00\x00\x00".to_vec();
+        small.extend_from_slice(&[1, 2, 3, 4]);
+        for input in [&b""[..], b"KPCM", &huge, &small, &[0xff; 5000]] {
+            decode_kpcm(input);
+        }
+    }
+
+    #[test]
     fn the_qoi_target_takes_any_bytes() {
         let mut huge = b"qoif\xff\xff\xff\xff\xff\xff\xff\xff\x04\x00".to_vec();
         huge.extend_from_slice(&[0xfd; 100]);
@@ -2417,6 +2450,14 @@ mod tests {
         // `crates/codec/tests/qoa/make_vectors.py`.
         for seed in seeds_of("qoa") {
             qoa::decode(&seed, Limits::default()).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_kpcm_seeds_are_files_the_codec_accepts() {
+        // The seeds come from `crates/codec/tests/kpcm/make_vectors.py`.
+        for seed in seeds_of("kpcm") {
+            kpcm::decode(&seed, Limits::default()).unwrap();
         }
     }
 

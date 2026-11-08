@@ -175,7 +175,7 @@ flowchart TB
     end
     subgraph L1["Layer 1: OS behavior and formats"]
         n_platform["nadir-platform<br/>window and events, GL context through EGL on Linux, audio output through ALSA on Linux, user folders, error dialog, precise sleep, dev allocation counter"]
-        n_codec["nadir-codec<br/>inflate, PNG behind the png feature, QOI, WAV, KLZ, JSON and JSONC, KBJ, BMFont, Aseprite, LDtk, atlas, level, prefab and pack files"]
+        n_codec["nadir-codec<br/>inflate, PNG behind the png feature, QOI, QOA, WAV, the sound file and resampling, KLZ, JSON and JSONC, KBJ, BMFont, Aseprite, LDtk, atlas, level, prefab and pack files"]
     end
     subgraph L0["Layer 0: foundations"]
         n_core["nadir-core<br/>math, color, rects, time, logging, RNG, hashing, handles, keys, profile scopes, CLI parser"]
@@ -248,12 +248,13 @@ flowchart TB
         cli["CLI, main.rs<br/>reads nadir-cook [--force] SOURCE OUT, runs cook, prints the report"]
         lib["cook, lib.rs<br/>plans the jobs, cooks data JSONC to KBJ, checks prefabs, writes each output through a temporary file"]
         scan["scan<br/>walks SOURCE and sorts what it finds into jobs"]
-        config["config<br/>sprite.jsonc sidecars and atlas.jsonc"]
+        config["config<br/>sprite.jsonc and sound.jsonc sidecars, and atlas.jsonc"]
         cache["cache<br/>.cache.kbj: the hashes each job read and wrote"]
         atlas["atlas<br/>images, Aseprite exports and fonts into QOI pages, a KBJ, and a glyph file for each font"]
         image["image<br/>trims frames, extrudes their edges"]
         packer["pack<br/>MaxRects rectangle packing"]
         level["level<br/>each LDtk level into levels/NAME.klvl"]
+        sound["sound<br/>each WAV below audio/ into audio/PATH.kpcm or .qoa, resampled"]
         kpak["kpak<br/>writes game.kpak, reads it back with the game's reader"]
     end
     n_assets["nadir-assets<br/>AssetPath, the pack's file name"]
@@ -266,7 +267,9 @@ flowchart TB
     lib --> cache
     lib --> atlas
     lib --> level
+    lib --> sound
     lib --> kpak
+    sound --> config
     atlas --> config
     atlas --> image
     atlas --> packer
@@ -279,7 +282,7 @@ flowchart TB
     n_codec --> n_core
 
     classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
-    class cli,lib,scan,config,cache,atlas,image,packer,level,kpak,n_assets,n_codec,n_core component
+    class cli,lib,scan,config,cache,atlas,image,packer,level,sound,kpak,n_assets,n_codec,n_core component
 ```
 
 ## 5. The workspace's other programs

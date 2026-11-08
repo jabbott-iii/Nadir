@@ -34,7 +34,12 @@ Formats made for the game, which reads them at run time:
 - **KLZ**, Nadir's LZ77 block compression, for the pack's entries.
 - **QOA** sounds, encoded and decoded, whole or a frame at a time into a
   buffer of your own: 16-bit audio at 3.2 bits a sample, for music and long
-  sounds. The cook does not write them yet (M6.6).
+  sounds. The cook writes them.
+- **The sound file**, `.kpcm`: 16-bit samples of 1 or 2 channels as they
+  are, for short sounds, decoded and encoded. The cook writes it.
+- **A resampler** (`pcm`), a windowed sinc that gives the same bits on every
+  system and keeps a looped sound's seam: the cook resamples sounds to 48
+  kHz with it.
 
 Formats only the cook reads:
 
@@ -45,8 +50,8 @@ Formats only the cook reads:
   into clips.
 - **BMFont** fonts, in the text format.
 - **LDtk 1.5.3** projects and level files, which the cook reads.
-- **WAV** sounds (PCM of 16 and 24 bits, float of 32): the reader is built,
-  but the cook does not call it yet (M6.6).
+- **WAV** sounds (PCM of 16 and 24 bits, float of 32, mono or stereo),
+  which the cook cooks to the sound file or QOA.
 
 **JSON** (RFC 8259) with the JSONC extensions, comments and trailing
 commas, is read and written: the cook reads its data files and sidecars

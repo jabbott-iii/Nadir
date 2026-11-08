@@ -74,7 +74,7 @@ mods, downloaded content and corrupted files. In scope:
 
 - **Parsers and loaders**: the codecs in `nadir-codec` (inflate, PNG, QOI,
   QOA, WAV, JSON and JSONC, KBJ, KLZ, BMFont, Aseprite exports, LDtk
-  projects, and the atlas, level, prefab and pack files), the asset server
+  projects, and the atlas, level, prefab, pack and sound files), the asset server
   and its sources in `nadir-assets`, and, as the roadmap adds them, saves.
   For example:
   - a panic, a hang, or a stack overflow on any input;

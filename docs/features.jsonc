@@ -232,9 +232,9 @@
     {
       "name": "Audio mixer",
       "area": "Audio",
-      "summary": "Sound is compressed as QOA, with an encoder and decoder of our own, to 3.2 bits a sample: a tone keeps 71 dB of signal over its noise, and white noise 16, and a damaged or cut file is refused, not played. A mixer of our own mixes up to 48 voices on four buses, resampled as their rate or pitch asks, with constant-power panning, attenuation by distance from the listener, fades of at least 2 ms at every start and stop, voices stolen by priority, a soft limiter, and music streamed from QOA a frame at a time, crossfading from one track to the next. It allocates nothing as it mixes: 32 voices and a track take 88 µs of a 10.7 ms callback, and it is tested offline, frame by frame. The game will play its WAV and QOA assets through it, with footsteps that follow the player and music that crossfades between areas, and a soak test will count underruns.",
-      "tasks": ["M6.1", "M6.2", "M6.6", "M6.7"],
-      "ticked": ["M6.1", "M6.2"]
+      "summary": "Sound is compressed as QOA, with an encoder and decoder of our own, to 3.2 bits a sample: a tone keeps 71 dB of signal over its noise, and white noise 16, and a damaged or cut file is refused, not played. The cook turns each WAV below the assets' audio folder into 16-bit PCM in a sound file of our own, or into QOA, as its folder or a sidecar says, with music in QOA and looped. It resamples each to 48 kHz with a windowed sinc of our own, which keeps a tone's error 92 dB below it up to 0.82 of the Nyquist frequency, resamples a loop's seam as any other point, and is built to give the same bits on every system, and it warns of a sound that clips or that ends loud enough to click. A mixer of our own mixes up to 48 voices on four buses, resampled as their rate or pitch asks, with constant-power panning, attenuation by distance from the listener, fades of at least 2 ms at every start and stop, voices stolen by priority, a soft limiter, and music streamed from QOA a frame at a time, crossfading from one track to the next. It allocates nothing as it mixes: 32 voices and a track take 88 µs of a 10.7 ms callback, and it is tested offline, frame by frame. The game will load its cooked sounds and music and play them through it, with footsteps that follow the player and music that crossfades between areas, and a soak test will count underruns.",
+      "tasks": ["M6.1", "M6.2", "M6.8", "M6.9", "M6.6", "M6.7"],
+      "ticked": ["M6.1", "M6.2", "M6.8"]
     },
     {
       "name": "Audio output on every desktop",

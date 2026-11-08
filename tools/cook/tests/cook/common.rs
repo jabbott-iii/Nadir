@@ -27,6 +27,56 @@ use nadir_codec::{Limits, atlas, kbj, kpak};
 use nadir_cook::{CACHE, CookError, Options, PACK, Report};
 use nadir_core::hash::crc32;
 
+/// A WAV of `data`, as a format `tag` (1 integers, 3 floats) of `channels`
+/// at `rate`, `bits` a sample: the RIFF and `fmt ` chunks written here, from
+/// the format, not by a library.
+pub(crate) fn wav_bytes(tag: u16, channels: u16, rate: u32, bits: u16, data: &[u8]) -> Vec<u8> {
+    let block = channels * (bits / 8);
+    let mut format = Vec::new();
+    format.extend_from_slice(&tag.to_le_bytes());
+    format.extend_from_slice(&channels.to_le_bytes());
+    format.extend_from_slice(&rate.to_le_bytes());
+    format.extend_from_slice(&(rate * u32::from(block)).to_le_bytes());
+    format.extend_from_slice(&block.to_le_bytes());
+    format.extend_from_slice(&bits.to_le_bytes());
+    let mut body = b"WAVE".to_vec();
+    for (id, chunk) in [(b"fmt ", &format[..]), (b"data", data)] {
+        body.extend_from_slice(id);
+        body.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
+        body.extend_from_slice(chunk);
+        if chunk.len() % 2 == 1 {
+            body.push(0);
+        }
+    }
+    let mut file = b"RIFF".to_vec();
+    file.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    file.extend_from_slice(&body);
+    file
+}
+
+/// A 16-bit WAV of `samples`, interleaved.
+pub(crate) fn wav16(channels: u16, rate: u32, samples: &[i16]) -> Vec<u8> {
+    let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+    wav_bytes(1, channels, rate, 16, &data)
+}
+
+/// A 32-bit float WAV of `samples`, interleaved.
+pub(crate) fn wav_float(channels: u16, rate: u32, samples: &[f32]) -> Vec<u8> {
+    let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+    wav_bytes(3, channels, rate, 32, &data)
+}
+
+/// A tone of `frames` frames of `hz` at `rate`, at `level` of full scale,
+/// as 16-bit samples.
+pub(crate) fn tone16(frames: usize, rate: u32, hz: f64, level: f64) -> Vec<i16> {
+    (0..frames)
+        .map(|i| {
+            let x = (i as f64 * hz / f64::from(rate) * std::f64::consts::TAU).sin();
+            (x * level * 32767.0).round() as i16
+        })
+        .collect()
+}
+
 /// A PNG of `width` × `height` RGBA8 pixels, rows from the top, with each
 /// of `extra` (a chunk's type and data) after its header. The image data is
 /// one zlib stream of stored blocks, every row filtered with None.

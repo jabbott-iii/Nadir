@@ -38,8 +38,10 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   M2.7).
 - **Audio:** the mixer is built (voices, buses, positional sound, QOA
   music streamed as it plays), and tested offline, and so is the audio
-  output on Linux, through ALSA; the game does not play sound yet
-  (roadmap M6.6), and Windows and macOS have no output yet (M6.4, M6.5).
+  output on Linux, through ALSA; the cook turns WAVs into the game's sound
+  files and QOA, resampled to 48 kHz. The game does not load or play
+  sounds yet (roadmap M6.9 and M6.6), and Windows and macOS have no output
+  yet (M6.4, M6.5).
 - **Not built yet:** text, the debug tools, gamepads, hot reload, saves
   and the Metal backend.
 
