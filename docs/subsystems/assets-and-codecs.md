@@ -1484,7 +1484,7 @@ reader"); what the values mean, and the chain of bases, nadir-scene checks
 ### Incremental cache `OUT/.cache.kbj` (version 1)
 
 ```
-{ "version": 1, "cooker": "nadir-cook 0.2.0 <fnv1a64 of its executable>", "options": "",
+{ "version": 1, "cooker": "nadir-cook 0.3.0 <fnv1a64 of its executable>", "options": "",
   "jobs": [ { "job": "atlas/sprites",                        // by name
               "inputs": [["sprites/person.png", "<fnv1a64, 16 hex digits>"], …],  // its images, sidecars, atlas.jsonc
               "outputs": [["atlas/sprites.kbj", "…"], …] } ] }                    // by path

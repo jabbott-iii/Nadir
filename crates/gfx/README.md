@@ -13,7 +13,7 @@ sprites and tiles with it. Depend on it to write a renderer of your own.
 
 ## Status
 
-Version 0.2: the API will change before 1.0.
+Version 0.3: the API will change before 1.0.
 
 Built:
 
@@ -37,8 +37,8 @@ Not yet:
 
 ```toml
 [dependencies]
-nadir-gfx = "0.2"
-nadir-core = "0.2"
+nadir-gfx = "0.3"
+nadir-core = "0.3"
 ```
 
 `nadir-core` has the math and color types the API takes. A window comes

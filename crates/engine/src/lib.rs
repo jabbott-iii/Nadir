@@ -36,7 +36,7 @@
 //! }
 //! ```
 //!
-//! This is version 0.2, and the API will change before 1.0. The engine
+//! This is version 0.3, and the API will change before 1.0. The engine
 //! draws on Linux (X11). On Windows and macOS a game runs, but its window
 //! stays empty until roadmap tasks M2.6 and M2.7. Audio, text, gamepads,
 //! saves and the debug tools are not built yet. The

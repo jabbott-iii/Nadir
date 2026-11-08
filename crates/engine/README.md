@@ -13,7 +13,7 @@ ECS, input, rendering, collision, assets and reflection as `nadir::ecs`,
 
 ## Status
 
-Version 0.2: the API will change before 1.0.
+Version 0.3: the API will change before 1.0.
 
 Built:
 
@@ -66,7 +66,7 @@ Not built yet:
 
 ```toml
 [dependencies]
-nadir_engine = "0.2"
+nadir_engine = "0.3"
 ```
 
 The package is `nadir_engine`, since `nadir` was taken on crates.io, and its
@@ -591,7 +591,7 @@ out:
 
 ```toml
 [dependencies]
-nadir_engine = "0.2"
+nadir_engine = "0.3"
 
 [features]
 dev = ["nadir_engine/dev"]

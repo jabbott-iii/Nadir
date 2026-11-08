@@ -16,7 +16,7 @@ Depend on it directly for the rest, such as `FastHashMap`, `GenArena` or
 
 ## Status
 
-Version 0.2: the API will change before 1.0.
+Version 0.3: the API will change before 1.0.
 
 What is built:
 
@@ -52,7 +52,7 @@ Not yet:
 
 ```toml
 [dependencies]
-nadir-core = "0.2"
+nadir-core = "0.3"
 ```
 
 Math, color and random numbers. World space is +X right and +Y down, in
@@ -114,7 +114,7 @@ assert_eq!(frame.alpha, 0.0);
 
   ```toml
   [dependencies]
-  nadir-core = { version = "0.2", features = ["profile"] }
+  nadir-core = { version = "0.3", features = ["profile"] }
   ```
 
 ## Documentation

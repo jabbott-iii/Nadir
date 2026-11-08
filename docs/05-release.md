@@ -163,7 +163,7 @@ sudo apt update && sudo apt install nadir-cook nadir-sandbox
 docker run --rm --user "$(id -u):$(id -g)" --volume "$PWD:/work" \
   ghcr.io/jabbott-iii/nadir-cook assets cooked
 
-# crates.io: the engine in Cargo.toml as `nadir_engine = "0.2"`, used as
+# crates.io: the engine in Cargo.toml as `nadir_engine = "0.3"`, used as
 # `nadir::…`; and the cook as a command
 cargo install nadir-cook
 ```
@@ -188,7 +188,7 @@ publishes can read two releases' files and fail; it passes when run again.
 3. Check out that commit, then tag it and push the tag:
 
    ```bash
-   make release VERSION=v0.2.0
+   make release VERSION=v0.3.0
    ```
 
    The root `Makefile` first checks what the gate will, as the tag
@@ -198,8 +198,8 @@ publishes can read two releases' files and fail; it passes when run again.
    `REMOTE=` names a remote other than `origin`. Without `make`, it is:
 
    ```bash
-   git tag -a v0.2.0 -m "Nadir 0.2.0"
-   git push origin v0.2.0
+   git tag -a v0.3.0 -m "Nadir 0.3.0"
+   git push origin v0.3.0
    ```
 
 One release runs at a time. GitHub keeps only the newest run that waits

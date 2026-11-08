@@ -1,6 +1,6 @@
 # Nadir — 2D top-down game engine (Rust, desktop only)
 
-**Status:** in development, at version 0.2. `docs/roadmap.md` ticks each task
+**Status:** in development, at version 0.3. `docs/roadmap.md` ticks each task
 once it is done and verified. A task whose code is written but still needs a
 check on another OS stays unticked, with a `⏳ needs <OS>` note. The next task
 is the first unticked one whose dependencies are all ticked, skipping one

@@ -3147,7 +3147,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0040 — The crates go to 0.2.0, as M5.11 and M5.12 broke public enums
 
-- **Status:** Accepted
+- **Status:** Accepted; its version, 0.2.0, is superseded by ADR-0044 (0.3.0)
 - **Date:** 2026-11-02
 - **Context:**
   - ADR-0039 set every crate at 0.1.1, ready for crates.io, where twelve
@@ -3538,3 +3538,52 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   reloading (M10.3); a page gained by an atlas only a level uses must be
   freed with the level; or the level made twice by one cook gets in a
   game's way.
+
+## ADR-0044 — The crates go to 0.3.0
+
+- **Status:** Accepted
+- **Date:** 2026-11-07
+- **Context:**
+  - Release v0.2.0 (`c3e45ba`) is out: its tag is on `origin`, and on
+    2026-11-02 the release workflow published the crates on crates.io and
+    the GitHub release (ADR-0040). crates.io takes a version only once, and
+    the tag ruleset keeps a pushed tag from being moved or deleted
+    (ADR-0036).
+  - Ten commits have landed on `main` since, among them the facade's
+    level loading (M5.6), the pack (M5.13, M5.14, M5.7), `cook --watch`
+    (M5.15) and hot reload (M5.16, M5.17, M5.8).
+  - `make release` refuses a `VERSION` other than `v` and HEAD's
+    `[workspace.package]` version, and one `origin` already has; the
+    workflow's gate refuses a tag other than that version. With the
+    workspace at 0.2.0, no tag gets through either.
+  - The user asked on 2026-11-07 for every crate at 0.3.0.
+- **Decision:**
+  - **Every crate goes to 0.3.0**, `[workspace.package]`'s version and each
+    of `[workspace.dependencies]`, with `Cargo.lock`, as `cargo xtask
+    crates` checks. The next release is `make release VERSION=v0.3.0`.
+  - The crates' READMEs, the repository's README, `AGENTS.md`'s status,
+    the facade's crate docs, `docs/05-release.md` and the `Makefile`'s
+    examples name 0.3 (`nadir_engine = "0.3"`, `v0.3.0`), and the cook's
+    cache examples name nadir-cook 0.3.0. The roadmap's notes, the earlier
+    ADRs and the diagrams' "as of commit" lines keep 0.2, as history.
+  - This supersedes only ADR-0040's version.
+- **Consequences:**
+  - Good: `v0.3.0` is a tag neither `origin` nor crates.io has, so
+    `make release` and the gate take it once CI passes on its commit; and
+    code that asks for `0.2` takes none of what changed since 0.2.0 until
+    it asks for `0.3`.
+  - Bad: a game on 0.2 edits its `Cargo.toml` to move, even where nothing
+    it uses changed; crates with no change since 0.2.0 go to 0.3.0 too, as
+    the workspace keeps one version (ADR-0036); and the 0.2 line ends at
+    0.2.0.
+- **Alternatives considered:**
+  - 0.2.1: Cargo takes it as compatible with 0.2 and gives it to code that
+    asks for `0.2` at its next `cargo update`, which is right only if
+    nothing since 0.2.0 breaks such code; the user asked for 0.3.0.
+  - Leaving the version at 0.2.0: `make release` and the gate refuse every
+    tag until it changes.
+  - Only the crates that changed at 0.3.0: the workspace's one version
+    (ADR-0036) and `cargo xtask crates` require all of them to agree.
+- **Revisit when:**
+  - the crates reach 1.0, when a break needs a major version;
+  - or the crates stop sharing one version.

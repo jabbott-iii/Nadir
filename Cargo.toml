@@ -32,7 +32,7 @@ opt-level = 3
 # by, nadir_engine, is in crates/engine/Cargo.toml: `nadir` is taken there
 # (ADR-0036, ADR-0039).
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Joseph Anthony Abbott III <jabbottpublicsupport@gmail.com>"]
 description = "A lightweight, cross-platform Rust engine."
@@ -48,18 +48,18 @@ categories = ["game-engines", "game-development", "graphics"]
 # above and each of these with it; `cargo xtask crates` checks that they
 # agree (ADR-0036).
 [workspace.dependencies]
-nadir = { path = "crates/engine", version = "0.2.0", package = "nadir_engine" }
-nadir-assets = { path = "crates/assets", version = "0.2.0" }
-nadir-codec = { path = "crates/codec", version = "0.2.0" }
-nadir-collision = { path = "crates/collision", version = "0.2.0" }
-nadir-core = { path = "crates/core", version = "0.2.0" }
-nadir-ecs = { path = "crates/ecs", version = "0.2.0" }
-nadir-gfx = { path = "crates/gfx", version = "0.2.0" }
-nadir-input = { path = "crates/input", version = "0.2.0" }
-nadir-platform = { path = "crates/platform", version = "0.2.0" }
-nadir-render = { path = "crates/render", version = "0.2.0" }
-nadir-scene = { path = "crates/scene", version = "0.2.0" }
-nadir-sys = { path = "crates/sys", version = "0.2.0" }
+nadir = { path = "crates/engine", version = "0.3.0", package = "nadir_engine" }
+nadir-assets = { path = "crates/assets", version = "0.3.0" }
+nadir-codec = { path = "crates/codec", version = "0.3.0" }
+nadir-collision = { path = "crates/collision", version = "0.3.0" }
+nadir-core = { path = "crates/core", version = "0.3.0" }
+nadir-ecs = { path = "crates/ecs", version = "0.3.0" }
+nadir-gfx = { path = "crates/gfx", version = "0.3.0" }
+nadir-input = { path = "crates/input", version = "0.3.0" }
+nadir-platform = { path = "crates/platform", version = "0.3.0" }
+nadir-render = { path = "crates/render", version = "0.3.0" }
+nadir-scene = { path = "crates/scene", version = "0.3.0" }
+nadir-sys = { path = "crates/sys", version = "0.3.0" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"              # sys, platform, gfx override with #![allow(unsafe_code)]

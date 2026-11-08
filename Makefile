@@ -16,8 +16,8 @@
 # workflow (.github/workflows/release.yml; docs/05-release.md, "Making a
 # release"). For maintainers: Git is read-only for agents (AGENTS.md).
 #
-#     make release VERSION=v0.2.0             # tag HEAD and push the tag
-#     make release VERSION=v0.2.0 DRY_RUN=1   # check, and print the rest
+#     make release VERSION=v0.3.0             # tag HEAD and push the tag
+#     make release VERSION=v0.3.0 DRY_RUN=1   # check, and print the rest
 #
 # The tag ruleset blocks moving or deleting a pushed tag, so it first
 # checks what the workflow's gate will: that VERSION is `v` and HEAD's

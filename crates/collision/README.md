@@ -13,7 +13,7 @@ tick and moves them with it; depend on it directly to use it on its own.
 
 ## Status
 
-Version 0.2: the API will change before 1.0.
+Version 0.3: the API will change before 1.0.
 
 Built:
 
@@ -38,8 +38,8 @@ Movement is kinematic: there is no rigid-body physics.
 
 ```toml
 [dependencies]
-nadir-collision = "0.2"
-nadir-core = "0.2"
+nadir-collision = "0.3"
+nadir-core = "0.3"
 ```
 
 Positions, sizes and cells are nadir-core's `Vec2`, `IVec2` and `Rect`, so
