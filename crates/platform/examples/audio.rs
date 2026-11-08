@@ -113,7 +113,7 @@ fn run(mut args: Args, out: &mut dyn Write) -> Result<(), Box<dyn Error>> {
         )?;
         second += 1;
     }
-    drop(stream);
+    // The stream stops as it drops, here.
     Ok(())
 }
 
