@@ -61,7 +61,9 @@
 //! [`pcm`] changes a sound's rate, with a windowed sinc that gives the same
 //! bits on every system and keeps a loop's seam ([`pcm::resample`]), and
 //! makes 16-bit samples of `f32` ones ([`pcm::to_i16`]): the cook resamples
-//! sounds to 48 kHz with it.
+//! sounds to 48 kHz with it, and nadir-audio's `Sound` converts a sound
+//! cooked at another rate that ends in quiet, its last 2 ms within
+//! −48 dBFS, to 48 kHz with it as it loads (M6.9).
 //!
 //! Read only by the cook:
 //!

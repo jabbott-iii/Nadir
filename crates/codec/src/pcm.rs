@@ -36,10 +36,12 @@
 //!
 //! # The resampler
 //!
-//! A windowed sinc, for the cook, which can take its time: each output
-//! sample is the input's samples weighed by `sinc` over 32 of its zero
-//! crossings each side, under a Kaiser window of β = 9, with its cutoff
-//! (−6 dB) at 0.91 of the lower of the two rates' Nyquist frequencies.
+//! A windowed sinc, for the cook, which can take its time, and for
+//! nadir-audio's `Sound`, which converts as it loads, on a worker or the
+//! caller's thread: each output sample is the input's samples weighed by
+//! `sinc` over 32 of its zero crossings each side, under a Kaiser window of
+//! β = 9, with its cutoff (−6 dB) at 0.91 of the lower of the two rates'
+//! Nyquist frequencies.
 //! Measured, alike at every ratio tried, from 384,000 Hz to 8,000 and
 //! back: a tone up to 0.82 of the lower Nyquist frequency keeps its level
 //! within 0.00021 dB and stays 92 dB or more below the tone itself; at

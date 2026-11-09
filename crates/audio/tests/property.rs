@@ -16,14 +16,23 @@
 //! should not send among them: whatever the sequence, the mixer neither
 //! panics nor sends the device anything but finite samples below full
 //! scale, and once everything is stopped, every sound comes back.
+//!
+//! The sounds and tracks load once, for every case, in an asset server,
+//! and play from their handles, as the game's do; but for the sounds at a
+//! rate that loading would convert to 48 kHz, which are made in code and
+//! played as they are, so that their rates reach the mixer.
+
+mod common;
 
 use std::sync::Arc;
 
-use nadir_audio::{AudioConfig, Bus, MusicData, PlayParams, SoundData, VoiceChange};
-use nadir_codec::qoa;
+use nadir_assets::Handle;
+use nadir_audio::{AudioConfig, Bus, Music, PlayParams, Sound, SoundData, VoiceChange};
 use nadir_core::Pcg32;
 use nadir_core::Vec2;
 use nadir_core::testing::check;
+
+use common::Library;
 
 #[derive(Debug)]
 enum Action {
@@ -190,44 +199,75 @@ fn generate(rng: &mut Pcg32) -> Case {
 
 const SOUNDS: usize = 6;
 
-fn sounds() -> Vec<Arc<SoundData>> {
-    let mut rng = Pcg32::new(7, 7);
-    let mut noise = |len: usize| -> Vec<f32> { (0..len).map(|_| rng.range(-1.0..1.0)).collect() };
-    [
-        SoundData::new(1, 48_000, vec![1.0]),
-        SoundData::new(2, 8_000, [-1.0, 1.0].repeat(7)),
-        SoundData::new(1, 44_100, noise(300)),
-        SoundData::new(2, 384_000, noise(5000 * 2)),
-        SoundData::new(1, 1, noise(3)),
-        SoundData::new(2, 48_000, [1.0, -1.0].repeat(2000)),
-    ]
-    .into_iter()
-    .map(|sound| Arc::new(sound.expect("a valid sound")))
-    .collect()
+/// A sound the cases play.
+enum Played {
+    /// Loaded, and played from its handle.
+    Loaded(Handle<Sound>),
+    /// Made in code, and played as it is.
+    Made(Sound),
 }
 
-fn tracks() -> Vec<Arc<MusicData>> {
+impl Played {
+    fn get<'a>(&'a self, lib: &'a Library) -> &'a Sound {
+        match self {
+            Self::Loaded(sound) => lib.get(*sound),
+            Self::Made(sound) => sound,
+        }
+    }
+}
+
+/// The sounds and tracks every case plays, loaded once.
+struct Fixture {
+    lib: Library,
+    sounds: Vec<Played>,
+    tracks: Vec<Handle<Music>>,
+}
+
+fn fixture() -> Fixture {
+    let mut lib = Library::new();
+    let mut rng = Pcg32::new(7, 7);
+    let mut noise = |len: usize| -> Vec<f32> { (0..len).map(|_| rng.range(-1.0..1.0)).collect() };
+    let made = |channels, rate, samples| {
+        Played::Made(Sound::new(
+            SoundData::new(channels, rate, samples).expect("a valid sound"),
+        ))
+    };
+    let sounds = vec![
+        Played::Loaded(lib.sound_f32(1, 48_000, &[1.0])),
+        // Not handles: loading would convert these rates to 48 kHz, and the
+        // cases are to reach the mixer's resampling of them.
+        made(2, 8_000, [-1.0, 1.0].repeat(7)),
+        made(1, 44_100, noise(300)),
+        made(2, 384_000, noise(5000 * 2)),
+        // Below the rates loading converts: it loads at 1 Hz.
+        Played::Loaded(lib.sound_f32(1, 1, &noise(3))),
+        Played::Loaded(lib.sound_f32(2, 48_000, &[1.0, -1.0].repeat(2000))),
+    ];
     let mut rng = Pcg32::new(9, 9);
-    [(1u8, 8_000u32, 6000u32), (2, 384_000, 5121)]
+    // Music keeps its rate as it loads.
+    let tracks = [(1u8, 8_000u32, 6000u32), (2, 384_000, 5121)]
         .into_iter()
-        .map(|(channels, sample_rate, samples)| {
-            let header = qoa::Header {
-                channels,
-                sample_rate,
-                samples,
-            };
+        .map(|(channels, rate, samples)| {
             let pcm: Vec<i16> = (0..samples * u32::from(channels))
                 .map(|_| rng.next_u32() as i16)
                 .collect();
-            let file = qoa::encode(&header, &pcm).expect("a valid track");
-            Arc::new(MusicData::new(file).expect("a valid track"))
+            lib.track(channels, rate, &pcm)
         })
-        .collect()
+        .collect();
+    Fixture {
+        lib,
+        sounds,
+        tracks,
+    }
 }
 
-fn run(case: &Case) -> Result<(), String> {
-    let sounds = sounds();
-    let tracks = tracks();
+fn run(fixture: &Fixture, case: &Case) -> Result<(), String> {
+    let Fixture {
+        lib,
+        sounds,
+        tracks,
+    } = fixture;
+    let assets = &lib.server;
     let (audio, mut mixer) = nadir_audio::new(AudioConfig {
         voices: case.voices,
         commands: case.commands,
@@ -248,9 +288,11 @@ fn run(case: &Case) -> Result<(), String> {
     };
     for action in &case.actions {
         match *action {
-            Action::Play { sound, params, at } => voices.push(match at {
-                Some(at) => audio.play_at(&sounds[sound], at, params),
-                None => audio.play(&sounds[sound], params),
+            Action::Play { sound, params, at } => voices.push(match (&sounds[sound], at) {
+                (Played::Loaded(sound), Some(at)) => audio.play_at(assets, *sound, at, params),
+                (Played::Loaded(sound), None) => audio.play(assets, *sound, params),
+                (Played::Made(sound), Some(at)) => audio.play_sound_at(sound, at, params),
+                (Played::Made(sound), None) => audio.play_sound(sound, params),
             }),
             Action::Stop { voice, fade_ms } => {
                 if let Some(&voice) = voices.get(voice % voices.len().max(1)) {
@@ -271,7 +313,7 @@ fn run(case: &Case) -> Result<(), String> {
             Action::Music {
                 track,
                 crossfade_ms,
-            } => audio.play_music(&tracks[track], crossfade_ms),
+            } => audio.play_music(assets, tracks[track], crossfade_ms),
             Action::StopMusic(fade_ms) => audio.stop_music(fade_ms),
             Action::Update => audio.update(),
             Action::Render {
@@ -301,9 +343,20 @@ fn run(case: &Case) -> Result<(), String> {
             audio.stats().active_voices
         ));
     }
+    // Every handle named a loaded sound or track, which played.
+    if audio.stats().unplayed != 0 {
+        return Err(format!("{} plays of nothing", audio.stats().unplayed));
+    }
+    // Held once only: by the server, or by the test for a sound it made.
     let held = |count: usize| count != 1;
-    if sounds.iter().map(Arc::strong_count).any(held)
-        || tracks.iter().map(Arc::strong_count).any(held)
+    if sounds
+        .iter()
+        .map(|sound| Arc::strong_count(sound.get(lib).data()))
+        .any(held)
+        || tracks
+            .iter()
+            .map(|&track| Arc::strong_count(lib.get_track(track).data()))
+            .any(held)
     {
         return Err("a sound or a track never came back".into());
     }
@@ -312,5 +365,19 @@ fn run(case: &Case) -> Result<(), String> {
 
 #[test]
 fn whatever_the_game_asks_the_output_stays_finite_and_below_full_scale() {
-    check("mixer sequences", 300, generate, run);
+    let fixture = fixture();
+    // Each rate reaches the mixer as it was asked for.
+    let rates: Vec<u32> = fixture
+        .sounds
+        .iter()
+        .map(|sound| sound.get(&fixture.lib).data().sample_rate())
+        .collect();
+    assert_eq!(rates, [48_000, 8_000, 44_100, 384_000, 1, 48_000]);
+    let rates: Vec<u32> = fixture
+        .tracks
+        .iter()
+        .map(|&track| fixture.lib.get_track(track).data().header().sample_rate)
+        .collect();
+    assert_eq!(rates, [8_000, 384_000]);
+    check("mixer sequences", 300, generate, |case| run(&fixture, case));
 }

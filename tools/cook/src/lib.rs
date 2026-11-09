@@ -135,7 +135,9 @@
 //!   take 512 MiB as `f32`, 23 minutes of 48 kHz stereo. A frame larger
 //!   than a page of 4096 pixels, with its edge extrusion, is an error
 //!   ([`CookError::TooBig`]), and so is a sound that, resampled, would pass
-//!   that limit, or as PCM16 the game's ([`CookError::Config`]).
+//!   that limit, or a sound, not music, whose samples the game's `Sound`
+//!   could not hold as `f32` within the default 256 MiB, as cooked or once
+//!   it converts them to 48 kHz as it loads ([`CookError::Config`]).
 //! - **Warnings:** a sound whose samples are clipped to full scale, one
 //!   that does not loop and ends loud, so that it clicks when it stops, and
 //!   one of 10 s or more stored as PCM16 by default.

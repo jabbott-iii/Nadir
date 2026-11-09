@@ -20,12 +20,9 @@ writes.
 
 The cook reads PNG images with their sidecars, Aseprite exports, BMFont
 fonts, WAV sounds with theirs, LDtk 1.5.3 projects and JSONC data, and
-keeps a cache so that the next cook does only what changed. Not yet:
-
-- the sound and music assets in the game (roadmap M6.9): the cook writes
-  them, but the game does not load them yet;
-- a reader for the font files in the game (roadmap M7.1): the cook writes
-  them, but the game does not read them yet.
+keeps a cache so that the next cook does only what changed. Not yet: a
+reader for the font files in the game (roadmap M7.1): the cook writes
+them, but the game does not read them yet.
 
 ## Install
 
@@ -146,6 +143,13 @@ assets/                          target/cooked/
   loop and ends loud, which clicks when it stops, and of one of 10 s or
   more left as 16-bit samples. A WAV outside `audio/` is listed as not
   cooked.
+
+  The game loads a sound with nadir-audio's `Sound`, which holds it as
+  `f32`, converted to 48 kHz if it is at another rate and ends in quiet,
+  and music, QOA below `audio/music/`, with `Music`, which keeps it
+  compressed. The cook refuses a sound the game could not hold, more than
+  256 MiB as `f32` (about 11.6 minutes of 48 kHz stereo), as cooked or as
+  converted, and suggests making it music.
 - **Data** below `data/` keeps its path: `data/items.jsonc` cooks to
   `data/items.kbj`. What the value means is checked where the game loads
   it. A prefab, `data/prefabs/<name>.jsonc`, must be a prefab file of that

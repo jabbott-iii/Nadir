@@ -309,7 +309,10 @@ pub fn check_sized<T: std::fmt::Debug>(
   loops and crossfades, a change of rate and a main thread that does not
   call `update` for a while: 0 allocations and 0 deallocations, the audio
   thread's rule. The test lets go of each sound once it is queued, so that
-  one freed in `render` would be counted (M6.2).
+  one freed in `render` would be counted (M6.2): since M6.9 it plays each
+  from a handle, loaded in a scope of its own that it unloads once the
+  sound is queued, and checks that only the mixer holds it before the
+  render it counts.
 - `nadir-platform`'s audio thread (`crates/platform/src/linux/alsa.rs`,
   M6.3) allocates nothing as it plays: a period with underruns and waits
   for room, against a fake device, and the real thread writing ALSA's

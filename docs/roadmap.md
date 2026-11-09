@@ -4311,7 +4311,7 @@ by the batched sprite renderer.
     that. `assets/` holds no sound yet: the cook's tests check the Accept,
     cooking sources of their own in temporary folders.
 
-- [ ] **M6.9 — audio: `Sound` and `Music` assets; the API takes handles**
+- [x] **M6.9 — audio: `Sound` and `Music` assets; the API takes handles**
   - Split from M6.6 on 2026-11-08 (ADR-0048).
   - Note (from M6.2, ADR-0046):
     - `Audio::play`, `play_at` and `play_music` take `&Arc<SoundData>`
@@ -4335,6 +4335,63 @@ by the batched sprite renderer.
     through the mixer offline; the mixer's tests pass on handles; `cargo
     xtask crates` takes nadir-audio.
   - Verify: `cargo test -p nadir-audio`; `cargo xtask crates`
+  - Decided with the user on 2026-11-08 (ADR-0050): `play`, `play_at` and
+    `play_music` take the `AssetServer` and a handle by value, beside
+    `play_sound`, `play_sound_at` and `play_track`, which take the asset;
+    "converted to the device's rate" is to `LOAD_RATE`, 48 kHz, the
+    output's default, which every backend opens at or converts to; and
+    nadir-assets' docs, which list the engine's asset types, are a fourth
+    package, docs only.
+  - Built (2026-11-08, ADR-0050):
+    - `Sound` and `Music`, nadir-assets assets in nadir-audio. A sound from
+      `.kpcm` or `.qoa`, on a worker: QOA's header first, its samples
+      within half the server's limits, so that their `f32` copy is held to
+      them; converted to 48 kHz from 8,000 to 384,000 Hz if its last 2 ms
+      (36 frames at least) are within −48 dBFS, else kept at its rate, for
+      the mixer, so that a loop's seam holds; clamped, with a warning when
+      it clips. A track from `.qoa`, held to the limits before it is
+      copied. Placeholders: a frame of silence, a QOA frame of silence.
+    - A handle with nothing under it plays nothing, names no voice, and is
+      counted in `AudioStats::unplayed`. The same track is the same bytes
+      (`MusicData`'s FNV-1a hash and length), so a level that loads its
+      music again goes on playing it.
+    - nadir-audio for crates.io: the others' metadata, a description and
+      categories of its own, `LICENSE` and `NOTICE`, a README in
+      ADR-0039's shape whose examples `src/lib.rs` tests; it goes out with
+      the next release, after the maintainer raises the version from
+      0.3.0, with the token's `publish-new`.
+    - xtask's crates test lists it; the bench plays its sounds at their
+      rates through `Sound::new` and the calls that take the asset.
+  - Measured on 2026-11-08 (x86_64 Linux): `mixer_32_voices` 82.1 µs, the
+    median of five runs, against 82.5 µs for HEAD alternated with it (both
+    from 78 to 92 µs), so the 88.4 µs baseline stands. A seamless loop
+    converted as a one-shot breaks at its seam: −31 dBFS for a 441 Hz tone
+    at −6 dBFS from 22,050 Hz cut at a zero, up to −6 dBFS for higher
+    tones, so such sounds keep their rate. The property test takes 3.7 s,
+    from 13, loading its sounds once.
+  - Review: three critics of the design: 27 findings, 6 of them high,
+    which moved the same track to the same bytes, bounded the conversion
+    (no conversion below 8 kHz, QOA's header first), and added the calls
+    that take the asset and the placeholders. After the build, three
+    reviewers with a skeptic for each finding: 15 of 21 confirmed, all
+    fixed in nadir-audio and its docs (loops cooked at another rate
+    clicking once converted; tests the conversion of QOA, placeholders, a
+    play of nothing beside a real voice and the second load lacked; the
+    music's size, the conversion's cost, stale docs), but for the cook's
+    side: the cook still refuses a PCM16 sound only past 256 MiB, which a
+    `Sound` reads within half that, and nadir-cook's README still lists
+    the assets as not built, a task of the cook's. Of 24 planted bugs, 3
+    passed the tests at first; with the tests added since, all 24 fail
+    them, and so do 3 more planted in the fixes.
+  - Tests: `cargo test -p nadir-audio` (11 asset tests, 41 of the mixer's
+    on handles, 2 of allocation, the property test, 7 unit tests, 3 doc
+    tests); `cargo xtask crates`; xtask's crates tests; `cargo xtask bench
+    mixer`; `cargo xtask ci`.
+  - Since, the cook's side (ADR-0049, ADR-0050): the cook refuses a sound,
+    not music, whose samples the `Sound` could not hold, 256 MiB as `f32`,
+    as cooked or as it would convert them, and reads it back within half
+    the limits; nadir-cook's README and nadir-codec's `pcm` docs say what
+    is built.
 
 - [ ] **M6.6 — facade and sandbox: the game plays sound**
   - Split on 2026-11-08 (ADR-0048): the cook's part is M6.8, the assets'
@@ -4364,6 +4421,21 @@ by the batched sprite renderer.
       Verify on 2026-11-08 (ADR-0047).
     - A level file already has optional `music` and `ambience` asset paths
       (`docs/subsystems/assets-and-codecs.md`, "Level file").
+  - Note (from M6.9, ADR-0050):
+    - `Audio::play(&assets, handle, params)`, `play_at` and `play_music`
+      take the `AssetServer` and a handle by value; a handle with nothing
+      under it plays nothing, and `AudioStats::unplayed` counts it. A play
+      of a sound still loading is lost: load what a level plays as it
+      starts, its music, an emitter's looped sound, with `load_now_in`, as
+      `load_level` loads the level and its atlases, or start it once its
+      state is `Loaded`.
+    - Unloading a scope does not stop the voices that play its sounds:
+      stop a level's emitters and ambience when it goes. A level that
+      loads the same music file again goes on playing it (the same bytes
+      are the same track).
+    - nadir-audio's README says the facade plays a game's sound through it
+      "from roadmap task M6.6", which stays true once M6.6 lands, so M6.6
+      need not edit nadir-audio.
   - Do: the `App` opens audio with the mixer (above) and calls
     `Audio::update` once a frame; `AudioEmitter`/`AudioListener`
     components and their systems; music crossfade between areas; bus

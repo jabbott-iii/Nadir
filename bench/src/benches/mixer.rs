@@ -14,9 +14,7 @@
 
 //! The mixer's benchmark: a callback of 32 voices and a music track.
 
-use std::sync::Arc;
-
-use nadir_audio::{AudioConfig, MusicData, PlayParams, SoundData};
+use nadir_audio::{AudioConfig, Music, MusicData, PlayParams, Sound, SoundData};
 use nadir_codec::qoa;
 use nadir_core::{Pcg32, Vec2};
 
@@ -37,13 +35,14 @@ const FRAMES: usize = 512;
 pub(crate) fn voices(bencher: &mut Bencher) {
     let mut rng = Pcg32::new(0x6d69_7865, 0);
     let mut noise = |len: usize| -> Vec<f32> { (0..len).map(|_| rng.range(-0.5..0.5)).collect() };
+    // Not handles: a loaded sound is converted to 48 kHz, and these must keep their rates.
     let sounds = [
         SoundData::new(1, RATE, noise(48_000)),
         SoundData::new(1, RATE, noise(30_000)),
         SoundData::new(2, 44_100, noise(44_100 * 2)),
         SoundData::new(1, 22_050, noise(22_050)),
     ]
-    .map(|sound| Arc::new(sound.expect("a valid sound")));
+    .map(|sound| Sound::new(sound.expect("a valid sound")));
     let (audio, mut mixer) =
         nadir_audio::new(AudioConfig::default()).expect("the default config is valid");
     audio.set_listener(Vec2::new(400.0, 300.0));
@@ -59,12 +58,12 @@ pub(crate) fn voices(bencher: &mut Bencher) {
         let sound = &sounds[kind];
         if kind % 2 == 1 {
             let at = Vec2::new(voice as f32 * 25.0, 300.0 + voice as f32 * 5.0);
-            audio.play_at(sound, at, params);
+            audio.play_sound_at(sound, at, params);
         } else {
-            audio.play(sound, params);
+            audio.play_sound(sound, params);
         }
     }
-    audio.play_music(&track(), 0);
+    audio.play_track(&track(), 0);
     let mut out = vec![0.0; FRAMES * 2];
     // The commands, and the music's first frame.
     mixer.render(&mut out, 2, RATE);
@@ -76,7 +75,7 @@ pub(crate) fn voices(bencher: &mut Bencher) {
 }
 
 /// A track of 3 s of stereo noise at [`RATE`], below −6 dBFS.
-fn track() -> Arc<MusicData> {
+fn track() -> Music {
     let mut rng = Pcg32::new(0x6d75_7369, 0);
     let frames = 3 * RATE;
     let samples: Vec<i16> = (0..frames * 2)
@@ -88,5 +87,5 @@ fn track() -> Arc<MusicData> {
         samples: frames,
     };
     let file = qoa::encode(&header, &samples).expect("the track's header is valid");
-    Arc::new(MusicData::new(file).expect("a valid track"))
+    Music::new(MusicData::new(file).expect("a valid track"))
 }

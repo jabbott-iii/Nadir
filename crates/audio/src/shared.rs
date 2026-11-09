@@ -98,6 +98,9 @@ pub(crate) struct Shared {
     pub(crate) rate: AtomicU32,
     /// Commands dropped on the main thread because the queue was full.
     pub(crate) dropped: AtomicU64,
+    /// Plays of handles with nothing under them, counted on the main
+    /// thread.
+    pub(crate) unplayed: AtomicU64,
     /// Music frames that failed to decode as they played, which
     /// [`MusicData::new`] rules out: the audio thread counts them, and the
     /// main thread logs them.
@@ -115,6 +118,7 @@ impl Shared {
             callback_ns: AtomicU64::new(0),
             rate: AtomicU32::new(0),
             dropped: AtomicU64::new(0),
+            unplayed: AtomicU64::new(0),
             music_errors: AtomicU64::new(0),
         }
     }

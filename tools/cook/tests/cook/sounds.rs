@@ -453,6 +453,145 @@ fn a_wav_the_cook_cannot_take_is_named() {
     }
 }
 
+/// What the cook says to do with a sound too long for the game to hold.
+const TOO_LONG: &str = "shorten it, or make it music, QOA below `audio/music/`, which the game \
+                        decodes as it plays";
+
+/// Cooks the WAV `wav` at `path`, without `.wav`, with `sidecar`, and
+/// checks that the cook refuses it for `reason`.
+fn refused(test: &str, path: &str, wav: &[u8], sidecar: &str, reason: &str) {
+    let root = dir(&format!("sounds_{test}"));
+    let (source, out) = (root.join("source"), root.join("out"));
+    write(&source, &format!("{path}.wav"), wav);
+    write(&source, &format!("{path}.sound.jsonc"), sidecar);
+    assert_eq!(
+        cook(&source, &out).map(drop),
+        Err(CookError::Config {
+            path: format!("{path}.wav"),
+            reason: reason.to_string()
+        }),
+        "{test}"
+    );
+    fs::remove_dir_all(root).expect("remove the test's folder");
+}
+
+/// `frames` frames of silence at 8 kHz, mono, as a WAV.
+fn quiet_8k(frames: usize) -> Vec<u8> {
+    wav16(1, 8_000, &vec![0; frames])
+}
+
+#[test]
+fn a_sound_longer_than_the_game_holds_is_refused_before_it_is_resampled() {
+    // 1,398,102 frames at 8 kHz are 67,108,896 at 384 kHz, more than the
+    // 2²⁶ samples, 256 MiB as `f32`, that the game holds a sound in:
+    // refused from their count, before the resample, as PCM16 or as QOA,
+    // and as PCM16 below `audio/music/`, where it is a sound too.
+    let short = wav16(1, 8_000, &vec![0; 1_398_102]);
+    let held = format!(
+        "as a sound, it would take the game more than 256 MiB, 4 bytes a sample: {TOO_LONG}"
+    );
+    for (test, path, sidecar) in [
+        ("held_pcm16", "audio/x", r#"{ "rate": 384000 }"#),
+        (
+            "held_qoa",
+            "audio/x",
+            r#"{ "rate": 384000, "format": "qoa" }"#,
+        ),
+        (
+            "held_music_pcm16",
+            "audio/music/x",
+            r#"{ "rate": 384000, "format": "pcm16" }"#,
+        ),
+    ] {
+        refused(test, path, &short, sidecar, &held);
+    }
+    // In stereo, half the frames: 33,554,448 at 384 kHz, of 2 samples.
+    let stereo = wav16(2, 8_000, &vec![0; 699_051 * 2]);
+    refused(
+        "held_stereo",
+        "audio/x",
+        &stereo,
+        r#"{ "rate": 384000 }"#,
+        &held,
+    );
+}
+
+#[test]
+fn a_sound_the_game_would_convert_past_what_it_holds_is_refused() {
+    // 11,184,811 frames at 8 kHz are 67,108,866 at 48 kHz, to which the
+    // game converts a sound that ends in quiet as it loads: refused, from
+    // the samples the game reads back, as PCM16 or as QOA.
+    let over = quiet_8k(11_184_811);
+    let converted = format!(
+        "it ends in quiet, so the game converts it from 8000 Hz to 48000 Hz as it loads, which \
+         would take more than 256 MiB, 4 bytes a sample: {TOO_LONG}"
+    );
+    for (test, sidecar) in [
+        ("converted_pcm16", r#"{ "rate": 8000 }"#),
+        ("converted_qoa", r#"{ "rate": 8000, "format": "qoa" }"#),
+    ] {
+        refused(test, "audio/x", &over, sidecar, &converted);
+    }
+}
+
+#[test]
+fn a_sound_the_game_can_hold_once_converted_or_at_its_rate_is_cooked() {
+    // A frame fewer than above, 67,108,860 at 48 kHz; and the same length
+    // as above, loud in its 36th frame from the end, which keeps its rate.
+    let root = dir("sounds_held");
+    let (source, out) = (root.join("source"), root.join("out"));
+    let at_8k = r#"{ "rate": 8000 }"#;
+    write(&source, "audio/fits.wav", quiet_8k(11_184_810));
+    write(&source, "audio/fits.sound.jsonc", at_8k);
+    let mut loud = vec![0; 11_184_811];
+    loud[11_184_811 - 36] = 129;
+    write(&source, "audio/loud.wav", wav16(1, 8_000, &loud));
+    write(&source, "audio/loud.sound.jsonc", at_8k);
+    let report = cook(&source, &out).expect("a cook");
+    let game = Limits {
+        max_decoded_bytes: 128 << 20,
+        ..Limits::default()
+    };
+    let frames = |path: &str| {
+        let bytes = fs::read(out.join(path)).unwrap_or_else(|error| panic!("{path}: {error}"));
+        kpcm::decode(&bytes, game)
+            .unwrap_or_else(|error| panic!("{path}: {error}"))
+            .header
+            .frames
+    };
+    assert_eq!(frames("audio/fits.kpcm"), 11_184_810);
+    assert_eq!(frames("audio/loud.kpcm"), 11_184_811);
+    let long = |name: &str| {
+        format!(
+            "`audio/{name}.wav` lasts 1398.1 s: give its sidecar `\"format\": \"qoa\"` for a \
+             file about a fifth the size"
+        )
+    };
+    assert_eq!(report.warnings, [long("fits"), long("loud")]);
+    fs::remove_dir_all(root).expect("remove the test's folder");
+}
+
+#[test]
+fn music_is_not_held_to_what_the_game_converts_a_sound_to() {
+    // As long as the sound refused above, and quiet, but music: the game
+    // plays it at its rate, a frame at a time.
+    let root = dir("sounds_held_music");
+    let (source, out) = (root.join("source"), root.join("out"));
+    write(&source, "audio/music/theme.wav", quiet_8k(11_184_811));
+    write(
+        &source,
+        "audio/music/theme.sound.jsonc",
+        r#"{ "rate": 8000 }"#,
+    );
+    let report = cook(&source, &out).expect("a cook");
+    assert_eq!(
+        qoa_at(&out, "audio/music/theme.qoa").header.samples,
+        11_184_811
+    );
+    assert_eq!(report.warnings, Vec::<String>::new());
+    fs::remove_dir_all(root).expect("remove the test's folder");
+}
+
 #[test]
 fn outputs_and_names_that_cannot_be_are_refused_before_anything_is_written() {
     let root = dir("sounds_collision");

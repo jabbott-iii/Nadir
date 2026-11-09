@@ -39,7 +39,9 @@ Formats made for the game, which reads them at run time:
   are, for short sounds, decoded and encoded. The cook writes it.
 - **A resampler** (`pcm`), a windowed sinc that gives the same bits on every
   system and keeps a looped sound's seam: the cook resamples sounds to 48
-  kHz with it.
+  kHz with it, and nadir-audio's `Sound` converts a sound cooked at another
+  rate that ends in quiet, its last 2 ms within −48 dBFS, to 48 kHz with it
+  as it loads.
 
 Formats only the cook reads:
 

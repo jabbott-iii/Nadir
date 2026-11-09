@@ -451,7 +451,7 @@ impl Mixer {
         // The track waiting to start in the active slot: nothing changes.
         let waiting = self.active_music.is_some_and(|active| {
             matches!(&self.music[active].state,
-                MusicState::Handoff { next, .. } if Arc::ptr_eq(next, &track))
+                MusicState::Handoff { next, .. } if next.same(&track))
         });
         if waiting {
             self.retire(Retired::Music(track));
@@ -462,7 +462,7 @@ impl Mixer {
         let sounding = (0..2).find(|&index| {
             self.music[index]
                 .sounding()
-                .is_some_and(|playing| Arc::ptr_eq(&playing.music, &track))
+                .is_some_and(|playing| playing.music.same(&track))
         });
         if let Some(index) = sounding {
             if self.active_music != Some(index)

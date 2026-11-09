@@ -6,8 +6,8 @@ check on another OS stays unticked, with a `⏳ needs <OS>` note. The next task
 is the first unticked one whose dependencies are all ticked, skipping one
 whose remaining work needs an OS you cannot run. This document also describes
 what is not built yet, such as the Metal backend (and
-`cargo xtask golden --backend`), audio's devices on Windows and macOS and
-its assets (its mixer and Linux output are built), and the debug tools,
+`cargo xtask golden --backend`), audio's devices on Windows and macOS
+(its mixer, its assets and its Linux output are built), and the debug tools,
 whose crate is still empty. Some of what it mentions may not exist yet, and some exists
 before its roadmap task is ticked: check before assuming.
 

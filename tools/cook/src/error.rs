@@ -76,7 +76,7 @@ pub enum CookError {
     /// file that says something wrong, or names a sheet or page that is not
     /// there; a sound's sidecar with no sound beside it; or a sound the
     /// cook cannot take: of no samples, of a rate above 384,000 Hz, or too
-    /// long for the limits, resampled or as PCM16.
+    /// long for the limits, resampled, or for the game to hold as a sound.
     Config {
         /// The file, as found.
         path: String,

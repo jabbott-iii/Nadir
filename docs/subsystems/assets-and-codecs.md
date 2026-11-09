@@ -35,7 +35,7 @@ Every decoder:
 | `qoa` | qoaformat.org spec | ✓ | ✓ | yes | Music and long SFX; LMS predictor, 20-sample slices; a frame at a time, for music as it plays. See subset below |
 | `wav` | RIFF/WAVE | — | ✓ | no | PCM 16/24-bit int, 32-bit float; mono/stereo. See subset below |
 | `kpcm` | The sound file, version 1, below | ✓ | ✓ | yes | 16-bit samples of 1 or 2 channels as they are, for short sounds (M6.8, ADR-0049). See below |
-| `pcm` | Below | — | — | no (cook; M6.9's assets) | `resample`, a windowed sinc the same bits on every system, and `to_i16`. See below |
+| `pcm` | Below | — | — | yes (a sound's conversion as it loads, M6.9) | `resample`, a windowed sinc the same bits on every system, and `to_i16`. See below |
 | `klz` | Below | ✓ | ✓ | yes | Pack entry compression. See below |
 | `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (settings, dev data) | Order-preserving objects: `Vec<(String, Value)>` |
 | `kbj` | Below | ✓ | ✓ | yes | Binary form of the JSON value tree for cooked data. See below |
@@ -1093,7 +1093,9 @@ pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no al
     this on 2026-10-19.
   - A failed texture becomes a magenta/black 8×8 checker. Its state stays
     `Failed`, and `get` gives the placeholder.
-  - A failed sound becomes silence.
+  - A failed sound becomes a frame of silence, which plays as silence, and
+    a failed music track a QOA frame of silence, which the music fades to
+    (nadir-audio's `Sound` and `Music`, M6.9, ADR-0050).
   - Failures log with the path and the error.
 - **Release:** a missing level file or prefab is an error from `load_level`
   (a `LevelError`, M5.6), and a missing texture a hard error with a dialog
@@ -1529,8 +1531,12 @@ cooks to `audio/sfx/step.kpcm`, and `audio/music/field.wav` to
   its rate is not the one to cook to, resampled (above, "Resampler"), as a
   loop where it loops; then each sample made 16 bits (`pcm::to_i16`, so a
   16-bit WAV at 48 kHz cooks to the sound file sample for sample); then
-  encoded, and read back with the game's reader and limits (a QOA file a
-  frame at a time, as the game's music plays it) before it is written.
+  encoded, and read back with the codec's reader before it is written, as
+  the game reads it: a sound, PCM16 or QOA, whole, within half the game's
+  limits, as nadir-audio's `Sound` does, which holds its samples as `f32`
+  (M6.9, ADR-0050); music, QOA below `audio/music/`, a frame at a time, as
+  the game's `Music` plays it. A PCM16 sound below `audio/music/` is a
+  sound: `Music` reads only QOA.
 - **Why by folder, not by length:** the output's name is its path, which
   code and levels name; one that changed with the sound's length would
   move under them. A sound of 10 s or more kept as PCM16 by default gets a
@@ -1539,13 +1545,21 @@ cooks to `audio/sfx/step.kpcm`, and `audio/music/field.wav` to
   (`CookError::Decode`, an 8-bit one among them, as jsfxr writes unless it
   is told otherwise); one of no samples; one of a rate above 384,000 Hz,
   the game's, whatever the sidecar says; one that resampled would have more
-  than `u32::MAX` frames, or take more than 512 MiB as `f32`; one that as
-  PCM16 would be larger than the 256 MiB the game reads (`CookError::Config`,
+  than `u32::MAX` frames, or take more than 512 MiB as `f32`; a sound, not
+  music, whose samples would take the game more than its 256 MiB as `f32`,
+  2²⁶ of them, about 11.6 minutes of 48 kHz stereo (`CookError::Config`,
   each checked once the WAV is read, before the resample or the encoder
-  allocates). A WAV whose name without `.wav` ends in a dot or a space, or
-  whose output's path, with `.kpcm` for `.wav`, would be longer than 1024
-  bytes, is `CookError::BadPath`, and a sidecar with no WAV of its name
-  beside it is `CookError::Config`, each before anything is written.
+  allocates); and a sound at another rate than 48 kHz that would take more
+  than that once the game's `Sound` converts it to 48 kHz as it loads,
+  which it does if the sound's last 2 ms, and 36 frames at least, are
+  within −48 dBFS (`CookError::Config`, checked on the samples read back,
+  as the game decodes them). These two suggest shortening the sound or
+  making it music, which the game decodes as it plays. The cook restates
+  the `Sound`'s rule, as it may not depend on nadir-audio. A WAV whose
+  name without `.wav` ends in a dot or a space, or whose output's path,
+  with `.kpcm` for `.wav`, would be longer than 1024 bytes, is
+  `CookError::BadPath`, and a sidecar with no WAV of its name beside it is
+  `CookError::Config`, each before anything is written.
 - **Warnings:** samples past full scale, which the 16 bits clip, after a
   resample or in a float WAV; a sound that does not loop and whose own last
   frame, the WAV's, is above −48 dBFS, which clicks when it stops (the WAV's,

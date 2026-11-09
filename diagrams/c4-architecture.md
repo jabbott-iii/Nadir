@@ -164,7 +164,7 @@ flowchart TB
     subgraph L3["Layer 3: composed subsystems"]
         n_render["nadir-render<br/>sprite batching, y-sort, tilemap chunks, camera, texture and atlas assets"]
         n_scene["nadir-scene<br/>reflection macros, type registry, world hash, prefabs, a level's entities"]
-        n_audio["nadir-audio<br/>the mixer: voices, buses, resampling, positional sound, QOA music streamed a frame at a time, the command and return queues"]
+        n_audio["nadir-audio<br/>the mixer: voices, buses, resampling, positional sound, QOA music streamed a frame at a time, the command and return queues; the Sound and Music assets, played by handle"]
     end
     subgraph L2["Layer 2: base subsystems"]
         n_gfx["nadir-gfx<br/>RHI over OpenGL 3.3 core: device, textures, buffers, render targets, pipelines, passes"]
@@ -200,6 +200,7 @@ flowchart TB
     n_scene --> n_codec
     n_scene --> n_core
     n_scene --> n_ecs
+    n_audio --> n_assets
     n_audio --> n_codec
     n_audio --> n_core
     n_gfx --> n_core
@@ -342,7 +343,7 @@ that no other crate allows it.
 | `nadir-collision` | `crates/collision` | 2, base subsystems | deny | core |
 | `nadir-render` | `crates/render` | 3, composed subsystems | deny | assets, codec, core, gfx |
 | `nadir-scene` | `crates/scene` | 3, composed subsystems | deny | assets, codec, core, ecs |
-| `nadir-audio` | `crates/audio` | 3, composed subsystems | deny | codec, core |
+| `nadir-audio` | `crates/audio` | 3, composed subsystems | deny | assets, codec, core |
 | `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | none: planned, no code yet |
 | `nadir_engine` (`nadir` in code) | `crates/engine` | 5, facade | deny | assets, collision, core, ecs, gfx, input, platform, render, scene |
 | `nadir-cook` | `tools/cook` | 6, applications | deny | assets, codec with `png`, core |

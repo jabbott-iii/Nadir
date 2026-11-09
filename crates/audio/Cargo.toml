@@ -3,15 +3,22 @@ name = "nadir-audio"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-# Not on crates.io until M6.9 makes it ready for it (ADR-0036, ADR-0048).
-publish = false
+description = "Audio for the Nadir engine: a mixer of voices and buses, sound at a place in the world, streamed music, and sound and music assets."
+authors.workspace = true
+readme = "README.md"
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["game-development", "multimedia::audio"]
 
 [dependencies]
+nadir-assets.workspace = true
 nadir-codec.workspace = true
 nadir-core.workspace = true
 
 [dev-dependencies]
-# The allocation counter, which the tests of `Mixer::render` read.
+# The allocation counter, which the tests of `Mixer::render` read, and the
+# output the README's example opens.
 nadir-platform = { workspace = true, features = ["dev"] }
 
 [lints]

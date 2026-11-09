@@ -189,7 +189,8 @@ pub struct AudioStats {
     /// How long the last callback took to mix.
     pub callback_time: Duration,
     /// The device's rate, in frames a second, at the last callback: 0
-    /// before the first. M6.9's sounds are converted to it as they load.
+    /// before the first. Sounds load at [`LOAD_RATE`](crate::LOAD_RATE),
+    /// the output's: at another, the mixer resamples them.
     pub rate: u32,
     /// The commands dropped on the main thread: a change to a voice or a
     /// move of the listener once the queue is half full, and anything once
@@ -198,4 +199,8 @@ pub struct AudioStats {
     /// [`Audio::update`](crate::Audio::update) to take back what it is
     /// done with.
     pub dropped: u64,
+    /// The plays of handles with nothing under them, which played nothing:
+    /// a sound or a track still loading, failed with no placeholder, or
+    /// unloaded ([`Audio::play`](crate::Audio::play)).
+    pub unplayed: u64,
 }

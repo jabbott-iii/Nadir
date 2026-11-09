@@ -14,6 +14,7 @@ dependencies = [
 name = "nadir-audio"
 version = "0.3.0"
 dependencies = [
+ "nadir-assets",
  "nadir-codec",
  "nadir-core",
  "nadir-platform",

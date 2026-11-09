@@ -16,6 +16,7 @@
 //! kept as QOA and decoded as they play.
 
 use nadir_codec::qoa::{self, FRAME_LEN};
+use nadir_core::hash::fnv1a64;
 
 use crate::AudioError;
 
@@ -29,7 +30,7 @@ pub const MAX_SAMPLE_RATE: u32 = 384_000;
 const MAX_FRAMES: usize = 1 << 31;
 
 /// Checks a sound's or a track's rate.
-fn check_rate(rate: u32) -> Result<(), AudioError> {
+pub(crate) fn check_rate(rate: u32) -> Result<(), AudioError> {
     if rate == 0 || rate > MAX_SAMPLE_RATE {
         Err(AudioError::SampleRate { found: rate })
     } else {
@@ -39,8 +40,9 @@ fn check_rate(rate: u32) -> Result<(), AudioError> {
 
 /// A sound, decoded: `f32` samples, interleaved, of 1 or 2 channels, at a
 /// sample rate of its own. The mixer plays it at any rate, resampling it
-/// if the device's differs; M6.9's assets convert sounds to the device's
-/// rate when they load, so that most play without.
+/// if the device's differs; a [`Sound`](crate::Sound) that loads converts
+/// to [`LOAD_RATE`](crate::LOAD_RATE), the output's, so that most play
+/// without.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundData {
     channels: u8,
@@ -123,6 +125,9 @@ impl SoundData {
 pub struct MusicData {
     bytes: Box<[u8]>,
     header: qoa::Header,
+    /// The FNV-1a hash of the bytes: the mixer takes two tracks of the same
+    /// bytes, loaded apart, as the same track.
+    pub(crate) key: u64,
 }
 
 impl MusicData {
@@ -150,9 +155,16 @@ impl MusicData {
             at = qoa::decode_frame(&bytes, &header, at, &mut frame)?.next;
         }
         Ok(Self {
+            key: fnv1a64(&bytes),
             bytes: bytes.into_boxed_slice(),
             header,
         })
+    }
+
+    /// Whether `other` is the same track: the same bytes, wherever they
+    /// were loaded from.
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        self.key == other.key && self.bytes.len() == other.bytes.len()
     }
 
     /// The file's header: its channels, sample rate and length.

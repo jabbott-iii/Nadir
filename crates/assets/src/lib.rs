@@ -31,9 +31,10 @@
 //! ([`OnFailure::Placeholder`]); without it, nothing ([`OnFailure::Nothing`]).
 //!
 //! The asset types live beside what uses them: nadir-render's `Texture`, a
-//! QOI file, and `Atlas`, the cook's atlas file, and nadir-scene's `Level`
-//! and `PrefabAsset`, the cook's level and prefab files, each decoded with
-//! nadir-codec.
+//! QOI file, and `Atlas`, the cook's atlas file, nadir-scene's `Level` and
+//! `PrefabAsset`, the cook's level and prefab files, and nadir-audio's
+//! `Sound`, the cook's sound or QOA file, and `Music`, a QOA file, each
+//! decoded with nadir-codec.
 //! The files are the cook's outputs, in `target/cooked/` during
 //! development, loose or in its pack, `game.kpak`. Any type can be an
 //! asset: implement [`Asset`] for it.

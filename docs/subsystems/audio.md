@@ -11,7 +11,7 @@ main thread                                   audio thread (platform)
 ───────────                                   ───────────────────────
 Audio (handle) ──► CommandQueue ──try_lock──► Mixer::render(out, ch, rate)
    ▲                                             │ voices → buses → master → limiter
-   └──────── ReturnQueue (Arc<SoundData> to drop) ◄┘
+   └── ReturnQueue (Arc<SoundData>, Arc<MusicData> to drop) ◄┘
 ```
 
 - **`CommandQueue`:** a `Mutex<VecDeque<Command>>` with capacity reserved up
@@ -52,24 +52,29 @@ Audio (handle) ──► CommandQueue ──try_lock──► Mixer::render(out,
 
 ## Game-facing API
 
-Built in M6.2 as below, but taking `&Arc<SoundData>` and `&Arc<MusicData>`
-where it takes handles here: M6.9 makes the `Sound` and `Music` assets,
-and the handles (ADR-0046, ADR-0048).
+Built in M6.2 (ADR-0046), with the handles of M6.9 (ADR-0050): `play`,
+`play_at` and `play_music` look a handle up in the `AssetServer` they are
+given, on the main thread, as the renderer looks up its textures; the
+calls that take the asset itself play a sound or track as it is, such as
+one made in code.
 
 ```rust
 pub fn new(config: AudioConfig) -> Result<(Audio, Mixer), AudioError>;
 
 impl Audio {
-    pub fn play(&self, sound: &Handle<Sound>, params: PlayParams) -> VoiceId;
-    pub fn play_at(&self, sound: &Handle<Sound>, pos: Vec2, params: PlayParams) -> VoiceId;
+    pub fn play(&self, assets: &AssetServer, sound: Handle<Sound>, params: PlayParams) -> VoiceId;
+    pub fn play_at(&self, assets: &AssetServer, sound: Handle<Sound>, pos: Vec2, params: PlayParams) -> VoiceId;
+    pub fn play_sound(&self, sound: &Sound, params: PlayParams) -> VoiceId;
+    pub fn play_sound_at(&self, sound: &Sound, pos: Vec2, params: PlayParams) -> VoiceId;
     pub fn stop(&self, v: VoiceId, fade_ms: u32);
     pub fn set_voice(&self, v: VoiceId, change: VoiceChange);     // volume, pitch, pan, position
     pub fn set_bus_volume(&self, bus: Bus, volume: f32, fade_ms: u32);
     pub fn set_listener(&self, pos: Vec2);
-    pub fn play_music(&self, track: &Handle<Music>, crossfade_ms: u32);
+    pub fn play_music(&self, assets: &AssetServer, track: Handle<Music>, crossfade_ms: u32);
+    pub fn play_track(&self, track: &Music, crossfade_ms: u32);
     pub fn stop_music(&self, fade_ms: u32);
     pub fn update(&self);                                         // once a frame: drops returns, logs
-    pub fn stats(&self) -> AudioStats;                            // active voices, underruns, callback time, rate, dropped
+    pub fn stats(&self) -> AudioStats;                            // active voices, underruns, callback time, rate, dropped, unplayed
 }
 
 impl Mixer {                                                      // the audio thread's
@@ -91,16 +96,32 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
 - `SoundData::new(channels, sample_rate, samples)` takes 1 or 2 channels,
   1 to 384,000 Hz, at most 2³¹ frames, and samples within −1 … 1. `MusicData::new(bytes)`
   takes a QOA file of 1 or 2 channels at those rates, and decodes every
-  frame once, so a track cannot fail as it plays.
+  frame once, so a track cannot fail as it plays. `Sound::new` and
+  `Music::new` make assets of them, as they are.
+- **A handle with nothing under it**, a sound or track still loading,
+  failed with no placeholder, or unloaded, plays nothing: `play` and
+  `play_at` return a `VoiceId` that names no voice, `play_music` leaves
+  the music as it is, and `AudioStats::unplayed` counts each. A one-off
+  play of a sound still loading is lost: load what must sound at once
+  with `load_now`. A handle names an asset of its own server: another
+  server's may name another sound. Unloading a scope does not stop the
+  voices that play its sounds: the mixer holds them until they end.
 
 ## Mixer details
 
 - **Format:** interleaved `f32` stereo at the device rate (normally 48 kHz).
   The cook resamples sounds and music to 48 kHz unless their sidecars say
-  otherwise, with a windowed sinc (M6.8, ADR-0049); sounds at another rate
-  than the device's are converted to it **at load time**, on a worker
-  (M6.9), so most voices play without resampling. Music is streamed, and
-  the mixer resamples it as it plays when its rate is not the device's.
+  otherwise, with a windowed sinc (M6.8, ADR-0049); a sound at another
+  rate, from 8,000 to 384,000 Hz, that ends in quiet (its last 2 ms within
+  −48 dBFS, as the cook asks of a sound that does not loop) is converted
+  to `LOAD_RATE`, 48 kHz, the output's default, **at load time**, on a
+  worker, by the same sinc, as a sound that does not loop (M6.9,
+  ADR-0050), so most voices play without resampling. A sound that ends
+  louder may be a loop, which that would break at its seam: it keeps its
+  rate, as does a sound at another rate than those, and the mixer
+  resamples it as it plays, wrapping its seam; so it does for a sound
+  played on an output at another rate than 48 kHz, and for music, which
+  streams.
 - **Pitch:** a linear-interpolation resampler with a 32.32 fixed-point
   position. Good enough for SFX pitch variance (±20%).
 - **Pan:** constant-power for a mono sound: `l = cos(θ)`, `r = sin(θ)`,
@@ -156,8 +177,29 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
 
 | Asset | Source | Cooked | Runtime representation |
 | :- | :- | :- | :- |
-| `Sound` (SFX) | WAV PCM 16/24-bit or float, mono/stereo, below `audio/` | The sound file (`.kpcm`, PCM16) or QOA, by its sidecar, or by its folder (QOA below `audio/music/`), at 48 kHz unless the sidecar gives a rate (M6.8) | `Arc<SoundData>`: `f32` interleaved at device rate |
-| `Music` | WAV, below `audio/` (`audio/music/` by default) | QOA (`.qoa`), looped | `Arc<[u8]>` compressed + per-voice streaming decoder state |
+| `Sound` (SFX) | WAV PCM 16/24-bit or float, mono/stereo, below `audio/` | The sound file (`.kpcm`, PCM16) or QOA, by its sidecar, or by its folder (QOA below `audio/music/`), at 48 kHz unless the sidecar gives a rate (M6.8) | `Arc<SoundData>`: `f32` interleaved, at 48 kHz (`LOAD_RATE`) if it loaded from 8,000 to 384,000 Hz, else at its own rate; 4 bytes a sample, about 66 MiB for three minutes of stereo |
+| `Music` | WAV, below `audio/` (`audio/music/` by default) | QOA (`.qoa`), looped | `Arc<MusicData>`: the QOA file, compressed, about 6.9 MB for three minutes of 48 kHz stereo, decoded a frame at a time as it plays |
+
+- **Loading** (`nadir_assets::Asset`, M6.9, ADR-0050): on a worker, a
+  QOA's header is checked first (1 or 2 channels, 1 to 384,000 Hz), a
+  sound's samples are decoded within half the server's limits, so that
+  their `f32` copy is held to them, then converted; a track's file is held
+  to the limits before it is copied, and every frame is decoded once.
+  Converted samples past full scale are clipped, with a warning naming the
+  file. Converting takes about 0.4 s for 10 s of 44.1 kHz mono optimized,
+  8 to 14 times that unoptimized, and up to about a minute for a file at
+  the limits. The finalize needs no resource, so `load_now` works with an
+  empty `FinalizeCtx`, on the caller's thread, which then decodes and
+  converts. QOA's error rings into the silence after a sound, so a QOA
+  sound converts only if it fades out over a few milliseconds more.
+- **Placeholders** (`OnFailure::Placeholder`, the facade's `dev`): a failed
+  sound is a frame of silence, mono, at 48 kHz, which plays as silence; a
+  failed track, a QOA frame of silence, which `play_music` fades to.
+- **The same track:** two tracks of the same file's bytes, loaded apart, as
+  a level unloads its scope and loads its music again, are the same track:
+  `MusicData` keeps a hash of the bytes, and `play_music` of one while the
+  other plays goes on. A sound's `max_instances` counts the voices of one
+  load (one `Arc`).
 
 ## Device events
 
@@ -191,6 +233,20 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
   - music: the samples QOA decodes, across frames and the loop, mono and
     stereo; resampled from 44.1 kHz, against the interpolation computed in
     the test; a crossfade back to a track still fading out
+  - each played from a handle, of a sound or track written as the cook
+    writes it and loaded through an `AssetServer` in memory (M6.9)
+- **Assets** (`crates/audio/tests/assets.rs`, M6.9): `.kpcm` and `.qoa`
+  sounds and music loaded on the server's workers play as the same samples
+  made in code; a sound at another rate that ends in quiet converts as
+  `pcm::resample` does, from `.kpcm` and from QOA, one at 48 kHz or below
+  8,000 Hz keeps its samples, and seamless loops that end loud keep their
+  rate and step across their seams no more than elsewhere; clipping is
+  clamped and told; what the mixer cannot play is refused, QOA's channels
+  from its header; the limits at 4 bytes a sample, and a track's at its
+  file; placeholders, one per failure; a handle with nothing under it
+  plays nothing, is counted, and names no voice; the same track loaded
+  again, playing or waiting to start, goes on, and the second load comes
+  back; a reloaded sound plays its new samples from its next play.
 - **No allocation, no free:** `crates/audio/tests/allocations.rs` counts
   every `render` from a new mixer's first, through steals, refusals,
   music frames, loops and crossfades, a change of rate and a main thread
@@ -204,9 +260,10 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
   record it in the test. M6.1 measured seven signals and asserts each, from
   13 dB for plucks of noise to 71 dB for a tone
   (`crates/codec/tests/qoa.rs`).
-- **Resampler:** a sine at 44.1 kHz resampled to 48 kHz keeps its frequency
+- **Resampler:** a sine at 48 kHz played at 44.1 kHz keeps its frequency
   (zero-crossing count) and amplitude (±0.5 dB), and stays within linear
-  interpolation's error of the sine itself.
+  interpolation's error of the sine itself: the mixer resamples a loaded
+  sound only when the output's rate is not its own (M6.9).
 - **Bench:** `mixer_32_voices` (`cargo xtask bench mixer`), a callback of
   512 frames with 32 voices and a track.
 - **Soak** (`xtask soak --audio`, manual or nightly on hardware): 10 minutes

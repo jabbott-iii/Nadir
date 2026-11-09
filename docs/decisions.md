@@ -2518,7 +2518,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0036 — Releases from a tag: six targets on GitHub Releases, a signed apt repository beside them, the cook's image on ghcr.io, and the crates on crates.io with the facade as NadirGE
 
-- **Status:** Accepted; ADR-0037 adds `NOTICE` beside `LICENSE` in its archives and image, beside the `copyright` file in its `.deb`s, and both to its crates; the facade's package name NadirGE is superseded by ADR-0039 (`nadir_engine`); that its archives and the sandbox's `.deb` hold the cooked atlases, and that dist checks them byte for byte, is superseded by ADR-0041: they hold the pack, `assets/game.kpak`, alone, which dist checks against the laid-out cook's
+- **Status:** Accepted; ADR-0037 adds `NOTICE` beside `LICENSE` in its archives and image, beside the `copyright` file in its `.deb`s, and both to its crates; the facade's package name NadirGE is superseded by ADR-0039 (`nadir_engine`); that its archives and the sandbox's `.deb` hold the cooked atlases, and that dist checks them byte for byte, is superseded by ADR-0041: they hold the pack, `assets/game.kpak`, alone, which dist checks against the laid-out cook's; nadir-audio goes to crates.io from the release after 0.3.0, before the facade uses it (ADR-0048, ADR-0050), so 14 crates, and the token stays until it exists there
 - **Date:** 2026-11-01
 - **Context:**
   - The user asked for a release pipeline that a pushed version tag
@@ -3075,7 +3075,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0039 — The facade's package is `nadir_engine`; each crate for crates.io has a README of its own, whose examples are tested; the crates go to 0.1.1
 
-- **Status:** Accepted; its version, 0.1.1, is superseded by ADR-0040 (0.2.0)
+- **Status:** Accepted; its version, 0.1.1, is superseded by ADR-0040 (0.2.0); nadir-audio, added for crates.io in M6.9, has a README in its shape (ADR-0050)
 - **Date:** 2026-11-01
 - **Context:**
   - Release v0.1.0 (ADR-0036) put twelve of the thirteen crates on
@@ -3679,7 +3679,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0046 — M6.2: the mixer takes its sounds as `Arc`s until M6.6's assets; queues that never grow; a stolen voice fades out beside the new one; a track still sounding is brought back; gains move over 16 ms
 
-- **Status:** Proposed
+- **Status:** Proposed; its `Arc`s in `play`, `play_at` and `play_music` give way to handles in M6.9 (ADR-0048), as ADR-0050 says, and the same track is the same file's bytes there, no longer the same `Arc`
 - **Date:** 2026-11-08
 - **Context:**
   - M6.2 asks for the mixer, offline: voices, buses, constant-power pan,
@@ -4006,7 +4006,11 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 ## ADR-0049 — M6.8: the sound file `.kpcm`; sounds cooked below `audio/`, by folder or sidecar, resampled to 48 kHz by a deterministic windowed sinc in nadir-codec
 
 - **Status:** Accepted: the user accepted it on 2026-11-08, with M6.8's
-  Accept as it reworded it
+  Accept as it reworded it; after M6.9, the cook holds a sound, not music,
+  to what the game's `Sound` holds, its samples within 256 MiB as `f32`,
+  as cooked and as the `Sound` converts it, and reads it back within half
+  the game's limits, as the `Sound` does, in place of PCM16 within the
+  game's 256 MiB (ADR-0050)
 - **Date:** 2026-11-08
 - **Context:**
   - M6.8 (ADR-0048) asks for `.kpcm`, PCM16 sounds, with a reader, a writer
@@ -4096,3 +4100,137 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - a game needs loop points, or sounds longer than 23 minutes;
   - M6.9's conversion at load needs another trade of quality for time;
   - or a system's CI gives another hash for the pinned resample.
+
+## ADR-0050 — M6.9: `Sound` and `Music` assets in nadir-audio; `play` looks a handle up in the `AssetServer`, beside calls that take the asset; sounds load at 48 kHz; the same track is the same bytes; nadir-audio for crates.io
+
+- **Status:** Accepted in part: on 2026-11-08 the user chose the server as
+  a parameter with calls that take the asset, the fixed load rate of
+  48 kHz, and nadir-assets' docs as a fourth package; the rest is Proposed
+- **Date:** 2026-11-08
+- **Context:**
+  - M6.9 (ADR-0048) asks for `Sound` and `Music` as nadir-assets assets,
+    "decoded on a worker and converted to the device's rate", for
+    `Audio::play`, `play_at` and `play_music` taking `Handle<Sound>` and
+    `Handle<Music>`, a failed sound as silence where placeholders are on,
+    and nadir-audio ready for crates.io.
+  - The spec's `play(&self, sound: &Handle<Sound>, ..)` cannot be built as
+    written: `Audio` holds no assets, a `Handle` owns nothing, and the
+    `AssetServer` is neither `Send` nor `Sync`. `Asset::finalize` and
+    `release` get no handle, so `Audio` cannot keep a table of its own
+    without a change to nadir-assets.
+  - `Asset::decode`, on the worker, sees only the path and the `Limits`;
+    the device's rate is `AudioStats::rate`, 0 until the first callback.
+    Every backend opens at `AudioOutputConfig`'s rate, 48 kHz by default,
+    or converts to it (docs/03-platforms.md), and the cook writes sounds at
+    48 kHz unless their sidecars give a rate (ADR-0049).
+  - The mixer told tracks apart by `Arc`: a level that unloads its scope
+    and loads the same track again would crossfade it into itself.
+  - A design critique measured a 2.8 KB `.kpcm` at 1 Hz that converts for
+    about a minute into 256 MiB, and a QOA that `qoa::decode` takes at 8
+    channels or 16.7 MHz.
+- **Decision:**
+  - **The assets are nadir-audio's:** `Sound` (`Arc<SoundData>`), from
+    `.kpcm` or `.qoa`, and `Music` (`Arc<MusicData>`), from `.qoa`, each
+    implementing `nadir_assets::Asset`; nadir-audio depends on nadir-assets,
+    as the matrix allows. `Sound::new` and `Music::new` make one in code.
+  - **The API:** `play(&self, assets: &AssetServer, sound: Handle<Sound>,
+    params)`, `play_at(.., position, ..)` and `play_music(&self, assets,
+    track: Handle<Music>, crossfade_ms)`, handles by value, as the renderer
+    takes the server and its handles; each looks the handle up on the main
+    thread and calls `play_sound`, `play_sound_at` or `play_track`, which
+    take the asset. A handle with nothing under it, loading, failed with no
+    placeholder or unloaded, plays nothing, returns a `VoiceId` that names
+    no voice, and is counted in `AudioStats::unplayed`; a one-off play of
+    a sound still loading is lost, so M6.6 loads what it plays at once.
+    Unloading a scope does not stop the voices that play its sounds.
+  - **Sounds load at `LOAD_RATE`, 48 kHz:** a sound from 8,000 to 384,000
+    Hz but 48,000 whose last 2 ms (36 frames at least, the resampler's
+    reach) are within −48 dBFS, as the cook asks of a sound that does not
+    loop, is converted on the worker by `nadir_codec::pcm`, as such a
+    sound; clamped to ±1, with a warning naming the file when it clips. The
+    files do not say whether a sound loops, and a seamless loop converted
+    as a one-shot breaks at its seam: by −31 dBFS for a 441 Hz tone at
+    −6 dBFS from 22,050 Hz cut at a zero, and up to −6 dBFS for higher
+    tones, measured (a one-shot converted as a loop clicks at −3 dBFS). So
+    a sound that ends louder, which may be a loop, keeps its rate, as does
+    any sound at another rate, and the mixer resamples it as it plays,
+    wrapping a loop's seam. A unit test ties `LOAD_RATE` to
+    `AudioOutputConfig::default()`. A game that opens another rate hears
+    the mixer resample its sounds, as it does music. Music keeps its rate
+    and streams. Converting takes a worker about 0.4 s for 10 s of 44.1 kHz
+    mono optimized, 8 to 14 times that unoptimized, and up to about a
+    minute for a file at the limits; through `load_now`, the caller's
+    thread.
+  - **Bounds before allocation:** QOA's header first (1 or 2 channels, 1
+    to 384,000 Hz); a sound's samples decoded within half the `Limits`, so
+    that their `f32` copy is held to them whole; the converted samples
+    held to them by the resampler; a track's file held to them before it
+    is copied. At the limits, a worker holds about 640 MiB at once (the
+    file, the `f32` samples, the converted ones). The cook holds a sound,
+    PCM16 or QOA, not music, to the same, restating the rule, as it may
+    not depend on nadir-audio: its samples within 256 MiB as `f32`, as
+    cooked, and as converted where the `Sound` would convert it, read back
+    within half the limits; it refused a PCM16 sound only past the whole
+    256 MiB until a task of its own after M6.9.
+  - **The same track is the same bytes:** `MusicData` keeps the FNV-1a
+    hash of its file, made on the worker, and the mixer compares it and
+    the length, not the `Arc`, so the track loaded again goes on, and a
+    reloaded track that changed crossfades. A sound's `max_instances` is
+    still per `Arc`: per load.
+  - **Placeholders:** a failed sound is a frame of silence, mono, 48 kHz;
+    a failed track, a QOA frame of silence, so that playing it fades the
+    music out; one of each per failure.
+  - **crates.io:** nadir-audio leaves `publish = false` for the metadata of
+    the others, a description and categories of its own (`game-development`,
+    `multimedia::audio`), copies of `LICENSE` and `NOTICE`, and a README in
+    ADR-0039's shape, whose examples `src/lib.rs` tests; xtask's crates test
+    lists it. It goes out with the next release, after the maintainer's
+    raise of the version from 0.3.0, with the token's `publish-new`, as
+    trusted publishing cannot make a crate.
+  - **Four packages:** nadir-audio; xtask (its crates test); nadir-bench
+    (the calls that change); and nadir-assets' README and crate docs,
+    which list the engine's asset types, docs only, which M6.6's three
+    could not take (ADR-0048's revisit).
+- **Consequences:**
+  - Good: games play sounds by handle, as the spec writes, with the
+    server they hold already; a sound made in code still plays; the bench
+    and the property test keep their sources at odd rates; most sounds
+    reach the mixer at the output's rate, resampled once, well; a level
+    change keeps its music going; a bad file is refused before it costs
+    memory or time.
+  - Bad: every play takes the server; the spec's `&Handle` changes; the
+    roadmap's "the device's rate" becomes the output's configured default,
+    so a game at another rate gets linear interpolation for its sounds; a
+    sound cooked at another rate that ends loud keeps the mixer's linear
+    interpolation; a sound takes 4 bytes a sample in memory, 66 MiB for
+    three minutes of stereo, against 6.9 MB as music; a long sound at
+    another rate takes seconds of a worker, up to about a minute at the
+    limits, and the caller's thread through `load_now`; the cook restates
+    the `Sound`'s bounds and its rule for converting, so a change to either
+    is a change to the cook's `sound.rs` too.
+- **Alternatives considered:**
+  - A table of handles to `Arc`s in `Audio`, filled at finalize: finalize
+    and release get no handle, so it needs nadir-assets to change.
+  - `play(&Sound)` alone: does not take handles, as the task asks.
+  - The device's rate through a new `DecodeCtx` setting: a change to the
+    API of nadir-assets, on crates.io, for the rate the config gives
+    anyway.
+  - A process-wide rate: global state, shared by tests and by two
+    `Audio`s.
+  - Converting in `finalize`, on the main thread: 0.4 s for 10 s of sound,
+    against a 2 ms budget.
+  - Converting at a sound's first play, on a thread of `Audio`'s: a
+    thread, a cache across threads, and two `Arc`s a sound.
+  - Looped below `audio/music/`, as the cook's default: the sounds it
+    would touch are those with a sidecar, which says what it says.
+  - Every sound converted as a one-shot: a review measured seamless loops
+    at 22,050 Hz clicking at their seams, by up to −11 dBFS.
+  - A loud last frame as the sign of a loop, alone: a loop cut at a zero
+    ends at 0, and broke at its seam by −31 dBFS.
+- **Revisit when:**
+  - a game opens its output at another rate than 48 kHz (then `DecodeCtx`
+    gains a setting, in nadir-assets);
+  - `.kpcm` gains a loop flag, in its reserved byte (then the conversion
+    keeps a loop's seam);
+  - crates.io's trusted publishing replaces the token (nadir-audio must
+    exist there first).

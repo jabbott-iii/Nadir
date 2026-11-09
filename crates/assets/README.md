@@ -46,8 +46,9 @@ The engine's facade starts the watcher under its `dev` feature, and its
 `App::run` reloads what changed each frame (M5.8).
 
 The engine's asset types are in nadir-render, `Texture` (`.qoi`) and
-`Atlas` (`.kbj`), and in nadir-scene, `Level` (`.klvl`) and `PrefabAsset`
-(`.kbj`).
+`Atlas` (`.kbj`), in nadir-scene, `Level` (`.klvl`) and `PrefabAsset`
+(`.kbj`), and in nadir-audio, `Sound` (`.kpcm` or `.qoa`) and `Music`
+(`.qoa`).
 
 ## Usage
 

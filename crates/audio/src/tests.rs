@@ -23,7 +23,7 @@ use std::time::Duration;
 use crate::dsp::{CEILING, KNEE, Ramp, attenuation, limit, pan_gains};
 use crate::shared::lock;
 use crate::voice::{MAX_STEP, ONE, step};
-use crate::{AudioConfig, PlayParams, SoundData};
+use crate::{AudioConfig, PlayParams, Sound, SoundData};
 
 #[test]
 fn a_ramp_is_linear_and_lands_on_its_target() {
@@ -135,8 +135,9 @@ fn render_elsewhere(mixer: crate::Mixer) -> crate::Mixer {
 #[test]
 fn render_never_waits_for_the_main_thread() {
     let (audio, mixer) = crate::new(AudioConfig::default()).unwrap();
-    let sound = Arc::new(SoundData::new(1, 48_000, vec![0.1; 10]).unwrap());
-    audio.play(&sound, PlayParams::default());
+    // Not a handle: it counts the queues' references, which a server's would add to.
+    let sound = Sound::new(SoundData::new(1, 48_000, vec![0.1; 10]).unwrap());
+    audio.play_sound(&sound, PlayParams::default());
     // The main thread holds the queue: the command waits.
     let queue = lock(&audio.shared.commands);
     let mixer = render_elsewhere(mixer);
@@ -144,20 +145,20 @@ fn render_never_waits_for_the_main_thread() {
     drop(queue);
     let mixer = render_elsewhere(mixer);
     assert_eq!(lock(&audio.shared.commands).len(), 0);
-    assert_eq!(Arc::strong_count(&sound), 2, "the voice ended");
+    assert_eq!(Arc::strong_count(sound.data()), 2, "the voice ended");
     // The main thread holds the return queue, which has the sound: played
     // again, it ends again, and waits with the mixer.
     assert_eq!(lock(&audio.shared.returns).len(), 1);
-    audio.play(&sound, PlayParams::default());
+    audio.play_sound(&sound, PlayParams::default());
     let returns = lock(&audio.shared.returns);
     let mixer = render_elsewhere(mixer);
     assert_eq!(returns.len(), 1);
-    assert_eq!(Arc::strong_count(&sound), 3);
+    assert_eq!(Arc::strong_count(sound.data()), 3);
     drop(returns);
     let mixer = render_elsewhere(mixer);
     assert_eq!(lock(&audio.shared.returns).len(), 2);
     audio.update();
-    assert_eq!(Arc::strong_count(&sound), 1);
+    assert_eq!(Arc::strong_count(sound.data()), 1);
     // A queue a panic poisoned is taken as it is, on both sides.
     let shared = Arc::clone(&audio.shared);
     let _ = thread::spawn(move || {
@@ -166,7 +167,7 @@ fn render_never_waits_for_the_main_thread() {
     })
     .join();
     assert!(audio.shared.commands.is_poisoned());
-    audio.play(&sound, PlayParams::default());
+    audio.play_sound(&sound, PlayParams::default());
     let _mixer = render_elsewhere(mixer);
     assert_eq!(lock(&audio.shared.commands).len(), 0);
 }
@@ -182,11 +183,12 @@ fn the_queues_never_grow() {
     let capacity = |mutex: &Mutex<std::collections::VecDeque<_>>| lock(mutex).capacity();
     let queue = capacity(&audio.shared.commands);
     let returns = lock(&audio.shared.returns).capacity();
-    let sound = Arc::new(SoundData::new(1, 48_000, vec![0.1; 4]).unwrap());
+    // Not a handle: the queues are the point, and a made sound fills them as a loaded one.
+    let sound = Sound::new(SoundData::new(1, 48_000, vec![0.1; 4]).unwrap());
     let mut out = vec![0.0; 512];
     for round in 0..50 {
         for _ in 0..40 {
-            audio.play(&sound, PlayParams::default());
+            audio.play_sound(&sound, PlayParams::default());
         }
         mixer.render(&mut out, 2, 48_000);
         if round % 7 == 0 {

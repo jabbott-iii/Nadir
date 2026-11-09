@@ -13,7 +13,8 @@
 // limitations under the License.
 
 //! Audio for the Nadir engine: a software mixer of voices, buses and music,
-//! which runs on the platform's audio thread, and the game's handle on it.
+//! which runs on the platform's audio thread, the game's handle on it, and
+//! the sound and music assets it plays.
 //!
 //! [`new`] makes the two sides. [`Audio`] stays on the main thread: each of
 //! its calls queues a command. [`Mixer`] goes to the audio thread, which
@@ -26,17 +27,31 @@
 //!
 //! # Contents
 //!
-//! - **Sounds**, [`SoundData`]: `f32` samples of 1 or 2 channels, in
-//!   memory, at a rate of their own. [`Audio::play`] plays one on a
-//!   [`Bus`], as its [`PlayParams`] say; [`Audio::play_at`] plays one at a
-//!   position in the world, which pans it and attenuates it from where the
-//!   listener is ([`Audio::set_listener`]). [`Audio::set_voice`] changes a
-//!   voice as it plays, and [`Audio::stop`] fades it out.
-//! - **Music**, [`MusicData`]: a QOA file of 1 or 2 channels, kept
-//!   compressed and decoded a frame at a time as it plays, looped.
-//!   [`Audio::play_music`] crossfades from one track to another.
+//! - **Sounds**, [`Sound`]: samples of 1 or 2 channels, in memory. As a
+//!   nadir-assets asset, a sound loads from the cook's `.kpcm` or `.qoa`
+//!   files, on a worker; one at 8,000 to 384,000 Hz that ends in quiet, as
+//!   a sound that does not loop does, is converted to [`LOAD_RATE`], the
+//!   output's 48 kHz.
+//!   [`Audio::play`] plays the sound under a handle, looked up in the
+//!   `AssetServer`, on a [`Bus`], as its [`PlayParams`] say;
+//!   [`Audio::play_at`] plays one at a position in the world, which pans it
+//!   and attenuates it from where the listener is
+//!   ([`Audio::set_listener`]). [`Audio::set_voice`] changes a voice as it
+//!   plays, and [`Audio::stop`] fades it out. [`Sound::new`] makes a sound
+//!   in code, of a [`SoundData`], which [`Audio::play_sound`] and
+//!   [`Audio::play_sound_at`] play as it is.
+//! - **Music**, [`Music`]: a QOA file of 1 or 2 channels, kept compressed
+//!   and decoded a frame at a time as it plays, looped. As an asset, it
+//!   loads from the cook's `.qoa` files. [`Audio::play_music`] crossfades
+//!   from one track to another; [`Audio::play_track`] plays a [`Music`] as
+//!   it is.
 //! - **Buses**: music, sound effects, the interface and ambience, each with
 //!   a volume ([`Audio::set_bus_volume`]), all feeding the master.
+//!
+//! A handle with nothing under it, a sound still loading, failed with no
+//! placeholder, or unloaded, plays nothing ([`AudioStats::unplayed`]
+//! counts it). With the server's placeholders on, a failed sound plays as
+//! silence, and a failed track fades the music out.
 //!
 //! # What the mixer does
 //!
@@ -63,32 +78,53 @@
 //!
 //! # Example
 //!
-//! Play a tone, mix 10 ms of it, and let the main thread drop it:
+//! Load a sound as the cook writes it, from files in memory, play it, mix
+//! 10 ms of it, and let the main thread drop what the mixer is done with:
 //!
 //! ```
+//! use std::collections::HashMap;
 //! use std::sync::Arc;
 //!
-//! use nadir_audio::{AudioConfig, PlayParams, SoundData};
+//! use nadir_assets::{AssetError, AssetPath, AssetServer, FinalizeCtx, OnFailure, Source};
+//! use nadir_audio::{AudioConfig, PlayParams, Sound};
+//! use nadir_codec::kpcm;
+//!
+//! /// The game's files, in memory.
+//! struct Memory(HashMap<&'static str, Vec<u8>>);
+//!
+//! impl Source for Memory {
+//!     fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError> {
+//!         self.0.get(path.as_str()).cloned().ok_or(AssetError::NotFound)
+//!     }
+//! }
+//!
+//! // 10 ms of a 440 Hz tone at 48 kHz, as a sound file.
+//! let tone: Vec<i16> = (0..480)
+//!     .map(|i| ((i as f32 / 48_000.0 * 440.0 * std::f32::consts::TAU).sin() * 16_384.0) as i16)
+//!     .collect();
+//! let header = kpcm::Header { channels: 1, sample_rate: 48_000, frames: 480 };
+//! let files = HashMap::from([("audio/sfx/tone.kpcm", kpcm::encode(&header, &tone)?)]);
+//! let mut assets = AssetServer::with_source(Memory(files), OnFailure::Nothing);
+//! let tone = assets.load_now::<Sound>("audio/sfx/tone.kpcm", &mut FinalizeCtx::new())?;
 //!
 //! let (audio, mut mixer) = nadir_audio::new(AudioConfig::default())?;
-//! let tone: Vec<f32> = (0..480)
-//!     .map(|i| (i as f32 / 48_000.0 * 440.0 * std::f32::consts::TAU).sin() * 0.5)
-//!     .collect();
-//! let tone = Arc::new(SoundData::new(1, 48_000, tone)?);
-//! audio.play(&tone, PlayParams::default());
+//! audio.play(&assets, tone, PlayParams::default());
 //!
 //! // On the audio thread: 10 ms of stereo at 48 kHz.
 //! let mut out = vec![0.0; 480 * 2];
 //! mixer.render(&mut out, 2, 48_000);
 //! assert!(out.iter().any(|&sample| sample != 0.0));
 //!
-//! // The tone has ended; the next callback hands it back.
+//! // The tone has ended; the next callback hands it back, and only the
+//! // server holds it.
 //! mixer.render(&mut out, 2, 48_000);
 //! audio.update();
-//! assert_eq!(Arc::strong_count(&tone), 1);
-//! # Ok::<(), nadir_audio::AudioError>(())
+//! let sound = assets.get(tone).expect("loaded");
+//! assert_eq!(Arc::strong_count(sound.data()), 1);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+mod asset;
 mod audio;
 mod data;
 mod dsp;
@@ -104,6 +140,7 @@ mod tests;
 
 use std::sync::Arc;
 
+pub use asset::{LOAD_RATE, Music, Sound};
 pub use audio::Audio;
 pub use data::{MAX_SAMPLE_RATE, MusicData, SoundData};
 pub use error::AudioError;
@@ -128,3 +165,8 @@ pub fn new(config: AudioConfig) -> Result<(Audio, Mixer), AudioError> {
     let mixer = Mixer::new(Arc::clone(&shared), &config, returns);
     Ok((Audio::new(shared, returns), mixer))
 }
+
+// The README's examples are compiled as doc tests too.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;

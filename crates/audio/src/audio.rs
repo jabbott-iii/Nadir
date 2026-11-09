@@ -18,11 +18,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use nadir_assets::{AssetServer, Handle};
 use nadir_core::Vec2;
 use nadir_core::log::warn;
 
 use crate::shared::{Command, Retired, Shared, lock};
-use crate::{AudioStats, Bus, MusicData, PlayParams, SoundData, VoiceChange, VoiceId};
+use crate::{AudioStats, Bus, Music, PlayParams, Sound, SoundData, VoiceChange, VoiceId};
 
 /// The game's handle on the mixer, for the main thread: each call queues a
 /// command, which the [`Mixer`](crate::Mixer) carries out at the start of
@@ -57,6 +58,40 @@ impl Audio {
         }
     }
 
+    /// Plays the sound under `sound`, in `assets`, as `params` say, and
+    /// names the voice: see [`Audio::play_sound`].
+    ///
+    /// With nothing under the handle, a sound still loading, failed with no
+    /// placeholder, or unloaded, it plays nothing, counts it
+    /// ([`AudioStats::unplayed`]), and names a voice that never started:
+    /// changing or stopping it does nothing. A sound played once, as it
+    /// starts, is lost if it has not loaded: load it before
+    /// (`AssetServer::load_now`), or play it when its state is loaded. A
+    /// handle names an asset of the server it came from: another server's
+    /// may name another sound.
+    pub fn play(&self, assets: &AssetServer, sound: Handle<Sound>, params: PlayParams) -> VoiceId {
+        match assets.get(sound) {
+            Some(sound) => self.play_sound(sound, params),
+            None => self.unplayed(),
+        }
+    }
+
+    /// Plays the sound under `sound`, in `assets`, at `position` in the
+    /// world: see [`Audio::play_sound_at`], and [`Audio::play`] for a
+    /// handle with nothing under it.
+    pub fn play_at(
+        &self,
+        assets: &AssetServer,
+        sound: Handle<Sound>,
+        position: Vec2,
+        params: PlayParams,
+    ) -> VoiceId {
+        match assets.get(sound) {
+            Some(sound) => self.play_sound_at(sound, position, params),
+            None => self.unplayed(),
+        }
+    }
+
     /// Plays `sound` as `params` say, and names the voice. If the voices
     /// are full, or the sound is playing its
     /// [`max_instances`](PlayParams::max_instances) already, it takes the
@@ -64,15 +99,23 @@ impl Audio {
     /// whatever its priority, or else the one of the lowest priority no
     /// higher than its own, the oldest of those. At a sound's
     /// `max_instances`, only that sound's voices that are not fading out
-    /// are taken. If there is none to take, it does not play.
-    pub fn play(&self, sound: &Arc<SoundData>, params: PlayParams) -> VoiceId {
-        self.start(sound, params, None)
+    /// are taken: a sound is the one loaded, or made with [`Sound::new`],
+    /// and its clones. If there is none to take, it does not play.
+    pub fn play_sound(&self, sound: &Sound, params: PlayParams) -> VoiceId {
+        self.start(sound.data(), params, None)
     }
 
     /// Plays `sound` at `position` in the world: its pan and volume follow
     /// from where it is from the listener ([`Audio::set_listener`]).
-    pub fn play_at(&self, sound: &Arc<SoundData>, position: Vec2, params: PlayParams) -> VoiceId {
-        self.start(sound, params, Some(position))
+    pub fn play_sound_at(&self, sound: &Sound, position: Vec2, params: PlayParams) -> VoiceId {
+        self.start(sound.data(), params, Some(position))
+    }
+
+    /// Counts a play of a handle with nothing under it, and names a voice
+    /// that never starts.
+    fn unplayed(&self) -> VoiceId {
+        self.shared.unplayed.fetch_add(1, Ordering::Relaxed);
+        VoiceId(self.next_id.fetch_add(1, Ordering::Relaxed))
     }
 
     fn start(&self, sound: &Arc<SoundData>, params: PlayParams, position: Option<Vec2>) -> VoiceId {
@@ -114,12 +157,26 @@ impl Audio {
         self.send(Command::Listener(position));
     }
 
+    /// Plays the track under `track`, in `assets`: see
+    /// [`Audio::play_track`]. With nothing under the handle, a track still
+    /// loading, failed with no placeholder, or unloaded, the music goes on
+    /// as it is, and the play is counted ([`AudioStats::unplayed`]).
+    pub fn play_music(&self, assets: &AssetServer, track: Handle<Music>, crossfade_ms: u32) {
+        match assets.get(track) {
+            Some(track) => self.play_track(track, crossfade_ms),
+            None => {
+                self.unplayed();
+            }
+        }
+    }
+
     /// Plays `track` on the music bus, looped, crossfading from the track
-    /// playing over `crossfade_ms` milliseconds, at least 2. A track that
-    /// is playing already goes on as it is.
-    pub fn play_music(&self, track: &Arc<MusicData>, crossfade_ms: u32) {
+    /// playing over `crossfade_ms` milliseconds, at least 2. The track
+    /// playing already, or the same file's bytes loaded again, goes on as
+    /// it is.
+    pub fn play_track(&self, track: &Music, crossfade_ms: u32) {
         self.send(Command::PlayMusic {
-            track: Arc::clone(track),
+            track: Arc::clone(track.data()),
             crossfade_ms,
         });
     }
@@ -176,6 +233,7 @@ impl Audio {
             callback_time: Duration::from_nanos(shared.callback_ns.load(Ordering::Relaxed)),
             rate: shared.rate.load(Ordering::Relaxed),
             dropped: shared.dropped.load(Ordering::Relaxed),
+            unplayed: shared.unplayed.load(Ordering::Relaxed),
         }
     }
 

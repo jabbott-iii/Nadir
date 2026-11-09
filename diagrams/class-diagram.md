@@ -27,10 +27,10 @@ shows only a few of its fields and methods: the ones the design rests on.
   error type of a `Result` are left out.
 
 Nothing here is planned work: the diagrams show only what is built. The
-Metal backend, audio's output on Windows and macOS and its assets, the
-debug tools, bitmap text, gamepads, saves and pathfinding are not built yet
-(see `docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2),
-and its output on Linux (M6.3). The members only the `dev` feature compiles, the facade's hot
+Metal backend, audio's output on Windows and macOS, the debug tools,
+bitmap text, gamepads, saves and pathfinding are not built yet (see
+`docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
+output on Linux (M6.3), and its assets (M6.9). The members only the `dev` feature compiles, the facade's hot
 reload's (roadmap M5.8), are marked `dev`. One member that exists in the
 code for planned work, `ShaderSource::msl`, carries a note.
 
@@ -751,10 +751,14 @@ classDiagram
     class Atlas["render::Atlas"]
     class Level["scene::Level"]
     class PrefabAsset["scene::PrefabAsset"]
+    class Sound["audio::Sound"]
+    class Music["audio::Music"]
     Asset <|.. Texture : qoi
     Asset <|.. Atlas : kbj
     Asset <|.. Level : klvl
     Asset <|.. PrefabAsset : kbj
+    Asset <|.. Sound : kpcm, qoa
+    Asset <|.. Music : qoa
     Asset ..> DecodeCtx : decode
     Asset ..> FinalizeCtx : finalize
     Source <|.. LooseSource
@@ -1645,9 +1649,10 @@ classDiagram
 `Mixer`, on the audio thread, carries the commands out at the start of
 each `render`, then mixes its voices and music into the buses and the
 master. The sounds it is done with go back through the return queue,
-and `Audio::update` drops them. M6.9 puts sound and music assets over
-`SoundData` and `MusicData`, and M6.6 the facade's components over
-`Audio`.
+and `Audio::update` drops them. `Sound` and `Music`, nadir-assets
+assets, hold `SoundData` and `MusicData` in `Arc`s: `play`, `play_at` and
+`play_music` look a handle up in the `AssetServer` and play what is under
+it (M6.9, ADR-0050). M6.6 puts the facade's components over `Audio`.
 
 ```mermaid
 classDiagram
@@ -1655,13 +1660,16 @@ classDiagram
     class Audio {
         -shared Arc~Shared~
         -spare Mutex~Vec~Retired~~
-        +play(sound, params) VoiceId
-        +play_at(sound, position, params) VoiceId
+        +play(assets, sound, params) VoiceId
+        +play_at(assets, sound, position, params) VoiceId
+        +play_sound(sound, params) VoiceId
+        +play_sound_at(sound, position, params) VoiceId
         +stop(voice, fade_ms)
         +set_voice(voice, change)
         +set_bus_volume(bus, volume, fade_ms)
         +set_listener(position)
-        +play_music(track, crossfade_ms)
+        +play_music(assets, track, crossfade_ms)
+        +play_track(track, crossfade_ms)
         +stop_music(fade_ms)
         +update()
         +stats() AudioStats
@@ -1701,10 +1709,23 @@ classDiagram
         -cursor u64
         -fade Ramp
     }
+    class Sound {
+        <<Asset>>
+        -data Arc~SoundData~
+        +new(data) Sound
+        +data() Arc~SoundData~
+    }
+    class Music {
+        <<Asset>>
+        -data Arc~MusicData~
+        +new(data) Music
+        +data() Arc~MusicData~
+    }
     class SoundData {
         +new(channels, sample_rate, samples) Result
     }
     class MusicData {
+        -key u64
         +new(bytes) Result
     }
     class PlayParams {
@@ -1731,6 +1752,10 @@ classDiagram
     MusicSlot *-- Track
     Voice o-- SoundData
     Track o-- MusicData
+    Sound o-- SoundData
+    Music o-- MusicData
+    Audio ..> Sound : play_sound
+    Audio ..> Music : play_track
     Audio ..> PlayParams : play
     PlayParams *-- Bus
 ```
@@ -2289,8 +2314,8 @@ The main files these diagrams were drawn from:
   `linux/alsa.rs`
 - `crates/collision/src/world.rs`, `shape.rs`, `grid.rs`, `hash.rs`,
   `slide.rs`, `sweep.rs`, `trigger.rs`
-- `crates/audio/src/lib.rs`, `audio.rs`, `mixer.rs`, `voice.rs`,
-  `music.rs`, `data.rs`, `params.rs`, `shared.rs`
+- `crates/audio/src/lib.rs`, `asset.rs`, `audio.rs`, `mixer.rs`,
+  `voice.rs`, `music.rs`, `data.rs`, `params.rs`, `shared.rs`
 - `crates/engine/src/app.rs`, `components.rs`, `collisions.rs`,
   `animation.rs`, `level.rs`, `reflected.rs`, `pack.rs`, `error.rs`,
   `hot_reload.rs`
