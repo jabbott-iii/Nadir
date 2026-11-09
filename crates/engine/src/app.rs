@@ -978,10 +978,12 @@ impl App {
                 None
             }
         };
-        let stream = self.start_audio();
-        let result = self.run_loop(&mut platform, graphics);
-        // The sound stops before an error is shown.
-        drop(stream);
+        // The stream stops as it drops, at the end of the block, so that the
+        // sound stops before an error is shown.
+        let result = {
+            let _stream = self.start_audio();
+            self.run_loop(&mut platform, graphics)
+        };
         result.map_err(|error| fatal(&title, error))
     }
 

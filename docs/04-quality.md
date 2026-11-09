@@ -15,7 +15,7 @@ below is our own code (dependency policy items 26–28).
 | Golden-image tests | `xtask golden`; scenes in the GL test binaries, references in `tests/golden/` | Linux CI (llvmpipe); Windows and macOS locally before release | Rendering regressions, backend divergence |
 | Determinism tests | `crates/engine/tests/determinism.rs` | `cargo test` | Replays producing different world state |
 | Fuzz smoke | `xtask fuzz-smoke` | CI (time-boxed) | Panics, hangs, huge allocations in parsers |
-| Soak tests | `xtask soak` (from M6.7; manual or nightly) | Real hardware | Audio underruns, memory growth, handle leaks |
+| Soak tests | `xtask soak --audio` (M6.7; manual or nightly) | Real hardware | Audio underruns and late callbacks, the mix's time, memory growth, sounds the mixer never hands back |
 | Benchmarks | `nadir-bench` | Manual; nightly once there is a nightly job | Performance regressions versus the stored baseline |
 
 ## Own harnesses
@@ -369,6 +369,55 @@ pub fn check_sized<T: std::fmt::Debug>(
   - inflate 10 MB (`inflate_10mb`: a zlib stream of 10 MiB, noise in stored
     blocks and literals and matches in fixed-Huffman blocks, written by the
     bench; it has no dynamic blocks, see the roadmap backlog)
+
+### Soak — `xtask soak`
+
+- Run with `cargo xtask soak --audio [--minutes N] [--silent]`, which
+  builds nadir-bench's second binary, `soak`, in release mode and runs it
+  (ADR-0052): `N` minutes, 10 by default, the M6 exit criterion's. It
+  needs an audio device: Linux's `default`, or the ALSA device that
+  `NADIR_ALSA_DEVICE` names, such as `null`, which plays nothing; Windows
+  and macOS once M6.4 and M6.5 open output there.
+- **The load:** 32 voices, each replaced at random as it ends, from five
+  sounds made in code from a fixed seed: mono and stereo, at 48 kHz and at
+  44.1 and 22.05 kHz, which the mixer resamples, three played once and two
+  looped, stopped after 2 to 8 s with fades of 50 to 500 ms. They play on
+  the Sfx, UI and ambience buses, at pitches of 0.5 to 2, a third panned,
+  a third at a position and a third moving, about a listener that goes
+  round a circle, as a camera would. Two 8 s QOA tracks crossfade every
+  20 s. The main thread runs at 60 Hz, with `Audio::update` each frame.
+  `--silent` mixes all of it, then gives the device silence: the pacing
+  and the underruns are the device's, and nothing is heard.
+- **What it measures:** the soak's render times each mix into a histogram
+  of 1 µs buckets up to 100 ms, allocated at the start, so that the audio
+  thread only adds to atomics; and it counts a callback as late when it
+  starts more than the device's buffer after the one before, since the
+  device then ran dry or the render fell behind, which counts even on a
+  device that reports no underruns, as `null`. Gaps are judged from 2 s
+  in, once the device plays, and again from 2 s after a lost device
+  comes back, while it is there: PipeWire took 254 ms to start the
+  stream while the buffer waited full, which lost nothing, and a loss's
+  gaps are the loss's. The memory is `VmRSS`,
+  `RssAnon` and `VmHWM` from `/proc/self/status`, where there is one: its
+  growth is `RssAnon`'s, the process's own, from the first line (10 s in)
+  to the last.
+- **Report:** a line every 10 s of the callbacks, underruns, late
+  callbacks, the mix's p99 and longest against the period, the voices
+  sounding, the commands dropped and the memory; each underrun, late
+  callback, loss and return of the device as it comes; and at the end a
+  summary, with the device's buffer, which is not the latency from
+  trigger to speaker.
+- **Verdict:** at the end every voice and the music stop, and the mixer
+  has 3 s to hand back every sound and track, watched as the run was, so
+  that an underrun, a late callback or a loss then counts too. A run the
+  audio thread stopped says when. The soak prints `soak: ok`,
+  or `soak: FAILED (...)` and exits 1, for an underrun, a late callback, a
+  loss of the device, an audio thread that stopped (no callback for 5 s),
+  or a sound or track not handed back. No device at the start is an error.
+  Dropped commands and the memory's growth are told, not judged.
+- CI does not run it: it needs a device, and minutes. Its own logic is
+  tested offline, the mixer rendered on the test's thread
+  (`cargo test -p nadir-bench`).
 
 ## `xtask` checks
 

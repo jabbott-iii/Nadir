@@ -99,10 +99,10 @@ flowchart LR
     logs[("The user's logs folder<br/>nadir.log and the logs of the three runs before")]
 
     subgraph ws["Nadir workspace"]
-        xtask["xtask<br/>Rust binary, run as cargo xtask: the checks, cook, golden, fuzz-smoke, bench, site, dist"]
+        xtask["xtask<br/>Rust binary, run as cargo xtask: the checks, cook, golden, fuzz-smoke, bench, soak, site, dist"]
         cook["nadir-cook<br/>Rust library and CLI: nadir-cook [--force] SOURCE OUT"]
         game["Game executable: sandbox<br/>Rust binary on nadir_engine. cargo run -p sandbox, or cargo dev for the dev feature"]
-        bench["nadir-bench<br/>Rust binary: the benchmark harness"]
+        bench["nadir-bench<br/>Rust binaries: the benchmark harness and the audio soak"]
         src[("assets/<br/>PNG images and sprite.jsonc sidecars, WAVs and sound.jsonc sidecars, Aseprite JSON, LDtk projects, data JSONC and prefabs")]
         loose[("target/cooked/ loose files<br/>atlas QOI pages, KBJ and font files, sounds, data KBJ, levels .klvl, the cache .cache.kbj")]
         pack[("target/cooked/game.kpak<br/>the pack: every cooked file, KLZ where that is smaller")]
@@ -121,7 +121,7 @@ flowchart LR
     game -->|"without dev: reads the pack when it is there, else the loose files"| pack
     game -->|"writes"| logs
     game -->|"window, events, OpenGL, sound"| os
-    xtask -->|"bench: cargo run --release --package nadir-bench"| bench
+    xtask -->|"bench: cargo run --release --package nadir-bench; soak: the same, --bin soak"| bench
     xtask -->|"site and dist: build it in release and run it"| game
     xtask -->|"dist: lays out, checks and packs"| dist
     xtask -->|"site: captures, encodes with GStreamer, packs the download"| site
@@ -297,13 +297,14 @@ through cargo.
 
 ```mermaid
 flowchart TB
-    xtask["xtask<br/>the checks, cook, golden, fuzz-smoke, bench, site, dist"]
-    bench["nadir-bench<br/>the benchmark harness and its benches"]
+    xtask["xtask<br/>the checks, cook, golden, fuzz-smoke, bench, soak, site, dist"]
+    bench["nadir-bench<br/>the benchmark harness and its benches, and the audio soak"]
     n_engine["nadir_engine"]
     n_render["nadir-render"]
     n_audio["nadir-audio"]
     n_ecs["nadir-ecs"]
     n_collision["nadir-collision"]
+    n_platform["nadir-platform"]
     n_codec["nadir-codec"]
     n_core["nadir-core"]
 
@@ -314,13 +315,14 @@ flowchart TB
     bench --> n_audio
     bench --> n_ecs
     bench --> n_collision
+    bench -->|"soak: open_audio"| n_platform
     bench --> n_codec
     bench --> n_core
 
     classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
     classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
     class xtask,bench container
-    class n_engine,n_render,n_audio,n_ecs,n_collision,n_codec,n_core component
+    class n_engine,n_render,n_audio,n_ecs,n_collision,n_platform,n_codec,n_core component
 ```
 
 ## The crates
@@ -352,7 +354,7 @@ that no other crate allows it.
 | `nadir-cook` | `tools/cook` | 6, applications | deny | assets, codec with `png`, core |
 | `xtask` | `xtask` | 6, applications | deny | codec with `png`, core |
 | `sandbox` | `games/sandbox` | 6, applications | deny | `nadir_engine` |
-| `nadir-bench` | `bench` | 6, applications | deny | `nadir_engine`, audio, codec, collision, core, ecs, render |
+| `nadir-bench` | `bench` | 6, applications | deny | `nadir_engine`, audio, codec, collision, core, ecs, platform, render |
 
 ## Sources
 

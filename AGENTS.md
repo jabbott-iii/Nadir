@@ -105,7 +105,7 @@ before its roadmap task is ticked: check before assuming.
 | `tools/cook` | `nadir-cook` | Offline asset pipeline (library + CLI) | deny |
 | `xtask` | `xtask` | Build automation: CI checks, goldens, packaging | deny |
 | `games/sandbox` | `sandbox` | The game that drives requirements | deny |
-| `bench` | `nadir-bench` | Own micro-benchmark harness and benches | deny |
+| `bench` | `nadir-bench` | Own micro-benchmark harness and benches; the audio soak (`soak`) | deny |
 
 ## Commands (verify one exists before relying on it)
 
@@ -124,6 +124,7 @@ before its roadmap task is ticked: check before assuming.
 | `cargo xtask fuzz-smoke [--secs N] [--target T]` | Runs the dependency-free mutation fuzzer over every parser, or over one |
 | `cargo xtask cook [--force] [--watch]` | Cooks `assets/` into `target/cooked/`, skipping the jobs (atlas groups, sounds, data files, LDtk projects) whose files did not change, unless `--force`, and packs all its outputs into `target/cooked/game.kpak`, writing only the files whose bytes changed. `--watch` keeps cooking, with a cook built once, whenever a file in `assets/` changes, until stopped (ADR-0042) |
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
+| `cargo xtask soak --audio [--minutes N] [--silent]` | Plays 32 random voices and music through the audio device for `N` minutes (10), in release mode, and reports underruns, late callbacks, the mix's p99 and the memory; fails on an underrun, a late callback, a lost device or a sound not handed back. It plays sound: `--silent` gives the device silence, and `NADIR_ALSA_DEVICE=null` plays nothing on Linux (ADR-0052) |
 | `cargo xtask dist [--out DIR]` | Builds this machine's release files into `target/dist`: runs the laid-out programs, then packs the archive and, on Linux, the `.deb`s (needs `dpkg-dev`; ADR-0036) |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |
 | `cargo run -p sandbox` | Runs the sandbox game (opens a window, and on Linux the audio output). It draws the cooked sprites: run `cargo xtask cook` first, which `cargo xtask ci` also does, as the sandbox's tests need them too |

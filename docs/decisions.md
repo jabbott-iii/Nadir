@@ -4457,3 +4457,122 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     master volume;
   - or the cook primes a looped track's first QOA frame with its last
     samples, so that a tune need not start at a zero crossing.
+
+## ADR-0052 — M6.7: the audio soak is nadir-bench's second binary, `soak`, which `cargo xtask soak --audio` runs; it times every callback in a histogram of its own, counts late callbacks besides underruns, reads the memory from `/proc`, and fails on underruns, late callbacks, a lost device or a sound not handed back
+
+- **Status:** Accepted in part: on 2026-11-08 the user chose the memory
+  read in the soak, with no new API; a `--silent` mode, with M6.7 ticked
+  on a silent run on the default device; and the verdict, which fails on
+  underruns, late callbacks, a sound not handed back and no device, and
+  tells dropped commands and the memory without judging them, in runs of
+  10 minutes by default; the rest is Proposed
+- **Date:** 2026-11-08
+- **Context:**
+  - M6.7 asks for `xtask soak --audio --minutes N`, which logs underruns,
+    callback time p99 and memory; Accept: the tool runs and reports. The
+    audio spec's soak is "10 minutes of 32 random voices plus music, with
+    zero underruns on min-spec", manual or nightly on hardware, and the M6
+    exit criteria ask for a 10-minute soak with 0 underruns on each OS.
+  - xtask may link only nadir-core and nadir-codec (the dependency
+    matrix), so it cannot open audio; nadir-bench may link any workspace
+    crate.
+  - `AudioStats` gives the last callback's time, not a p99 (M6.2's note).
+    ALSA's backend reports an underrun only when the device does (`-EPIPE`):
+    ALSA's `null` device, which takes samples as fast as they come and is
+    held to the system's clock, never reports one, nor does the thread
+    while it plays on with no device.
+  - The process's resident set (`VmRSS`) counts the libraries' pages,
+    which come and go with the page cache; its own memory, heaps and
+    stacks, is `RssAnon`. Platform `cfg` belongs in three crates (rule 4).
+  - The soak plays sound through the default device, which the developer
+    may not want to hear.
+- **Decision:**
+  - **Home:** a second binary of nadir-bench, `bench/src/bin/soak/`,
+    with `default-run = "nadir-bench"`, so that `cargo run -p
+    nadir-bench` and `cargo xtask bench` still run the harness. nadir-bench
+    gains nadir-platform. `cargo xtask soak --audio [--minutes N]
+    [--silent]` checks its options and runs `cargo run --release --package
+    nadir-bench --bin soak -- ...`; a failed soak fails it (exit 1).
+  - **Load:** 32 slots, each refilled with a random voice as its own ends:
+    five sounds made in code from a fixed seed (mono and stereo, at
+    48 kHz and at 44.1 and 22.05 kHz, which the mixer resamples, three
+    played once and two looped and stopped after 2 to 8 s with fades of
+    50 to 500 ms), on the Sfx, UI and ambience buses, at pitches from 0.5
+    to 2, a third panned, a third at a position and a third moving, with
+    the listener going round a circle, as a camera would; and two 8 s QOA
+    tracks crossfading every 20 s. They are played as `Sound` and `Music`
+    values, not handles, as `mixer_32_voices` plays them: the audio
+    thread gets the same commands.
+  - **Callback time:** the soak's own render, as the facade's
+    `MixerOutput`, times each mix into a histogram of 1 µs buckets up to
+    100 ms, allocated at the start, which the audio thread adds to with
+    relaxed atomics: the p50, the p99 (to the microsecond above) and the
+    longest, against the period. nadir-audio is unchanged.
+  - **Late callbacks:** the render keeps when each callback starts; one
+    that starts more than the device's buffer after the one before is
+    late, as the device must then have run dry or the render fallen
+    behind. It is counted beside the device's underruns, and on devices
+    that report none, as `null`. Gaps are judged, and the longest kept,
+    from 2 s in, and from 2 s after a lost device comes back, while it is
+    there: the first silent run on PipeWire's `default` waited 254 ms at
+    the start, its buffer full, for the server to start the stream, and
+    lost nothing; and a loss's gaps, of the backend's 2 s stall and its
+    tries to open the device, are the loss's, which fails the soak
+    already.
+  - **Memory:** `VmRSS`, `RssAnon` and `VmHWM` of `/proc/self/status`,
+    read as a file with no `cfg`, at each line; the change of `RssAnon`
+    from the first line (10 s in) to the end, and whether the peak rose.
+    Where there is no such file, as on Windows and macOS, "not read".
+  - **Lines:** one every 10 s, and each underrun, late callback, loss and
+    return of the device as it comes; the device's buffer is shown as
+    such, not as the latency from trigger to speaker.
+  - **Verdict:** at the end, every voice and the music are stopped, and
+    the mixer has 3 s (past the longest fade and the backend's 2 s wait
+    for a device) to hand back every sound and track, watched as the run
+    is. `soak: ok`, or
+    `soak: FAILED (...)` with exit status 1, for underruns, late
+    callbacks, a loss of the device, an audio thread that stopped (no
+    callback for 5 s), or a sound or track not handed back. No device at
+    the start is an error. Commands dropped and the memory are told, not
+    judged.
+  - **`--silent`:** the mix is made and timed as ever, then the device is
+    given silence: its pacing and underruns are real, and nothing is
+    heard.
+- **Consequences:**
+  - The soak runs where `open_audio` does: Linux now, Windows and macOS
+    once M6.4 and M6.5 build their backends, which need nothing else of
+    it, but their memory is "not read" until it is read there.
+  - A late callback is a lower bound on the device running dry: a gap
+    shorter than the buffer can still underrun one that was not full.
+  - A run on `null` shows the tool working and the mix's time, with
+    real-time pacing, but no device's underruns.
+  - CI does not run it: it needs a device, and minutes.
+- **Alternatives considered:**
+  - A crate of its own: a new row in the dependency matrix for one
+    binary.
+  - The facade's `App` with emitters: it needs a window, and its systems
+    would be soaked with the mixer.
+  - A p99 kept by `Mixer::render`, as M6.2's note suggests: an API in
+    nadir-audio for a tool; the soak's render times the same span.
+  - Every callback's time in a list: it grows with the minutes, and the
+    soak would measure its own growth.
+  - The sandbox's cooked sounds: `cargo xtask cook` first, and four mono
+    sounds at 48 kHz, which resample less.
+  - Handles from an `AssetServer`: `play` looks the handle up and sends
+    the same command.
+  - `process_memory()` in nadir-platform: a public API in a published
+    crate for a number nothing judges, and Windows and macOS bindings to
+    write.
+  - Failing on dropped commands: a dropped move is sent again by design,
+    and a pause of a sound server drops some.
+  - Judging the memory's growth: a threshold needs a history of nightly
+    runs first.
+- **Revisit when:**
+  - M6.4 or M6.5 opens output on Windows or macOS (then the soak runs
+    there, and reads their memory if a nightly run needs it);
+  - a nightly job runs the soak (then a threshold for the memory's
+    growth, and perhaps dropped commands judged);
+  - the M6 exit criterion's latency is measured, which this tool does
+    not do;
+  - or a soak shows the mix near its period (ADR-0046) or underruns that
+    the thread's scheduling causes (ADR-0047).

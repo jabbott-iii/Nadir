@@ -119,7 +119,7 @@ It has:
 | `games/sandbox` | The game that drives the engine's requirements |
 | `assets/` | The sandbox's source assets, which the cook reads |
 | `xtask/` | `cargo xtask`: the CI checks, golden images, fuzzing, cooking, packaging and the demo page |
-| `bench/` | The benchmark harness |
+| `bench/` | The benchmark harness, and the audio soak |
 | `fuzz/` | The fuzzer's seed corpora |
 | `tests/golden/` | The renderer's golden reference images |
 | `site/` | The demo page |

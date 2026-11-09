@@ -22,7 +22,8 @@
 //! record a baseline, copy `latest.json` there after a run of every
 //! benchmark: a filtered run writes only what it ran.
 //!
-//! The method is specified in `docs/04-quality.md`.
+//! The method is specified in `docs/04-quality.md`. The package's other
+//! binary, `soak`, is the audio soak (`cargo xtask soak --audio`).
 
 mod benches;
 mod error;

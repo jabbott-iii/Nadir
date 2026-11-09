@@ -93,6 +93,12 @@ fn run(mut args: Args, root: &Path, out: &mut dyn Write) -> Result<bool, Error> 
             cargo::run(root, &bench_command(&filter))?;
             return Ok(true);
         }
+        "soak" => {
+            let soak = soak_command(args)?;
+            let soak: Vec<&str> = soak.iter().map(String::as_str).collect();
+            cargo::run(root, &soak)?;
+            return Ok(true);
+        }
         "cook" => {
             let force = args.flag("--force");
             let watching = args.flag("--watch");
@@ -135,6 +141,50 @@ fn bench_command(filter: &[String]) -> Vec<&str> {
     command
 }
 
+/// The cargo arguments behind `cargo xtask soak --audio [--minutes N]
+/// [--silent]`: the soak, built in release mode, as the benchmarks are. Its
+/// options are checked here, as `Args` refuses those it is not told of,
+/// and the soak checks them again. A soak that fails exits 1, and so does
+/// this tool (ADR-0052).
+fn soak_command(mut args: Args) -> Result<Vec<String>, Error> {
+    let usage = |error: CoreError| Error::Usage(error.to_string());
+    let audio = args.flag("--audio");
+    let silent = args.flag("--silent");
+    let minutes: Option<u32> = args.parsed("--minutes").map_err(usage)?;
+    if let Some(argument) = args.finish().map_err(usage)?.first() {
+        return Err(Error::Usage(format!(
+            "`soak` takes only options, but got `{argument}`"
+        )));
+    }
+    if !audio {
+        return Err(Error::Usage(
+            "`soak` needs `--audio`, the only soak so far".to_string(),
+        ));
+    }
+    if minutes == Some(0) {
+        return Err(Error::Usage("`--minutes` must be 1 or more".to_string()));
+    }
+    let mut command: Vec<String> = [
+        "run",
+        "--release",
+        "--package",
+        "nadir-bench",
+        "--bin",
+        "soak",
+        "--",
+        "--audio",
+    ]
+    .map(String::from)
+    .into();
+    if let Some(minutes) = minutes {
+        command.extend(["--minutes".to_string(), minutes.to_string()]);
+    }
+    if silent {
+        command.push("--silent".to_string());
+    }
+    Ok(command)
+}
+
 /// The cargo arguments behind `cargo xtask cook [--force]`: the cook tool,
 /// built in release mode, from `assets/` into `target/cooked/`, both below
 /// the workspace root, where cargo runs.
@@ -171,6 +221,10 @@ fn usage() -> String {
         (
             "bench",
             "Run the benchmarks in release mode: [FILTER] for those whose name contains it",
+        ),
+        (
+            "soak",
+            "Soak the audio on this machine's device: --audio, [--minutes N] (10), [--silent]",
         ),
         (
             "site",
@@ -227,6 +281,7 @@ mod tests {
             "fuzz-smoke",
             "golden",
             "bench",
+            "soak",
             "site",
             "dist",
             "cook",
@@ -345,6 +400,47 @@ mod tests {
         assert_eq!(
             usage_error(&["bench", "--fast"]),
             "unexpected argument `--fast`"
+        );
+    }
+
+    #[test]
+    fn soak_runs_the_audio_soak_in_release_mode_with_its_options() {
+        let soak = |args: &[&str]| soak_command(Args::new(args.iter().copied())).unwrap();
+        let start = [
+            "run",
+            "--release",
+            "--package",
+            "nadir-bench",
+            "--bin",
+            "soak",
+            "--",
+            "--audio",
+        ];
+        assert_eq!(soak(&["--audio"]), start);
+        let mut all = start.to_vec();
+        all.extend(["--minutes", "1", "--silent"]);
+        assert_eq!(soak(&["--silent", "--minutes", "1", "--audio"]), all);
+        assert_eq!(soak(&["--audio", "--minutes=1", "--silent"]), all);
+
+        assert_eq!(
+            usage_error(&["soak"]),
+            "`soak` needs `--audio`, the only soak so far"
+        );
+        assert_eq!(
+            usage_error(&["soak", "--audio", "--minutes", "0"]),
+            "`--minutes` must be 1 or more"
+        );
+        assert_eq!(
+            usage_error(&["soak", "--audio", "--minutes", "ten"]),
+            "invalid value `ten` for option `--minutes`"
+        );
+        assert_eq!(
+            usage_error(&["soak", "--audio", "--loud"]),
+            "unexpected argument `--loud`"
+        );
+        assert_eq!(
+            usage_error(&["soak", "--audio", "now"]),
+            "`soak` takes only options, but got `now`"
         );
     }
 

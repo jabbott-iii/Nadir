@@ -379,7 +379,7 @@ M11.2. Until then the workflow publishes the engine's releases above.
 ## Release checklist (manual items)
 
 - [ ] Golden tests run locally on Windows and macOS hardware (if CI cannot) — attach results.
-- [ ] 10-minute audio soak with no underruns on each OS.
+- [ ] 10-minute audio soak with no underruns on each OS (`cargo xtask soak --audio`, ADR-0052).
 - [ ] Min-spec performance pass: 10k-sprite scene ≥ 60 fps; p99 frame ≤ 20 ms.
 - [ ] Gamepad smoke test: Xbox, DualSense, Switch Pro on each OS (XInput-only limits on Windows noted).
 - [ ] Save compatibility: load saves from the previous release.

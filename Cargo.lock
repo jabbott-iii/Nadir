@@ -29,6 +29,7 @@ dependencies = [
  "nadir-collision",
  "nadir-core",
  "nadir-ecs",
+ "nadir-platform",
  "nadir-render",
  "nadir_engine",
 ]

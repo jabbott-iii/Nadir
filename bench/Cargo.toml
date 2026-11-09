@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 # The workspace's own benchmarks (ADR-0036).
 publish = false
+# The benchmark harness; `soak`, the audio soak, is the other binary
+# (ADR-0052).
+default-run = "nadir-bench"
 
 [dependencies]
 nadir.workspace = true
@@ -13,6 +16,7 @@ nadir-core.workspace = true
 nadir-codec.workspace = true
 nadir-collision.workspace = true
 nadir-ecs.workspace = true
+nadir-platform.workspace = true
 nadir-render.workspace = true
 
 [lints]

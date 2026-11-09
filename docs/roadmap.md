@@ -4210,6 +4210,11 @@ by the batched sprite renderer.
     waits 2 s at most, and `latency()`. `no_audio.rs` is the stand-in to
     replace; `cargo run -p nadir-platform --example audio` is the check by
     ear.
+  - Note (from M6.7, ADR-0052): `cargo xtask soak --audio` runs here once
+    `open_audio` does, with nothing else to change; it reads the memory
+    only from Linux's `/proc/self/status`, so here it says "not read"
+    (`GetProcessMemoryInfo`'s working set would be the reading, if a
+    nightly soak needs one).
   - Depends: M6.2
   - Do: COM vtables, event-driven shared mode, avrt, device invalidation
     reopen.
@@ -4225,6 +4230,8 @@ by the batched sprite renderer.
     overload notification comes on another thread, and reaches the next
     callback through an atomic; with no device CoreAudio calls nothing, so
     keeping time needs a thread of the backend's.
+  - Note (from M6.7, ADR-0052): as M6.4's note; the reading here would be
+    `task_info`'s `MACH_TASK_BASIC_INFO`.
   - Depends: M6.2
   - Do: the DefaultOutput unit, stream format, render callback.
   - Accept: as M6.3.
@@ -4393,7 +4400,7 @@ by the batched sprite renderer.
     the limits; nadir-cook's README and nadir-codec's `pcm` docs say what
     is built.
 
-- [ ] **M6.6 — facade and sandbox: the game plays sound**
+- [x] **M6.6 — facade and sandbox: the game plays sound**
   - Split on 2026-11-08 (ADR-0048): the cook's part is M6.8, the assets'
     M6.9; this task keeps M6.6's number, and the rest.
   - Note (from M6.2, ADR-0046):
@@ -4448,7 +4455,8 @@ by the batched sprite renderer.
   - Accept: sandbox audio plays; footsteps follow the player positionally;
     music crossfades between areas.
   - Verify: `cargo test -p nadir_engine -p sandbox`; `cargo dev` (manual)
-  - ⏳ needs Linux with headphones, by the user, as no test plays sound:
+  - Checked by the user on 2026-11-08, by ear, as no test plays sound,
+    who reported "6.6 by ear test good" for the check that was left:
     `cargo xtask cook`, then `cargo dev`: the north's tune fades in, the
     pond laps from the right; walking east along the path, steps twice a
     walk cycle, none when stopped or against a wall, the pond moving from
@@ -4457,8 +4465,8 @@ by the batched sprite renderer.
     south's tune, and back; the report's 0 allocations, no underrun
     warning; closing quits within 2 s. Then `cargo dev --scene
     stress-sprites`: the steps pan to the person's side of the view; and
-    `cargo run -p sandbox`, from the pack, the same (`docs/subsystems/audio.md`,
-    "By ear").
+    `cargo run -p sandbox`, from the pack, the same
+    (`docs/subsystems/audio.md`, "By ear").
   - Decided with the user on 2026-11-08 (ADR-0051): nadir-cook's
     workspace test as a fourth package, as ADR-0048's revisit; bus volumes
     in percent, heard as their square (50 is −12 dB); the camera as the
@@ -4505,7 +4513,7 @@ by the batched sprite renderer.
     `--all-features`; `cargo test -p nadir-cook`; `cargo test -p xtask`;
     `cargo xtask bench facade`; `cargo xtask ci`.
 
-- [ ] **M6.7 — soak tooling**
+- [x] **M6.7 — soak tooling**
   - Note (from M6.2): `AudioStats` gives the last callback's mixing time,
     the underruns `Mixer::count_underrun` counted and the commands
     dropped; a p99 needs every callback's time, which `render` could keep
@@ -4522,6 +4530,48 @@ by the batched sprite renderer.
     time p99 and memory.
   - Accept: the tool runs and reports.
   - Verify: `cargo xtask soak --audio --minutes 1`
+  - Built (ADR-0052): nadir-bench's second binary, `soak`
+    (`bench/src/bin/soak/`), which `cargo xtask soak --audio [--minutes N]
+    [--silent]` builds in release mode and runs, 10 minutes by default:
+    32 random voices of five sounds made in code and two QOA tracks
+    crossfading every 20 s; a line every 10 s, each underrun, late
+    callback and loss of the device as it comes, and a summary; `soak:
+    FAILED` and exit 1 for underruns, late callbacks, a lost device, a
+    stopped audio thread or a sound not handed back. The user chose, on
+    2026-11-08: the memory read in the soak from `/proc/self/status`, with
+    no new API; `--silent`, which mixes and gives the device silence, with
+    the tick on a silent run on the default device; that verdict, with
+    dropped commands and memory told, not judged; 10 minutes by default.
+  - Ticked on 2026-11-09, on the silent run below, as the user chose.
+  - Measured on 2026-11-09, i7-11800H, Linux 7.2, PipeWire 1.6.8 (its
+    PulseAudio server), one minute each:
+    - `cargo xtask soak --audio --minutes 1 --silent`, on `default`:
+      7,988 callbacks of 360 frames (7.5 ms, a buffer of 30 ms),
+      0 underruns, 0 late (the longest gap 11.0 ms), the mix's p50 96 µs,
+      p99 198 µs (2.6% of the period), longest 612 µs; 30 to 38 voices
+      sounding; 0 commands dropped; 16.2 MiB resident, 8.6 MiB its own,
+      unchanged from 0:10 to the end; every sound and track handed back
+      0.1 s after the stop; `soak: ok`.
+    - `NADIR_ALSA_DEVICE=null cargo xtask soak --audio --minutes 1`:
+      8,020 callbacks, 0 underruns, 0 late (9.5 ms), p99 216 µs (2.9%),
+      longest 704 µs; 10.9 MiB resident, 7.1 MiB its own, unchanged;
+      `soak: ok`.
+    - The first silent run failed on one late callback: PipeWire took
+      254 ms to start the stream, its buffer full, at 0:00, which lost
+      nothing; the gaps are judged from 2 s in since, and from 2 s after a
+      lost device returns.
+  - Not run: the Verify line as written, on the default device with
+    sound, by the user's choice (`--silent` in its place); a 10-minute
+    soak, on min-spec, and on Windows and macOS (M6.4, M6.5), which the
+    M6 exit criteria ask for.
+  - Tests: `cargo test -p nadir-bench` (the soak's 32: the histogram and
+    its quantiles, late gaps and their warm-up, the render timed and
+    silent, the memory's fields, the watch's lines, losses, stopped
+    thread and verdicts, the command line, the load, the wind-down, and
+    12 s of the load offline through the timed mixer); `cargo test -p
+    xtask`; `cargo xtask ci`. Of 25 planted bugs, 9 passed the tests at
+    first; of 13 planted since, those 9 among them, 12 fail the tests, and
+    the one left was a condition that changed nothing, now gone.
 
 **Exit criteria (M6):**
 

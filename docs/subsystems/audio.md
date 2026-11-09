@@ -388,5 +388,10 @@ and plays them, and re-exports the crate as `nadir::audio`.
   person's side; and `cargo run -p sandbox`, the pack, the same.
 - **Bench:** `mixer_32_voices` (`cargo xtask bench mixer`), a callback of
   512 frames with 32 voices and a track.
-- **Soak** (`xtask soak --audio`, manual or nightly on hardware): 10 minutes
-  of 32 random voices plus music, with zero underruns on min-spec.
+- **Soak** (`cargo xtask soak --audio [--minutes N] [--silent]`, M6.7,
+  ADR-0052; manual or nightly on hardware): 10 minutes, by default, of 32
+  random voices plus music through the default device, with zero
+  underruns and no late callbacks on min-spec. `docs/04-quality.md`
+  ("Soak") has the method. It shows the device's buffer, not the latency
+  from trigger to speaker, which the M6 exit criteria ask to be measured
+  apart.
