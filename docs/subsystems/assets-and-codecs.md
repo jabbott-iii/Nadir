@@ -42,6 +42,7 @@ Every decoder:
 | `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines. See subset below |
 | `aseprite` | Aseprite's `--format json-array` sprite sheet data | — | ✓ | no (cook only) | Frames, sheet, tags expanded to clips (ADR-0035). See subset below |
 | `atlas` | The cook's atlas file, version 2, below | — | ✓ | yes | KBJ, then checked strictly; read by render's `Atlas` asset (ADR-0033, ADR-0035). See below |
+| `font` | The cook's font file, version 1, below | — | ✓ | yes | KBJ, then checked strictly; the cook reads back what it writes (M7.7, ADR-0053), and render's font asset will read it (M7.1). See below |
 | `ldtk` | LDtk 1.5.3's project `.ldtk` and level `.ldtkl` JSON | — | ✓ | no (cook only) | The members the cook uses, checked against the project's definitions (ADR-0038). See subset below |
 | `level` | The cook's level file, version 1, below | — | ✓ | yes | KBJ, then checked strictly (ADR-0038). See below |
 | `prefab` | The prefab file, below | — | ✓ | yes | KBJ, or its source's JSON, then checked strictly (ADR-0038). See below |
@@ -785,6 +786,55 @@ makes them. As built in M5.9 (ADR-0033), and given clips in M5.5
   empty frame, a sprite with clips that loop and do not); what it accepts
   must keep the promises above, which the target asserts.
 
+### Font file reader (documented, tested)
+
+`font::parse(bytes, limits)` reads the cook's `atlas/<font>.font.kbj`
+(below, "Font file") into a `FontFile`: the face, size, line height and
+base, the atlas file and sprite of the glyphs' frames, its `Glyph`s by
+character, its `Kerning` pairs, and its `Fallback`. The types are
+`#[non_exhaustive]`: only the reader makes them. As built in M7.7
+(ADR-0053); the cook reads back each font file it writes with it, and
+M7.1's font asset reads it:
+
+- **KBJ first**, with the KBJ decoder and its limits, which bound the
+  glyphs and kerning pairs by `max_entries` and the strings by
+  `max_string_bytes`; a file that is not KBJ is a `CodecError::Kbj`.
+- **The version first:** any whole number other than 1 is
+  `Version { found }`, "not supported", whatever else the file holds.
+- **Strict:** each object has its members and no others, but a glyph's
+  `frame`, which one with no pixels leaves out; the fallback has a frame.
+- **Numbers:** whole; `size`, each `x`, `y` and `advance`, and a kerning
+  pair's amount fit 32 bits signed, as BMFont's do (a negative `size` is
+  BMFont's "match the characters' height"); `line_height`, `base` and the
+  frames fit 32 bits unsigned.
+- **Strings:** `face` may be empty, as BMFont's may; `atlas` and `sprite`
+  may not.
+- **Characters:** the glyphs' ids and each kerning pair's two are code
+  points of characters, read as Rust's `char`: from 0 to U+10FFFF, and no
+  surrogate.
+- **Order:** the glyphs by character, and the kerning pairs, each a list of
+  three, by their first and then their second, each after the one before
+  with no two the same, as the cook writes them.
+- **Not checked here:** that a frame is one of the sprite's in the atlas
+  file, which the font asset reads beside it; and what BMFont does not
+  promise, that a kerning pair's characters are the font's, or that
+  `base` is within `line_height`.
+- **Errors** name where in the file: `CodecError::Font { at, kind }`, with
+  `at` a member path such as `glyphs[3].id`; empty for the file as a whole.
+- **Tests:** a rule a test, from hand-written JSON text encoded to KBJ, in
+  `crates/codec/src/font.rs`; four files as the cook wrote them, in
+  `crates/codec/tests/font/`, checked field by field in
+  `crates/codec/tests/font.rs`, and each cut at every length and with every
+  byte changed:
+  Unicode with kerning, a space and a clear glyph with no frames, and
+  characters past ASCII; ANSI with BMFont's fallback glyph and a negative
+  size; two pages; and an empty face with no glyph but BMFont's fallback.
+  They are made by
+  `crates/codec/tests/font/make_vectors.py`, which writes their BMFonts
+  and pages and runs the cook. **Fuzz target:** `font`, with the same
+  files as seeds in `fuzz/corpus/font/`; what it accepts must keep the
+  promises above, which the target asserts.
+
 ### LDtk subset (documented, tested)
 
 `ldtk::parse_project(&str, Limits)` reads a project `.ldtk`, and
@@ -1505,8 +1555,9 @@ in this order:
   with the glyphs in its alpha (`alphaChnl` 0 or 2, or not given, as
   Hiero writes), and some pixel clear (a page with no alpha channel has
   none). Each error names the `.fnt`.
-- The game's reader of it comes with M7.1: the cook cannot yet read back
-  what it writes, as it does the atlas file.
+- The cook reads back each font file it writes with the game's reader
+  (above, "Font file reader"), as it does the atlas file, and refuses one
+  the reader would (M7.7); the game's font asset comes with M7.1.
 
 ### Sounds `audio/<path>.kpcm` and `audio/<path>.qoa`
 
@@ -1839,13 +1890,17 @@ bytes, its samples, the resampled ones, and the file).
     `crates/codec/tests/ldtk/` with the script that wrote them
   - The pack file: packs assembled field by field, each rule broken once,
     in `crates/codec/tests/kpak/` with the script that wrote them
+  - The font file: four files as the cook wrote them from BMFonts made for
+    the purpose, in `crates/codec/tests/font/` with the script that made
+    them
   - JSON: RFC 8259 examples plus the JSONC extensions; deep nesting hits the
     limit and errors, it doesn't overflow the stack
 - **Fuzz targets** (fuzz smoke): every decoder above, the atlas file reader
   (`atlas`, M5.9), the Aseprite reader (`aseprite`, M5.5), the LDtk reader
   (`ldtk`), the level file reader (`level`) and the prefab file reader
   (`prefab`, all three M5.10), the pack file reader (`kpak`, M5.13), the
-  sound file reader (`kpcm`, M6.8) and, from M9.4, the save reader.
+  sound file reader (`kpcm`, M6.8), the font file reader (`font`, M7.7)
+  and, from M9.4, the save reader.
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   read every cooked file through `PackSource` and `LooseSource`, and find
   the same bytes (`tools/cook/tests/cook/workspace.rs`, M5.14).

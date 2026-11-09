@@ -2380,7 +2380,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0035 — Aseprite exports join their folder's atlas, their tags become clips in the atlas file (version 2), and clip frames carry their own size and pivot; flips mirror about the pivot; the cook also writes fonts' glyph files and data as KBJ
 
-- **Status:** Accepted
+- **Status:** Accepted; its font file's reader comes with M7.7, not
+  M7.1, and the cook reads back each font file it writes (ADR-0053)
 - **Date:** 2026-11-01
 - **Context:**
   - Roadmap M5.5: cook Aseprite animations, JSONC data and BMFont fonts,
@@ -4576,3 +4577,40 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     not do;
   - or a soak shows the mix near its period (ADR-0046) or underruns that
     the thread's scheduling causes (ADR-0047).
+
+## ADR-0053 — M7.1 split in two: the font file read back (M7.7: codec, cook, xtask), and render's text (M7.1)
+
+- **Status:** Accepted: the user chose the split on 2026-11-09
+- **Date:** 2026-11-09
+- **Context:**
+  - M7.1 asks for the font asset, layout (wrap, align, kerning, color
+    markup), the `text` pipeline and the missing-glyph fallback, with
+    text layout unit tests and goldens. Its note from M5.5 (ADR-0035) asks
+    for the font file's reader in nadir-codec, with a fuzz target, and for
+    the cook to read back each font file it writes, as it does the atlas
+    file.
+  - That is four packages: nadir-codec (the reader), xtask (the fuzz
+    target's registration), nadir-cook (the read-back) and nadir-render
+    (the rest; its goldens need no change to xtask, whose `golden` runs
+    each GL test binary's `golden` module). CLAUDE.md asks a task to stay
+    within three.
+- **Decision:** two tasks, in this order:
+  1. **M7.7** (nadir-codec, nadir-cook, xtask): the font file's reader,
+     `nadir_codec::font`, with its checks, a fuzz target `font` and its
+     seeds, test vectors, and the cook reading back each font file it
+     writes. It depends on M5.5, which writes the file.
+  2. **M7.1** (nadir-render): the font asset, read with M7.7's reader,
+     the layout, the `text` pipeline and the fallback. It keeps M7.1's
+     number, Do, Accept and Verify, and depends on M7.7 too.
+- **Consequences:**
+  - M7.7 comes before M7.1 in the roadmap, so that `/next-task` takes it
+    first.
+  - The Bitmap text feature holds both tasks.
+- **Alternatives considered:**
+  - M7.1 whole, in four packages: one review of codec, cook, xtask and
+    render together.
+  - The reader in nadir-render: the cook, which may not depend on render,
+    could not read back what it writes.
+- **Revisit when:** M7.1 finds that render needs a field the font file
+  lacks (then a version 2 of the file, with the cook's writer and M7.7's
+  reader).

@@ -33,8 +33,8 @@ use std::time::Duration;
 
 use nadir_codec::inflate::ErrorKind as InflateError;
 use nadir_codec::{
-    CodecError, Limits, adler32, aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, kpcm,
-    ldtk, level, png, prefab, qoa, qoi, wav,
+    CodecError, Limits, adler32, aseprite, atlas, bmfont, font, inflate, json, kbj, klz, kpak,
+    kpcm, ldtk, level, png, prefab, qoa, qoi, wav,
 };
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
@@ -118,6 +118,10 @@ const TARGETS: &[Target] = &[
     Target {
         name: "kpcm",
         run: decode_kpcm,
+    },
+    Target {
+        name: "font",
+        run: parse_font,
     },
 ];
 
@@ -318,6 +322,30 @@ fn decode_kpcm(input: &[u8]) {
     );
     let file = kpcm::encode(&header, &sound.samples).expect("a sound the decoder gave encodes");
     assert_eq!(file, input, "the file does not encode back to its bytes");
+}
+
+/// The `font` target: `nadir_codec::font::parse`, with the default limits.
+/// What it accepts must keep the promises the font asset will rely on: the
+/// glyphs by character and the kerning pairs by their two, each after the
+/// one before; an atlas and a sprite named.
+fn parse_font(input: &[u8]) {
+    let Ok(file) = font::parse(input, Limits::default()) else {
+        return;
+    };
+    assert!(
+        file.glyphs.windows(2).all(|pair| pair[0].id < pair[1].id),
+        "glyphs out of order"
+    );
+    assert!(
+        file.kerning
+            .windows(2)
+            .all(|pair| (pair[0].first, pair[0].second) < (pair[1].first, pair[1].second)),
+        "kerning pairs out of order"
+    );
+    assert!(
+        !file.atlas.is_empty() && !file.sprite.is_empty(),
+        "a font with no atlas or sprite"
+    );
 }
 
 /// The `atlas` target: `nadir_codec::atlas::parse`, with the default
@@ -2451,6 +2479,27 @@ mod tests {
         for seed in seeds_of("qoa") {
             qoa::decode(&seed, Limits::default()).unwrap();
         }
+    }
+
+    #[test]
+    fn the_font_seeds_are_files_the_codec_accepts() {
+        // The seeds come from `crates/codec/tests/font/make_vectors.py`.
+        let files: Vec<font::FontFile> = seeds_of("font")
+            .iter()
+            .map(|seed| font::parse(seed, Limits::default()))
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // Among them, kerning, BMFont's fallback glyph, glyphs with no
+        // frame, and no glyphs at all.
+        assert_eq!(files.len(), 4);
+        assert!(files.iter().any(|file| !file.kerning.is_empty()));
+        assert!(files.iter().any(|file| file.fallback.frame > 0));
+        assert!(files.iter().any(|file| file.glyphs.is_empty()));
+        assert!(
+            files
+                .iter()
+                .any(|file| file.glyphs.iter().any(|glyph| glyph.frame.is_none()))
+        );
     }
 
     #[test]

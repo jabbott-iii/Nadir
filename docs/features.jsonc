@@ -246,8 +246,9 @@
     {
       "name": "Bitmap text",
       "area": "Graphics",
-      "summary": "Text will be drawn from bitmap fonts, with wrapping, alignment, kerning and color markup.",
-      "tasks": ["M7.1"]
+      "summary": "The cook's font files, each a bitmap font's metrics, its glyphs by character as frames of the atlas, and its kerning, are read by a reader of our own, which checks each one strictly and says where it is wrong, and the cook reads back every font file it writes with it. A fuzzer throws about a million damaged files a second at it. Text will be drawn from these fonts, with wrapping, alignment, kerning and color markup.",
+      "tasks": ["M7.7", "M7.1"],
+      "ticked": ["M7.7"]
     },
     {
       "name": "Developer tools",

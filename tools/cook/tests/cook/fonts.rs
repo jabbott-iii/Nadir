@@ -180,6 +180,13 @@ fn a_font_s_glyphs_join_its_group_and_its_file_places_them() {
         (number(fallback, "frame"), number(fallback, "advance")),
         (0, 5)
     );
+
+    // The game's reader takes it as it was written.
+    let bytes = std::fs::read(out.join("atlas/fonts/tiny.font.kbj")).expect("the font file");
+    let read = nadir_codec::font::parse(&bytes, nadir_codec::Limits::default()).expect("a font");
+    let ids: Vec<char> = read.glyphs.iter().map(|glyph| glyph.id).collect();
+    assert_eq!(ids, [' ', '?', 'A', 'B', 'C']);
+    assert_eq!((read.kerning.len(), read.fallback.frame), (3, 0));
 }
 
 #[test]

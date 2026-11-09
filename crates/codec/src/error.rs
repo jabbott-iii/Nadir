@@ -19,8 +19,8 @@ use std::fmt;
 #[cfg(feature = "png")]
 use crate::png;
 use crate::{
-    aseprite, atlas, bmfont, inflate, json, kbj, klz, kpak, kpcm, ldtk, level, pcm, prefab, qoa,
-    qoi, wav,
+    aseprite, atlas, bmfont, font, inflate, json, kbj, klz, kpak, kpcm, ldtk, level, pcm, prefab,
+    qoa, qoi, wav,
 };
 
 /// Errors produced by `nadir-codec`.
@@ -133,6 +133,15 @@ pub enum CodecError {
         /// What is wrong.
         kind: atlas::ErrorKind,
     },
+    /// A KBJ file is not a font file the game can read
+    /// ([`font::parse`](crate::font::parse)).
+    Font {
+        /// Where the problem is, such as `glyphs[3].id`; empty for the file
+        /// as a whole.
+        at: String,
+        /// What is wrong.
+        kind: font::ErrorKind,
+    },
     /// A JSON file is not an Aseprite export the cook takes
     /// ([`aseprite::parse`](crate::aseprite::parse)).
     Aseprite {
@@ -216,6 +225,10 @@ impl fmt::Display for CodecError {
                 write!(f, "atlas error in the file: {kind}")
             }
             Self::Atlas { at, kind } => write!(f, "atlas error at `{at}`: {kind}"),
+            Self::Font { at, kind } if at.is_empty() => {
+                write!(f, "font file error in the file: {kind}")
+            }
+            Self::Font { at, kind } => write!(f, "font file error at `{at}`: {kind}"),
             Self::Aseprite { at, kind } if at.is_empty() => {
                 write!(f, "Aseprite export error in the file: {kind}")
             }

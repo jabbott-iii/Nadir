@@ -31,8 +31,8 @@ use crate::pack::{self, Rect};
 
 /// The atlas file's version: the one the game's reader reads.
 pub(crate) const VERSION: i64 = nadir_codec::atlas::VERSION;
-/// The version of a font's file.
-pub(crate) const FONT_VERSION: i64 = 1;
+/// The version of a font's file: the one the game's reader reads.
+pub(crate) const FONT_VERSION: i64 = nadir_codec::font::VERSION;
 /// The space between two frames in a page, in pixels.
 pub(crate) const PADDING: u32 = 2;
 /// How far each frame's edge pixels are repeated outward.
@@ -477,6 +477,27 @@ fn object(members: Vec<(&str, Value)>) -> Value {
     )
 }
 
+/// The font file `file` of the sprite `name`, as the cook writes it: its
+/// path, and its bytes, encoded as KBJ, then read back with the game's
+/// reader, which refuses what the font asset could not use. No BMFont the
+/// cook takes makes a file it refuses: the read-back guards the writer, as
+/// it changes.
+///
+/// # Errors
+///
+/// [`CookError::Encode`], naming the font file, if the encoder or the
+/// reader refuses it.
+fn font_output(name: &str, file: &Value) -> Result<(String, Vec<u8>), CookError> {
+    let path = font_file(name);
+    let encode = |error| CookError::Encode {
+        path: path.clone(),
+        error,
+    };
+    let bytes = nadir_codec::kbj::encode(file, Limits::default()).map_err(encode)?;
+    nadir_codec::font::parse(&bytes, Limits::default()).map_err(encode)?;
+    Ok((path, bytes))
+}
+
 /// The path of the font file of the sprite `name`.
 pub(crate) fn font_file(name: &str) -> String {
     format!("atlas/{name}.font.kbj")
@@ -492,7 +513,7 @@ pub(crate) fn font_file(name: &str) -> String {
 /// sheet that does not fit its export, or a font whose pages or glyphs are
 /// wrong, [`CookError::TooBig`] for a frame bigger than the largest page,
 /// and [`CookError::Encode`] if an output cannot be written as QOI or KBJ,
-/// or the game's atlas reader refuses the atlas file written.
+/// or the game's reader refuses the atlas file or a font file written.
 pub(crate) fn cook(group: &str, members: &[Member<'_>]) -> Result<Cooked, CookError> {
     let mut warnings = Vec::new();
     // By name, whatever order the files were found in, so that the same
@@ -706,9 +727,7 @@ pub(crate) fn cook(group: &str, members: &[Member<'_>]) -> Result<Cooked, CookEr
     let mut font_count = 0;
     for cut in &cuts {
         if let Some(font) = &cut.font {
-            let path = font_file(cut.member.name);
-            let bytes = encode(&path, font)?;
-            files.push((path, bytes));
+            files.push(font_output(cut.member.name, font)?);
             font_count += 1;
         }
     }
@@ -735,4 +754,103 @@ pub(crate) fn cook(group: &str, members: &[Member<'_>]) -> Result<Cooked, CookEr
         clips: clip_count,
         fonts: font_count,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use nadir_codec::CodecError;
+    use nadir_codec::font::ErrorKind;
+
+    use super::*;
+
+    /// The error `font_output` gives for the font file `file` of the sprite
+    /// `fonts/tiny`: where, and what.
+    fn refused(file: &Value) -> (String, ErrorKind) {
+        match font_output("fonts/tiny", file) {
+            Err(CookError::Encode {
+                path,
+                error: CodecError::Font { at, kind },
+            }) => {
+                assert_eq!(path, "atlas/fonts/tiny.font.kbj");
+                (at, kind)
+            }
+            other => panic!("expected the font file refused, got {other:?}"),
+        }
+    }
+
+    /// A font file as `font_frames` writes it, with `glyphs`.
+    fn file(glyphs: Vec<Value>) -> Value {
+        let glyph = |id: i64, frame: Option<i64>| {
+            let mut members = vec![("id", Value::Int(id))];
+            if let Some(frame) = frame {
+                members.push(("frame", Value::Int(frame)));
+            }
+            members.extend([
+                ("x", Value::Int(0)),
+                ("y", Value::Int(1)),
+                ("advance", Value::Int(5)),
+            ]);
+            object(members)
+        };
+        let glyphs = if glyphs.is_empty() {
+            vec![glyph(32, None), glyph(63, Some(0))]
+        } else {
+            glyphs
+        };
+        object(vec![
+            ("version", Value::Int(FONT_VERSION)),
+            ("face", Value::String("Tiny".to_string())),
+            ("size", Value::Int(8)),
+            ("line_height", int(9)),
+            ("base", int(7)),
+            ("atlas", Value::String("atlas/fonts.kbj".to_string())),
+            ("sprite", Value::String("fonts/tiny".to_string())),
+            ("glyphs", Value::Array(glyphs)),
+            ("kerning", Value::Array(Vec::new())),
+            (
+                "fallback",
+                object(vec![
+                    ("frame", Value::Int(0)),
+                    ("x", Value::Int(0)),
+                    ("y", Value::Int(1)),
+                    ("advance", Value::Int(5)),
+                ]),
+            ),
+        ])
+    }
+
+    #[test]
+    fn a_font_file_the_game_s_reader_takes_is_written() {
+        let (path, bytes) = font_output("fonts/tiny", &file(Vec::new())).unwrap();
+        assert_eq!(path, "atlas/fonts/tiny.font.kbj");
+        let font = nadir_codec::font::parse(&bytes, Limits::default()).unwrap();
+        assert_eq!(font.glyphs.len(), 2);
+    }
+
+    #[test]
+    fn a_font_file_the_game_s_reader_refuses_is_not_written() {
+        // Glyphs out of order, as a writer that forgot to sort them would
+        // write them.
+        let glyph = |id| {
+            object(vec![
+                ("id", Value::Int(id)),
+                ("x", Value::Int(0)),
+                ("y", Value::Int(0)),
+                ("advance", Value::Int(3)),
+            ])
+        };
+        assert_eq!(
+            refused(&file(vec![glyph(65), glyph(32)])),
+            ("glyphs[1].id".to_string(), ErrorKind::NotSorted)
+        );
+        // A file of the next version.
+        let Value::Object(mut members) = file(Vec::new()) else {
+            unreachable!()
+        };
+        members[0].1 = Value::Int(FONT_VERSION + 1);
+        assert_eq!(
+            refused(&Value::Object(members)),
+            ("version".to_string(), ErrorKind::Version { found: 2 })
+        );
+    }
 }

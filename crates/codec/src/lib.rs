@@ -15,7 +15,8 @@
 //! File-format codecs for the Nadir engine: Adler-32, inflate, PNG, QOI, QOA,
 //! WAV, the sound file (KPCM) and a resampler, KLZ block compression,
 //! JSON(C), binary JSON (KBJ), BMFont, Aseprite's sprite sheet data, LDtk's
-//! projects, the cook's atlas, level and prefab files, and the pack file.
+//! projects, the cook's atlas, font, level and prefab files, and the pack
+//! file.
 //!
 //! # Where it fits
 //!
@@ -45,6 +46,7 @@
 //! | [`kpcm`] | The sound file, `audio/<path>.kpcm`: 16-bit samples of 1 or 2 channels as they are, for short sounds | [`kpcm::decode`], [`kpcm::encode`] |
 //! | [`kbj`] | KBJ, the binary form of a [`json::Value`] tree that cooked data is stored in | [`kbj::decode`], [`kbj::encode`] |
 //! | [`atlas`] | The cook's atlas file, `atlas/<group>.kbj`: each sprite's frames on the pages, and its clips | [`atlas::parse`] |
+//! | [`font`] | The cook's font file, `atlas/<font>.font.kbj`: a bitmap font's metrics, its glyphs by character, as frames of a sprite of the atlas, and its kerning | [`font::parse`] |
 //! | [`level`] | The level file, `levels/<name>.klvl`: tile layers, a collision grid, tall tiles, entities | [`level::parse`] |
 //! | [`prefab`] | The prefab file, `data/prefabs/<name>.kbj`: a prefab's base and its components' values | [`prefab::parse`], [`prefab::read`] |
 //! | [`kpak`] | The pack file, `game.kpak`: its header, its table of contents, and each entry checked against its CRC-32 | [`kpak::header`], [`kpak::toc`], [`kpak::parse`] |
@@ -56,7 +58,9 @@
 //! nadir-assets' `PackSource` reads them (M5.14), as the engine's release
 //! builds do (M5.7). QOA's encoder and decoder are built (M6.1), and the
 //! sound file's (M6.8): the cook writes both, and the mixer plays QOA
-//! (M6.2); the game loads them as assets from M6.9.
+//! (M6.2); the game loads them as assets from M6.9. The font file's reader
+//! is built (M7.7), and the cook reads back each font file it writes; the
+//! game's font asset comes with M7.1.
 //!
 //! [`pcm`] changes a sound's rate, with a windowed sinc that gives the same
 //! bits on every system and keeps a loop's seam ([`pcm::resample`]), and
@@ -142,7 +146,7 @@
 //!   [`CodecError::Json`] and [`CodecError::BmFont`];
 //! - a member path, such as `sprites[2].frames[0].w`, in a file checked
 //!   after its KBJ or JSON is read: [`CodecError::Atlas`],
-//!   [`CodecError::Level`], [`CodecError::Prefab`],
+//!   [`CodecError::Font`], [`CodecError::Level`], [`CodecError::Prefab`],
 //!   [`CodecError::Aseprite`] and [`CodecError::Ldtk`]. KBJ or JSON that
 //!   cannot be read at all is the KBJ or JSON error.
 //!
@@ -221,6 +225,7 @@ pub mod aseprite;
 pub mod atlas;
 pub mod bmfont;
 mod error;
+pub mod font;
 pub mod inflate;
 pub mod json;
 pub mod kbj;

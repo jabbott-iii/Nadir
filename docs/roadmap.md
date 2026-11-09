@@ -4583,7 +4583,58 @@ by the batched sprite renderer.
 
 ## M7 — Developer tools
 
+- [x] **M7.7 — codec and cook: the font file read back**
+  - Split from M7.1 on 2026-11-09 (ADR-0053): the font file's reader and
+    the cook's read-back; M7.1 keeps render's text.
+  - Note (from M5.5, ADR-0035): the cook writes each font as
+    `atlas/<font>.font.kbj`, version 1 (`assets-and-codecs.md`, "Font
+    file"); it cannot yet read back what it writes, as it does the atlas
+    file.
+  - Depends: M5.5
+  - Do: the font file's reader in codec, with its checks; a fuzz target
+    with seeds; test vectors; the cook reading back each font file it
+    writes.
+  - Accept: the reader takes the font files the cook writes and refuses
+    malformed ones with an error that says where; the cook refuses a font
+    file its reader would.
+  - Verify: `cargo test -p nadir-codec -p nadir-cook -p xtask`;
+    `cargo xtask fuzz-smoke --target font`
+  - Built (ADR-0053): `nadir_codec::font::parse` reads a font file into a
+    `FontFile` (face, size, line height, base, the atlas and sprite, its
+    `Glyph`s by `char`, its `Kerning` pairs, its `Fallback`), strictly, as
+    `atlas::parse` reads an atlas file: the version first, each object's
+    members and no others, whole numbers that fit their fields (signed for
+    the offsets, advances, kerning and size), ids that are characters, the
+    glyphs and pairs each after the one before, a fallback with a frame;
+    `CodecError::Font { at, kind }` says where. The cook encodes and reads
+    back each font file in one helper, `font_output`, the only way it
+    makes one; no BMFont it takes makes a file the reader refuses, so the
+    read-back guards the writer as it changes.
+  - Vectors and seeds: four files the cook wrote from BMFonts made for the
+    purpose by `crates/codec/tests/font/make_vectors.py`, which writes
+    their pages and runs the cook, to the same bytes each time: Unicode
+    with kerning and glyphs with no frame, ANSI with BMFont's fallback
+    glyph and a negative size, two pages, and an empty face with no glyph
+    but the fallback. They are `crates/codec/tests/font/` and
+    `fuzz/corpus/font/`.
+  - Left to M7.1 (its note): checking each glyph's frame against the atlas
+    file's sprite, and choosing the pipeline, as the file says nothing of
+    what the pages' color channels hold.
+  - Measured on 2026-11-09, i7-11800H: `cargo xtask fuzz-smoke --target
+    font`, 59.1 million inputs in 60 s from the 4 seeds, no finding.
+  - Tests: `cargo test -p nadir-codec -p nadir-cook -p xtask` (the
+    reader's 12 unit tests, a rule each, and its 5 of the vectors, each
+    field, every cut and every byte changed; the cook's `font_output`,
+    taking a file and refusing two, and its font test read back with the
+    reader; the seeds' test); clippy for Linux, and x86_64 and aarch64
+    Windows and macOS, from Linux; `cargo xtask ci`. Of 20 planted bugs, 6
+    passed the tests at first; with the tests added since, 4 of those
+    fail them, and the 2 left can only show in a fuzz run: the target's
+    assertion of the glyphs' order dropped, and the target registered
+    with another's function.
+
 - [ ] **M7.1 — render: bitmap text**
+  - Split on 2026-11-09 (ADR-0053): the font file's reader is M7.7's.
   - Note (from M5.5, ADR-0035): the cook writes each font as
     `atlas/<font>.font.kbj`, version 1 (`assets-and-codecs.md`, "Font
     file"): BMFont's metrics, the atlas file and sprite of its glyphs, the
@@ -4591,10 +4642,18 @@ by the batched sprite renderer.
     of its untrimmed rectangle, its advance), the kerning pairs sorted, and
     the fallback glyph (BMFont's, else `?`). Each glyph's frame is trimmed:
     its atlas frame's offset places the pixels. The glyphs share the
-    group's RGBA pages, alpha straight. Write its reader in codec, with a
-    fuzz target, and have the cook read back each font file it writes, as
-    it does the atlas file.
-  - Depends: M5.5, M3.3
+    group's RGBA pages, alpha straight. M7.7 reads it.
+  - Note (from M7.7, ADR-0053): `nadir_codec::font::parse` gives a
+    `FontFile`: its glyphs by character and its kerning pairs by their two,
+    each in order (a binary search finds one), each glyph's frame one of
+    the atlas file's sprite's, which the reader cannot check: the font
+    asset checks it against the atlas file. The file says nothing of what
+    the pages' color channels hold: with BMFont's `alphaChnl=2` an outline
+    is in the alpha with the glyph, and only RGB tells them apart. So
+    choosing the `text` pipeline (alpha × tint) or the sprite pipeline
+    (RGBA × tint) is the font asset's, or the draw's, with no change to the
+    file.
+  - Depends: M7.7, M5.5, M3.3
   - Do: the font asset; layout (wrap, align, kerning, color markup); the
     `text` pipeline; the missing-glyph fallback.
   - Accept: text layout unit tests and goldens pass.

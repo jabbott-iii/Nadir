@@ -20,9 +20,9 @@ writes.
 
 The cook reads PNG images with their sidecars, Aseprite exports, BMFont
 fonts, WAV sounds with theirs, LDtk 1.5.3 projects and JSONC data, and
-keeps a cache so that the next cook does only what changed. Not yet: a
-reader for the font files in the game (roadmap M7.1): the cook writes
-them, but the game does not read them yet.
+keeps a cache so that the next cook does only what changed. It reads back
+each font file it writes with nadir-codec's reader (roadmap M7.7). Not
+yet: the game's font asset that reads them (M7.1).
 
 ## Install
 

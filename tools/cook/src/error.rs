@@ -138,9 +138,10 @@ pub enum CookError {
         /// The other.
         second: String,
     },
-    /// An encoder refused what the cook made, or the game's atlas, sound or
-    /// pack reader refused the file it wrote: a pivot past what an `f32`
-    /// holds, say, or an output larger than the game reads from a pack.
+    /// An encoder refused what the cook made, or the game's atlas, font,
+    /// sound or pack reader refused the file it wrote: a pivot past what an
+    /// `f32` holds, say, or an output larger than the game reads from a
+    /// pack.
     Encode {
         /// The output, below the output folder.
         path: String,

@@ -244,7 +244,7 @@ pub fn check_sized<T: std::fmt::Debug>(
     checksums repairs a copy of each input, so that mutations get past
     them (`png`, `kpak`). One that can check its own answers asserts them, so that
     a wrong answer is a finding too (`inflate`, `klz`, `kbj`, `kpcm`), and so does
-    one whose reader makes promises its users rely on (`atlas`,
+    one whose reader makes promises its users rely on (`atlas`, `font`,
     `aseprite`, `ldtk`, `level`, `prefab`, `kpak`). See
     `docs/subsystems/assets-and-codecs.md`.
 - The optional coverage-guided fuzzing (`cargo fuzz`) is a separate,
