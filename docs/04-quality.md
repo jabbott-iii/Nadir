@@ -93,6 +93,11 @@ pub fn check_sized<T: std::fmt::Debug>(
     - `animated_tiles_0ms` and `animated_tiles_350ms` (M4.5): four
       animated or flipped tiles at two fixed times, one of them wrapping
       past the tile set's last tile
+    - `text_alignment` (M7.1): a pixel font's text aligned left, in the
+      middle and right in a box, over a panel at its depth; a paragraph
+      wrapped and kerned, with a glyph left of its block; a color run; the
+      fallback for a missing character; a glyph with a black ring in its
+      own colors and as a mask; and a text placed by its middle
 
     Each sprite is drawn at a whole number of pixels per texel, with its
     corner on a whole pixel, so that every GPU draws it alike.

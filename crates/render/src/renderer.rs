@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The renderer: draws a frame's sprites and tile layers into the virtual
-//! image, then scales that up into the output.
+//! The renderer: draws a frame's sprites, texts and tile layers into the
+//! virtual image, then scales that up into the output.
 
 use std::mem;
 
@@ -25,8 +25,10 @@ use nadir_gfx::{
     VertexLayout, VertexStep,
 };
 
+use crate::batcher::Pipe;
 use crate::chunks::{self, ChunkDraw, Step, TileCache};
-use crate::shader::{BLIT, Interface, Program, SPRITE, TILE_CHUNK, packed};
+use crate::glyphs::{Server, TextPass};
+use crate::shader::{BLIT, Interface, Program, SPRITE, TEXT, TILE_CHUNK, packed};
 use crate::view::{self, Upscale, View};
 use crate::{
     Camera2D, RenderError, RenderFrame, SPRITE_INSTANCE_FLOATS, SpriteBatcher, Texture, TileLayers,
@@ -51,22 +53,30 @@ pub struct Output {
     pub size: UVec2,
 }
 
-/// What a frame drew.
+/// What a frame drew. Its draw calls into the virtual image are `batches`
+/// and `chunks`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FrameStats {
     /// The sprites drawn.
     pub sprites: u32,
-    /// The sprites not drawn because their texture is not ready: still
-    /// loading, failed with no placeholder to show
-    /// ([`OnFailure::Nothing`](nadir_assets::OnFailure)), or unknown to the
-    /// asset server.
+    /// The sprites, and the glyphs of texts laid out, not drawn because
+    /// their texture is not ready: still loading, failed with no
+    /// placeholder to show ([`OnFailure::Nothing`](nadir_assets::OnFailure)),
+    /// or unknown to the asset server.
     pub skipped: u32,
-    /// The instanced draws of sprites.
+    /// The instanced draws of sprites and of texts' glyphs.
     pub batches: u32,
     /// The tiles drawn, of every tile layer.
     pub tiles: u32,
     /// The instanced draws of tiles: one for each chunk drawn.
     pub chunks: u32,
+    /// The texts laid out and drawn, glyphs not ready aside.
+    pub texts: u32,
+    /// The glyphs drawn, of every text: each a quad, as a sprite is.
+    pub glyphs: u32,
+    /// The texts not drawn: their font, its atlas or its sprite not ready,
+    /// not loaded, or not the font's.
+    pub skipped_texts: u32,
 }
 
 /// The unit quad, as a triangle strip: (0, 0) to (1, 1).
@@ -110,22 +120,24 @@ struct ReadyLayer {
 enum Bound {
     Nothing,
     Sprites,
+    Text,
     Tiles,
 }
 
 /// The 2D renderer.
 ///
-/// Each frame, [`Renderer::render`] draws the sprites and tile layers into
-/// a render target of the virtual resolution: the sprites sorted by layer
-/// and depth and batched by texture, each tile layer at its own layer and
-/// depth among them, a chunk at a time. It then scales that image up into
-/// the output by the largest whole factor that fits, with bars in the
-/// clear color around it.
+/// Each frame, [`Renderer::render`] draws the sprites, texts and tile
+/// layers into a render target of the virtual resolution: the sprites and
+/// the texts' glyphs sorted by layer and depth and batched by texture and
+/// program, each tile layer at its own layer and depth among them, a chunk
+/// at a time. It then scales that image up into the output by the largest
+/// whole factor that fits, with bars in the clear color around it.
 pub struct Renderer {
     virtual_size: UVec2,
     sprite: PipelineId,
     tile_chunk: PipelineId,
     blit: PipelineId,
+    text: PipelineId,
     quad: BufferId,
     blit_quad: BufferId,
     instances: BufferId,
@@ -133,13 +145,14 @@ pub struct Renderer {
     capacity: usize,
     world: RenderTargetId,
     batcher: SpriteBatcher<TextureId>,
+    texts: TextPass<TextureId>,
     tiles: TileCache,
     // The tile work of a frame, in lists reused from frame to frame.
     ready: Vec<ReadyLayer>,
     chunk_draws: Vec<ChunkDraw>,
     /// (Position among the sprites, index in `ready`) of each ready layer.
     positions: Vec<(u32, u32)>,
-    steps: Vec<Step<TextureId>>,
+    steps: Vec<Step<(TextureId, Pipe)>>,
 }
 
 impl Renderer {
@@ -159,6 +172,7 @@ impl Renderer {
         let sprite = pipeline(device, &SPRITE, SPRITE.source())?;
         let tile_chunk = pipeline(device, &TILE_CHUNK, TILE_CHUNK.source())?;
         let blit = pipeline(device, &BLIT, BLIT.source())?;
+        let text = pipeline(device, &TEXT, TEXT.source())?;
 
         let quad = device.create_buffer(&BufferDesc {
             label: "unit quad",
@@ -181,12 +195,14 @@ impl Renderer {
             sprite,
             tile_chunk,
             blit,
+            text,
             quad,
             blit_quad,
             instances,
             capacity: FIRST_CAPACITY,
             world,
             batcher: SpriteBatcher::new(),
+            texts: TextPass::new(),
             tiles: TileCache::default(),
             ready: Vec::new(),
             chunk_draws: Vec::new(),
@@ -250,6 +266,7 @@ impl Renderer {
             Program::Sprite => &mut self.sprite,
             Program::TileChunk => &mut self.tile_chunk,
             Program::Blit => &mut self.blit,
+            Program::Text => &mut self.text,
         };
         device.destroy(mem::replace(slot, rebuilt));
         Ok(())
@@ -259,6 +276,15 @@ impl Renderer {
     /// [`TileLayerDraw`](crate::TileLayerDraw)s name in `tiles`. Call it
     /// inside a frame of the device (`begin_frame` and `end_frame`, or their
     /// offscreen forms).
+    ///
+    /// Each text is laid out in its [`Font`](crate::Font), whose atlas file
+    /// and pages it finds by their paths in `assets`: a text whose font or
+    /// atlas is not ready is not drawn, nor a glyph whose page is not. A
+    /// font whose atlas or page is not loaded at all, or whose atlas has no
+    /// sprite of its name or too few frames, is logged once; so is each
+    /// character a font lacks, which draws the font's fallback. A glyph on
+    /// a page that failed shows the placeholder, as a sprite does, with the
+    /// sprite program.
     ///
     /// Sprites whose texture is still loading are not drawn. A texture that
     /// failed to load shows its placeholder, all of it, whatever the
@@ -290,14 +316,20 @@ impl Renderer {
             let failed = textures.state(handle) == Some(LoadState::Failed);
             Some((texture.id(), failed))
         };
-        self.batcher.build(&frame.sprites, &frame.camera, |sprite| {
-            texture(sprite.texture)
-        });
+        self.texts.build(&frame.texts, &Server(assets));
+        self.batcher
+            .build_with(&frame.sprites, &self.texts.quads, &frame.camera, |sprite| {
+                texture(sprite.texture)
+            });
 
         let view = View::new(&frame.camera, self.virtual_size);
         self.prepare_tiles(device, tiles, frame, &view, texture)?;
         let mut stats = self.batcher.stats();
-        let count = stats.sprites as usize;
+        stats.skipped += self.texts.skipped_glyphs;
+        stats.texts = self.texts.texts;
+        stats.skipped_texts = self.texts.skipped_texts;
+        // The plan numbers its sprites and glyphs together with a u32.
+        let count = (stats.sprites + stats.glyphs) as usize;
         if count > self.capacity {
             let capacity = count.next_power_of_two().max(self.capacity * 2);
             let instances = instance_buffer(device, capacity)?;
@@ -318,17 +350,22 @@ impl Renderer {
             for &step in &self.steps {
                 match step {
                     Step::Sprites {
-                        texture,
+                        texture: (texture, pipe),
                         start,
                         count,
                     } => {
                         // A tile layer between two batches, or in one,
-                        // leaves its own program and buffers bound.
-                        if bound != Bound::Sprites {
-                            pass.set_pipeline(self.sprite)?;
+                        // leaves its own program and buffers bound. The
+                        // sprite and text programs share the instances.
+                        let (wanted, pipeline) = match pipe {
+                            Pipe::Sprite => (Bound::Sprites, self.sprite),
+                            Pipe::Text => (Bound::Text, self.text),
+                        };
+                        if bound != wanted {
+                            pass.set_pipeline(pipeline)?;
                             pass.set_vertex_buffer(0, self.instances, 0)?;
                             pass.set_vertex_buffer(1, self.quad, 0)?;
-                            bound = Bound::Sprites;
+                            bound = wanted;
                         }
                         pass.set_texture(0, texture, Sampler::NearestClamp)?;
                         pass.draw(0..4, start..start + count)?;
@@ -476,7 +513,9 @@ fn pipeline(
                 && TILE_CHUNK.instance.len() <= ATTRIBUTES
                 && TILE_CHUNK.vertex_attributes.len() <= ATTRIBUTES
                 && BLIT.instance.len() <= ATTRIBUTES
-                && BLIT.vertex_attributes.len() <= ATTRIBUTES,
+                && BLIT.vertex_attributes.len() <= ATTRIBUTES
+                && TEXT.instance.len() <= ATTRIBUTES
+                && TEXT.vertex_attributes.len() <= ATTRIBUTES,
             "a program has more attributes than a slot has room for"
         );
     }
@@ -494,7 +533,7 @@ fn pipeline(
 
 fn instance_buffer(device: &mut Device, capacity: usize) -> Result<BufferId, RenderError> {
     Ok(device.create_buffer(&BufferDesc {
-        label: "sprite instances",
+        label: "sprite and glyph instances",
         kind: BufferKind::Vertex,
         usage: BufferUsage::Dynamic,
         size: capacity * SPRITE_INSTANCE_FLOATS * size_of::<f32>(),
@@ -527,8 +566,13 @@ mod gpu_tests {
     }
 
     /// The renderer's programs, in the order of `Program::ALL`.
-    fn programs(renderer: &Renderer) -> [PipelineId; 3] {
-        [renderer.sprite, renderer.tile_chunk, renderer.blit]
+    fn programs(renderer: &Renderer) -> [PipelineId; 4] {
+        [
+            renderer.sprite,
+            renderer.tile_chunk,
+            renderer.blit,
+            renderer.text,
+        ]
     }
 
     #[test]
@@ -558,7 +602,7 @@ mod gpu_tests {
                 Err(error) => panic!("{error}"),
             }
         };
-        assert_eq!(Program::ALL.len(), 3);
+        assert_eq!(Program::ALL.len(), 4);
         for (index, &program) in Program::ALL.iter().enumerate() {
             let before = programs(&renderer);
             let source = program.interface().source();

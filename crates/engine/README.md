@@ -24,7 +24,7 @@ Built:
   stages;
 - input actions, with bindings, latched once a tick, and replays of them;
 - an OpenGL 3.3 renderer: y-sorted sprite batches, tile layers with
-  animated tiles, and a pixel-perfect camera;
+  animated tiles, bitmap text in the world, and a pixel-perfect camera;
 - kinematic collision: boxes and circles, a grid of solid tiles,
   move-and-slide, triggers, and queries;
 - sprite animation, from clips made in code or from Aseprite's tags;
@@ -52,7 +52,8 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
-- text (M7.1), the debug tools (M7), gamepads (M8);
+- text on screen, at the window's resolution (M7.8), the debug tools (M7),
+  gamepads (M8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 
@@ -527,7 +528,9 @@ path there is found from the folder the game runs in.
   only an asset that needs none, an atlas but not a texture, can be made
   then.
 - The asset types so far are `Texture`, a QOI image, `Atlas`, the cook's
-  `atlas/<group>.kbj`, `nadir::audio`'s `Sound`, a `.kpcm` or `.qoa`, and
+  `atlas/<group>.kbj`, `nadir::render::Font`, the cook's
+  `atlas/<font>.font.kbj`, which `Font::load_now_in` loads with its atlas
+  and pages, `nadir::audio`'s `Sound`, a `.kpcm` or `.qoa`, and
   `Music`, a `.qoa`, and `nadir::scene`'s `Level` and `PrefabAsset`,
   which `App::load_level` and the `PrefabLibrary` load. Asset paths are
   lowercase.
@@ -603,9 +606,10 @@ reads the pack there when there is one, and the loose files otherwise, so
 a release of the game needs only `game.kpak`; a pack that does not open
 fails every load, with its error. A build with `dev` reads the loose
 files. `App::load_level`
-loads a level file into the world, its prefabs with it. The engine has no
-asset type for the cooked fonts and other data files yet: text comes with
-roadmap task M7.1.
+loads a level file into the world, its prefabs with it. A cooked font is
+`nadir::render::Font`: `Font::load_now_in` loads it with its atlas and
+pages, and a system pushes texts into `RenderFrame::texts`, drawn in the
+world (M7.1). The engine has no asset type for the other data files yet.
 
 ## Features
 

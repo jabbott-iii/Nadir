@@ -27,10 +27,11 @@ shows only a few of its fields and methods: the ones the design rests on.
   error type of a `Result` are left out.
 
 Nothing here is planned work: the diagrams show only what is built. The
-Metal backend, audio's output on Windows and macOS, the debug tools,
-bitmap text, gamepads, saves and pathfinding are not built yet (see
-`docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
-output on Linux (M6.3), its assets (M6.9), and the game's sound (M6.6).
+Metal backend, audio's output on Windows and macOS, the debug tools, text
+on screen (the UI pass), gamepads, saves and pathfinding are not built yet
+(see `docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
+output on Linux (M6.3), its assets (M6.9), and the game's sound (M6.6);
+bitmap text in the world is (M7.1).
 The members only the `dev` feature compiles, the facade's hot reload's
 (roadmap M5.8), are marked `dev`. One member that exists in the code for
 planned work, `ShaderSource::msl`, carries a note.
@@ -1012,8 +1013,9 @@ classDiagram
 
 ## render: the renderer
 
-The `Renderer` draws one `RenderFrame` with the textures the asset server
-holds and the tile layers in `TileLayers`. It draws the world at the
+The `Renderer` draws one `RenderFrame` with the textures, fonts and atlases
+the asset server holds and the tile layers in `TileLayers`. It draws the
+world at the
 virtual resolution, then scales it up to the window by a whole number, the
 `Upscale`. While the game runs, it can rebuild one of its `Program`s
 from new GLSL sources, keeping the one it had when they do not build or
@@ -1027,9 +1029,11 @@ classDiagram
         -sprite PipelineId
         -tile_chunk PipelineId
         -blit PipelineId
+        -text PipelineId
         -instances BufferId
         -world RenderTargetId
         -batcher SpriteBatcher~TextureId~
+        -texts TextPass~TextureId~
         -tiles TileCache
         +new(device, config) Result~Renderer~
         +render(device, assets, tiles, frame, output) Result~FrameStats~
@@ -1051,6 +1055,9 @@ classDiagram
         +batches u32
         +tiles u32
         +chunks u32
+        +texts u32
+        +glyphs u32
+        +skipped_texts u32
     }
     class Upscale {
         +factor u32
@@ -1061,6 +1068,7 @@ classDiagram
         Sprite
         TileChunk
         Blit
+        Text
         +Program[] ALL$
         +name() str
         +vertex_file() str
@@ -1072,7 +1080,7 @@ classDiagram
     class AssetServer["assets::AssetServer"]
     Renderer ..> RenderConfig : new
     Renderer ..> Device : new, render, reload_program
-    Renderer ..> AssetServer : render finds textures
+    Renderer ..> AssetServer : render finds textures, fonts, atlases
     Renderer ..> TileLayers : render
     Renderer ..> RenderFrame : render
     Renderer ..> Output : render
@@ -1083,29 +1091,51 @@ classDiagram
 
 ## render: batching and tile chunks
 
-The `SpriteBatcher` sorts the frame's sprites and cuts them into batches,
-each a run of sprites with one texture, drawn in one instanced draw. The
-sort key is a `u64`: the layer, then the depth (the sprite's y, or a fixed
-depth), then the texture, then the submission order. The `TileCache` keeps
-each tile layer's chunks in GPU buffers between frames.
+The `TextPass` lays out the frame's texts and finds their glyphs in their
+atlases, as `GlyphQuad`s. The `SpriteBatcher` sorts the frame's sprites and
+those glyphs and cuts them into batches, each a run with one texture and
+one program (`Pipe`), drawn in one instanced draw. The sort key is a `u64`:
+the layer, then the depth (the sprite's y, or a fixed depth); then sprites
+before each text's glyphs, then the texture, then the submission order. The
+`TileCache` keeps each tile layer's chunks in GPU buffers between frames.
 
 ```mermaid
 classDiagram
     direction TB
     class Renderer
     class SpriteBatcher~K~ {
-        -plan Plan~K~
+        -plan Plan~KPipe~
         -packed Vec~f32~
         +new() SpriteBatcher~K~
         +build(sprites, camera, texture)
+        -build_with(sprites, glyphs, camera, texture)
         +instances() f32[]
         +stats() FrameStats
+    }
+    class TextPass~K~ {
+        -placed Vec~PlacedGlyph~
+        -quads Vec~GlyphQuad~
+        -warned FastHashSet
+        -missing FastHashSet
+        -build(texts, library)
+    }
+    class GlyphQuad~K~ {
+        -sprite SpriteDraw
+        -text u32
+        -texture K
+        -placeholder bool
+    }
+    class Pipe {
+        <<enumeration>>
+        Sprite
+        Text
     }
     class Plan~K~ {
         -keys Vec
         -order Vec~Drawn~
         -batches Vec~Batch~K~~
         -skipped u32
+        -glyphs u32
     }
     class Batch~K~ {
         -texture K
@@ -1127,7 +1157,11 @@ classDiagram
         -size Vec2
     }
     Renderer *-- SpriteBatcher : batcher
+    Renderer *-- TextPass : texts
     Renderer *-- TileCache : tiles
+    TextPass "1" *-- "0..*" GlyphQuad : quads
+    SpriteBatcher ..> GlyphQuad : plans with the sprites
+    SpriteBatcher ..> Pipe : a batch's program
     Renderer ..> View : per frame
     SpriteBatcher *-- Plan
     Plan "1" *-- "0..*" Batch : one instanced draw each
@@ -1137,7 +1171,7 @@ classDiagram
 ## render: a frame's contents
 
 Each frame, the facade's extract systems fill the `RenderFrame` resource
-with sprite draws and tile layer draws.
+with sprite draws and tile layer draws, and a game's systems may push texts.
 
 ```mermaid
 classDiagram
@@ -1147,8 +1181,17 @@ classDiagram
         +clear Color
         +sprites Vec~SpriteDraw~
         +tile_layers Vec~TileLayerDraw~
+        +texts TextList
         +time Duration
         +new() RenderFrame
+        +clear()
+    }
+    class TextList {
+        -text String
+        -draws Vec
+        +push(draw, text)
+        +write(draw, args)
+        +iter() Iterator
         +clear()
     }
     class Camera2D {
@@ -1188,6 +1231,7 @@ classDiagram
     RenderFrame *-- Camera2D
     RenderFrame "1" *-- "0..*" SpriteDraw
     RenderFrame "1" *-- "0..*" TileLayerDraw
+    RenderFrame *-- TextList
     SpriteDraw *-- SortMode
     SpriteDraw *-- Flip
     SpriteDraw --> Texture : Handle
@@ -1272,6 +1316,86 @@ classDiagram
     AtlasClipFrame --> AtlasFrame : frame index
     AtlasFrame --> AtlasPage : page index
     AtlasSprite ..> TileSet : tile_set
+```
+
+## render: fonts and text
+
+`Font` is an asset, the cook's font file: its glyphs by character, each a
+frame of a sprite of an atlas it names by path, and its kerning. It lays a
+text out alone, into `PlacedGlyph`s. A `TextDraw` pushed into the frame's
+`TextList` with its text draws it in the world; the renderer finds the
+font's atlas and pages by their paths each frame.
+
+```mermaid
+classDiagram
+    direction LR
+    class Font {
+        -atlas String
+        -sprite String
+        -glyphs Vec
+        -kerning Vec
+        -fallback Glyph
+        +load_now_in(server, path, scope, ctx)$ Result~Handle~Font~~
+        +line_height() u32
+        +glyph(c) Option~Glyph~
+        +fallback() Glyph
+        +kerning(first, second) i32
+        +measure(text, layout) UVec2
+        +layout(text, layout, out) UVec2
+    }
+    class Glyph {
+        +frame() Option~usize~
+        +offset() IVec2
+        +advance() i32
+    }
+    class TextLayout {
+        +max_width Option~u32~
+        +align Align
+        +markup bool
+    }
+    class Align {
+        <<enumeration>>
+        Left
+        Center
+        Right
+    }
+    class PlacedGlyph {
+        +character char
+        +byte usize
+        +glyph Glyph
+        +position IVec2
+        +run Option~Color~
+        +missing bool
+        +line u32
+    }
+    class TextDraw {
+        +font Handle~Font~
+        +position Vec2
+        +pivot Vec2
+        +layout TextLayout
+        +color Color
+        +glyphs GlyphMode
+        +layer u8
+        +sort SortMode
+        +new(font, position) TextDraw
+    }
+    class GlyphMode {
+        <<enumeration>>
+        Mask
+        Rgba
+    }
+    class Escaped {
+        +0 str
+    }
+    class Atlas
+    Font "1" *-- "1..*" Glyph
+    Font ..> PlacedGlyph : layout
+    Font ..> TextLayout : layout, measure
+    Font --> Atlas : by path
+    TextLayout *-- Align
+    TextDraw --> Font : Handle
+    TextDraw *-- TextLayout
+    TextDraw *-- GlyphMode
 ```
 
 ## render: tile layers

@@ -42,7 +42,7 @@ Every decoder:
 | `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines. See subset below |
 | `aseprite` | Aseprite's `--format json-array` sprite sheet data | — | ✓ | no (cook only) | Frames, sheet, tags expanded to clips (ADR-0035). See subset below |
 | `atlas` | The cook's atlas file, version 2, below | — | ✓ | yes | KBJ, then checked strictly; read by render's `Atlas` asset (ADR-0033, ADR-0035). See below |
-| `font` | The cook's font file, version 1, below | — | ✓ | yes | KBJ, then checked strictly; the cook reads back what it writes (M7.7, ADR-0053), and render's font asset will read it (M7.1). See below |
+| `font` | The cook's font file, version 1, below | — | ✓ | yes | KBJ, then checked strictly; the cook reads back what it writes (M7.7, ADR-0053), and render's `Font` asset reads it (M7.1, ADR-0054). See below |
 | `ldtk` | LDtk 1.5.3's project `.ldtk` and level `.ldtkl` JSON | — | ✓ | no (cook only) | The members the cook uses, checked against the project's definitions (ADR-0038). See subset below |
 | `level` | The cook's level file, version 1, below | — | ✓ | yes | KBJ, then checked strictly (ADR-0038). See below |
 | `prefab` | The prefab file, below | — | ✓ | yes | KBJ, or its source's JSON, then checked strictly (ADR-0038). See below |
@@ -794,7 +794,7 @@ base, the atlas file and sprite of the glyphs' frames, its `Glyph`s by
 character, its `Kerning` pairs, and its `Fallback`. The types are
 `#[non_exhaustive]`: only the reader makes them. As built in M7.7
 (ADR-0053); the cook reads back each font file it writes with it, and
-M7.1's font asset reads it:
+render's `Font` asset reads it (M7.1, ADR-0054):
 
 - **KBJ first**, with the KBJ decoder and its limits, which bound the
   glyphs and kerning pairs by `max_entries` and the strings by
@@ -1557,7 +1557,7 @@ in this order:
   none). Each error names the `.fnt`.
 - The cook reads back each font file it writes with the game's reader
   (above, "Font file reader"), as it does the atlas file, and refuses one
-  the reader would (M7.7); the game's font asset comes with M7.1.
+  the reader would (M7.7); render's `Font` asset reads it (M7.1).
 
 ### Sounds `audio/<path>.kpcm` and `audio/<path>.qoa`
 

@@ -18,11 +18,14 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use nadir_assets::{AssetServer, FinalizeCtx, Handle, OnFailure};
+use nadir_assets::{AssetServer, FinalizeCtx, Handle, OnFailure, Scope};
 use nadir_codec::qoi::{self, Channels, ColorSpace, Header};
+use nadir_codec::{Limits, json, kbj};
 use nadir_core::UVec2;
 use nadir_gfx::{Device, GfxError, RenderTargetId, TextureFormat};
-use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, Texture, TileLayers};
+use nadir_render::{
+    Font, FrameStats, Output, RenderConfig, RenderFrame, Renderer, Texture, TileLayers,
+};
 
 /// Names a part of the renderer, such as `llvmpipe`, that the context must
 /// have. Unset or empty, any renderer will do.
@@ -190,6 +193,161 @@ impl Stage {
         self.device.destroy(target);
         (stats, pixels)
     }
+}
+
+/// A glyph of a test font: its character, its pixels by row (`#` white,
+/// `o` black, `.` clear, all of a row's width), where its rectangle goes
+/// from the pen, and its advance.
+pub(crate) struct Art {
+    pub(crate) id: char,
+    pub(crate) rows: &'static [&'static str],
+    pub(crate) offset: (i32, i32),
+    pub(crate) advance: i32,
+}
+
+impl Stage {
+    /// Writes the font [`Stage::write_font`] writes, then loads it, its
+    /// atlas and its page with [`Font::load_now_in`]; the page is made by
+    /// the next finish.
+    pub(crate) fn font(
+        &mut self,
+        name: &str,
+        line_height: u32,
+        glyphs: &[Art],
+        fallback: char,
+        kerning: &[(char, char, i32)],
+    ) -> Handle<Font> {
+        let path = self.write_font(name, line_height, glyphs, fallback, kerning);
+        Font::load_now_in(
+            &mut self.server,
+            &path,
+            Scope::Global,
+            &mut FinalizeCtx::new(),
+        )
+        .expect("the font and its atlas")
+    }
+
+    /// Writes a font named `name` of `glyphs`, as the cook would: its page,
+    /// `atlas/<name>_0.qoi`, with each glyph's pixels trimmed to a frame of
+    /// the sprite `fonts/<name>` of the atlas file `atlas/<name>.kbj`, and
+    /// its font file, `atlas/fonts/<name>.font.kbj`, whose fallback is the
+    /// glyph of `fallback`. Returns the font file's path.
+    pub(crate) fn write_font(
+        &mut self,
+        name: &str,
+        line_height: u32,
+        glyphs: &[Art],
+        fallback: char,
+        kerning: &[(char, char, i32)],
+    ) -> String {
+        const WHITE: [u8; 4] = [255, 255, 255, 255];
+        const BLACK: [u8; 4] = [0, 0, 0, 255];
+        let width: usize = glyphs
+            .iter()
+            .map(|art| art.rows.first().map_or(0, |row| row.len()) + 1)
+            .sum();
+        let height = glyphs
+            .iter()
+            .map(|art| art.rows.len())
+            .max()
+            .unwrap_or(0)
+            .max(1);
+        let mut page = vec![[0u8; 4]; width.max(1) * height];
+        let mut frames = Vec::new();
+        let mut entries = Vec::new();
+        let mut fallback_entry = None;
+        let mut glyphs: Vec<&Art> = glyphs.iter().collect();
+        glyphs.sort_by_key(|art| art.id);
+        let mut left = 0;
+        for art in glyphs {
+            let w = art.rows.first().map_or(0, |row| row.len());
+            let mut ink: Option<(usize, usize, usize, usize)> = None;
+            for (y, row) in art.rows.iter().enumerate() {
+                assert_eq!(row.len(), w, "{:?}: rows of one width", art.id);
+                for (x, pixel) in row.bytes().enumerate() {
+                    let texel = match pixel {
+                        b'#' => WHITE,
+                        b'o' => BLACK,
+                        _ => continue,
+                    };
+                    page[y * width + left + x] = texel;
+                    ink = Some(match ink {
+                        None => (x, y, x, y),
+                        Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+                    });
+                }
+            }
+            let frame = ink.map(|(x0, y0, x1, y1)| {
+                frames.push(format!(
+                    r#"{{ "page": 0, "x": {}, "y": {y0}, "w": {}, "h": {}, "ox": {x0}, "oy": {y0}, "sw": {w}, "sh": {} }}"#,
+                    left + x0,
+                    x1 - x0 + 1,
+                    y1 - y0 + 1,
+                    art.rows.len()
+                ));
+                frames.len() - 1
+            });
+            let (x, y) = art.offset;
+            let frame_member =
+                frame.map_or(String::new(), |frame| format!(r#""frame": {frame}, "#));
+            entries.push(format!(
+                r#"{{ "id": {}, {frame_member}"x": {x}, "y": {y}, "advance": {} }}"#,
+                art.id as u32, art.advance
+            ));
+            if art.id == fallback {
+                let frame = frame.expect("the fallback has pixels");
+                fallback_entry = Some(format!(
+                    r#"{{ "frame": {frame}, "x": {x}, "y": {y}, "advance": {} }}"#,
+                    art.advance
+                ));
+            }
+            left += w + 1;
+        }
+        let mut kerning: Vec<(u32, u32, i32)> = kerning
+            .iter()
+            .map(|&(a, b, amount)| (a as u32, b as u32, amount))
+            .collect();
+        kerning.sort();
+        let kerning: Vec<String> = kerning
+            .iter()
+            .map(|(a, b, amount)| format!("[{a}, {b}, {amount}]"))
+            .collect();
+
+        let atlas = self.root.join("atlas");
+        fs::create_dir_all(atlas.join("fonts")).expect("the atlas folder");
+        write_image(
+            &atlas.join(format!("{name}_0.qoi")),
+            width.max(1) as u32,
+            height as u32,
+            &page,
+        );
+        let atlas_file = format!(
+            r#"{{ "version": 2,
+                "pages": [ {{ "path": "atlas/{name}_0.qoi", "w": {}, "h": {height} }} ],
+                "sprites": [ {{ "name": "fonts/{name}", "frames": [ {} ], "pivot": [0.0, 0.0] }} ] }}"#,
+            width.max(1),
+            frames.join(", ")
+        );
+        write_kbj(&atlas.join(format!("{name}.kbj")), &atlas_file);
+        let font_file = format!(
+            r#"{{ "version": 1, "face": "{name}", "size": {line_height}, "line_height": {line_height},
+                "base": {line_height}, "atlas": "atlas/{name}.kbj", "sprite": "fonts/{name}",
+                "glyphs": [ {} ], "kerning": [ {} ], "fallback": {} }}"#,
+            entries.join(", "),
+            kerning.join(", "),
+            fallback_entry.expect("the fallback among the glyphs")
+        );
+        let path = format!("atlas/fonts/{name}.font.kbj");
+        write_kbj(&self.root.join(&path), &font_file);
+        path
+    }
+}
+
+/// Writes the KBJ file that `text`, JSON, describes.
+pub(crate) fn write_kbj(path: &Path, text: &str) {
+    let value = json::parse(text, Limits::default()).expect("the test's JSON");
+    let bytes = kbj::encode(&value, Limits::default()).expect("encodable");
+    fs::write(path, bytes).expect("write the file");
 }
 
 /// `n` texels of `texel`.

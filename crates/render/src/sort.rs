@@ -40,8 +40,9 @@ pub(crate) const fn sortable_bits(f: f32) -> u32 {
 /// `texture` is the low 16 bits of its texture's handle, so that sprites
 /// of one depth group by texture; two textures that share them only split a
 /// batch. `seq` is its submission number, modulo 256. The renderer sorts
-/// on the key without `seq`, then on the full submission number, so that
-/// ties keep their submission order exactly.
+/// on the layer and depth, then sprites before each text's glyphs, then the
+/// texture, then the full submission number, so that ties keep their
+/// submission order exactly (ADR-0054).
 pub(crate) const fn sort_key(layer: u8, sort: SortMode, y: f32, texture: u16, seq: u8) -> u64 {
     let depth = match sort {
         SortMode::YSort => sortable_bits(y),

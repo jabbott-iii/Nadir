@@ -52,11 +52,14 @@ pub enum Program {
     TileChunk,
     /// The integer upscale of the virtual image into the output.
     Blit,
+    /// Instanced glyphs of texts: the sprite's quads, with the texture's
+    /// alpha as a mask in the tint's color.
+    Text,
 }
 
 impl Program {
     /// Every program.
-    pub const ALL: &'static [Self] = &[Self::Sprite, Self::TileChunk, Self::Blit];
+    pub const ALL: &'static [Self] = &[Self::Sprite, Self::TileChunk, Self::Blit, Self::Text];
 
     /// Its name: its folder under [`SHADER_DIR`], and its pipeline's label.
     pub fn name(self) -> &'static str {
@@ -70,6 +73,7 @@ impl Program {
             Self::Sprite => "sprite/sprite.vert.glsl",
             Self::TileChunk => "tile_chunk/tile_chunk.vert.glsl",
             Self::Blit => "blit/blit.vert.glsl",
+            Self::Text => "text/text.vert.glsl",
         }
     }
 
@@ -80,6 +84,7 @@ impl Program {
             Self::Sprite => "sprite/sprite.frag.glsl",
             Self::TileChunk => "tile_chunk/tile_chunk.frag.glsl",
             Self::Blit => "blit/blit.frag.glsl",
+            Self::Text => "text/text.frag.glsl",
         }
     }
 
@@ -88,6 +93,7 @@ impl Program {
             Self::Sprite => &SPRITE,
             Self::TileChunk => &TILE_CHUNK,
             Self::Blit => &BLIT,
+            Self::Text => &TEXT,
         }
     }
 }
@@ -362,6 +368,20 @@ pub(crate) const BLIT: Interface = Interface {
     uniform_blocks: &[],
     textures: &["source"],
     blend: BlendMode::Opaque,
+};
+
+/// Instanced glyphs: the sprite's instances and quad, with the texture's
+/// alpha as a mask in the tint's color (`docs/subsystems/render.md`,
+/// "Text").
+pub(crate) const TEXT: Interface = Interface {
+    name: "text",
+    vertex: include_str!("../shaders/text/text.vert.glsl"),
+    fragment: include_str!("../shaders/text/text.frag.glsl"),
+    instance: SPRITE.instance,
+    vertex_attributes: SPRITE.vertex_attributes,
+    uniform_blocks: SPRITE.uniform_blocks,
+    textures: &["text_texture"],
+    blend: BlendMode::Alpha,
 };
 
 /// The vertex attributes of `attributes`, packed one after another, and
@@ -1537,7 +1557,7 @@ void main() { in_body(); { gl_Position = vec4(0.0); } }
                     .map(|_| PIECES[(next() % PIECES.len() as u64) as usize])
                     .collect()
             };
-            for interface in [&SPRITE, &TILE_CHUNK, &BLIT] {
+            for interface in [&SPRITE, &TILE_CHUNK, &BLIT, &TEXT] {
                 let _ = interface.check(&source, &source);
                 let _ = interface.check(interface.vertex, &source);
             }
@@ -1551,6 +1571,27 @@ void main() { in_body(); { gl_Position = vec4(0.0); } }
         let offsets: Vec<u32> = attributes.iter().map(|a| a.offset / 4).collect();
         // The float each attribute starts at, as `push_instance` packs them.
         assert_eq!(offsets, [0, 2, 4, 6, 10, 14]);
+    }
+
+    #[test]
+    fn the_text_program_takes_the_sprite_s_instances_and_vertices() {
+        // The renderer packs a glyph as a sprite, into the same buffer.
+        assert!(std::ptr::eq(TEXT.instance, SPRITE.instance));
+        assert!(std::ptr::eq(
+            TEXT.vertex_attributes,
+            SPRITE.vertex_attributes
+        ));
+        assert_eq!(TEXT.uniform_blocks, SPRITE.uniform_blocks);
+        // Its vertex shader is the sprite's, its comments aside.
+        let code = |source: &str| -> Vec<String> {
+            source
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with("//"))
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(code(TEXT.vertex), code(SPRITE.vertex));
     }
 
     #[test]

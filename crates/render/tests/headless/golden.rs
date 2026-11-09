@@ -35,11 +35,11 @@ use std::time::Duration;
 use nadir_core::{Color, IVec2, Rect, UVec2, Vec2};
 use nadir_gfx::Device;
 use nadir_render::{
-    Camera2D, Flip, FrameStats, RenderFrame, SortMode, SpriteDraw, Tile, TileLayer, TileLayerDraw,
-    TileSet, Upscale,
+    Align, Camera2D, Flip, FrameStats, GlyphMode, RenderFrame, SortMode, SpriteDraw, TextDraw,
+    Tile, TileLayer, TileLayerDraw, TileSet, Upscale,
 };
 
-use crate::common::{EXPECT_RENDERER, Stage, near};
+use crate::common::{Art, EXPECT_RENDERER, Stage, near};
 
 /// Names the directory the scenes write their pixels to.
 const DIR_VAR: &str = "NADIR_GOLDEN_DIR";
@@ -664,5 +664,171 @@ scene! {
     /// 3 of 4, which is tile 8, past the last: tile 0.
     fn animated_tiles_350ms(stage: UVec2::new(64, 16), checks) {
         animated(stage, checks, 350, [1, 4, 0, 7])
+    }
+}
+
+/// The glyphs of the text scene's font: 3 × 5 on lines 7 high, each 1 below
+/// the line's top and 4 apart, but `J`, which reaches 1 left of the pen, and
+/// `O`, 5 × 5 with a black ring, as an outline would be. It has no `X`.
+const LETTERS: &[Art] = &[
+    Art {
+        id: 'A',
+        rows: &[".#.", "#.#", "###", "#.#", "#.#"],
+        offset: (0, 1),
+        advance: 4,
+    },
+    Art {
+        id: 'E',
+        rows: &["###", "#..", "##.", "#..", "###"],
+        offset: (0, 1),
+        advance: 4,
+    },
+    Art {
+        id: 'I',
+        rows: &["###", ".#.", ".#.", ".#.", "###"],
+        offset: (0, 1),
+        advance: 4,
+    },
+    Art {
+        id: 'J',
+        rows: &["..#", "..#", "..#", "#.#", ".#."],
+        offset: (-1, 1),
+        advance: 3,
+    },
+    Art {
+        id: 'O',
+        rows: &["ooooo", "o###o", "o###o", "o###o", "ooooo"],
+        offset: (0, 0),
+        advance: 6,
+    },
+    Art {
+        id: 'T',
+        rows: &["###", ".#.", ".#.", ".#.", ".#."],
+        offset: (0, 1),
+        advance: 4,
+    },
+    Art {
+        id: 'V',
+        rows: &["#.#", "#.#", "#.#", "#.#", ".#."],
+        offset: (0, 1),
+        advance: 4,
+    },
+    Art {
+        id: '?',
+        rows: &["##.", "..#", ".#.", "...", ".#."],
+        offset: (0, 1),
+        advance: 4,
+    },
+    Art {
+        id: ' ',
+        rows: &[],
+        offset: (0, 0),
+        advance: 2,
+    },
+];
+
+const PANEL: [u8; 4] = opaque(0, 0, 128);
+const INK: [u8; 4] = opaque(255, 255, 255);
+const GOLD: [u8; 4] = opaque(255, 255, 0);
+const CYAN: [u8; 4] = opaque(0, 255, 255);
+const RED: [u8; 4] = opaque(255, 0, 0);
+
+scene! {
+    /// Text in a pixel font: three lines aligned left, in the middle and
+    /// right in a box 40 wide, over a panel at the same depth; a paragraph
+    /// wrapped at 24, kerned, with a glyph that reaches left of its block; a
+    /// run of color; a character the font lacks, drawn as its fallback; a
+    /// glyph with a black ring drawn with its own colors, and as a mask; and
+    /// a text placed by its middle.
+    fn text_alignment(stage: UVec2::new(96, 64), checks) {
+        let font = stage.font("letters", 7, LETTERS, '?', &[('A', 'V', -1), ('V', 'A', -1)]);
+        let panel = stage.image("panel.qoi", 1, 1, &[PANEL]);
+        stage.finish();
+
+        let mut frame = RenderFrame::new();
+        frame.camera = Camera2D {
+            position: Vec2::new(48.0, 32.0),
+            ..Camera2D::default()
+        };
+        frame.clear = Color::rgb(DARK[0], DARK[1], DARK[2]);
+        let mut backing = SpriteDraw::new(panel, Vec2::new(4.0, 4.0), Vec2::new(40.0, 21.0));
+        backing.pivot = Vec2::ZERO;
+        backing.sort = SortMode::Fixed(0);
+        frame.sprites.push(backing);
+        let text = |x: f32, y: f32| {
+            let mut text = TextDraw::new(font, Vec2::new(x, y));
+            text.sort = SortMode::Fixed(0);
+            text
+        };
+        for (row, align) in [Align::Left, Align::Center, Align::Right].into_iter().enumerate() {
+            let mut line = text(4.0, 4.0 + 7.0 * row as f32);
+            line.layout.max_width = Some(40);
+            line.layout.align = align;
+            frame.texts.push(line, "TIE");
+        }
+        let mut paragraph = text(48.0, 4.0);
+        paragraph.layout.max_width = Some(24);
+        frame.texts.push(paragraph, "AVA TIE JAV");
+        frame.texts.push(text(48.0, 30.0), "T{c:#ff0}IE{/c}A");
+        frame.texts.push(text(4.0, 30.0), "AXE");
+        let mut ringed = text(4.0, 44.0);
+        ringed.glyphs = GlyphMode::Rgba;
+        frame.texts.push(ringed, "O");
+        let mut masked = text(12.0, 44.0);
+        masked.color = Color::rgb(0, 255, 255);
+        frame.texts.push(masked, "O");
+        let mut middle = text(72.0, 50.0);
+        middle.pivot = Vec2::new(0.5, 0.5);
+        middle.color = Color::rgb(255, 0, 0);
+        frame.texts.push(middle, "TI");
+
+        let (shot, stats) = shoot_counting(stage, &frame, UVec2::new(96, 64));
+        checks.that(
+            (stats.texts, stats.skipped_texts, stats.sprites) == (9, 0, 1),
+            &format!("{stats:?}"),
+        );
+        // Left: T's top at (4..7, 5), its stem at x 5; the panel beside it.
+        checks.pixel(&shot, (5, 5), INK);
+        checks.pixel(&shot, (5, 8), INK);
+        checks.pixel(&shot, (4, 8), PANEL);
+        checks.pixel(&shot, (3, 5), DARK);
+        // In the middle: (40 - 12) / 2 = 14 in.
+        checks.pixel(&shot, (19, 12), INK);
+        checks.pixel(&shot, (18, 14), PANEL);
+        // Right: 28 in, so E's right edge is the box's.
+        checks.pixel(&shot, (33, 19), INK);
+        checks.pixel(&shot, (42, 19), INK);
+        checks.pixel(&shot, (43, 19), PANEL);
+        // The paragraph: V kerned to 51, A to 54; the line breaks before
+        // JAV, whose J reaches to 47, left of the block.
+        checks.pixel(&shot, (51, 5), INK);
+        checks.pixel(&shot, (55, 5), INK);
+        checks.pixel(&shot, (70, 5), INK);
+        checks.pixel(&shot, (49, 12), INK);
+        checks.pixel(&shot, (47, 15), INK);
+        checks.pixel(&shot, (48, 15), DARK);
+        checks.pixel(&shot, (52, 12), INK);
+        // The run: I and E gold, T and A not.
+        checks.pixel(&shot, (49, 31), INK);
+        checks.pixel(&shot, (53, 31), GOLD);
+        checks.pixel(&shot, (57, 31), GOLD);
+        checks.pixel(&shot, (61, 31), INK);
+        // X is the fallback, `?`, 4 in, kerned with nothing.
+        checks.pixel(&shot, (8, 31), INK);
+        checks.pixel(&shot, (10, 31), DARK);
+        checks.pixel(&shot, (10, 32), INK);
+        checks.pixel(&shot, (13, 31), INK);
+        // The ring: black with its own colors, cyan as a mask.
+        checks.pixel(&shot, (4, 44), BLACK);
+        checks.pixel(&shot, (6, 46), INK);
+        checks.pixel(&shot, (12, 44), CYAN);
+        checks.pixel(&shot, (14, 46), CYAN);
+        // By its middle: 8 × 7 about (72, 50), the half pixel rounded up.
+        checks.pixel(&shot, (69, 47), RED);
+        checks.pixel(&shot, (73, 47), RED);
+        checks.pixel(&shot, (71, 47), DARK);
+        checks.pixel(&shot, (69, 50), RED);
+        checks.pixel(&shot, (67, 47), DARK);
+        shot
     }
 }

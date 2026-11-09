@@ -43,8 +43,8 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   The cook turns WAVs into the game's sound files and QOA, resampled to
   48 kHz, which the asset server loads. Windows and macOS have no audio
   output yet (roadmap M6.4, M6.5), so there the game is silent.
-- **Not built yet:** text, the debug tools, gamepads, hot reload, saves
-  and the Metal backend.
+- **Not built yet:** text on screen (it is drawn in the world), the debug
+  tools, gamepads, hot reload, saves and the Metal backend.
 
 ## Build and run
 

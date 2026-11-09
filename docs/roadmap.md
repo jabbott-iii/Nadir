@@ -4633,7 +4633,7 @@ by the batched sprite renderer.
     assertion of the glyphs' order dropped, and the target registered
     with another's function.
 
-- [ ] **M7.1 — render: bitmap text**
+- [x] **M7.1 — render: bitmap text**
   - Split on 2026-11-09 (ADR-0053): the font file's reader is M7.7's.
   - Note (from M5.5, ADR-0035): the cook writes each font as
     `atlas/<font>.font.kbj`, version 1 (`assets-and-codecs.md`, "Font
@@ -4658,12 +4658,62 @@ by the batched sprite renderer.
     `text` pipeline; the missing-glyph fallback.
   - Accept: text layout unit tests and goldens pass.
   - Verify: `cargo test -p nadir-render`; `cargo xtask golden`
+  - Built (ADR-0054): `Font`, the font file's asset, which lays text out
+    alone (`Font::layout`, `Font::measure`: wrapping, alignment, kerning,
+    the color markup, the fallback), and `Font::load_now_in`, which loads
+    it with its atlas and pages and checks they fit; `TextDraw`s in
+    `RenderFrame.texts`, a `TextList` of one buffer of characters; the
+    glyphs drawn in the world pass as sprite instances at their text's
+    layer and depth, after the sprites at a tie, with the new `text`
+    program (alpha × tint) or the sprite program (`GlyphMode::Rgba`, and a
+    page that failed); a text's atlas and pages found by their paths each
+    frame. `FrameStats` gains `texts`, `glyphs` and `skipped_texts`, and
+    `RenderFrame` is `#[non_exhaustive]`.
+  - Left to M7.8, added by ADR-0054 at the user's choice: text and sprites
+    on screen, the UI pass.
+  - Golden: `text_alignment`, drawn on llvmpipe and blessed on 2026-11-09
+    after the user looked at it; the 13 other scenes kept.
+  - Tests: `cargo test -p nadir-render` with `headless-test`, on llvmpipe
+    (the layout's 16, with a property test that layout and measure agree
+    over 3,000 texts; the font asset's 5; the text list's 4; the glyph
+    pass's 9, its logs counted once by the log's records; the plan's and
+    the batcher's; headless: modes, a fade, order against a sprite, pages
+    loading and failed, a font without its atlas, scopes, a reloaded page,
+    and the reload test with the text program); `cargo xtask golden`;
+    clippy for Linux, and x86_64 and aarch64 Windows and macOS, from
+    Linux; `cargo xtask ci`. Of 18 planted bugs, 10 passed the tests at
+    first and one more only the GPU's; all 11 fail the unit or headless
+    tests now.
+  - Not checked by a test: that a font that does not fit its atlas
+    allocates nothing each frame (render may not count allocations); its
+    error is a `Copy` value, formatted only when logged.
+
+- [ ] **M7.8 — render: the UI pass**
+  - Added on 2026-11-09 (ADR-0054): M7.1 draws texts in the world pass
+    only, and M7.2's debug UI and M9.2's menus need text and sprites on
+    screen.
+  - Note (from M7.1): `TextDraw` and `RenderFrame` are
+    `#[non_exhaustive]`, so a text's space, or a list of screen texts, can
+    come with no break. Glyphs are laid out on the CPU (`Font::layout`)
+    and drawn as sprite instances with the `text` program. The debug UI
+    wants clip rects for its scrolling windows (`debug-tools.md`), and
+    `render.md` a UI scale in whole virtual pixels or a free one.
+  - Depends: M7.1
+  - Do: `RenderFrame::ui_sprites` and screen-space texts, drawn after the
+    upscale at the window's resolution, by a UI scale; clip rects; the
+    mapping from window to UI coordinates.
+  - Accept: UI pass unit tests and goldens pass.
+  - Verify: `cargo test -p nadir-render`; `cargo xtask golden`
 
 - [ ] **M7.2 — debug: immediate-mode UI core**
   - Note (from M4.7): while a replay plays (`App::play_replay`), the
     actions come from it, not from the input. Capturing input for the debug
     UI must not stop a replayed tick.
-  - Depends: M7.1, M3.1
+  - Depends: M7.1, M7.8, M3.1
+  - Note (from M7.1): `Font::measure` sizes a row from a font, and
+    `PlacedGlyph::byte` places a caret in a laid-out text; `Escaped` keeps
+    a typed text's `{` from the markup, or `TextLayout::markup` turns it
+    off. Text on screen comes with M7.8 (ADR-0054).
   - Note (from M3.1): typed text does not exist yet. The platform needs
     `Event::Text`:
     - on Linux, an X input method: `XOpenIM`, `XCreateIC` and
@@ -4694,6 +4744,10 @@ by the batched sprite renderer.
     `crates/engine/src/app.rs`): hand them to the profiler's ring there.
   - Note (from M4.5): `FrameStats` has `tiles` and `chunks` beside the
     sprites and batches: the chunk draws count as draw calls too.
+  - Note (from M7.1): `FrameStats` has `texts`, `glyphs` and
+    `skipped_texts`; `batches` counts the draws of sprites and glyphs, so
+    the draw calls into the virtual image are `batches + chunks`. The
+    overlay's own text counts in `glyphs`, not `sprites`.
   - Depends: M7.2, M0.4
   - Do: the overlay; profiler ring, graph and scope tree; Chrome trace
     export; GL timer queries.
@@ -4840,7 +4894,10 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-scene -p nadir_engine`
 
 - [ ] **M9.2 — menu kit and game UI**
-  - Depends: M7.1, M8.4
+  - Depends: M7.1, M7.8, M8.4
+  - Note (from M7.1): text is drawn in the world pass only until M7.8, the
+    UI pass (ADR-0054); `Font` and `TextDraw` are reached as
+    `nadir::render::*`, not from `nadir::prelude`.
   - Note (from M3.1): `ActionMap::conflict` returns the first other slot
     whose binding shares a key or button. A swap is an `unbind` and a
     `bind`. `begin_capture` is this task's.

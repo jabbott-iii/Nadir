@@ -59,8 +59,8 @@
 //! builds do (M5.7). QOA's encoder and decoder are built (M6.1), and the
 //! sound file's (M6.8): the cook writes both, and the mixer plays QOA
 //! (M6.2); the game loads them as assets from M6.9. The font file's reader
-//! is built (M7.7), and the cook reads back each font file it writes; the
-//! game's font asset comes with M7.1.
+//! is built (M7.7), and the cook reads back each font file it writes;
+//! nadir-render's `Font` asset reads it (M7.1).
 //!
 //! [`pcm`] changes a sound's rate, with a windowed sinc that gives the same
 //! bits on every system and keeps a loop's seam ([`pcm::resample`]), and

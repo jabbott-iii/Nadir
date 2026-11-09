@@ -4614,3 +4614,113 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** M7.1 finds that render needs a field the font file
   lacks (then a version 2 of the file, with the cook's writer and M7.7's
   reader).
+
+## ADR-0054 — Bitmap text: the font asset finds its atlas by path, texts in a `TextList`, the world pass only
+
+- **Status:** Accepted: the user chose world-only text with a new task for
+  the UI pass, and `FrameStats`' new fields, on 2026-11-09; a design
+  critique led to the rest
+- **Date:** 2026-11-09
+- **Context:**
+  - M7.1 asks for the font asset, layout (wrap, align, kerning, color
+    markup), the `text` pipeline and the missing-glyph fallback, with
+    layout unit tests and goldens (ADR-0053 left it nadir-render's).
+  - The cook's font file (ADR-0035) names its atlas file and a sprite of it
+    whose frames are the glyphs. An asset's `decode` and `finalize` cannot
+    load or see another asset, so the font asset cannot hold its atlas or
+    its pages' textures.
+  - `render.md` planned `RenderFrame.texts: Vec<TextDraw>`, in world or
+    screen space, with UI drawn after the upscale at the window's
+    resolution. No roadmap task builds that UI pass, which M7.2's debug UI
+    and M9.2's menus both need.
+  - Every `RenderFrame` list is cleared and reused: a `String` in each
+    `TextDraw` would allocate whenever the list is filled again.
+  - The sort key puts a texture's handle bits above the submission order,
+    so at one depth a glyph could draw behind or in front of a sprite by
+    which texture was loaded first.
+  - `FrameStats` is built by struct literal in two tests outside render
+    (nadir_engine's `app.rs`, nadir-bench's `sprite.rs`); the sandbox's
+    uses `..`. Before 1.0 a minor version may break an API, recorded here
+    (`docs/05-release.md`).
+- **Decision:**
+  - **The font asset** is `Font`, the font file read with
+    `nadir_codec::font::parse`: data only, no placeholder. It refuses an
+    atlas path that is not an atlas file's, and offsets, advances, kerning
+    or a line height past ±32767 (an `i16`), so that a line's sums cannot
+    overflow. It lays text out alone (`Font::layout`, `Font::measure`).
+  - **The atlas by path, each frame:** the renderer finds a text's atlas,
+    the font's sprite in it, and the pages' textures by their paths in the
+    asset server, so that a reload of any of them draws from the next
+    frame with no step of the game's. `Font::load_now_in` loads the font,
+    its atlas and its pages, and checks that the atlas has the sprite with
+    every frame the glyphs name. A text whose font, atlas or sprite is not
+    ready is skipped; one whose atlas or page is not loaded at all, or
+    does not fit, is logged once a font; each character a font lacks is
+    logged once a font.
+  - **Texts in a `TextList`:** `RenderFrame.texts` holds the texts in one
+    buffer of characters, `push(draw, &str)` and `write(draw,
+    format_args!(…))`, cleared with the frame: a frame that writes the
+    texts of the last allocates nothing. `TextDraw` (font, position,
+    pivot, layout, color, glyph mode, layer, sort) is `Copy`. `RenderFrame`
+    becomes `#[non_exhaustive]`, so that the fields of later tasks break
+    nothing: nothing outside render built it by literal.
+  - **The world pass only:** a text's glyphs are sprites of its layer at its
+    depth (its pivot's y, or its fixed depth), unrotated, their corners on
+    whole virtual pixels: the block's corner is moved by whole pixels from
+    the pivot. A new task, M7.8, builds the UI pass (UI sprites,
+    screen-space texts, clip rects, the UI scale), and M7.2 and M9.2
+    depend on it.
+  - **Order:** at one layer and depth, every sprite, then each text's
+    glyphs in the order the texts were pushed; within those, by texture,
+    then submission order. A tile layer still goes before them all.
+  - **Layout:** whole pixels from the block's top-left; `\n` breaks and a
+    `\r` takes no room; the pen moves by the kerning of the pair before a
+    glyph, never across a line; greedy wrapping at the last run of spaces
+    (U+0020) before a character that would pass `max_width`, the run
+    dropped, a lone word broken between its characters with one at least a
+    line; spaces at a line's end take no room; alignment within the
+    widest line or `max_width`, the odd pixel of the middle to the right.
+    A character the font lacks draws the fallback with no kerning; a
+    control character the font lacks takes no room; a no-break space the
+    font lacks is its space, and never a break. Markup: `{c:#rgb}`,
+    `#rgba`, `#rrggbb`, `#rrggbbaa` start a run, `{/c}` ends it, `{{` is a
+    `{`, anything else is drawn as written; a run's alpha is multiplied by
+    the text's; `Escaped` doubles the `{` of text written into markup;
+    `TextLayout::markup` turns it off.
+  - **The `text` program** (`Program::Text`): the sprite's instances and
+    vertex shader, and the texture's alpha as a mask in the tint's color.
+    `GlyphMode::Rgba` draws a text's glyphs with the sprite program, for
+    pages whose colors matter (BMFont's `alphaChnl=2` outlines); so does a
+    page that failed, which shows the placeholder.
+  - **`FrameStats`** gains `texts`, `glyphs` and `skipped_texts`;
+    `batches` counts the draws of sprites and glyphs together, and
+    `skipped` the glyphs whose page is not ready with the sprites. The two
+    test literals outside render gain the fields.
+- **Consequences:**
+  - A game loads a font with `Font::load_now_in`, and pushes texts into
+    `RenderFrame.texts`; `nadir::render` reaches the types, which are not in
+    `nadir::prelude`.
+  - Each frame, each text costs a hash lookup of its atlas and of each
+    page it uses, a binary search of its sprite, and a binary search a
+    glyph; the lists are reused.
+  - Text drawn on screen waits for M7.8: until then a HUD's text is placed
+    in the world, under the camera's zoom and shake.
+  - The texture bits of a glyph's key still group a text's glyphs by page,
+    so the glyphs of a two-page font that overlap may draw out of their
+    order; a glyph rarely overlaps another.
+- **Alternatives considered:**
+  - A bound font, made by the game from the font, its atlas and its pages,
+    kept in a store given to `render` beside `TileLayers`: `render`'s
+    signature and the facade change, and the binding goes stale on a
+    reload.
+  - A version 2 font file holding its pages and regions: the cook, the
+    codec and render again, and the atlas's frames twice.
+  - A `String` or `Cow<'static, str>` in each `TextDraw`: an allocation a
+    text a frame, or for each formatted one.
+  - Screen space in virtual pixels now (`space: World | Screen`): a third
+    kind of placement before the UI pass at the window's resolution.
+  - Glyphs counted as sprites: a stats overlay's own text would change the
+    sprite count it shows.
+- **Revisit when:** a game draws text whose glyphs on two pages overlap
+  (then order a text's glyphs by their place in it, at the cost of a batch
+  per page change), or M7.8 builds the UI pass (then texts gain a space).

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 //! The 2D renderer of the Nadir engine: y-sorted, batched sprites, tile
-//! layers drawn in chunks, a pixel-perfect camera, and the texture and
-//! atlas assets.
+//! layers drawn in chunks, bitmap text, a pixel-perfect camera, and the
+//! texture, atlas and font assets.
 //!
 //! It draws with [`nadir_gfx`] and finds its textures in a
 //! [`nadir_assets::AssetServer`]. It knows nothing of entities: each frame
@@ -49,8 +49,15 @@
 //!
 //! **What a frame draws.** A [`RenderFrame`] holds the [`Camera2D`], the
 //! clear color, the [`SpriteDraw`]s (each with a [`SortMode`] and a
-//! [`Flip`]), the [`TileLayerDraw`]s, and the time that animated tiles
-//! show.
+//! [`Flip`]), the [`TileLayerDraw`]s, the texts in a [`TextList`], and the
+//! time that animated tiles show.
+//!
+//! **Text.** A [`TextDraw`] draws a text in a [`Font`]: laid out with a
+//! [`TextLayout`] (a width to wrap at, an [`Align`]ment, and the color
+//! markup, which [`Escaped`] keeps from a player's text), in a color, its
+//! glyphs a mask or their own colors ([`GlyphMode`]). [`Font::layout`]
+//! gives each [`PlacedGlyph`] of a text, and [`Font::measure`] its block,
+//! with no GPU.
 //!
 //! **Tiles.** A [`TileLayer`] is a grid of cells, each empty or a [`Tile`]
 //! of its [`TileSet`]. The game keeps its layers in a [`TileLayers`] store,
@@ -65,6 +72,10 @@
 //!   [`AtlasPage`]s, and its [`AtlasSprite`]s by name, each with its
 //!   [`AtlasFrame`]s and its [`AtlasClip`]s of [`AtlasClipFrame`]s. It
 //!   needs no GPU.
+//! - [`Font`]: a cooked font file, `atlas/<font>.font.kbj`: its metrics, its
+//!   [`Glyph`]s by character, each a frame of a sprite of its atlas, and its
+//!   kerning. It needs no GPU; [`Font::load_now_in`] loads it with its atlas
+//!   and pages, which drawing it needs.
 //!
 //! **For measuring without a GPU:** [`SpriteBatcher`], the renderer's work
 //! on the CPU for sprites, and [`TileLayer::pack_chunk`], for tiles. Their
@@ -156,6 +167,42 @@
 //! }
 //! ```
 //!
+//! # Example: a text
+//!
+//! A font is loaded with its atlas and the atlas's pages, which its glyphs
+//! are drawn from. Each frame, texts are pushed into the frame's
+//! [`TextList`], formatted ones with no allocation once it is warm:
+//!
+//! ```
+//! use nadir_assets::{AssetError, AssetServer, FinalizeCtx, Handle, Scope};
+//! use nadir_core::{Color, Vec2};
+//! use nadir_render::{Align, Font, RenderFrame, TextDraw};
+//!
+//! /// Loads the font the cook made of `fonts/ui.fnt`, and the atlas and
+//! /// pages of its glyphs.
+//! fn ui_font(server: &mut AssetServer) -> Result<Handle<Font>, AssetError> {
+//!     let mut ctx = FinalizeCtx::new();
+//!     Font::load_now_in(server, "atlas/fonts/ui.font.kbj", Scope::Global, &mut ctx)
+//! }
+//!
+//! /// The score, centred at the top of a panel 120 wide at (20, 10), in
+//! /// layer 5, above the world's sprites.
+//! fn score(frame: &mut RenderFrame, font: Handle<Font>, score: u32) {
+//!     let mut text = TextDraw::new(font, Vec2::new(20.0, 10.0));
+//!     text.layout.max_width = Some(120);
+//!     text.layout.align = Align::Center;
+//!     text.layer = 5;
+//!     frame.texts.write(text, format_args!("Score {{c:#ff0}}{score}{{/c}}"));
+//! }
+//!
+//! let mut frame = RenderFrame::new();
+//! let font = Handle::new(nadir_core::GenIndex::new(0, std::num::NonZeroU32::MIN));
+//! score(&mut frame, font, 120);
+//! let (_, text) = frame.texts.iter().next().expect("a text");
+//! assert_eq!(text, "Score {c:#ff0}120{/c}");
+//! # let _ = (ui_font, Color::WHITE);
+//! ```
+//!
 //! # Example: reloading a shader
 //!
 //! The renderer reads no file. A game that watches its shader files reads
@@ -207,11 +254,14 @@
 //! the order they were added in, so the same frame draws the same way
 //! every time. A tile layer is drawn at its [`TileLayerDraw::layer`] and
 //! [`TileLayerDraw::depth`], before the sprites of the same layer and
-//! depth.
+//! depth. A text's glyphs are drawn at its layer, and at its depth, its
+//! position's y or its fixed depth: at one depth, after every sprite, the
+//! texts in the order they were pushed.
 //!
-//! Consecutive sprites of one texture are one instanced draw. Y-sorting
-//! interleaves textures, so sprites that share an atlas page draw in fewer
-//! batches ([`FrameStats::batches`]).
+//! Consecutive sprites of one texture are one instanced draw, and so are
+//! consecutive glyphs of one page. Y-sorting interleaves textures, so
+//! sprites that share an atlas page draw in fewer batches
+//! ([`FrameStats::batches`]).
 //!
 //! # Pixel-perfect mode
 //!
@@ -221,8 +271,8 @@
 //! centred, with bars of the clear color around it; an output smaller than
 //! the image crops it. The camera's zoom is rounded to a whole number, at
 //! least 1. The view's top-left corner, the top-left corner of each
-//! unrotated sprite, and each tile layer's origin are moved to whole
-//! virtual pixels, so that texels land on whole pixels (ADR-0018).
+//! unrotated sprite and glyph, and each tile layer's origin are moved to
+//! whole virtual pixels, so that texels land on whole pixels (ADR-0018).
 //!
 //! # Textures that are not ready
 //!
@@ -232,7 +282,13 @@
 //! `uv`, when the server shows placeholders
 //! ([`OnFailure::Placeholder`](nadir_assets::OnFailure::Placeholder));
 //! otherwise it is skipped too. A tile layer does the same with its tile
-//! set's texture.
+//! set's texture, and a text's glyphs with their page: a glyph whose page
+//! is not ready, or was never loaded, is not drawn, and is counted in
+//! [`FrameStats::skipped`]. A text whose font, atlas or sprite is not ready
+//! or does not fit is not drawn at all ([`FrameStats::skipped_texts`]). An
+//! atlas or a page never loaded, and an atlas that lacks the glyphs'
+//! frames, are logged once for the font. A character a font lacks draws
+//! the font's fallback glyph, and is logged once.
 //!
 //! # Tile layers
 //!
@@ -254,26 +310,31 @@
 //! compile or link, or the device refuses, and keeps the program it had.
 //! [`TileLayer::new`] panics on a tile size that is not a finite
 //! number above 0, and [`TileLayer::set`] on a cell outside the layer.
+//! [`Font::load_now_in`] fails with the font's or its atlas's
+//! [`AssetError`](nadir_assets::AssetError), or when the atlas lacks the
+//! glyphs' frames.
 //!
 //! # Allocation and threading
 //!
-//! The renderer's lists and buffers are reused from frame to frame. Its
-//! sprite instance buffer grows by doubling and never shrinks; a steady
-//! frame allocates nothing on the heap. The renderer runs on the device's
+//! The renderer's lists and buffers are reused from frame to frame, the
+//! frame's texts' one buffer of characters too. Its instance buffer, of
+//! sprites and glyphs, grows by doubling and never shrinks; a steady frame
+//! allocates nothing on the heap. The renderer runs on the device's
 //! thread, as the [`nadir_gfx::Device`] stays there.
 //!
 //! # Platforms
 //!
 //! It draws wherever `nadir-gfx` has a device: on Linux so far. Windows
 //! and macOS have no OpenGL context yet (roadmap M2.6 and M2.7). What needs
-//! no GPU, such as frames, tile layers, atlases and the [`SpriteBatcher`],
-//! works on all three.
+//! no GPU, such as frames, tile layers, atlases, fonts and their layout, and
+//! the [`SpriteBatcher`], works on all three.
 //!
 //! # Not built yet
 //!
-//! Bitmap text (roadmap M7.1), debug draw (M7.6), UI sprites, post effects,
-//! camera rotation, the smooth-camera and native-resolution modes, and the
-//! Metal shaders (M10.3).
+//! Text and sprites on screen, at the window's resolution (the UI pass,
+//! roadmap M7.8), debug draw (M7.6), post effects, camera rotation, the
+//! smooth-camera and native-resolution modes, and the Metal shaders
+//! (M10.3).
 //!
 //! # Features
 //!
@@ -287,12 +348,15 @@ mod atlas;
 mod batcher;
 mod chunks;
 mod error;
+mod font;
 mod frame;
+mod glyphs;
 mod instance;
 mod plan;
 mod renderer;
 mod shader;
 mod sort;
+mod text;
 mod texture;
 mod tiles;
 mod view;
@@ -305,10 +369,12 @@ struct ReadmeDoctests;
 pub use atlas::{Atlas, AtlasClip, AtlasClipFrame, AtlasFrame, AtlasPage, AtlasSprite};
 pub use batcher::SpriteBatcher;
 pub use error::RenderError;
-pub use frame::{Camera2D, Flip, RenderFrame, SortMode, SpriteDraw};
+pub use font::{Font, Glyph};
+pub use frame::{Camera2D, Flip, GlyphMode, RenderFrame, SortMode, SpriteDraw, TextDraw, TextList};
 pub use instance::SPRITE_INSTANCE_FLOATS;
 pub use renderer::{FrameStats, Output, RenderConfig, Renderer};
 pub use shader::{Program, SHADER_DIR};
+pub use text::{Align, Escaped, PlacedGlyph, TextLayout};
 pub use texture::{DecodedTexture, Texture};
 pub use tiles::{TILE_INSTANCE_FLOATS, Tile, TileLayer, TileLayerDraw, TileLayers, TileSet};
 pub use view::Upscale;

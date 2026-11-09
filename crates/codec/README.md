@@ -26,7 +26,7 @@ Formats made for the game, which reads them at run time:
   the atlas pages and which clips they make.
 - **The cook's font file**, a bitmap font's metrics, its glyphs by
   character as frames of a sprite of the atlas, and its kerning: the cook
-  reads back each one it writes, and the game's font asset will read it
+  reads back each one it writes, and nadir-render's `Font` asset reads it
   (roadmap M7.1).
 - **The level file and the prefab file**, which nadir-scene loads as
   assets (`Level`, and prefabs through `PrefabLibrary::load`), and the

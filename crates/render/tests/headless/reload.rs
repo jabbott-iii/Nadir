@@ -19,34 +19,43 @@ use std::fs;
 use std::path::Path;
 
 use nadir_assets::{Handle, LoadState};
-use nadir_core::{IRect, IVec2, UVec2, Vec2};
+use nadir_core::{Color, IRect, IVec2, UVec2, Vec2};
 use nadir_gfx::{GfxError, ResourceKind, ShaderSource, ShaderStage};
 use nadir_render::{
-    Camera2D, Program, RenderError, RenderFrame, SHADER_DIR, SpriteDraw, Texture, Tile, TileLayer,
-    TileLayerDraw, TileSet,
+    Camera2D, Font, Program, RenderError, RenderFrame, SHADER_DIR, SpriteDraw, TextDraw, Texture,
+    Tile, TileLayer, TileLayerDraw, TileSet,
 };
 
-use crate::common::{Stage, solid, write_image};
+use crate::common::{Art, Stage, solid, write_image};
 
 const RED: [u8; 4] = [255, 0, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
 const CLEAR: [u8; 4] = [0, 0, 0, 255];
 
-/// The view: a sprite over x 0 to 4, a tile layer over x 4 to 8, and the
-/// clear color over x 8 to 12.
-const SIZE: UVec2 = UVec2::new(12, 4);
+/// The view: a sprite over x 0 to 4, a tile layer over x 4 to 8, a text
+/// over x 8 to 12, and the clear color over x 12 to 16.
+const SIZE: UVec2 = UVec2::new(16, 4);
 
 /// What a scene draws with.
 struct Scene {
     sprite: Handle<Texture>,
     tiles: Handle<TileLayer>,
+    font: Handle<Font>,
 }
 
-/// A stage for `test`, with a red sprite and a layer of one red tile.
+/// A stage for `test`, with a red sprite, a layer of one red tile, and a
+/// font of one white glyph, a block, drawn red.
 fn scene(test: &str) -> Option<(Stage, Scene)> {
     let mut stage = Stage::new(test, SIZE)?;
     let sprite = stage.image("sprite.qoi", 4, 4, &solid(16, RED));
     let texture = stage.image("tiles.qoi", 4, 4, &solid(16, RED));
+    let block = Art {
+        id: '#',
+        rows: &["####"; 4],
+        offset: (0, 0),
+        advance: 4,
+    };
+    let font = stage.font("block", 4, &[block], '#', &[]);
     stage.finish();
     let set = TileSet {
         texture,
@@ -56,12 +65,19 @@ fn scene(test: &str) -> Option<(Stage, Scene)> {
     let mut layer = TileLayer::new(set, UVec2::ONE, 4.0, Vec2::new(4.0, 0.0));
     layer.set(IVec2::ZERO, Some(Tile::new(0)));
     let tiles = stage.tiles.add(layer);
-    Some((stage, Scene { sprite, tiles }))
+    Some((
+        stage,
+        Scene {
+            sprite,
+            tiles,
+            font,
+        },
+    ))
 }
 
-/// Draws the scene, and gives the colors of the sprite, the tile and the
-/// clear color.
-fn draw(stage: &mut Stage, scene: &Scene) -> [[u8; 4]; 3] {
+/// Draws the scene, and gives the colors of the sprite, the tile, the text
+/// and the clear color.
+fn draw(stage: &mut Stage, scene: &Scene) -> [[u8; 4]; 4] {
     let mut frame = RenderFrame::new();
     frame.camera = Camera2D {
         position: SIZE.as_vec2() * 0.5,
@@ -73,9 +89,12 @@ fn draw(stage: &mut Stage, scene: &Scene) -> [[u8; 4]; 3] {
         Vec2::splat(4.0),
     ));
     frame.tile_layers.push(TileLayerDraw::new(scene.tiles));
+    let mut text = TextDraw::new(scene.font, Vec2::new(8.0, 0.0));
+    text.color = Color::rgb(255, 0, 0);
+    frame.texts.push(text, "#");
     let (stats, pixels) = stage.draw(&frame, SIZE);
-    assert_eq!((stats.sprites, stats.tiles), (1, 1));
-    [2, 6, 10].map(|x| pixels[(2 * SIZE.x + x) as usize])
+    assert_eq!((stats.sprites, stats.tiles, stats.glyphs), (1, 1, 1));
+    [2, 6, 10, 14].map(|x| pixels[(2 * SIZE.x + x) as usize])
 }
 
 /// A program's sources, read from its files under `SHADER_DIR`.
@@ -118,22 +137,23 @@ fn a_reloaded_program_draws_with_its_new_sources_from_the_next_frame() {
     // What each program's swap turns blue: the blit swaps the whole image,
     // whose clear color is the same either way.
     let expected = [
-        (Program::Sprite, [BLUE, RED, CLEAR]),
-        (Program::TileChunk, [RED, BLUE, CLEAR]),
-        (Program::Blit, [BLUE, BLUE, CLEAR]),
+        (Program::Sprite, [BLUE, RED, RED, CLEAR]),
+        (Program::TileChunk, [RED, BLUE, RED, CLEAR]),
+        (Program::Blit, [BLUE, BLUE, BLUE, CLEAR]),
+        (Program::Text, [RED, RED, BLUE, CLEAR]),
     ];
     assert_eq!(expected.len(), Program::ALL.len());
     for (program, after) in expected {
         let Some((mut stage, scene)) = scene(&format!("reload_{}", program.name())) else {
             return;
         };
-        assert_eq!(draw(&mut stage, &scene), [RED, RED, CLEAR]);
+        assert_eq!(draw(&mut stage, &scene), [RED, RED, RED, CLEAR]);
         let (vertex, fragment) = sources(program);
         reload(&mut stage, program, &vertex, &swapped(&fragment)).expect("a program");
         assert_eq!(draw(&mut stage, &scene), after, "{}", program.name());
         // Its files as they are bring it back.
         reload(&mut stage, program, &vertex, &fragment).expect("a program");
-        assert_eq!(draw(&mut stage, &scene), [RED, RED, CLEAR]);
+        assert_eq!(draw(&mut stage, &scene), [RED, RED, RED, CLEAR]);
     }
 }
 
@@ -145,7 +165,7 @@ fn sources_that_do_not_build_are_refused_and_the_last_program_stays() {
     let (vertex, fragment) = sources(Program::Sprite);
     reload(&mut stage, Program::Sprite, &vertex, &swapped(&fragment)).expect("a program");
     let last = draw(&mut stage, &scene);
-    assert_eq!(last, [BLUE, RED, CLEAR]);
+    assert_eq!(last, [BLUE, RED, RED, CLEAR]);
 
     let broken_fragment = fragment.replace("out_color = texture(", "out_color = = texture(");
     let broken_vertex = vertex.replace("v_color = color;", "v_color = color");
@@ -184,7 +204,7 @@ fn sources_of_another_interface_are_refused_and_the_last_program_stays() {
     let (vertex, fragment) = sources(Program::TileChunk);
     reload(&mut stage, Program::TileChunk, &vertex, &swapped(&fragment)).expect("a program");
     let last = draw(&mut stage, &scene);
-    assert_eq!(last, [RED, BLUE, CLEAR]);
+    assert_eq!(last, [RED, BLUE, RED, CLEAR]);
 
     let moved = vertex.replace(
         "location = 2) in vec2 corner",
@@ -216,11 +236,30 @@ fn sources_of_another_interface_are_refused_and_the_last_program_stays() {
 }
 
 #[test]
+fn a_font_s_page_reloaded_behind_its_handle_draws_from_the_next_frame() {
+    let Some((mut stage, scene)) = scene("reload_font_page") else {
+        return;
+    };
+    assert_eq!(draw(&mut stage, &scene), [RED, RED, RED, CLEAR]);
+    // The block's page, 5 × 4, made clear: the glyph has no pixels left.
+    write_image(
+        &stage.root.join("atlas/block_0.qoi"),
+        5,
+        4,
+        &solid(20, [0; 4]),
+    );
+    assert_eq!(stage.server.reload("atlas/block_0.qoi"), 1);
+    assert_eq!(draw(&mut stage, &scene), [RED, RED, RED, CLEAR]);
+    stage.finish();
+    assert_eq!(draw(&mut stage, &scene), [RED, RED, CLEAR, CLEAR]);
+}
+
+#[test]
 fn a_texture_reloaded_behind_its_handle_draws_its_new_texels() {
     let Some((mut stage, scene)) = scene("reload_texture") else {
         return;
     };
-    assert_eq!(draw(&mut stage, &scene), [RED, RED, CLEAR]);
+    assert_eq!(draw(&mut stage, &scene), [RED, RED, RED, CLEAR]);
     let old = stage.server.get(scene.sprite).map(Texture::id);
     // Of another size: the sprite's uv spans all of it either way.
     write_image(&stage.root.join("sprite.qoi"), 2, 2, &solid(4, BLUE));
@@ -228,10 +267,10 @@ fn a_texture_reloaded_behind_its_handle_draws_its_new_texels() {
     assert_eq!(stage.server.reload("sprite.qoi"), 1);
     assert_eq!(stage.server.reload("tiles.qoi"), 1);
     // Until a finish makes them, the old texels are drawn.
-    assert_eq!(draw(&mut stage, &scene), [RED, RED, CLEAR]);
+    assert_eq!(draw(&mut stage, &scene), [RED, RED, RED, CLEAR]);
 
     stage.finish();
-    assert_eq!(draw(&mut stage, &scene), [BLUE, BLUE, CLEAR]);
+    assert_eq!(draw(&mut stage, &scene), [BLUE, BLUE, RED, CLEAR]);
     let texture = *stage.server.get(scene.sprite).expect("the new texture");
     assert_eq!(stage.server.state(scene.sprite), Some(LoadState::Loaded));
     assert_eq!(texture.size(), UVec2::new(2, 2));
@@ -252,7 +291,7 @@ fn a_texture_reloaded_behind_its_handle_draws_its_new_texels() {
     fs::write(stage.root.join("sprite.qoi"), b"not an image").expect("write the file");
     assert_eq!(stage.server.reload("sprite.qoi"), 1);
     stage.finish();
-    assert_eq!(draw(&mut stage, &scene), [BLUE, BLUE, CLEAR]);
+    assert_eq!(draw(&mut stage, &scene), [BLUE, BLUE, RED, CLEAR]);
     assert_eq!(
         stage.server.get(scene.sprite).map(Texture::id),
         Some(texture.id())

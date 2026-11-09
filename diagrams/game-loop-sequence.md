@@ -684,8 +684,9 @@ second.
 
 ## Not shown, because it is not built yet
 
-- Gamepads (M8), bitmap text (M7.1), and the debug UI, profiler and console
-  (M7.2 to M7.6).
+- Gamepads (M8), text on screen (the UI pass, M7.8), and the debug UI,
+  profiler and console (M7.2 to M7.6). Text in the world is the renderer's,
+  from the frame's `TextList`, within its draw.
 - Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).
   There the loop runs as section 3 shows, with no `Graphics`.
 - Sound on Windows and macOS (M6.4, M6.5): there `open_audio` fails, and

@@ -42,8 +42,12 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
 - M5.5: the atlas's clips, and flips about the pivot (ADR-0035), below
 - M5.17: a program rebuilt from new sources, and a texture reloaded behind
   its handle drawn (ADR-0042), in "Reloading" below
+- M7.1: bitmap text in the world (ADR-0054), in "Text" below: the `Font`
+  asset, layout, the `text` program, the fallback, and the golden scene
+  `text_alignment`
 - Not built yet:
-  - text, UI sprites, debug draw and post
+  - UI sprites and screen-space text (the UI pass, M7.8), debug draw and
+    post
   - the smooth-camera and native-resolution modes
   - the Metal sources (M10.3)
 
@@ -62,7 +66,8 @@ impl Renderer {
 }
 pub struct Output { pub target: PassTarget, pub size: UVec2 }      // the caller knows the window's size
 pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
-                        pub tiles: u32, pub chunks: u32 }
+                        pub tiles: u32, pub chunks: u32,
+                        pub texts: u32, pub glyphs: u32, pub skipped_texts: u32 }  // texts: M7.1
 ```
 
 - Textures are looked up in the `AssetServer`.
@@ -70,8 +75,10 @@ pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
   - One whose texture failed draws all of its placeholder, uv 0 to 1,
     whatever its `uv`, when the server shows placeholders. Without them
     (`OnFailure::Nothing`) it is skipped too.
-- `RenderFrame` so far has `camera`, `clear`, `sprites`, and since M4.5
-  `tile_layers` and `time`. The other fields below come with their tasks.
+- `RenderFrame` so far has `camera`, `clear`, `sprites`, since M4.5
+  `tile_layers` and `time`, and since M7.1 `texts`, a `TextList`
+  (ADR-0054). The other fields below come with their tasks: it is
+  `#[non_exhaustive]` since M7.1, made with `RenderFrame::new`.
   `Camera2D` has no rotation yet.
 - **`Atlas`** (M5.9, ADR-0033; clips in M5.5, ADR-0035): the asset of a
   cooked atlas file, `atlas/<group>.kbj`, version 2, read with
@@ -110,10 +117,15 @@ pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
   - Sprites that share a page share a texture, so at the same feet y their
     order falls to the order they were drawn in, not to their textures'
     handles (see "Sort keys").
-- `FrameStats.batches` counts the sprite draws made, a batch split by a
-  tile layer counting twice. `tiles` and `chunks` count the tiles and the
-  chunk draws. `SpriteBatcher::stats` knows no tile layers: its `batches`
-  is before any split, and its `tiles` and `chunks` are 0.
+- `FrameStats.batches` counts the draws of sprites and of texts' glyphs,
+  a batch split by a tile layer counting twice. `tiles` and `chunks` count
+  the tiles and the chunk draws, so a frame's draw calls into the virtual
+  image are `batches + chunks`. `texts` counts the texts laid out,
+  `glyphs` their glyph quads drawn, and `skipped_texts` the texts not laid
+  out; `skipped` counts the glyphs whose page is not ready with the
+  sprites. `SpriteBatcher::stats` knows no tile layers or texts: its
+  `batches` is before any split, and its `tiles`, `chunks`, `texts` and
+  `skipped_texts` are 0.
 
 ## Input: `RenderFrame`
 
@@ -126,8 +138,8 @@ pub struct RenderFrame {
     pub clear: Color,
     pub sprites: Vec<SpriteDraw>,         // world-space sprites
     pub tile_layers: Vec<TileLayerDraw>,  // layers in the TileLayers store + layer/depth info
-    pub ui_sprites: Vec<SpriteDraw>,      // screen-space
-    pub texts: Vec<TextDraw>,             // world or screen space
+    pub ui_sprites: Vec<SpriteDraw>,      // screen-space (M7.8)
+    pub texts: TextList,                  // world space; screen space with M7.8 (ADR-0054)
     pub debug: DebugDrawList,             // lines/rects/circles, cleared per frame
     pub post: PostSettings,               // fade, tint, color grade LUT handle (optional)
     pub time: Duration,                   // for animated tiles/shaders (and the facade's clips, ADR-0024); whole ms reach the shader
@@ -169,8 +181,12 @@ Every world sprite gets a `u64` key, and the keys are sorted with
   with equal depth, which avoids flicker between frames. Only the low 8 bits
   are used; that's acceptable because exact ties are rare and order within a
   tie is cosmetic.
-  - As built, the renderer sorts `(key >> 8, submission index)` pairs, so
-    the full index breaks ties instead of `seq`.
+  - As built, the renderer sorts by the layer and depth (`key >> 24`),
+    then a group, 0 for a sprite and its text's place plus 1 for a glyph,
+    then the texture bits, then the submission index, so the full index
+    breaks ties instead of `seq` (M7.1, ADR-0054). At one layer and depth,
+    every sprite then goes before every text's glyphs, whatever their
+    textures, and the texts keep the order they were pushed in.
   - Ties then keep their submission order exactly, even when sprites are
     added before them: sprites submitted at 255 and 256 have `seq` 255 and
     0.
@@ -363,7 +379,7 @@ As built (M5.17, ADR-0042):
 ```rust
 pub const SHADER_DIR: &str;                  // this crate's shaders/, where it was compiled
 #[non_exhaustive]
-pub enum Program { Sprite, TileChunk, Blit }
+pub enum Program { Sprite, TileChunk, Blit, Text }   // Text: M7.1
 impl Program {
     pub const ALL: &'static [Program];
     pub fn name(self) -> &'static str;           // its folder, and its pipeline's label
@@ -444,19 +460,91 @@ impl Program {
 
 ## Text
 
-- The font asset is a BMFont (text format), cooked into our font asset:
-  glyph metrics, kerning pairs and atlas pages.
-- Layout:
-  - left/center/right alignment
-  - wrap at a max width (word boundaries, falling back to character
-    boundaries)
-  - `\n` line breaks
-  - per-run color via a tiny markup: `{c:#ff0}text{/c}`
-- A missing glyph renders the font file's `fallback`: BMFont's fallback
-  glyph if the font has one, else its `?` (`assets-and-codecs.md`, "Font
-  file"), and logs once per character.
-- Glyph quads go through the `text` pipeline (alpha mask × tint). For pixel
-  fonts, the font texture can also be RGBA and use the sprite pipeline.
+As built in M7.1 (ADR-0054), in the world pass. Screen-space text, at the
+window's resolution after the upscale, comes with the UI pass (M7.8).
+
+```rust
+impl Font {                                  // the asset of atlas/<font>.font.kbj
+    pub fn load_now_in(server: &mut AssetServer, path: &str, scope: Scope,
+                       ctx: &mut FinalizeCtx<'_>) -> Result<Handle<Font>, AssetError>;  // font, atlas, pages
+    pub fn face(&self) -> &str; size() -> i32; line_height() -> u32; base() -> u32;
+    pub fn atlas(&self) -> &str; sprite() -> &str;          // where its glyphs' frames are
+    pub fn glyph(&self, c: char) -> Option<Glyph>; fallback() -> Glyph; kerning(a, b) -> i32;
+    pub fn measure(&self, text: &str, layout: &TextLayout) -> UVec2;
+    pub fn layout(&self, text: &str, layout: &TextLayout, out: &mut Vec<PlacedGlyph>) -> UVec2;
+}
+impl Glyph { frame() -> Option<usize>, offset() -> IVec2, advance() -> i32 }
+#[non_exhaustive] pub struct TextLayout { pub max_width: Option<u32>, pub align: Align, pub markup: bool }
+pub enum Align { Left, Center, Right }
+#[non_exhaustive] pub struct PlacedGlyph { pub character: char, pub byte: usize, pub glyph: Glyph,
+                                           pub position: IVec2, pub run: Option<Color>,
+                                           pub missing: bool, pub line: u32 }
+pub struct Escaped<'a>(pub &'a str);         // Display doubles each `{`
+
+#[non_exhaustive] #[derive(Clone, Copy)]
+pub struct TextDraw { pub font: Handle<Font>, pub position: Vec2, pub pivot: Vec2 /* (0, 0) */,
+                      pub layout: TextLayout, pub color: Color, pub glyphs: GlyphMode /* Mask */,
+                      pub layer: u8, pub sort: SortMode }
+pub enum GlyphMode { Mask, Rgba }
+impl TextList { push(draw, &str), write(draw, fmt::Arguments), iter() -> (&TextDraw, &str),
+                len(), is_empty(), clear() }
+```
+
+- **The font asset:** `Font` is the cook's font file, read with
+  `nadir_codec::font::parse` (`assets-and-codecs.md`, "Font file"): data
+  only, no placeholder, made before a window opens if need be. It refuses
+  an atlas path that is not an atlas file's, and offsets, advances,
+  kerning or a line height past ±32767.
+- **Its atlas, by path:** an asset cannot see another, so each frame the
+  renderer finds a text's atlas file, the font's sprite in it, and the
+  pages' textures by their paths in the asset server. A reload of the
+  font, the atlas or a page is drawn from the next frame. A game loads all
+  three with `Font::load_now_in`, which also checks that the atlas has the
+  sprite with every frame the glyphs name; `server.load::<Font>` loads the
+  font file alone, whose texts are then not drawn.
+- **Not ready:** a text whose font, atlas or sprite is not ready, not
+  loaded or does not fit is not drawn (`skipped_texts`); a glyph whose page
+  is still loading, not loaded, or failed with no placeholder, is not
+  drawn (`skipped`); a page that failed shows the placeholder, through the
+  sprite program. An atlas or a page not loaded at all, and an atlas that
+  does not fit, are logged once a font.
+- **Layout** (`Font::layout` and `Font::measure`, which agree):
+  - whole pixels of the font from the block's top-left corner;
+  - `\n` breaks a line, a `\r` takes no room; lines are `line_height`
+    apart, and `""` is one line;
+  - each glyph's rectangle at the pen plus its offset; the pen moves by its
+    advance, and before it by the kerning of the glyph before it on the
+    line;
+  - wrap at a max width: at the last run of spaces before a character that
+    would pass it, the run dropped; a word wider than the width alone
+    breaks between its characters, one at least a line; spaces at a line's
+    end take no room, and spaces that start a paragraph are kept;
+  - left, center and right alignment within the widest line, or the max
+    width if that is wider; the odd pixel of the middle to the right;
+  - a missing character draws the font's `fallback` (BMFont's fallback
+    glyph, else its `?`), with no kerning either side, and is logged once
+    a font and character; a control character the font lacks takes no
+    room; a no-break space the font lacks is its space, never a break;
+  - per-run color via a tiny markup: `{c:#ff0}text{/c}`, with 3, 4, 6 or 8
+    hex digits; `{{` is a `{`; a run lasts across lines; anything else is
+    drawn as written; a run's alpha is multiplied by the text's.
+    `Escaped` doubles the `{` of a player's text written into markup, and
+    `TextLayout::markup` false draws every character.
+- **Drawing:** each glyph is a sprite instance of its trimmed frame, at its
+  rectangle plus the frame's offset, its pivot (0, 0), unrotated, with its
+  corner snapped as a sprite's. The block's corner is moved from
+  `position` by the pivot times the block's size rounded to whole pixels,
+  so that every glyph snaps alike. Glyphs are planned with the sprites at
+  their text's layer and depth (`YSort` by `position.y`): at one depth,
+  every sprite, then each text in the order it was pushed, its glyphs by
+  page; a tile layer goes before them all.
+- **The `text` program** (alpha mask × tint): the sprite's instances and
+  vertex shader, `vec4(tint.rgb, tint.a × texel.a)`. `GlyphMode::Rgba`
+  draws a text with the sprite program, for pages whose colors matter,
+  such as BMFont's `alphaChnl=2` outlines.
+- **No allocation once warm:** `TextList` keeps one buffer of characters
+  (`write` formats into it), and the renderer's lists of laid-out glyphs,
+  pages and quads are reused.
 
 ## Debug draw
 
@@ -491,12 +579,15 @@ Measured on min-spec; see `docs/00-overview.md`.
     negatives and `-0.0`)
   - batching boundaries
   - chunk dirty tracking
-  - text layout (wrapping, alignment, kerning)
+  - text layout (wrapping, alignment, kerning; M7.1: also markup, the
+    fallback, and a property test that layout and measure agree)
   - `screen_to_world` round-trip
 - **Golden:**
   - y-sort scene (character walking behind and in front of a tree)
   - tilemap with animated tiles at fixed `time` values
-  - text alignment
+  - text alignment (`text_alignment`, M7.1: aligned lines over a panel, a
+    wrapped and kerned paragraph, a color run, the fallback, both glyph
+    modes, a text placed by its middle)
   - pixel-perfect upscale at 3 window sizes
   - debug draw primitives
 - **Benchmarks:** sort+batch for 10k sprites; chunk rebuild

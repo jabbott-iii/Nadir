@@ -21,8 +21,8 @@ writes.
 The cook reads PNG images with their sidecars, Aseprite exports, BMFont
 fonts, WAV sounds with theirs, LDtk 1.5.3 projects and JSONC data, and
 keeps a cache so that the next cook does only what changed. It reads back
-each font file it writes with nadir-codec's reader (roadmap M7.7). Not
-yet: the game's font asset that reads them (M7.1).
+each font file it writes with nadir-codec's reader (roadmap M7.7), which
+nadir-render's `Font` asset reads them with (M7.1).
 
 ## Install
 

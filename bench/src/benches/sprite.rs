@@ -122,6 +122,9 @@ mod tests {
                 batches: 2,
                 tiles: 0,
                 chunks: 0,
+                texts: 0,
+                glyphs: 0,
+                skipped_texts: 0,
             }
         );
     }

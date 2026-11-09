@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The order sprites are drawn in, and the batches they are drawn in.
+//! The order sprites, and texts' glyphs, are drawn in, and the batches
+//! they are drawn in.
 
 use crate::SpriteDraw;
 use crate::sort::sort_key;
@@ -39,10 +40,23 @@ pub(crate) struct Batch<K> {
     pub(crate) count: u32,
 }
 
-/// One drawn sprite, in draw order.
+/// A glyph of a text, laid out, with its texture found: a sprite of its
+/// text's layer, whose sort is its text's depth, `Fixed`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct GlyphQuad<K> {
+    pub(crate) sprite: SpriteDraw,
+    /// Its text's place among the frame's texts.
+    pub(crate) text: u32,
+    pub(crate) texture: K,
+    /// Whether it shows its texture's placeholder.
+    pub(crate) placeholder: bool,
+}
+
+/// One drawn sprite or glyph, in draw order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Drawn {
-    /// Its index in the frame's sprites.
+    /// Its index among the frame's sprites, then the glyphs after them: a
+    /// glyph's is the sprites' count plus its own.
     pub(crate) sprite: u32,
     /// Whether it shows its texture's placeholder.
     pub(crate) placeholder: bool,
@@ -55,13 +69,17 @@ pub(crate) struct Drawn {
 /// measured without a GPU.
 #[derive(Debug)]
 pub(crate) struct Plan<K> {
-    /// (key, sprite index) of each drawn sprite.
-    keys: Vec<(u64, u32)>,
-    /// Each sprite's texture, by index; `None` when skipped.
+    /// (key, group, index) of each drawn sprite and glyph: the group is 0
+    /// for a sprite, and its text's place plus 1 for a glyph.
+    keys: Vec<(u64, u32, u32)>,
+    /// Each sprite's and glyph's texture, by index; `None` when skipped.
     textures: Vec<Option<(K, bool)>>,
     pub(crate) order: Vec<Drawn>,
     pub(crate) batches: Vec<Batch<K>>,
+    /// The sprites skipped: not ready, or past `u32::MAX` of them.
     pub(crate) skipped: u32,
+    /// The glyphs in `order`.
+    pub(crate) glyphs: u32,
 }
 
 impl<K: Copy + Eq> Plan<K> {
@@ -72,15 +90,31 @@ impl<K: Copy + Eq> Plan<K> {
             order: Vec::new(),
             batches: Vec::new(),
             skipped: 0,
+            glyphs: 0,
         }
     }
 
     /// Plans `sprites`: sorts the ready ones by layer, depth and texture,
     /// keeping submission order among ties, and groups runs of one texture
     /// into batches.
+    #[cfg(test)]
     pub(crate) fn build(
         &mut self,
         sprites: &[SpriteDraw],
+        resolve: impl FnMut(&SpriteDraw) -> Resolved<K>,
+    ) {
+        self.build_with(sprites, &[], resolve);
+    }
+
+    /// Plans `sprites` and the texts' `glyphs`, whose textures are found:
+    /// sorts them by layer and depth; at one depth, the sprites first, by
+    /// texture then in submission order, then each text's glyphs in the
+    /// order of the texts, by texture then in the order they were laid out.
+    /// Runs of one texture `K` are batches.
+    pub(crate) fn build_with(
+        &mut self,
+        sprites: &[SpriteDraw],
+        glyphs: &[GlyphQuad<K>],
         mut resolve: impl FnMut(&SpriteDraw) -> Resolved<K>,
     ) {
         self.keys.clear();
@@ -88,6 +122,7 @@ impl<K: Copy + Eq> Plan<K> {
         self.order.clear();
         self.batches.clear();
         self.skipped = 0;
+        self.glyphs = 0;
 
         for (index, sprite) in sprites.iter().enumerate() {
             // A frame of more than u32::MAX sprites is far past any
@@ -107,23 +142,28 @@ impl<K: Copy + Eq> Plan<K> {
                 self.skipped += 1;
                 continue;
             }
-            let texture_bits = sprite.texture.id().index() as u16;
-            let key = sort_key(
-                sprite.layer,
-                sprite.sort,
-                sprite.position.y,
-                texture_bits,
-                index as u8,
-            );
-            self.keys.push((key, index));
+            self.keys.push((key_of(sprite, index), 0, index));
+        }
+        let first_glyph = self.textures.len();
+        for (offset, glyph) in glyphs.iter().enumerate() {
+            // As for sprites: past u32::MAX in all, they are not drawn.
+            let Ok(index) = u32::try_from(first_glyph + offset) else {
+                break;
+            };
+            self.textures.push(Some((glyph.texture, glyph.placeholder)));
+            let group = glyph.text.saturating_add(1);
+            self.keys.push((key_of(&glyph.sprite, index), group, index));
         }
 
-        // The submission number breaks ties, not the 8 bits of `seq`, so
-        // that tied sprites keep their order whatever comes before them.
-        self.keys
-            .sort_unstable_by_key(|&(key, index)| (key >> 8, index));
+        // The layer and depth first, then sprites before glyphs and each
+        // text's glyphs together, then the texture. The submission number
+        // breaks ties, not the 8 bits of `seq`, so that tied sprites keep
+        // their order whatever comes before them.
+        self.keys.sort_unstable_by_key(|&(key, group, index)| {
+            (key >> 24, group, (key >> 8) & 0xFFFF, index)
+        });
 
-        for &(_, index) in &self.keys {
+        for &(_, group, index) in &self.keys {
             let Some((texture, placeholder)) = self.textures[index as usize] else {
                 continue;
             };
@@ -132,6 +172,9 @@ impl<K: Copy + Eq> Plan<K> {
                 sprite: index,
                 placeholder,
             });
+            if group > 0 {
+                self.glyphs += 1;
+            }
             match self.batches.last_mut() {
                 Some(batch) if batch.texture == texture => batch.count += 1,
                 _ => self.batches.push(Batch {
@@ -149,8 +192,20 @@ impl<K: Copy + Eq> Plan<K> {
     pub(crate) fn position(&self, layer: u8, depth: u32) -> u32 {
         let bound = u64::from(layer) << 32 | u64::from(depth);
         // The plan numbers its sprites with a u32, so this fits.
-        self.keys.partition_point(|&(key, _)| key >> 24 < bound) as u32
+        self.keys.partition_point(|&(key, _, _)| key >> 24 < bound) as u32
     }
+}
+
+/// The sort key of the sprite or glyph `sprite`, the `index`th.
+fn key_of(sprite: &SpriteDraw, index: u32) -> u64 {
+    let texture_bits = sprite.texture.id().index() as u16;
+    sort_key(
+        sprite.layer,
+        sprite.sort,
+        sprite.position.y,
+        texture_bits,
+        index as u8,
+    )
 }
 
 #[cfg(test)]
@@ -273,6 +328,93 @@ mod tests {
         assert_eq!(plan.position(3, 0), 4, "after everything");
     }
 
+    /// A glyph of text `text`, on texture `texture`, at depth `depth` of
+    /// layer 0.
+    fn glyph(text: u32, texture: u32, depth: u32) -> GlyphQuad<u32> {
+        let mut sprite = sprite(texture, 0.0);
+        sprite.sort = SortMode::Fixed(depth);
+        GlyphQuad {
+            sprite,
+            text,
+            texture,
+            placeholder: false,
+        }
+    }
+
+    fn plan_with(sprites: &[SpriteDraw], glyphs: &[GlyphQuad<u32>]) -> Plan<u32> {
+        let mut plan = Plan::new();
+        plan.build_with(sprites, glyphs, |sprite| {
+            Resolved::Draw(sprite.texture.id().index())
+        });
+        plan
+    }
+
+    #[test]
+    fn at_a_tie_texts_go_after_sprites_whatever_their_textures() {
+        // A panel on texture 5, and a text on its font's page, texture 1,
+        // at one depth: the text is in front, though its texture's bits are
+        // lower.
+        let mut panel = sprite(5, 0.0);
+        panel.sort = SortMode::Fixed(10);
+        let plan = plan_with(&[panel], &[glyph(0, 1, 10), glyph(0, 1, 10)]);
+        assert_eq!(order(&plan), [0, 1, 2]);
+        assert_eq!(batches(&plan), [(5, 0, 1), (1, 1, 2)]);
+        assert_eq!(plan.glyphs, 2);
+        // A text at a lower depth goes behind.
+        let plan = plan_with(&[panel], &[glyph(0, 1, 9)]);
+        assert_eq!(order(&plan), [1, 0]);
+    }
+
+    #[test]
+    fn texts_keep_their_order_and_a_text_s_glyphs_group_by_page() {
+        // A shadow text (0) then its text (1), at one depth, on a font of
+        // two pages, 3 and 2: each text's glyphs by page, the shadow's
+        // first.
+        let glyphs = [
+            glyph(0, 3, 4),
+            glyph(0, 2, 4),
+            glyph(0, 3, 4),
+            glyph(1, 3, 4),
+            glyph(1, 2, 4),
+        ];
+        let plan = plan_with(&[], &glyphs);
+        assert_eq!(order(&plan), [1, 0, 2, 4, 3]);
+        assert_eq!(batches(&plan), [(2, 0, 1), (3, 1, 2), (2, 3, 1), (3, 4, 1)]);
+    }
+
+    #[test]
+    fn tiles_go_before_the_glyphs_of_their_layer_and_depth() {
+        let mut ground = sprite(0, 0.0);
+        ground.sort = SortMode::Fixed(3);
+        let plan = plan_with(&[ground], &[glyph(0, 1, 3), glyph(0, 1, 4)]);
+        assert_eq!(order(&plan), [0, 1, 2]);
+        assert_eq!(plan.position(0, 3), 0);
+        assert_eq!(
+            plan.position(0, 4),
+            2,
+            "after the sprite and the glyph at 3"
+        );
+        assert_eq!(plan.position(0, 5), 3);
+    }
+
+    #[test]
+    fn a_glyph_s_texture_and_placeholder_are_its_own() {
+        let mut shown = glyph(0, 7, 0);
+        shown.placeholder = true;
+        let mut plan = Plan::new();
+        // The resolver is for sprites alone.
+        plan.build_with(&[sprite(1, 0.0)], &[shown], |_| Resolved::Skip);
+        assert_eq!(plan.skipped, 1);
+        assert_eq!(
+            plan.order,
+            [Drawn {
+                sprite: 1,
+                placeholder: true
+            }]
+        );
+        assert_eq!(batches(&plan), [(7, 0, 1)]);
+    }
+
     #[test]
     fn a_plan_is_reused() {
         let mut plan = plan(&[sprite(0, 1.0), sprite(1, 2.0)]);
@@ -282,5 +424,10 @@ mod tests {
         assert_eq!(order(&plan), [0]);
         assert_eq!(batches(&plan), [(5, 0, 1)]);
         assert_eq!(plan.skipped, 0);
+        let mut plan = plan_with(&[], &[glyph(0, 1, 0)]);
+        plan.build(&[sprite(5, 0.0)], |sprite| {
+            Resolved::Draw(sprite.texture.id().index())
+        });
+        assert_eq!(plan.glyphs, 0);
     }
 }
