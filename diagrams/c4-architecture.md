@@ -24,7 +24,8 @@ dashed and labelled "planned".
 The game built on Nadir and Nadir's own tools, with the people, editors,
 OS interfaces and services they deal with. The Windows and macOS windows
 are written but still wait on checks on those systems (roadmap M1.5, M1.6),
-and there the game runs without drawing until their OpenGL contexts land.
+and there the game runs without drawing until their OpenGL contexts land,
+and without sound until their audio output does (M6.4, M6.5).
 
 ```mermaid
 flowchart TB
@@ -43,7 +44,8 @@ flowchart TB
     os["OS window and input APIs<br/>X11 on Linux, Win32 on Windows, AppKit on macOS"]
     gpu["GPU driver<br/>OpenGL 3.3 core through EGL, on Linux"]
     gpu_planned["GPU on Windows and macOS<br/>WGL and NSOpenGL contexts, then Metal: planned"]
-    audio_api["OS audio APIs<br/>ALSA, which nadir-platform drives on Linux; WASAPI, CoreAudio: planned"]
+    audio["OS audio API<br/>ALSA, through libasound, on Linux"]
+    audio_planned["Audio on Windows and macOS<br/>WASAPI and CoreAudio: planned"]
     pad_api["Gamepad APIs<br/>evdev, XInput, GameController: planned"]
     gha["GitHub Actions<br/>workflows CI, CodeQL, Pages and Release"]
     pages["GitHub Pages<br/>the demo page at jabbott.dev/Nadir"]
@@ -63,7 +65,8 @@ flowchart TB
     game -->|"opens a window, reads its events"| os
     game -->|"draws through OpenGL 3.3 core"| gpu
     game -.->|"planned M2.6, M2.7, M10"| gpu_planned
-    game -.->|"planned M6.4 to M6.6"| audio_api
+    game -->|"plays sound through ALSA"| audio
+    game -.->|"planned M6.4, M6.5"| audio_planned
     game -.->|"planned M8"| pad_api
     gha -->|"runs cargo xtask"| tools
     gha -->|"deploys the demo page"| pages
@@ -77,8 +80,8 @@ flowchart TB
     classDef planned fill:#ffffff,stroke:#888888,stroke-dasharray: 5 5,color:#555555
     class developer,player person
     class game,tools system
-    class aseprite,ldtk,editors,fs,os,gpu,gha,pages,channels external
-    class gpu_planned,audio_api,pad_api planned
+    class aseprite,ldtk,editors,fs,os,gpu,audio,gha,pages,channels external
+    class gpu_planned,audio_planned,pad_api planned
 ```
 
 ## 2. Containers
@@ -92,7 +95,7 @@ it reads the pack, or the loose files where there is no pack.
 flowchart LR
     developer(["Game developer"])
     gha["GitHub Actions<br/>workflows CI, Pages and Release"]
-    os["OS and GPU driver<br/>window, events, OpenGL"]
+    os["OS and GPU driver<br/>window, events, OpenGL, sound"]
     logs[("The user's logs folder<br/>nadir.log and the logs of the three runs before")]
 
     subgraph ws["Nadir workspace"]
@@ -100,8 +103,8 @@ flowchart LR
         cook["nadir-cook<br/>Rust library and CLI: nadir-cook [--force] SOURCE OUT"]
         game["Game executable: sandbox<br/>Rust binary on nadir_engine. cargo run -p sandbox, or cargo dev for the dev feature"]
         bench["nadir-bench<br/>Rust binary: the benchmark harness"]
-        src[("assets/<br/>PNG images and sprite.jsonc sidecars, Aseprite JSON, LDtk projects, data JSONC and prefabs")]
-        loose[("target/cooked/ loose files<br/>atlas QOI pages, KBJ and font files, data KBJ, levels .klvl, the cache .cache.kbj")]
+        src[("assets/<br/>PNG images and sprite.jsonc sidecars, WAVs and sound.jsonc sidecars, Aseprite JSON, LDtk projects, data JSONC and prefabs")]
+        loose[("target/cooked/ loose files<br/>atlas QOI pages, KBJ and font files, sounds, data KBJ, levels .klvl, the cache .cache.kbj")]
         pack[("target/cooked/game.kpak<br/>the pack: every cooked file, KLZ where that is smaller")]
         dist[("target/dist/<br/>nadir-VERSION-TARGET: sandbox, nadir-cook, assets/game.kpak, as .zip or .tar.gz, and .debs on Linux")]
         site[("target/site/<br/>the demo page, its videos and posters, the Linux download")]
@@ -117,7 +120,7 @@ flowchart LR
     game -->|"with dev: reads the loose files, and reloads those that change"| loose
     game -->|"without dev: reads the pack when it is there, else the loose files"| pack
     game -->|"writes"| logs
-    game -->|"window, events, OpenGL"| os
+    game -->|"window, events, OpenGL, sound"| os
     xtask -->|"bench: cargo run --release --package nadir-bench"| bench
     xtask -->|"site and dist: build it in release and run it"| game
     xtask -->|"dist: lays out, checks and packs"| dist
@@ -144,11 +147,10 @@ flowchart LR
 
 The crates of the game executable by layer, with an arrow for each entry
 in a crate's `[dependencies]` table. The debug crate has no code and no
-dependencies yet. The two dotted arrows are edges still to come: the
-facade's to audio (roadmap M6.6, which the matrix's "all crates above"
-allows) and the sandbox's to debug, behind `dev` (the matrix's row for the
-sandbox). The edges the matrix allows out of debug (core, ecs, scene,
-render, input) are not drawn.
+dependencies yet. The dotted arrow is an edge still to come: the
+sandbox's to debug, behind `dev` (the matrix's row for the sandbox). The
+edges the matrix allows out of debug (core, ecs, scene, render, input) are
+not drawn.
 
 ```mermaid
 flowchart TB
@@ -184,6 +186,7 @@ flowchart TB
 
     n_sandbox --> n_engine
     n_engine --> n_assets
+    n_engine --> n_audio
     n_engine --> n_collision
     n_engine --> n_core
     n_engine --> n_ecs
@@ -215,7 +218,6 @@ flowchart TB
     n_platform --> n_core
     n_platform --> n_sys
     n_codec --> n_core
-    n_engine -.->|"planned M6.6"| n_audio
     n_sandbox -.->|"planned, dev only"| n_debug
 
     classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
@@ -227,7 +229,8 @@ flowchart TB
 ```
 
 - The game reaches the subsystems through the facade, which re-exports
-  assets, collision, ecs, input, render and scene as modules of `nadir`.
+  assets, audio, collision, ecs, input, render and scene as modules of
+  `nadir`.
 - `nadir_engine` uses `nadir-codec` only in its tests, as a
   dev-dependency, which the diagram leaves out; `nadir-audio`'s tests use
   `nadir-platform`'s allocation counter the same way.
@@ -345,7 +348,7 @@ that no other crate allows it.
 | `nadir-scene` | `crates/scene` | 3, composed subsystems | deny | assets, codec, core, ecs |
 | `nadir-audio` | `crates/audio` | 3, composed subsystems | deny | assets, codec, core |
 | `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | none: planned, no code yet |
-| `nadir_engine` (`nadir` in code) | `crates/engine` | 5, facade | deny | assets, collision, core, ecs, gfx, input, platform, render, scene |
+| `nadir_engine` (`nadir` in code) | `crates/engine` | 5, facade | deny | assets, audio, collision, core, ecs, gfx, input, platform, render, scene |
 | `nadir-cook` | `tools/cook` | 6, applications | deny | assets, codec with `png`, core |
 | `xtask` | `xtask` | 6, applications | deny | codec with `png`, core |
 | `sandbox` | `games/sandbox` | 6, applications | deny | `nadir_engine` |

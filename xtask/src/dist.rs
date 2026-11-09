@@ -23,7 +23,9 @@
 //!    where it reads them (ADR-0033, ADR-0041), a `README.txt`, and the
 //!    `LICENSE` and `NOTICE`. On
 //!    Windows and macOS the sandbox shows an empty window until the engine
-//!    draws there, which its README says ([`Target::drawing_task`]).
+//!    draws there, which its README says ([`Target::drawing_task`]), and
+//!    plays no sound until it has audio output there
+//!    ([`Target::sound_task`]).
 //! 3. Runs what it laid out. `nadir-cook --version` must print the
 //!    workspace's version; the laid-out cook must cook `assets/` into the
 //!    pack the layout holds, byte for byte; and the sandbox must
@@ -35,7 +37,7 @@
 //! 5. On Linux, makes the Debian packages [`COOK_DEB`] and
 //!    [`SANDBOX_DEB`] with `dpkg-deb`. `dpkg-shlibdeps` finds the packages
 //!    of the libraries each executable links; the sandbox also depends on
-//!    those it loads when it runs: X11, EGL and OpenGL.
+//!    those it loads when it runs: X11, EGL, OpenGL and ALSA's libasound.
 //!
 //! On Windows the executables link the C runtime statically
 //! (`.cargo/config.toml`), so that they need no Visual C++
@@ -79,8 +81,11 @@ const BUILD: &[&str] = &[
 const NO_SCENE: &str = "there is no scene `none`";
 
 /// The libraries the sandbox loads when it runs, by their Debian
-/// packages: `libX11.so.6`, `libEGL.so.1` and `libOpenGL.so.0`.
-const SANDBOX_LOADS: &[&str] = &["libx11-6", "libegl1", "libopengl0"];
+/// packages: `libX11.so.6`, `libEGL.so.1`, `libOpenGL.so.0` and
+/// `libasound.so.2`. It opens them with `dlopen`, which `dpkg-shlibdeps`
+/// cannot see. Debian 12 and Ubuntu 22.04 ship `libasound2`; Ubuntu
+/// 24.04's `libasound2t64` provides it.
+const SANDBOX_LOADS: &[&str] = &["libx11-6", "libegl1", "libopengl0", "libasound2"];
 
 /// One Debian package.
 struct Deb {
@@ -106,14 +111,14 @@ const COOK_DEB: Deb = Deb {
 };
 
 /// The sandbox, in `/usr/lib/games/nadir-sandbox` with its cooked
-/// sprites, and `/usr/games/nadir-sandbox`, a link to it.
+/// sprites and sounds, and `/usr/games/nadir-sandbox`, a link to it.
 const SANDBOX_DEB: Deb = Deb {
     name: "nadir-sandbox",
     section: "games",
     summary: "demo game of the Nadir game engine",
     details: " The top-down game that drives the Nadir engine's requirements: a person\n \
               walks a field of tiles, trees and rocks. It needs an X11 server or\n \
-              XWayland, and OpenGL 3.3 through EGL.\n",
+              XWayland, and OpenGL 3.3 through EGL. It plays its sound through ALSA.\n",
 };
 
 /// Runs `cargo xtask dist` with the arguments after `dist`.
@@ -320,6 +325,18 @@ impl Target {
         }
     }
 
+    /// The roadmap task that gives the engine audio output on this target,
+    /// if it has none yet: Linux has ALSA, and Windows gets WASAPI with
+    /// M6.4 and macOS an AudioUnit with M6.5. Until then the sandbox runs
+    /// without sound.
+    fn sound_task(&self) -> Option<&'static str> {
+        match self.os {
+            Os::Linux => None,
+            Os::Windows => Some("M6.4"),
+            Os::Mac => Some("M6.5"),
+        }
+    }
+
     /// The Debian architecture.
     fn debian_arch(&self) -> &'static str {
         match self.arch {
@@ -346,7 +363,8 @@ fn readme(release: &Release, glibc: Option<&str>) -> String {
     );
     programs.push_str(
         "  sandbox      the game that drives the engine's requirements, with its\n               \
-         cooked sprites, prefabs and levels in assets/game.kpak.\n",
+         cooked sprites, sounds, prefabs and levels in\n               \
+         assets/game.kpak.\n",
     );
     let sandbox = run("sandbox");
     let commands = format!("    {cook} --help\n    {cook} SOURCE OUT\n    {sandbox}\n");
@@ -360,6 +378,15 @@ fn readme(release: &Release, glibc: Option<&str>) -> String {
              an OpenGL context."
         ),
     };
+    let sounds = match target.sound_task() {
+        None => "It plays its sound through ALSA (libasound2), and is silent\n\
+                 without it."
+            .to_string(),
+        Some(task) => format!(
+            "It plays no sound until roadmap task {task} gives the\n\
+             engine audio output."
+        ),
+    };
     let log = match target.os {
         Os::Linux => "~/.local/share/Sandbox/nadir.log",
         Os::Windows => "%LOCALAPPDATA%\\Nadir\\Sandbox\\nadir.log",
@@ -370,7 +397,7 @@ fn readme(release: &Release, glibc: Option<&str>) -> String {
          other scenes:\n\n    \
          {sandbox} --scene stress-sprites\n    \
          {sandbox} --scene stress-entities\n\n\
-         {draws} Its log is {log}.\n"
+         {draws} {sounds} Its log is {log}.\n"
     );
     let system = match target.os {
         Os::Linux => glibc.map_or(String::new(), |version| {
@@ -829,15 +856,19 @@ mod tests {
         for line in [
             "This archive holds its programs for Linux on x86_64:",
             "  sandbox      the game that drives the engine's requirements, with its",
+            "               cooked sprites, sounds, prefabs and levels in\n               \
+             assets/game.kpak.\n",
             "    ./nadir-cook SOURCE OUT\n    ./sandbox\n",
             "    ./sandbox --scene stress-sprites",
-            "EGL. Its log is ~/.local/share/Sandbox/nadir.log.",
+            "EGL. It plays its sound through ALSA (libasound2), and is silent\n\
+             without it. Its log is ~/.local/share/Sandbox/nadir.log.",
             "The programs need glibc 2.34 or newer.",
             "https://crates.io/crates/nadir_engine,\nand its source is at https://github.com/jabbott-iii/Nadir.",
         ] {
             assert!(linux.contains(line), "`{line}` is not in:\n{linux}");
         }
         assert!(!linux.contains("signed"), "{linux}");
+        assert!(!linux.contains("no sound"), "{linux}");
         let windows = readme(&release("aarch64-pc-windows-msvc", "0.1.0"), None);
         for line in [
             "programs for Windows on Arm:",
@@ -845,23 +876,37 @@ mod tests {
             "    .\\sandbox.exe\n",
             "    .\\sandbox.exe --scene stress-sprites",
             "shows an\nempty window: the engine draws here once roadmap task M2.6",
-            "%LOCALAPPDATA%\\Nadir\\Sandbox\\nadir.log",
+            "an OpenGL context. It plays no sound until roadmap task M6.4 gives the\n\
+             engine audio output. Its log is %LOCALAPPDATA%\\Nadir\\Sandbox\\nadir.log.",
             "Windows 10 or newer",
             "SmartScreen",
         ] {
             assert!(windows.contains(line), "`{line}` is not in:\n{windows}");
         }
+        assert!(!windows.contains("ALSA"), "{windows}");
         let mac = readme(&release("aarch64-apple-darwin", "0.1.0"), None);
         for line in [
             "macOS on Apple silicon",
             "    ./sandbox --scene stress-entities",
             "roadmap task M2.7",
+            "roadmap task M6.5",
             "~/Library/Logs/Sandbox/nadir.log",
             "xattr -dr com.apple.quarantine .",
         ] {
             assert!(mac.contains(line), "`{line}` is not in:\n{mac}");
         }
         assert!(!mac.contains("X11"), "{mac}");
+        assert!(!mac.contains("ALSA"), "{mac}");
+    }
+
+    #[test]
+    fn the_sandbox_depends_on_the_libraries_it_opens_itself() {
+        // `dpkg-shlibdeps` sees none of them: the platform opens X11, EGL,
+        // OpenGL and ALSA with `dlopen`.
+        assert_eq!(
+            SANDBOX_LOADS,
+            ["libx11-6", "libegl1", "libopengl0", "libasound2"]
+        );
     }
 
     #[test]
@@ -896,7 +941,7 @@ Homepage: https://jabbott.dev/Nadir/
 Description: demo game of the Nadir game engine
  The top-down game that drives the Nadir engine's requirements: a person
  walks a field of tiles, trees and rocks. It needs an X11 server or
- XWayland, and OpenGL 3.3 through EGL.
+ XWayland, and OpenGL 3.3 through EGL. It plays its sound through ALSA.
 "
         );
         // Each line of a description after the first starts with a space,

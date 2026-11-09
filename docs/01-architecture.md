@@ -136,6 +136,9 @@ pub fn run(mut app: App) -> Result<(), Error> {
     let mut gfx = Device::new(platform.gpu_surface())?;     // keeps no borrow (ADR-0016)
     let render = RenderConfig { virtual_resolution: app.config.virtual_resolution };
     let mut renderer = Renderer::new(&mut gfx, &render)?;
+    let mixer = MixerOutput(app.mixer.take());              // the mixer App::new made
+    let stream = open_audio(&AudioOutputConfig::default(),  // the audio thread; on Err a warning,
+                            Box::new(mixer));               // and the game runs silent (ADR-0051)
     let mut limiter = FrameLimiter::new(app.config.frame_rate_limit, Instant::now());
     let mut stopwatch = Stopwatch::start();
     let mut events = Vec::with_capacity(256);
@@ -153,7 +156,7 @@ pub fn run(mut app: App) -> Result<(), Error> {
         }
         draw.clear();                                        // the RenderFrame resource
         draw.time = simulated_time(&app.clock);              // ticks + alpha: animated tiles (ADR-0023)
-        app.schedule.run_frame(&mut app.world, &frame);      // frame.dt, frame.alpha; Extract fills `draw`
+        app.schedule.run_frame(&mut app.world, &frame);      // frame.dt, frame.alpha; Extract sends the sound, fills `draw`
 
         gfx.begin_frame(platform.gpu_surface())?;
         renderer.render(&mut gfx, &assets, &tiles, &draw,    // the AssetServer and TileLayers resources
@@ -168,6 +171,7 @@ pub fn run(mut app: App) -> Result<(), Error> {
             precise_sleep(due);                              // the frame limiter: "Pacing", below
         }
     }
+    drop(stream);                                           // the sound stops, 2 s at most, before an error shows
     Ok(())
 }
 ```
@@ -183,6 +187,14 @@ The snapshot and the extract are the engine's own systems,
 `Offscreen::frame` updates, draws into a render target on an offscreen
 context, makes the loaded assets, and returns the pixels. The sandbox's
 `--capture` records the demo page's scenes with it (ADR-0029).
+
+Sound (M6.6, ADR-0051): `App::new` makes the mixer and the `Audio`
+resource, and `App::run` hands the mixer to the audio output once the
+window and the device are open. Each frame, the engine's `nadir::sound`,
+in `Extract`, sends the listener, the emitters and the music areas to the
+mixer and calls `Audio::update`. Only `App::run` opens the output:
+`App::update`'s first call drops a mixer the app still holds, so tests,
+headless runs and `App::offscreen` are silent.
 
 Rules:
 
@@ -242,6 +254,7 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
   | tick `PostMovement` | `nadir::parent_offsets` | puts each `Parent`'s child at its root plus the offsets |
   | tick `PostMovement` | `nadir::triggers` | sends `TriggerEnter` and `TriggerExit` |
   | frame `Animate` | `nadir::animate` | advances each `Animator` by the clock's step, writes its frame into its `Sprite`, sends `AnimationFinished`, mirrors each Sprite that faces left and unmirrors the rest with a `Facing` (ADR-0024) |
+  | frame `Extract` | `nadir::sound` | puts the listener at the first `AudioListener` or the camera, plays each `AudioEmitter` at its entity between the last two ticks, sends the track of the `MusicArea` the listener is in, then calls `Audio::update` (ADR-0051) |
   | frame `Extract` | `nadir::extract_sprites` | draws each `Sprite` between the last two ticks |
   | frame `Extract` | `nadir::extract_level` | draws the `CurrentLevel`'s tile layers, its background the clear colour |
 - Structural changes (spawn, despawn, add or remove component) are deferred
@@ -370,8 +383,8 @@ OS events ─► platform::Event ─► input (device state, edge accumulation)
              extract (ECS → RenderFrame: sprite instances, tile chunks, text, debug)
                                     ▼
              render (sort, batch, upload, passes) ─► gfx ─► GL / Metal ─► present
-                                    │
-             audio commands ──► SPSC queue ──► audio thread (mixer) ─► OS device
+
+             extract's nadir::sound ──► command queue ──► audio thread (mixer) ─► OS device
 ```
 
 ## Threading model
@@ -379,7 +392,7 @@ OS events ─► platform::Event ─► input (device state, edge accumulation)
 | Thread | Owns | Talks to others via |
 | :- | :- | :- |
 | Main | Window, GPU context, ECS world, renderer, input | Channels to workers; a command queue to audio |
-| Audio (one), `nadir-audio`: started by `nadir_platform::open_audio` (on Linux from M6.3, ADR-0047), which calls the mixer through `AudioRender` | Mixer state, voices, streaming decoders, OS audio device | Command queue in; atomic counters/status out; logs only when the device is lost and when it opens again |
+| Audio (one), `nadir-audio`: started by `nadir_platform::open_audio` (on Linux from M6.3, ADR-0047), which calls the mixer through `AudioRender`; the facade's `App::run` starts it with the game's mixer (M6.6, ADR-0051) | Mixer state, voices, streaming decoders, OS audio device | Command queue in; atomic counters/status out; logs only when the device is lost and when it opens again |
 | Workers (N = clamp(cores − 2, 1, 4), the asset server's, ADR-0030) | File reads, decode (QOI, QOA, data) | `std::sync::mpsc` jobs in, results out; GPU uploads happen on main |
 | Hot-reload watcher, `nadir-assets-watch` (M5.16; the facade starts it under `dev` in `App::new`, M5.8, ADR-0042) | Polling of the mtimes of the loaded cooked files every 250 ms; `cargo xtask cook --watch` cooks, in its own process | Channel of changed paths to main |
 | Shader watcher, `nadir-shader-watch` (M5.8; the facade's, under `dev`, from `App::run`, ADR-0043) | Polling of the mtimes of render's shader files every 250 ms | An atomic mask of the changed programs, read by main |

@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The workspace's own `assets/`, which the sandbox draws: each frame the
-//! cook packs is its PNG's cell, pixel for pixel, the person's clips are
-//! their Aseprite export's tags, and the atlas file is one the game's
-//! reader takes; the field's LDtk project cooks to its level file, and its
-//! prefabs to theirs. The sandbox's tests check the level against its map.
+//! The workspace's own `assets/`, which the sandbox draws and plays: each
+//! frame the cook packs is its PNG's cell, pixel for pixel, the person's
+//! clips are their Aseprite export's tags, and the atlas file is one the
+//! game's reader takes; the field's LDtk project cooks to its level file,
+//! and its prefabs to theirs; its sounds, mono at 48 kHz, are not
+//! resampled. The sandbox's tests check the level against its map.
 
 use std::fs;
 use std::path::Path;
 
 use nadir_codec::json::Value;
-use nadir_codec::{Limits, atlas, level, png, prefab};
-use nadir_cook::Counts;
+use nadir_codec::{Limits, atlas, kpcm, level, pcm, png, prefab, qoa, wav};
+use nadir_cook::{Counts, SoundEncoding};
 
 use crate::common::{
     clips, cook, dir, files, frame_pixels, frames, int, kbj, qoi as read_qoi, round_trip, sprite,
@@ -65,6 +66,10 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
         names,
         [
             "atlas/sprites",
+            "audio/ambience/pond",
+            "audio/music/north",
+            "audio/music/south",
+            "audio/sfx/step",
             "data/prefabs/rock",
             "data/prefabs/tree",
             "ldtk/levels/field"
@@ -72,12 +77,20 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
     );
     assert!(report.skipped.is_empty(), "{:?}", report.skipped);
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    let counts = |name: &str| {
+        report
+            .jobs
+            .iter()
+            .find(|job| job.name == name)
+            .unwrap_or_else(|| panic!("the job {name}"))
+            .counts
+    };
 
     // The field: one level, whose trees and rocks are its 16 entities, which
     // the game's reader takes; and its prefabs, which the prefab reader
     // takes.
     assert_eq!(
-        report.jobs[3].counts,
+        counts("ldtk/levels/field"),
         Some(Counts::Levels {
             levels: 1,
             entities: 16
@@ -213,6 +226,59 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
     let tree = &frames(sprite(&atlas, "sprites/tree"))[0];
     assert_eq!((int(tree, "h"), int(tree, "oy")), (44, 4));
 
+    // The sounds, made by games/sandbox/make_sounds.py at the rate the cook
+    // cooks to: the step and the pond's water as sound files, sample for
+    // sample, and the two tunes as music, QOA, which the game's reader
+    // takes.
+    for (job, length, file) in [
+        ("audio/ambience/pond", 192_000, "audio/ambience/pond.kpcm"),
+        ("audio/music/north", 384_000, "audio/music/north.qoa"),
+        ("audio/music/south", 384_000, "audio/music/south.qoa"),
+        ("audio/sfx/step", 3840, "audio/sfx/step.kpcm"),
+    ] {
+        let source = fs::read(assets().join(format!("{job}.wav"))).expect("the sound's WAV");
+        let source = wav::decode(&source, Limits::default()).expect("a WAV");
+        assert_eq!((source.channels, source.sample_rate), (1, 48_000), "{job}");
+        let encoding = if file.ends_with(".qoa") {
+            SoundEncoding::Qoa
+        } else {
+            SoundEncoding::Pcm16
+        };
+        assert_eq!(
+            counts(job),
+            Some(Counts::Sound {
+                encoding,
+                frames: length,
+                sample_rate: 48_000
+            }),
+            "{job}"
+        );
+        let bytes = fs::read(out.join(file)).expect("the sound's file");
+        if encoding == SoundEncoding::Qoa {
+            let music = qoa::decode(&bytes, Limits::default()).expect("music the game reads");
+            assert_eq!(
+                music.header,
+                qoa::Header {
+                    channels: 1,
+                    sample_rate: 48_000,
+                    samples: length as u32
+                }
+            );
+        } else {
+            let sound = kpcm::decode(&bytes, Limits::default()).expect("a sound the game reads");
+            assert_eq!(
+                sound.header,
+                kpcm::Header {
+                    channels: 1,
+                    sample_rate: 48_000,
+                    frames: length as u32
+                }
+            );
+            let samples: Vec<i16> = source.samples.iter().map(|&x| pcm::to_i16(x)).collect();
+            assert!(sound.samples == samples, "{job}: its samples, as the WAV's");
+        }
+    }
+
     // The group holds packed pages and a tile set's, whose files sort apart:
     // a second cook still finds it up to date, and changes nothing.
     let first = files(&out);
@@ -229,6 +295,7 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
 fn the_sandbox_s_pack_reads_as_its_loose_files_do() {
     let out = dir("workspace_pack");
     cook(assets(), &out).expect("a cook");
-    // The atlas file and its two pages, the two prefabs and the field.
-    assert_eq!(round_trip(&out), 6);
+    // The atlas file and its two pages, the four sounds, the two prefabs and
+    // the field.
+    assert_eq!(round_trip(&out), 10);
 }

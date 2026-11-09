@@ -13,9 +13,11 @@
 // limitations under the License.
 
 //! The engine's components: where entities are, how they move, what they
-//! look like and what they collide with (ADR-0014, ADR-0022).
+//! look like, what they collide with, and what they sound like (ADR-0014,
+//! ADR-0022).
 
 use nadir_assets::Handle;
+use nadir_audio::{Bus, Music, PlayParams, Sound};
 use nadir_collision::Shape;
 use nadir_core::{Color, Rect, Vec2};
 use nadir_ecs::{Component, Entity};
@@ -251,6 +253,111 @@ nadir_scene::reflect_newtype! {
     pub struct SaveId(pub u64);
 }
 
+/// Where the game hears from: the first entity with one and a
+/// [`Transform`], where it is drawn, between ticks part of the way from its
+/// [`PrevTransform`]. With none, the camera's position
+/// ([`RenderFrame::camera`](nadir_render::RenderFrame::camera)) is.
+///
+/// It is not reflected: a game gives it in code, not in prefabs or levels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AudioListener;
+
+/// A sound that plays at its entity, and follows it as it moves: the system
+/// `nadir::sound` starts it once its sound has loaded, while the entity has
+/// a [`Transform`] and is within
+/// [`AudioConfig::max_dist`](nadir_audio::AudioConfig::max_dist) of the
+/// listener ([`AudioListener`]), 800 pixels, where it can be heard. It
+/// stops, fading out over 100 ms, when the entity is despawned or loses
+/// the emitter or its `Transform`, or is more than 64 pixels past that
+/// distance; back within it, it starts again. A sound that does not loop
+/// plays once each time it starts.
+///
+/// Changed, it follows: a new `sound`, `bus`, `looped`, `priority` or
+/// `max_instances` stops the voice and starts the new one, and a new
+/// `volume` or `pitch` reaches the voice as it plays. Its `pan` is not
+/// used: where it is pans it.
+///
+/// A voice taken for another when the voices run short stays silent until
+/// the emitter starts again. [`PlayParams::priority`] protects it only
+/// from plays of a lower priority: [`AudioEmitter::looped`]'s 192 from
+/// sounds played with the default, 128. A sound that failed to load, or
+/// that the asset server does not hold, is warned of once, with the entity
+/// and its path, and not tried again until the emitter changes.
+///
+/// It is not reflected: a game gives it in code, not in prefabs or levels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct AudioEmitter {
+    /// The sound it plays.
+    pub sound: Handle<Sound>,
+    /// How it plays it.
+    pub params: PlayParams,
+}
+
+impl AudioEmitter {
+    /// An emitter of `sound`, played as `params` say.
+    pub const fn new(sound: Handle<Sound>, params: PlayParams) -> Self {
+        Self { sound, params }
+    }
+
+    /// An emitter of `sound` looped on [`Bus::Ambience`], for a sound of
+    /// the place, such as water or a fire: at priority 192, and with no
+    /// limit to the voices of the sound, so that the sound's limit does not
+    /// make its emitters take one another's voices; when all the mixer's
+    /// voices play, a play of the same priority or higher still takes the
+    /// oldest of them ([`Audio::play_sound`](nadir_audio::Audio::play_sound)).
+    /// Otherwise as [`PlayParams::default`] plays.
+    pub fn looped(sound: Handle<Sound>) -> Self {
+        Self::new(
+            sound,
+            PlayParams {
+                bus: Bus::Ambience,
+                looped: true,
+                priority: 192,
+                max_instances: u8::MAX,
+                ..PlayParams::default()
+            },
+        )
+    }
+}
+
+/// A box, its entity's position ± `half` in pixels, whose music plays
+/// while the listener ([`AudioListener`]) is in it: the system
+/// `nadir::sound` crossfades to `music` over `crossfade_ms` when the
+/// listener comes into it. Where areas overlap, the one playing stays
+/// while the listener is in it, and otherwise the first of them that holds
+/// it plays. Outside every area, the music plays on; coming back into the
+/// area of the track that plays, it goes on as it is (ADR-0046).
+///
+/// A track still loading plays once it has loaded. One that failed to
+/// load, or that the asset server does not hold, is warned of once, with
+/// the entity and its path, and not tried again until the area changes:
+/// the music plays on as it is.
+///
+/// It is not reflected: a game gives it in code, not in prefabs or levels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct MusicArea {
+    /// The track it plays, looped, on [`Bus::Music`].
+    pub music: Handle<Music>,
+    /// Half its size, from its entity's position.
+    pub half: Vec2,
+    /// How long the crossfade to its track takes, in milliseconds.
+    pub crossfade_ms: u32,
+}
+
+impl MusicArea {
+    /// An area of `music`, its entity's position ± `half`, that crossfades
+    /// to it over 1,500 ms.
+    pub const fn new(music: Handle<Music>, half: Vec2) -> Self {
+        Self {
+            music,
+            half,
+            crossfade_ms: 1_500,
+        }
+    }
+}
+
 impl Component for Transform {}
 impl Component for PrevTransform {}
 impl Component for Velocity {}
@@ -260,6 +367,9 @@ impl Component for Player {}
 impl Component for Facing {}
 impl Component for Parent {}
 impl Component for SaveId {}
+impl Component for AudioListener {}
+impl Component for AudioEmitter {}
+impl Component for MusicArea {}
 
 #[cfg(test)]
 mod tests {
@@ -296,5 +406,21 @@ mod tests {
         let corner = draw.position - draw.pivot * draw.size;
         assert_eq!(corner, feet - Vec2::new(8.0, 12.0) + Vec2::new(1.0, 2.0));
         assert_eq!((sprite.layer, sprite.color), (0, Color::WHITE));
+    }
+
+    #[test]
+    fn a_looped_emitter_loops_on_the_ambience_bus_at_192_with_no_limit() {
+        let sound = Handle::new(nadir_core::GenIndex::new(0, std::num::NonZeroU32::MIN));
+        let params = PlayParams {
+            bus: Bus::Ambience,
+            looped: true,
+            priority: 192,
+            max_instances: u8::MAX,
+            ..PlayParams::default()
+        };
+        assert_eq!(
+            AudioEmitter::looped(sound),
+            AudioEmitter::new(sound, params)
+        );
     }
 }

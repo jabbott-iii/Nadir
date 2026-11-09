@@ -20,7 +20,10 @@
 //! stone, with tall walls, trees and rocks to walk behind and in front of. They are moved with WASD
 //! or the arrow keys, walk in a cycle of four frames facing the way they
 //! go, collide with the walls, the water, the trees and the rocks, and the
-//! camera follows them. Once a second it logs how fast the
+//! camera follows them. Their steps sound where their feet come down, the
+//! pond's water laps, and the music crossfades from the north's tune to
+//! the south's as they go south past the tall walls of row 36, and back
+//! (`footsteps`, `field`). Once a second it logs how fast the
 //! simulation ticks and the frames come, how long the ticks take, and what
 //! was drawn; with the `dev` feature, also how often the frames allocated.
 //! Close the window to quit.
@@ -35,10 +38,10 @@
 //!   hashing the world each frame, which slows the frames
 //! - `--replay FILE`: plays a replay in place of the keys, then lets them
 //!   take over; pass the scene it was recorded in
-//! - `--headless`, with `--replay`: plays it with no window, as fast as it
-//!   runs, then quits
+//! - `--headless`, with `--replay`: plays it with no window and no sound,
+//!   as fast as it runs, then quits
 //! - `--capture DIR`: draws 10 seconds of the scene offscreen, with no
-//!   window, and writes the frames into `DIR`, for the demo page
+//!   window and no sound, and writes the frames into `DIR`, for the demo page
 //!   (`capture.rs`). In the field the person walks a tour, unless
 //!   `--replay` plays a replay.
 //!
@@ -48,7 +51,10 @@
 //! `target/cooked`. Without `dev` they are read from the cook's pack there,
 //! `game.kpak`, which is all the download and the release files hold; with
 //! it, from the loose files of `target/cooked` (ADR-0041). The person's clips are the tags of their Aseprite
-//! export, `assets/sprites/person.json`.
+//! export, `assets/sprites/person.json`. The sounds are cooked too, and
+//! read from the same place, from the WAVs of `assets/audio/` that
+//! `make_sounds.py`, beside `src/`, made; one that does not load is
+//! logged, and the game goes on without it.
 //!
 //! A recording, when its window is closed, and its replay each log their
 //! ticks and the world's hash after them (`replay.rs`); a recording whose
@@ -80,8 +86,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::{env, fmt};
 
+use nadir::assets::Asset;
 use nadir::cli::Args;
-use nadir::log::info;
+use nadir::log::{info, warn};
 use nadir::prelude::*;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -281,6 +288,10 @@ const SPEED: f32 = 120.0;
 /// Where the person starts: where their feet are.
 const PLAYER_START: Vec2 = Vec2::new(240.0, 160.0);
 
+/// A step every this many ticks while the person walks: two in the
+/// walk's 400 ms, as a foot comes down in its first frame and its third.
+const STEP_TICKS: u32 = 12;
+
 /// The clips of a person, the tags of their Aseprite export: standing, and
 /// walking. `move_player` plays them, and the crowds walk from their own
 /// points of the walk.
@@ -294,6 +305,15 @@ struct Gait {
 
 /// The cooked atlas of `assets/sprites/`.
 const ATLAS: &str = "atlas/sprites.kbj";
+
+/// The cooked sound of a step, `assets/audio/sfx/step.wav`.
+const STEP: &str = "audio/sfx/step.kpcm";
+
+/// The cooked sounds of the field: the pond's water, a loop, and the tunes
+/// of its north and its south.
+const POND: &str = "audio/ambience/pond.kpcm";
+const NORTH: &str = "audio/music/north.qoa";
+const SOUTH: &str = "audio/music/south.qoa";
 
 /// The sprites, from the cooked atlas [`ATLAS`]: every one on its first
 /// page, but for the tile set, which has its own.
@@ -430,7 +450,19 @@ struct Report {
     longest_tick: Duration,
 }
 
-/// Sets the game up on `app`: its sprites, actions, entities and systems.
+/// The person's steps, which `footsteps` sounds.
+struct Footsteps {
+    /// The sound of a step, unless it did not load.
+    sound: Option<Handle<Sound>>,
+    /// The ticks the person has moved since their last step, below
+    /// [`STEP_TICKS`]: a step sounds at 0, as it is again when they stop.
+    phase: u32,
+    /// The steps taken, whether or not their sound loaded.
+    steps: u64,
+}
+
+/// Sets the game up on `app`: its sprites, sounds, actions, entities and
+/// systems.
 ///
 /// # Errors
 ///
@@ -438,6 +470,7 @@ struct Report {
 /// action map cannot be made.
 fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
     let sprites = Sprites::load(&app)?;
+    let step = load_sound(&app, STEP, "the person's steps are silent");
 
     let mut map = ActionMap::<Act>::new()?;
     let keys = |up, down, left, right| Binding::KeyComposite2 {
@@ -465,8 +498,14 @@ fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
             tick_time: Duration::ZERO,
             longest_tick: Duration::ZERO,
         })
+        .insert_resource(Footsteps {
+            sound: step,
+            phase: 0,
+            steps: 0,
+        })
         .add_fixed_system(FixedStage::Gameplay, "move_player", move_player)
         .add_fixed_system(FixedStage::Cleanup, "count_ticks", count_ticks)
+        .add_fixed_system(FixedStage::Cleanup, "footsteps", footsteps)
         .add_frame_system(FrameStage::Ui, "report", report);
     #[cfg(feature = "dev")]
     let app = app.insert_resource(AllocTally::default());
@@ -476,6 +515,23 @@ fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
         Scene::StressEntities => stress_entities::add(app, &sprites),
     };
     Ok(app.insert_resource(sprites))
+}
+
+/// Loads the cooked sound or track at `path` now, so that it can play from
+/// the first tick. One that does not load is logged, with what is
+/// `without` it, and the game goes on without it.
+fn load_sound<T: Asset>(app: &App, path: &str, without: &str) -> Option<Handle<T>> {
+    let mut server = app.world().resource_mut::<AssetServer>();
+    match server.load_now(path, &mut FinalizeCtx::new()) {
+        Ok(sound) => Some(sound),
+        Err(error) => {
+            warn!(
+                "`{path}` cannot be loaded: {error}; {without}; run `cargo xtask cook` to cook \
+                 `assets/` into `target/cooked`"
+            );
+            None
+        }
+    }
 }
 
 /// A collider at the feet: a box of `half` half-extents, whose bottom edge
@@ -493,9 +549,21 @@ fn at_feet(half: Vec2, layer: LayerMask, mask: LayerMask) -> Collider {
 /// [`map::PEOPLE`], as the field's prefabs and grid name them.
 const COLLISION_LAYERS: [&str; 2] = ["World", "People"];
 
+/// The field's size, in pixels: 64 × 48 tiles of 16.
+const FIELD: Vec2 = Vec2::new(1024.0, 768.0);
+
+/// Where the south begins, down the field: at the tall walls of row 36,
+/// whose gap the path goes through.
+const SOUTH_TOP: f32 = 576.0;
+
+/// The middle of the pond, where its water is heard from.
+const POND_AT: Vec2 = Vec2::new(560.0, 112.0);
+
 /// The field: the level `field` (`assets/levels/field.ldtk`, cooked to
 /// `levels/field.klvl`), its ground, grid, tall walls, trees and rocks,
-/// then the person, and the camera on them.
+/// then the person, and the camera on them; and its sound, the music of
+/// the north and the south, which crossfades from one to the other
+/// as the camera crosses [`SOUTH_TOP`], and the pond's water.
 ///
 /// # Errors
 ///
@@ -508,6 +576,9 @@ fn field(app: App, sprites: &Sprites) -> Result<App, Box<dyn Error>> {
             "the field, `levels/field.klvl`, cannot be loaded: {error}; run `cargo xtask cook` to cook `assets/` into `target/cooked`"
         )
     })?;
+    let pond = load_sound::<Sound>(&app, POND, "the pond is silent");
+    let north = load_sound::<Music>(&app, NORTH, "the north has no music");
+    let south = load_sound::<Music>(&app, SOUTH, "the south has no music");
     // A trunk or a rock, which the level spawns, stops the person at its
     // foot, so that they are drawn behind it when they walk into it from
     // above, and in front of it from below.
@@ -519,6 +590,22 @@ fn field(app: App, sprites: &Sprites) -> Result<App, Box<dyn Error>> {
         player,
         at_feet(Vec2::new(5.0, 3.0), map::PEOPLE, map::WORLD),
     );
+    // Spawned after the person, so that the level's entities and theirs
+    // keep the ids they had before the field had sound.
+    for (music, top, bottom) in [(north, 0.0, SOUTH_TOP), (south, SOUTH_TOP, FIELD.y)] {
+        if let Some(music) = music {
+            let half = Vec2::new(FIELD.x, bottom - top) * 0.5;
+            world
+                .spawn()
+                .with(Transform::at(Vec2::new(half.x, top + half.y)))
+                .with(MusicArea::new(music, half));
+        }
+    }
+    if let Some(pond) = pond {
+        let mut water = AudioEmitter::looped(pond);
+        water.params.volume = 0.5;
+        world.spawn().with(Transform::at(POND_AT)).with(water);
+    }
     Ok(app.insert_resource(gait).add_frame_system(
         FrameStage::Camera,
         "follow_camera",
@@ -576,6 +663,45 @@ fn move_player(world: &World, _tick: &Tick) {
 
 fn count_ticks(world: &World, _tick: &Tick) {
     world.resource_mut::<Report>().ticks += 1;
+}
+
+/// Sounds a step at the person's feet as a foot comes down: in the first
+/// tick that moves them, and every [`STEP_TICKS`] after while they keep
+/// moving, every other step a little lower. Held against a wall, they do
+/// not move, and make no sound.
+fn footsteps(world: &World, _tick: &Tick) {
+    let mut footsteps = world.resource_mut::<Footsteps>();
+    let player = world.read::<Player>().entities().first().copied();
+    let transforms = world.read::<Transform>();
+    let previous = world.read::<PrevTransform>();
+    // Where this tick took them, if it moved them from where it started.
+    let moved = player.and_then(|player| {
+        let feet = transforms.get(player)?.position;
+        (previous.get(player)?.0.position != feet).then_some(feet)
+    });
+    let Some(feet) = moved else {
+        footsteps.phase = 0;
+        return;
+    };
+    if footsteps.phase == 0 {
+        if let Some(sound) = footsteps.sound {
+            let params = PlayParams {
+                volume: 0.6,
+                pitch: if footsteps.steps.is_multiple_of(2) {
+                    1.0
+                } else {
+                    0.94
+                },
+                ..PlayParams::default()
+            };
+            let assets = world.resource::<AssetServer>();
+            world
+                .resource::<Audio>()
+                .play_at(&assets, sound, feet, params);
+        }
+        footsteps.steps += 1;
+    }
+    footsteps.phase = (footsteps.phase + 1) % STEP_TICKS;
 }
 
 /// Where this frame draws `entity`: `alpha` of the way from where it was
@@ -752,6 +878,8 @@ impl TickRate {
 
 #[cfg(test)]
 mod tests {
+    use nadir::audio::{AudioConfig, Mixer};
+
     use super::*;
 
     const MS: Duration = Duration::from_millis(1);
@@ -859,6 +987,106 @@ mod tests {
         transforms.get(entity).expect("it has a Transform").position
     }
 
+    /// The rate the tests hear at: the audio output's.
+    pub(crate) const RATE: u32 = 48_000;
+
+    /// The frames of sound in a tick, at [`RATE`].
+    pub(crate) const BLOCK: usize = 800;
+
+    /// A scene, as [`scene`] sets it up but with its buses at `volumes`,
+    /// and its mixer, which the test renders itself.
+    pub(crate) fn listening(scene: Scene, volumes: Volumes) -> (App, Mixer) {
+        let config = Config {
+            assets: COOKED.into(),
+            volumes,
+            ..Config::default()
+        };
+        let mut app = game(App::new(config), scene)
+            .unwrap_or_else(|error| panic!("the sandbox does not set up: {error}"));
+        let mixer = app.take_mixer().expect("no frame has run");
+        (app, mixer)
+    }
+
+    /// Runs a frame of a tick with `events`, and adds the sound it sent to
+    /// `out`: a tick's frames, stereo.
+    pub(crate) fn hear(
+        app: &mut App,
+        mixer: &mut Mixer,
+        events: &[nadir::Event],
+        out: &mut Vec<f32>,
+    ) {
+        app.update(TICK, events);
+        let start = out.len();
+        out.resize(start + BLOCK * 2, 0.0);
+        mixer.render(&mut out[start..], 2, RATE);
+    }
+
+    /// A sound heard among silence.
+    #[derive(Debug)]
+    pub(crate) struct Heard {
+        /// The tick it began in, counted from the first in `out`.
+        pub(crate) tick: usize,
+        /// The ticks it lasted.
+        pub(crate) ticks: usize,
+        /// How loud it was, left and right: the root mean square of its
+        /// samples in those ticks.
+        pub(crate) rms: [f32; 2],
+    }
+
+    /// The sounds in `out`, which holds a tick's frames of sound after
+    /// each tick ([`hear`]): each run of ticks with any sound in it.
+    pub(crate) fn sounds_in(out: &[f32]) -> Vec<Heard> {
+        let silent = |tick: &[f32]| tick.iter().all(|&sample| sample == 0.0);
+        let ticks: Vec<&[f32]> = out.chunks(BLOCK * 2).collect();
+        let mut heard = Vec::new();
+        let mut tick = 0;
+        while tick < ticks.len() {
+            if silent(ticks[tick]) {
+                tick += 1;
+                continue;
+            }
+            let start = tick;
+            let mut squares = [0.0f64; 2];
+            while tick < ticks.len() && !silent(ticks[tick]) {
+                for frame in ticks[tick].as_chunks::<2>().0 {
+                    for (square, &sample) in squares.iter_mut().zip(frame) {
+                        *square += f64::from(sample).powi(2);
+                    }
+                }
+                tick += 1;
+            }
+            let frames = ((tick - start) * BLOCK) as f64;
+            heard.push(Heard {
+                tick: start,
+                ticks: tick - start,
+                rms: squares.map(|sum| (sum / frames).sqrt() as f32),
+            });
+        }
+        heard
+    }
+
+    /// How much louder on the right than on the left a sound is heard
+    /// `offset` to the right of the listener: as `AudioConfig::default`
+    /// pans, by the constant-power law, fully to one side 480 pixels away.
+    pub(crate) fn balance(offset: f32) -> f32 {
+        let pan = (offset / AudioConfig::default().pan_width).clamp(-1.0, 1.0);
+        ((pan + 1.0) * std::f32::consts::FRAC_PI_4).tan()
+    }
+
+    /// Checks that each of `steps` was heard on the side of `listener` that
+    /// the person's feet were on as it began, `feet` by tick, and by as
+    /// much as they were to that side.
+    #[track_caller]
+    pub(crate) fn assert_panned(steps: &[Heard], feet: &[Vec2], listener: Vec2) {
+        for step in steps {
+            let offset = feet[step.tick].x - listener.x;
+            let [left, right] = step.rms;
+            assert_eq!(right > left, offset > 0.0, "{step:?} at {offset}");
+            let ratio = right / left / balance(offset);
+            assert!((ratio - 1.0).abs() < 1e-3, "{step:?} at {offset}: {ratio}");
+        }
+    }
+
     fn options(args: &[&str]) -> Result<Options, String> {
         Options::parse(Args::new(args.iter().copied())).map_err(|error| error.to_string())
     }
@@ -942,9 +1170,11 @@ mod tests {
                 "tick  PostMovement: nadir::parent_offsets",
                 "tick  PostMovement: nadir::triggers",
                 "tick  Cleanup: count_ticks",
+                "tick  Cleanup: footsteps",
                 "frame Animate: nadir::animate",
                 "frame Camera: follow_camera",
                 "frame Ui: report",
+                "frame Extract: nadir::sound",
                 "frame Extract: nadir::extract_sprites",
                 "frame Extract: nadir::extract_level",
             ]
@@ -1238,6 +1468,154 @@ mod tests {
     }
 
     #[test]
+    fn the_field_plays_the_ponds_water_and_the_music_of_its_north_and_its_south() {
+        let app = sandbox();
+        assert_eq!(sound_states(&app), [Some(LoadState::Loaded); 4]);
+        let world = app.world();
+        let server = world.resource::<AssetServer>();
+        let step = world.resource::<Footsteps>().sound;
+        assert_eq!(step.and_then(|step| server.path(step)), Some(STEP));
+        // The field, and its south from the tall walls of row 36.
+        assert_eq!(
+            FIELD,
+            Vec2::new(map::WIDTH as f32, map::HEIGHT as f32) * map::TILE
+        );
+        assert_eq!(SOUTH_TOP, 36.0 * map::TILE);
+        // Each the whole width: the north down to there, the south below,
+        // crossfading over 1.5 s.
+        let areas = world.read::<MusicArea>();
+        let found: Vec<_> = areas
+            .iter()
+            .map(|(entity, area)| {
+                let music = server.path(area.music);
+                (music, position(&app, entity), area.half, area.crossfade_ms)
+            })
+            .collect();
+        let north = Vec2::new(512.0, 288.0);
+        let south = (Vec2::new(512.0, 672.0), Vec2::new(512.0, 96.0));
+        assert_eq!(
+            found,
+            [
+                (Some(NORTH), north, north, 1_500),
+                (Some(SOUTH), south.0, south.1, 1_500)
+            ]
+        );
+        // The pond's water, in the middle of the map's water cells, looped
+        // on the ambience bus at half its volume.
+        let emitters = world.read::<AudioEmitter>();
+        let [(pond, water)] = emitters.iter().collect::<Vec<_>>()[..] else {
+            panic!("one emitter");
+        };
+        assert_eq!(server.path(water.sound), Some(POND));
+        let cells: Vec<Vec2> = (0..)
+            .zip(map::MAP)
+            .flat_map(|(y, row)| {
+                (0..).zip(row.bytes()).filter_map(move |(x, letter)| {
+                    let middle = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) * map::TILE;
+                    (letter == b'~').then_some(middle)
+                })
+            })
+            .collect();
+        let middle = cells.iter().fold(Vec2::ZERO, |sum, &cell| sum + cell) / cells.len() as f32;
+        assert_eq!(position(&app, pond), middle);
+        let mut looped = AudioEmitter::looped(water.sound);
+        looped.params.volume = 0.5;
+        assert_eq!(*water, looped);
+        // Spawned after the person.
+        assert!(pond.index() > player(&app).index());
+    }
+
+    /// The field, with the person's feet at `feet`, hearing their steps
+    /// alone: its music and its pond at 0. Ten ticks are heard first, as
+    /// the buses fade to those volumes, so that what is heard next starts
+    /// from silence.
+    fn steps_alone(feet: Vec2) -> (App, Mixer) {
+        let volumes = Volumes {
+            music: 0,
+            ambience: 0,
+            ..Volumes::default()
+        };
+        let (mut app, mut mixer) = listening(Scene::Field, volumes);
+        put(&mut app, feet);
+        let mut out = Vec::new();
+        for _ in 0..10 {
+            hear(&mut app, &mut mixer, &[], &mut out);
+        }
+        assert!(out[out.len() - BLOCK * 2..].iter().all(|&x| x == 0.0));
+        (app, mixer)
+    }
+
+    #[test]
+    fn a_step_sounds_where_the_person_walks_every_12_ticks_and_none_when_they_stop() {
+        // Along the path, from the left of a listener beside it to its
+        // right, stopping between two steps, then on again.
+        let (mut app, mut mixer) = steps_alone(Vec2::new(240.0, 204.0));
+        let listener = Vec2::new(400.0, 240.0);
+        app.world_mut()
+            .spawn()
+            .with(Transform::at(listener))
+            .with(AudioListener);
+        let player = player(&app);
+        let mut out = Vec::new();
+        let key = |pressed| nadir::Event::Key {
+            key: Key::D,
+            pressed,
+            repeat: false,
+        };
+        let mut feet = Vec::new();
+        for tick in 0..230 {
+            let events = match tick {
+                0 | 190 => vec![key(true)],
+                160 | 220 => vec![key(false)],
+                _ => Vec::new(),
+            };
+            hear(&mut app, &mut mixer, &events, &mut out);
+            feet.push(position(&app, player));
+        }
+        assert_eq!(feet[159].x, 240.0 + 2.0 * 160.0, "it walked on");
+        assert_eq!(feet[189], feet[159], "it stood");
+        assert_eq!(feet[190].x, feet[189].x + 2.0, "it set off again");
+        // One as they set off, then one every 12 ticks, and none once they
+        // stop, 4 ticks after a step; then one as they set off again, and
+        // every 12 ticks from there.
+        let steps = sounds_in(&out);
+        let ticks: Vec<usize> = steps.iter().map(|step| step.tick).collect();
+        let walks = (0..160).step_by(12).chain((190..220).step_by(12));
+        assert_eq!(ticks, walks.collect::<Vec<_>>());
+        assert_eq!(app.world().resource::<Footsteps>().steps, 17);
+        assert_panned(&steps, &feet, listener);
+        // Every other step a little lower, and so a little longer.
+        let (high, low) = (steps[0].ticks, steps[1].ticks);
+        assert!(high < low, "{steps:?}");
+        for (index, step) in steps.iter().enumerate() {
+            assert_eq!(step.ticks, if index % 2 == 0 { high } else { low });
+        }
+    }
+
+    #[test]
+    fn held_against_a_wall_the_person_takes_no_step() {
+        // Below the top wall, whose bottom is at y = 16: walking up to it,
+        // a step as they set off, then none, held against it.
+        let (mut app, mut mixer) = steps_alone(Vec2::new(100.5, 32.0));
+        let player = player(&app);
+        let mut out = Vec::new();
+        let up = nadir::Event::Key {
+            key: Key::W,
+            pressed: true,
+            repeat: false,
+        };
+        hear(&mut app, &mut mixer, &[up], &mut out);
+        for _ in 1..40 {
+            hear(&mut app, &mut mixer, &[], &mut out);
+        }
+        assert!((position(&app, player).y - 22.0).abs() < 1e-2);
+        let steps = sounds_in(&out);
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        assert_eq!(steps[0].tick, 0);
+        assert_eq!(app.world().resource::<Footsteps>().steps, 1);
+    }
+
+    #[test]
     fn a_scene_is_chosen_by_name() {
         for scene in [Scene::Field, Scene::StressSprites, Scene::StressEntities] {
             assert_eq!(Scene::from_name(scene.name()), Some(scene));
@@ -1276,7 +1654,7 @@ mod tests {
         let cooked = PathBuf::from(COOKED);
         std::fs::copy(cooked.join("game.kpak"), packed.join("game.kpak"))
             .expect("the cooked pack: run `cargo xtask cook`");
-        for folder in ["atlas", "data", "levels"] {
+        for folder in ["atlas", "audio", "data", "levels"] {
             copy_dir(&cooked.join(folder), &loose.join(folder));
         }
         let field = |assets: &PathBuf| {
@@ -1288,6 +1666,7 @@ mod tests {
         };
         let from_loose =
             field(&loose).unwrap_or_else(|error| panic!("from the loose files: {error}"));
+        assert_eq!(sound_states(&from_loose), [Some(LoadState::Loaded); 4]);
         let from_pack = field(&packed);
         if cfg!(feature = "dev") {
             // Dev builds read the loose files, which are not there.
@@ -1300,9 +1679,25 @@ mod tests {
             // Builds without `dev` read the pack, and need nothing else.
             let from_pack =
                 from_pack.unwrap_or_else(|error| panic!("from the pack alone: {error}"));
+            assert_eq!(sound_states(&from_pack), [Some(LoadState::Loaded); 4]);
             assert_eq!(from_pack.world_hash(), from_loose.world_hash());
         }
         std::fs::remove_dir_all(&root).expect("remove the folders");
+    }
+
+    /// How the game's four sounds are loaded: the step, the pond, the
+    /// north's music and the south's.
+    fn sound_states(app: &App) -> [Option<LoadState>; 4] {
+        let server = app.world().resource::<AssetServer>();
+        let sound = |path| {
+            let sound = server.assets::<Sound>()?.handle(path)?;
+            server.state(sound)
+        };
+        let music = |path| {
+            let music = server.assets::<Music>()?.handle(path)?;
+            server.state(music)
+        };
+        [sound(STEP), sound(POND), music(NORTH), music(SOUTH)]
     }
 
     /// Copies the files under `from` into `to`, keeping the tree.

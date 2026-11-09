@@ -20,7 +20,8 @@
 //!    cooks `assets/` into `target/cooked` as `cargo xtask cook` does: the
 //!    sandbox draws the cooked sprites (ADR-0033).
 //! 2. Builds the sandbox in release and captures each of [`SCENES`]
-//!    offscreen (`--capture`), which needs an offscreen OpenGL context.
+//!    offscreen (`--capture`), which needs an offscreen OpenGL context,
+//!    and no audio output: a capture plays no sound.
 //! 3. Encodes each capture with GStreamer (`gst-launch-1.0`) into a VP9
 //!    WebM and a PNG poster, at twice the size: every pixel of the game a
 //!    square of four.
@@ -511,7 +512,7 @@ Run it from this directory:
 
     ./sandbox
 
-Its sprites, prefabs and level are in assets/game.kpak, the pack
+Its sprites, sounds, prefabs and level are in assets/game.kpak, the pack
 `cargo xtask cook` made of the repository's assets/. WASD or the arrow
 keys walk. Close the window to quit. The other scenes:
 
@@ -519,7 +520,8 @@ keys walk. Close the window to quit. The other scenes:
     ./sandbox --scene stress-entities
 
 It needs Linux on x86_64 with an X11 server (or XWayland), OpenGL 3.3
-through EGL{glibc}.
+through EGL{glibc}. It plays its sound through ALSA
+(libasound2), and is silent without it.
 
 Its log is in ~/.local/share/Sandbox/nadir.log.
 
@@ -983,12 +985,26 @@ mod tests {
         );
         assert_eq!(glibc_floor(b"no versions here"), None);
         assert_eq!(glibc_floor(b"GLIBC_PRIVATE"), None);
+        let floored = package_note(&build(), Some("2.34"));
         assert!(
-            package_note(&build(), Some("2.34"))
-                .contains("OpenGL 3.3\nthrough EGL, and glibc 2.34 or newer.")
+            floored.contains(
+                "OpenGL 3.3\nthrough EGL, and glibc 2.34 or newer. It plays its sound \
+                 through ALSA\n"
+            ),
+            "{floored}"
         );
         let note = package_note(&build(), None);
-        assert!(note.contains("through EGL.\n\nIts log"), "{note}");
+        assert!(
+            note.contains(
+                "through EGL. It plays its sound through ALSA\n\
+                 (libasound2), and is silent without it.\n\nIts log"
+            ),
+            "{note}"
+        );
+        assert!(
+            note.contains("Its sprites, sounds, prefabs and level are in assets/game.kpak"),
+            "{note}"
+        );
         assert!(note.ends_with("see LICENSE and NOTICE.\n"), "{note}");
         assert!(
             note.contains(

@@ -244,7 +244,10 @@ As built in M5.11 (ADR-0038):
   in as any do, a frame or more later; a loading state (M9.1) can wait
   for the asset server's `has_pending` to clear. The clips of an atlas
   only a prefab names, not a tile set, are not added: the cook lists only
-  tile sets' atlases among a level's assets.
+  tile sets' atlases among a level's assets. It does not play the level's
+  `music` or `ambience`, nor use its camera bounds, yet: the cook writes
+  none of them (the roadmap's backlog, ADR-0051). A game's music comes
+  from the facade's `MusicArea`s (`docs/subsystems/audio.md`).
 - **Reloaded, under `dev`** (M5.8, ADR-0043): the facade's hot reload
   makes the current level again once its file, an atlas, or a prefab was
   reloaded, from its files as they are then. Unlike a load, it keeps the

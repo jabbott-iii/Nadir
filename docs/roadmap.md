@@ -4436,6 +4436,9 @@ by the batched sprite renderer.
     - nadir-audio's README says the facade plays a game's sound through it
       "from roadmap task M6.6", which stays true once M6.6 lands, so M6.6
       need not edit nadir-audio.
+  - A level's own `music` and `ambience` went to the backlog's "A level's
+    music, ambience and camera bounds" on 2026-11-08 (ADR-0051): the cook
+    writes neither, and this task's music comes from areas.
   - Do: the `App` opens audio with the mixer (above) and calls
     `Audio::update` once a frame; `AudioEmitter`/`AudioListener`
     components and their systems; music crossfade between areas; bus
@@ -4445,6 +4448,62 @@ by the batched sprite renderer.
   - Accept: sandbox audio plays; footsteps follow the player positionally;
     music crossfades between areas.
   - Verify: `cargo test -p nadir_engine -p sandbox`; `cargo dev` (manual)
+  - ⏳ needs Linux with headphones, by the user, as no test plays sound:
+    `cargo xtask cook`, then `cargo dev`: the north's tune fades in, the
+    pond laps from the right; walking east along the path, steps twice a
+    walk cycle, none when stopped or against a wall, the pond moving from
+    right to left and fading; no click at a loop over 10 s standing;
+    walking south through the gap at column 50, a 1.5 s crossfade to the
+    south's tune, and back; the report's 0 allocations, no underrun
+    warning; closing quits within 2 s. Then `cargo dev --scene
+    stress-sprites`: the steps pan to the person's side of the view; and
+    `cargo run -p sandbox`, from the pack, the same (`docs/subsystems/audio.md`,
+    "By ear").
+  - Decided with the user on 2026-11-08 (ADR-0051): nadir-cook's
+    workspace test as a fourth package, as ADR-0048's revisit; bus volumes
+    in percent, heard as their square (50 is −12 dB); the camera as the
+    listener unless an entity has an `AudioListener`, so the player's own
+    steps are centred in the field, where the camera is on them, and pan
+    in `stress-sprites`, whose camera is fixed; sources of our own at 48 kHz
+    mono, 1.9 MB.
+  - Built: the `App` makes the mixer and opens the output in `App::run`
+    alone (a missing device is no error; a failed open is logged, and the
+    game runs on silent); the first `App::update` drops a mixer not taken,
+    so tests, headless runs and captures are silent, and `take_mixer` gives
+    it to a test; `nadir::sound`, first in `Extract`, places the listener
+    and the emitters where they are drawn when they move, starts an
+    `AudioEmitter` once its sound has loaded and within `max_dist`, follows
+    and changes it, stops it past `max_dist + 64` or when it goes, and
+    crossfades to the track of the `MusicArea` the listener is in; each
+    send checked against `AudioStats::dropped`, so a dropped one is sent
+    again; `Config::volumes`; `libasound2` in the `.deb`. The sandbox:
+    footsteps every 12 ticks while the person moves, a pond, a north and a
+    south, from `games/sandbox/make_sounds.py`.
+  - Measured: the field's capture, `298521738b5650ef` → `09b32c266f3b59f4`,
+    from its three new entities with a `Transform`, its 600 frames the same
+    bytes; `facade_tick_5k` 2.3 ms and `facade_frame_10k` 282.6 µs, 2.2%
+    and 4.6% under their baselines; the WAVs 1,927,856 bytes, the pack 10
+    files in 697,109 bytes; QOA errs on a loop's first samples, its
+    predictor starting empty, so each tune starts at a zero crossing (the
+    backlog's QOA entry).
+  - Review: three critics of the design, 31 findings, none refuted, which
+    moved the module to `sound.rs`, the positions to every frame, the
+    emitter to a stored copy compared each frame, the range rule, the
+    looped defaults, the warnings, and found the cook's workspace test
+    that needed a fourth package. After the build, three reviewers with a
+    skeptic for each finding: 6 of 13 confirmed, fixed (positions sent only
+    when they move, as 560 emitters sent every frame froze the live voices;
+    a failed track on the area playing; a warned emitter losing its
+    `Transform`; the hash; a doc's claim on stolen voices), and one refuted
+    that a planted bug showed true (the steps' cadence after a stop),
+    tested. Of 31 planted
+    bugs, 6 passed the tests; with the tests added since, 33 of 34 fail
+    them, the one left a step's volume.
+  - Tests: `cargo test -p nadir_engine` and `--all-features` (the facade's
+    sound tests, offline through a taken mixer, and a steady frame of 40
+    emitters allocating nothing); `cargo test -p sandbox` and
+    `--all-features`; `cargo test -p nadir-cook`; `cargo test -p xtask`;
+    `cargo xtask bench facade`; `cargo xtask ci`.
 
 - [ ] **M6.7 — soak tooling**
   - Note (from M6.2): `AudioStats` gives the last callback's mixing time,
@@ -4942,6 +5001,8 @@ three OSes from a tag, and the release checklist is complete.
 | TrueType rasterizer in cook (glyf outlines → bitmap atlases) | Localization beyond the hand-made bitmap fonts |
 | 2D lighting pass (`light2d`) | Art direction asks for it |
 | Native PipeWire audio | ALSA-compatibility issues reported |
+| A level's music, ambience and camera bounds: the cook maps an LDtk level's own fields to the level file's `music`, `ambience` and `camera`, which it writes none of yet (it drops a level's fields with a warning, ADR-0038); `load_level` loads the music and the ambience with `load_now_in` in `Scope::Level` and plays them, the ambience looped on `Bus::Ambience`, and `unload_level` stops them. The task decides how a level's music and its `MusicArea`s share the music (ADR-0051) | A game that needs music, ambience or camera bounds of each level |
+| QOA's first frame primed for a loop: the cook's encoder starts a file with an empty predictor, so a looped track whose first samples are loud decodes them wrong (by up to 593 of 32,768 in a draft of the sandbox's south tune) and ticks each time the loop comes round. QOA keeps the predictor's state in each frame's header, so the cook could write the first frame's from the loop's last samples; until then the sandbox's tunes start at a zero crossing (M6.6, ADR-0051) | Music whose loop must start loud |
 | Windows installer | A non-Steam/itch distribution channel requires one |
 | Opt-in crash upload | Volume of player bug reports; requires a privacy review |
 | Native file watchers (inotify, FSEvents, `ReadDirectoryChangesW`) | Polling cost on large asset trees |

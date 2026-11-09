@@ -126,7 +126,7 @@ before its roadmap task is ticked: check before assuming.
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
 | `cargo xtask dist [--out DIR]` | Builds this machine's release files into `target/dist`: runs the laid-out programs, then packs the archive and, on Linux, the `.deb`s (needs `dpkg-dev`; ADR-0036) |
 | `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |
-| `cargo run -p sandbox` | Runs the sandbox game (opens a window). It draws the cooked sprites: run `cargo xtask cook` first, which `cargo xtask ci` also does, as the sandbox's tests need them too |
+| `cargo run -p sandbox` | Runs the sandbox game (opens a window, and on Linux the audio output). It draws the cooked sprites: run `cargo xtask cook` first, which `cargo xtask ci` also does, as the sandbox's tests need them too |
 | `cargo dev` | Runs the sandbox with its `dev` feature (an alias in `.cargo/config.toml`): a development build, which reads the loose cooked files, not the pack, reloads those that change, and render's shaders, while it runs (with `cargo xtask cook --watch` beside it), shows a missing asset's placeholder, and logs how often the frames allocate |
 | `make release VERSION=v<version> [DRY_RUN=1]` | For maintainers, never agents (rule 7): checks that HEAD is on `main` at that version, then tags it and pushes the tag, which starts the release workflow (`docs/05-release.md`) |
 

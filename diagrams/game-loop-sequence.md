@@ -15,18 +15,20 @@ How to read them:
   with an open head sends a job or a result through a channel to another
   thread, without waiting.
 - `nadir::snapshot` and the like are the engine's systems, named as the
-  schedule lists them. `move_player`, `count_ticks`, `follow_camera` and
-  `report` are the sandbox's, in its default scene, the field.
+  schedule lists them. `move_player`, `count_ticks`, `footsteps`,
+  `follow_camera` and `report` are the sandbox's, in its default scene,
+  the field.
 - The other names are types and functions of the code.
 
 ## 1. Setup, before the window opens
 
 `App::new` builds the world, the schedule and the `AssetServer`, which reads
 loose files with the `dev` feature, and without it the pack `game.kpak` when
-there is one. The sandbox then loads its atlas and the level `field` before
-`App::run` opens anything, so the workers decode their textures with no GPU
-device to make them yet. Then it calls `App::run`, or, with the capture or
-headless option, runs frames with no window (section 10).
+there is one, and the mixer, which it keeps until `App::run`. The sandbox
+then loads its atlas, its sounds and the level `field` before `App::run`
+opens anything, so the workers decode their textures with no GPU device to
+make them yet. Then it calls `App::run`, or, with the capture or headless
+option, runs frames with no window (section 10).
 
 ```mermaid
 sequenceDiagram
@@ -56,15 +58,17 @@ sequenceDiagram
     end
     Srv->>Wk: Workers::new: 1 to 4 threads
     App->>App: the other resources, the events, the TypeRegistry
-    App->>App: Schedule: the engine's 7 systems
+    App->>App: nadir_audio::new: Audio, AudioState, each bus's volume queued, the Mixer kept
+    App->>App: Schedule: the engine's 8 systems
     App->>App: FixedClock::new(60 Hz, 250 ms)
     App-->>Main: app
     Main->>Srv: Sprites::load: load_now an Atlas
     Srv->>Srv: decode and make it now, no GPU needed
     Main->>Srv: load_pages: load_in each page
     Srv-)Wk: a decode job for each page
-    Main->>App: Clips add_atlas, add_actions
-    Main->>App: add move_player, count_ticks, report
+    Main->>App: Clips add_atlas
+    Main->>Srv: load_now the step's sound
+    Main->>App: add_actions, add move_player, count_ticks, footsteps, report
     Main->>App: collision_layers(World, People)
     Main->>Lvl: App::load_level("field")
     Lvl->>Lvl: unload_level: the last level goes
@@ -76,7 +80,9 @@ sequenceDiagram
     Lvl->>App: spawn the tall tiles and the prefabs
     Lvl->>App: TileLayers add, Collisions set_grid
     Lvl->>App: CurrentLevel keeps what it made
-    Main->>App: spawn_player, add follow_camera
+    Main->>Srv: load_now the pond's sound and the two tunes
+    Main->>App: spawn_player, the two MusicAreas, the pond's AudioEmitter
+    Main->>App: add follow_camera
     opt the record or replay option
         Main->>App: add the recording, or play_replay
     end
@@ -90,8 +96,10 @@ sequenceDiagram
 ## 2. Startup: the window, the GPU and the loop
 
 `App::run` opens the log file, the window and its OpenGL context, then the
-device and the renderer, and enters `run_loop`. Windows and macOS have no
-OpenGL context yet (roadmap M2.6 and M2.7), so there the game runs undrawn.
+device and the renderer, then the audio output with the mixer, and enters
+`run_loop`. Windows and macOS have no OpenGL context yet (roadmap M2.6 and
+M2.7), so there the game runs undrawn, and no audio output (M6.4, M6.5),
+so it runs silent.
 
 ```mermaid
 sequenceDiagram
@@ -102,7 +110,11 @@ sequenceDiagram
         participant Egl as WindowGl, EGL
         participant Dev as gfx Device
         participant Rend as Renderer
+        participant Out as open_audio
         participant RL as App::run_loop
+    end
+    box Audio thread
+        participant Thr as nadir-audio
     end
 
     Main->>Run: run()
@@ -129,6 +141,19 @@ sequenceDiagram
     else Windows, macOS: a stand-in context
         Dev-->>Run: Err MissingFunction
         Run->>Run: no Graphics: nothing is drawn
+    end
+    alt the App still holds the mixer
+        Run->>Out: open_audio(48 kHz stereo, MixerOutput(mixer))
+        alt Linux, with libasound
+            Out-)Thr: spawn it: the mixer moves there
+            Thr->>Thr: snd_pcm_open default, set_params, or none yet
+            Thr-->>Out: opened, or not, within 2 s
+            Out-->>Run: the AudioStream
+        else Windows, macOS, or no libasound
+            Out-->>Run: Err: a warning, the game runs silent
+        end
+    else taken, or an update ran first
+        Run->>Run: log it: the game runs silent
     end
     Run->>RL: run_loop(platform, graphics)
     RL->>RL: debug log the systems in order
@@ -298,6 +323,8 @@ sequenceDiagram
     Note over Sch,Wld: FixedStage::Cleanup
     Sch->>Game: count_ticks
     Game->>Wld: Report ticks plus 1
+    Sch->>Game: footsteps
+    Game->>Wld: every 12 ticks the player moves, Audio play_at its feet
     Sch->>Wld: apply_commands
 ```
 
@@ -308,8 +335,8 @@ has none. `move_colliders` moves the entities with a `Collider` and a
 ## 6. The frame stages: Schedule::run_frame
 
 After the ticks, the frame stages run once. They animate, put the camera
-between the last two ticks, and fill the `RenderFrame` that section 7
-draws.
+between the last two ticks, send the frame's sound to the mixer (section
+12), and fill the `RenderFrame` that section 7 draws.
 
 ```mermaid
 sequenceDiagram
@@ -319,20 +346,26 @@ sequenceDiagram
         participant Game as sandbox systems
         participant Wld as World
         participant RF as RenderFrame
+        participant Aud as Audio
     end
 
-    Note over Sch,RF: FrameStage::Animate
+    Note over Sch,Aud: FrameStage::Animate
     Sch->>Eng: nadir::animate
     Eng->>Wld: advance each Animator by the time
     Eng->>Wld: write its frame into the Sprite
     Eng->>Wld: send AnimationFinished, flip by Facing
-    Note over Sch,RF: FrameStage::Camera
+    Note over Sch,Aud: FrameStage::Camera
     Sch->>Game: follow_camera
     Game->>RF: camera on the player, lerp by alpha
-    Note over Sch,RF: FrameStage::Ui
+    Note over Sch,Aud: FrameStage::Ui
     Sch->>Game: report
     Game->>Wld: count the frame, once a second log the stats
-    Note over Sch,RF: FrameStage::Extract
+    Note over Sch,Aud: FrameStage::Extract
+    Sch->>Eng: nadir::sound
+    Eng->>Aud: set_listener: the AudioListener, or the camera
+    Eng->>Aud: start, place, change or stop each AudioEmitter
+    Eng->>Aud: play_track of the MusicArea the listener is in
+    Eng->>Aud: update: drop what the mixer is done with
     Sch->>Eng: nadir::extract_sprites
     Eng->>RF: a SpriteDraw for each Sprite, lerped
     Sch->>Eng: nadir::extract_level
@@ -346,6 +379,10 @@ last frame, and writes the clip frame's texture and uv, and its size and
 pivot when the frame has a placement. A
 sprite is drawn `alpha` of the way from its `PrevTransform` to its
 `Transform`, and a child where its root is drawn, plus its offset.
+`nadir::sound` places the listener and the emitters where they are drawn,
+the same way. An emitter starts once its sound has loaded and it is within
+800 px of the listener, and stops a little past that, or when its entity
+or the emitter goes.
 
 ## 7. Drawing, presenting, and the finished loads
 
@@ -446,7 +483,8 @@ the thread that asked.
 
 The loop ends on a close request or on a frame's error, which is logged and
 shown before the window goes. `EngineCore` drops first, the app before the
-GPU device, and then the `Platform` closes the window.
+GPU device, then the audio output, before the error is shown, and then the
+`Platform` closes the window.
 
 ```mermaid
 sequenceDiagram
@@ -460,6 +498,9 @@ sequenceDiagram
     end
     box Asset worker threads
         participant Wk as Workers
+    end
+    box Audio thread
+        participant Thr as nadir-audio
     end
 
     alt the player closes the window
@@ -475,6 +516,10 @@ sequenceDiagram
     Srv->>Wk: Workers drop: stop, close, join
     Core->>Core: drop Graphics: Renderer, then Device
     RL-->>Run: Ok, or the Err
+    opt there is an AudioStream
+        Run->>Thr: drop it: the stop flag, then join, 2 s at most
+        Thr->>Thr: snd_pcm_close, drop the mixer
+    end
     opt an Err
         Run->>Run: fatal: log, show_error_dialog
     end
@@ -498,7 +543,9 @@ holds a second `Rc` of the `EngineCore`, which then drops with the
 Tests, benchmarks and two of the sandbox's options run frames with no
 window. `App::update` alone draws nothing, so no load finishes, while
 `App::offscreen` draws into a render target and waits for every load, so
-that a recording is the same each time.
+that a recording is the same each time. Neither plays sound: the first
+`App::update` drops the mixer that `App::new` made, so no audio output
+opens, and `Audio` does nothing.
 
 ```mermaid
 sequenceDiagram
@@ -511,6 +558,7 @@ sequenceDiagram
         participant Srv as AssetServer
     end
 
+    Note over Sb,Srv: The first App::update drops the mixer: silent from then on.
     alt the headless option
         loop until Replay ends or fails
             Sb->>Upd: update(16.67 ms, no events)
@@ -589,20 +637,67 @@ An atlas, a prefab or the current level's file swapped makes the level
 due. A texture needs nothing: the renderer looks its handle up each frame.
 With nothing changed, the frame allocates nothing.
 
+## 12. Sound: the main thread and the audio thread
+
+`nadir::sound` (section 6) and the game's own plays queue commands
+through `Audio`. The audio thread, which `App::run` started (section 2),
+takes them at the start of each period, mixes, and writes to the device.
+What the mixer is done with comes back to the main thread, which drops it
+in `Audio::update`. Neither waits for the other: the audio thread only
+tries the queue's lock, and the queue never grows (M6.2, M6.3, M6.6).
+
+```mermaid
+sequenceDiagram
+    box Main thread
+        participant Snd as nadir::sound
+        participant Aud as Audio
+    end
+    box Audio thread
+        participant Thr as nadir-audio
+        participant Mix as MixerOutput, Mixer
+    end
+
+    Snd->>Aud: set_listener, play_sound_at, set_voice, stop, play_track
+    Aud->>Aud: push each on the command queue, or count it dropped
+    opt the dropped count rose around a send
+        Snd->>Snd: not recorded: the next frame sends it again
+    end
+    loop each period of the device, 7.5 ms by default
+        Thr->>Mix: render(out, 2, 48 kHz)
+        Mix->>Mix: try_lock: run the commands queued
+        Mix->>Mix: mix the voices and the music, the buses, the limiter
+        Mix->>Mix: what ended, to the return queue
+        Thr->>Thr: snd_pcm_writei, or wait for room
+        opt an underrun
+            Thr->>Mix: underrun: Mixer::count_underrun
+        end
+    end
+    Snd->>Aud: update
+    Aud->>Aud: swap the return queue, drop what came back
+    Aud->>Aud: at most once a second, warn of underruns and drops
+```
+
+The listener and the emitters that play are placed when they move, and a
+move that the half-full queue dropped is sent again the next frame. With no device, lost or not
+there yet, the thread renders on in time and tries the device every
+second.
+
 ## Not shown, because it is not built yet
 
-- The audio thread and its mixer: the mixer (M6.2) and the Linux output
-  (M6.3) are built, and the facade starts neither until M6.6.
 - Gamepads (M8), bitmap text (M7.1), and the debug UI, profiler and console
   (M7.2 to M7.6).
 - Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).
   There the loop runs as section 3 shows, with no `Graphics`.
+- Sound on Windows and macOS (M6.4, M6.5): there `open_audio` fails, and
+  the game runs silent.
 
 ## Sources
 
 - `crates/engine/src/app.rs`, `glue.rs`, `level.rs`, `pack.rs`,
   `limiter.rs`, `replay.rs`, `tick_stats.rs`, `frame_allocs.rs`,
-  `collisions.rs`, `animation.rs`, `log_file.rs`, `hot_reload.rs`
+  `collisions.rs`, `animation.rs`, `log_file.rs`, `hot_reload.rs`,
+  `sound.rs`
+- `crates/audio/src/audio.rs`, `mixer.rs`, `shared.rs`
 - `crates/core/src/time.rs`
 - `crates/ecs/src/schedule.rs`, `world.rs`, `events.rs`
 - `crates/input/src/input.rs`
@@ -611,6 +706,7 @@ With nothing changed, the frame allocates nothing.
 - `crates/render/src/renderer.rs`, `batcher.rs`, `plan.rs`, `sort.rs`,
   `frame.rs`, `chunks.rs`, `texture.rs`, `atlas.rs`
 - `crates/gfx/src/device.rs`, `gl/mod.rs`
-- `crates/platform/src/lib.rs`, `sleep.rs`, `linux/x11.rs`,
-  `linux/x11/input.rs`, `linux/x11/connection.rs`, `linux/egl.rs`
+- `crates/platform/src/lib.rs`, `sleep.rs`, `audio.rs`, `linux/x11.rs`,
+  `linux/x11/input.rs`, `linux/x11/connection.rs`, `linux/egl.rs`,
+  `linux/alsa.rs`
 - `games/sandbox/src/main.rs`, `replay.rs`, `capture.rs`

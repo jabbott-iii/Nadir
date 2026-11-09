@@ -1,0 +1,3 @@
+// The pond's water, made by games/sandbox/make_sounds.py: a loop, which
+// ends where it begins, not in silence.
+{ "loop": true }

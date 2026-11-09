@@ -1268,12 +1268,15 @@ mod tests {
             self.run(Some((device, FORMAT)), FORMAT, reopen, FAST);
         }
 
-        /// Whether the log's last records include one with this test's
-        /// name that contains `text`.
+        /// Whether the log's last records include one of this test's fake
+        /// errors that contains `text`: its name as the errors write it, so
+        /// that `separated` does not find the lines of `unseparated`, which
+        /// share the log.
         fn logged(&self, text: &str) -> bool {
+            let error = format!(" {}: fake error ", self.name);
             log::tail(log::RING_CAPACITY)
                 .iter()
-                .any(|line| line.contains(self.name) && line.contains(text))
+                .any(|line| line.contains(&error) && line.contains(text))
         }
     }
 

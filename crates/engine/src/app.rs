@@ -22,15 +22,17 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use nadir_assets::{AssetServer, FinalizeCtx, OnFailure};
+use nadir_audio::{AudioConfig, Bus, Mixer};
 use nadir_core::UVec2;
-use nadir_core::log::{debug, error};
+use nadir_core::log::{debug, error, info, warn};
 use nadir_core::profile::{self, ScopeRecord};
 use nadir_core::time::{FixedClock, Stopwatch};
 use nadir_ecs::{Component, FixedStage, FixedSystem, FrameStage, FrameSystem, Schedule, World};
 use nadir_gfx::{Device, PassTarget, RenderTargetId, TextureFormat};
 use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Input, InputPlayer};
 use nadir_platform::{
-    Event, GpuSurface, ModalFrame, Platform, WindowConfig, precise_sleep, show_error_dialog,
+    AudioOutputConfig, AudioStream, Event, GpuSurface, ModalFrame, Platform, WindowConfig,
+    open_audio, precise_sleep, show_error_dialog,
 };
 use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, TileLayers};
 use nadir_scene::{FromValue, PrefabLibrary, TypeRegistry};
@@ -38,10 +40,12 @@ use nadir_scene::{FromValue, PrefabLibrary, TypeRegistry};
 use crate::animation::AnimationClock;
 use crate::limiter::FrameLimiter;
 use crate::replay::{PlayReplay, ReplayInput};
+use crate::sound::{AudioState, MixerOutput, Tracked};
 use crate::{
-    AnimationFinished, Animator, Clips, Collider, CollisionLayers, Collisions, CurrentLevel, Error,
-    Facing, LevelError, Parent, Player, PrevTransform, Replay, SaveId, Sprite, TickStats,
-    Transform, TriggerEnter, TriggerExit, Velocity, glue, log_file,
+    AnimationFinished, Animator, AudioEmitter, AudioListener, Clips, Collider, CollisionLayers,
+    Collisions, CurrentLevel, Error, Facing, LevelError, MusicArea, Parent, Player, PrevTransform,
+    Replay, SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit, Velocity, glue,
+    log_file,
 };
 
 /// How many times a second the simulation steps.
@@ -99,6 +103,9 @@ pub struct Config {
     /// whose pack `game.kpak` builds without `dev` read when it is there
     /// ([`App::new`]).
     pub assets: PathBuf,
+    /// The volume of each of the mixer's buses as the game starts: full,
+    /// by default.
+    pub volumes: Volumes,
 }
 
 impl Default for Config {
@@ -115,7 +122,73 @@ impl Default for Config {
             vsync: true,
             virtual_resolution: UVec2::new(480, 270),
             assets: PathBuf::from("assets"),
+            volumes: Volumes::default(),
         }
+    }
+}
+
+/// The volume of each of the mixer's buses, in percent of full: 0 to 100,
+/// and more counts as 100. A percent is heard as its square
+/// ([`Volumes::gain`]), so 50 is −12 dB, nearer half as loud than the
+/// −6 dB of half the gain.
+///
+/// [`App::new`] sets the buses to [`Config::volumes`]. A game changes one
+/// while it runs, from its settings say, with
+/// `audio.set_bus_volume(bus, volumes.gain(bus), fade)`
+/// ([`Audio::set_bus_volume`](nadir_audio::Audio::set_bus_volume)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Volumes {
+    /// The music's: [`Bus::Music`].
+    pub music: u8,
+    /// The sound effects': [`Bus::Sfx`].
+    pub sfx: u8,
+    /// The interface's sounds': [`Bus::Ui`].
+    pub ui: u8,
+    /// The ambient loops': [`Bus::Ambience`].
+    pub ambience: u8,
+}
+
+impl Default for Volumes {
+    /// Every bus at 100: as its sounds are.
+    fn default() -> Self {
+        Self {
+            music: 100,
+            sfx: 100,
+            ui: 100,
+            ambience: 100,
+        }
+    }
+}
+
+impl Volumes {
+    /// The percent of `bus`.
+    pub const fn get(&self, bus: Bus) -> u8 {
+        match bus {
+            Bus::Music => self.music,
+            Bus::Sfx => self.sfx,
+            Bus::Ui => self.ui,
+            Bus::Ambience => self.ambience,
+        }
+    }
+
+    /// Sets the percent of `bus`: for a menu that goes through
+    /// [`Bus::ALL`].
+    pub fn set(&mut self, bus: Bus, percent: u8) {
+        let volume = match bus {
+            Bus::Music => &mut self.music,
+            Bus::Sfx => &mut self.sfx,
+            Bus::Ui => &mut self.ui,
+            Bus::Ambience => &mut self.ambience,
+        };
+        *volume = percent;
+    }
+
+    /// The gain of `bus`, for
+    /// [`Audio::set_bus_volume`](nadir_audio::Audio::set_bus_volume): its
+    /// percent, at most 100, as a part of 100, squared. 50 is 0.25.
+    pub fn gain(&self, bus: Bus) -> f32 {
+        let part = f32::from(self.get(bus).min(100)) / 100.0;
+        part * part
     }
 }
 
@@ -365,6 +438,10 @@ impl EngineCore {
 ///   writes its frame into its [`Sprite`], sends [`AnimationFinished`],
 ///   mirrors the Sprite of each entity that faces [`Facing::Left`], and
 ///   unmirrors the rest with a [`Facing`];
+/// - `nadir::sound` (frame `Extract`): puts the listener at the
+///   [`AudioListener`], or else the camera, plays each [`AudioEmitter`] at
+///   its entity, sends the track of the [`MusicArea`] the listener is in,
+///   and calls [`Audio::update`](nadir_audio::Audio::update);
 /// - `nadir::extract_sprites` (frame `Extract`): draws every [`Sprite`]
 ///   into the [`RenderFrame`], between the last two ticks;
 /// - `nadir::extract_level` (frame `Extract`): draws the tile layers of the
@@ -398,6 +475,9 @@ impl EngineCore {
 ///   until [`App::collision_layers`] gives them
 /// - [`CurrentLevel`], the level [`App::load_level`] loaded, none until it
 ///   loads one
+/// - [`Audio`](nadir_audio::Audio), the game's handle on the mixer, whose
+///   buses start at [`Config::volumes`], and [`AudioState`], what
+///   `nadir::sound` plays
 /// - with [`App::play_replay`], [`Replay`], how far the replay got
 /// - the events [`TriggerEnter`], [`TriggerExit`] and [`AnimationFinished`]
 /// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
@@ -440,6 +520,10 @@ pub struct App {
     /// `shaders/`, or a test's.
     #[cfg(feature = "dev")]
     shader_dir: PathBuf,
+    /// The mixer that [`Audio`](nadir_audio::Audio) sends to, until
+    /// [`App::run`] hands it to the audio output, [`App::take_mixer`] takes
+    /// it, or [`App::update`] drops it.
+    mixer: Option<Mixer>,
 }
 
 impl App {
@@ -461,6 +545,10 @@ impl App {
     /// engine's own. Its resources include a [`PrefabLibrary`] with no
     /// prefabs, and [`CollisionLayers`] with no names
     /// ([`App::collision_layers`]).
+    ///
+    /// It makes the mixer, of [`AudioConfig::default`], and sets each bus
+    /// to [`Config::volumes`]. [`AudioListener`], [`AudioEmitter`] and
+    /// [`MusicArea`] are not reflected: a game gives them in code.
     pub fn new(config: Config) -> Self {
         let on_failure = if cfg!(feature = "dev") {
             OnFailure::Placeholder
@@ -491,6 +579,14 @@ impl App {
         world.insert_resource(PrefabLibrary::new());
         world.insert_resource(CurrentLevel::default());
         world.insert_resource(AnimationClock::default());
+        let sound = AudioConfig::default();
+        let (audio, mixer) = nadir_audio::new(sound).expect("the default audio config is valid");
+        // Queued, for the mixer's first callback.
+        for bus in Bus::ALL {
+            audio.set_bus_volume(bus, config.volumes.gain(bus), 0);
+        }
+        world.insert_resource(audio);
+        world.insert_resource(AudioState::new(&sound));
         #[cfg(feature = "dev")]
         world.insert_resource(crate::FrameAllocs::default());
         #[cfg(feature = "dev")]
@@ -515,6 +611,10 @@ impl App {
         world.register::<Collider>();
         world.register::<Parent>();
         world.register::<Animator>();
+        world.register::<AudioListener>();
+        world.register::<AudioEmitter>();
+        world.register::<MusicArea>();
+        world.register::<Tracked>();
 
         let mut schedule = Schedule::new();
         schedule
@@ -527,6 +627,7 @@ impl App {
             )
             .add_fixed(FixedStage::PostMovement, "nadir::triggers", glue::triggers)
             .add_frame(FrameStage::Animate, "nadir::animate", glue::animate)
+            .add_frame(FrameStage::Extract, "nadir::sound", crate::sound::sound)
             .add_frame(
                 FrameStage::Extract,
                 "nadir::extract_sprites",
@@ -546,7 +647,16 @@ impl App {
             profile: Vec::new(),
             #[cfg(feature = "dev")]
             shader_dir: PathBuf::from(nadir_render::SHADER_DIR),
+            mixer: Some(mixer),
         }
+    }
+
+    /// Takes the mixer, for a test or a tool that renders it itself
+    /// ([`Mixer::render`]): [`App::run`] then opens no audio output. Take it
+    /// before the first [`App::update`], which drops a mixer the app still
+    /// holds: `None` then, and once it is taken.
+    pub fn take_mixer(&mut self) -> Option<Mixer> {
+        self.mixer.take()
     }
 
     /// Adds `resource`, or replaces the one of its type.
@@ -760,7 +870,15 @@ impl App {
     /// million frames. Asset loads finish only in a drawn frame, so a
     /// headless run finishes none: tick systems must not depend on whether
     /// an asset has loaded.
+    ///
+    /// It plays no sound. Its first call drops the mixer, unless
+    /// [`App::take_mixer`] took it, and [`Audio`](nadir_audio::Audio) then
+    /// does nothing: so tests, benchmarks, headless runs and
+    /// [`App::offscreen`] are silent, and [`App::run`] after it opens no
+    /// audio output.
     pub fn update(&mut self, elapsed: Duration, events: &[Event]) {
+        // Nothing renders it here: dropped, it leaves no queue to fill.
+        self.mixer = None;
         {
             let mut input = self.world.resource_mut::<Input>();
             for event in events {
@@ -823,6 +941,15 @@ impl App {
     /// roadmap M2.6 and M2.7), the error is logged and the game runs
     /// without drawing.
     ///
+    /// It opens the default audio output, 48 kHz stereo, with the mixer,
+    /// once the window is open, and closes it when the loop ends, before an
+    /// error is shown. Where it does not open (Windows and macOS until
+    /// roadmap M6.4 and M6.5, Linux without `libasound.so.2`), a warning
+    /// says why and the game runs without sound; with no mixer left
+    /// ([`App::take_mixer`], or an [`App::update`] before), the log says so.
+    /// A missing device is no error: the output starts without one, and
+    /// opens it once it comes.
+    ///
     /// With the `dev` feature, it reloads what changes while it runs: the
     /// loaded assets' files and render's shaders, after each drawn frame
     /// (the crate's docs, "Hot reload").
@@ -832,7 +959,7 @@ impl App {
     /// Fails if the window cannot be opened, the renderer cannot start, or
     /// a frame cannot be drawn. Before it returns the error, it logs it and
     /// shows it to the player with [`show_error_dialog`].
-    pub fn run(self) -> Result<(), Error> {
+    pub fn run(mut self) -> Result<(), Error> {
         log_file::start(&self.config.studio, &self.config.game);
         let title = self.config.title.clone();
         let mut platform =
@@ -851,8 +978,31 @@ impl App {
                 None
             }
         };
-        self.run_loop(&mut platform, graphics)
-            .map_err(|error| fatal(&title, error))
+        let stream = self.start_audio();
+        let result = self.run_loop(&mut platform, graphics);
+        // The sound stops before an error is shown.
+        drop(stream);
+        result.map_err(|error| fatal(&title, error))
+    }
+
+    /// Opens the audio output with the mixer, if the app still holds it.
+    /// `None`, after the log says why, where the game plays no sound.
+    fn start_audio(&mut self) -> Option<AudioStream> {
+        let Some(mixer) = self.mixer.take() else {
+            info!(
+                "the game plays no sound: its mixer was taken (App::take_mixer), or dropped by an \
+                 App::update before App::run"
+            );
+            return None;
+        };
+        let config = AudioOutputConfig::default();
+        match open_audio(&config, Box::new(MixerOutput(mixer))) {
+            Ok(stream) => Some(stream),
+            Err(error) => {
+                warn!("no audio output, so the game plays no sound: {error}");
+                None
+            }
+        }
     }
 
     /// The main loop: events, then the frame and its ticks, then drawing.
@@ -1126,6 +1276,32 @@ mod tests {
         assert!(config.vsync);
         assert_eq!(config.virtual_resolution, UVec2::new(480, 270));
         assert_eq!(config.assets, PathBuf::from("assets"));
+        for bus in Bus::ALL {
+            assert_eq!(config.volumes.get(bus), 100, "{bus:?}");
+            assert_eq!(config.volumes.gain(bus), 1.0, "{bus:?}");
+        }
+    }
+
+    #[test]
+    fn a_volume_is_heard_as_its_square_and_held_to_100() {
+        let mut volumes = Volumes::default();
+        volumes.set(Bus::Music, 50);
+        volumes.set(Bus::Ui, 0);
+        volumes.set(Bus::Ambience, 250);
+        assert_eq!(
+            volumes,
+            Volumes {
+                music: 50,
+                sfx: 100,
+                ui: 0,
+                ambience: 250
+            }
+        );
+        // 50 is a quarter of the gain: −12 dB.
+        assert_eq!(volumes.gain(Bus::Music), 0.25);
+        assert_eq!(volumes.gain(Bus::Ui), 0.0);
+        assert_eq!(volumes.gain(Bus::Ambience), 1.0);
+        assert_eq!(volumes.get(Bus::Ambience), 250);
     }
 
     #[test]
@@ -1142,6 +1318,12 @@ mod tests {
             vsync: false,
             virtual_resolution: UVec2::new(320, 180),
             assets: PathBuf::from("data"),
+            volumes: Volumes {
+                music: 60,
+                sfx: 80,
+                ui: 100,
+                ambience: 40,
+            },
         };
         let expected = WindowConfig {
             title: "Sandbox".to_string(),
@@ -1181,6 +1363,7 @@ mod tests {
                 "frame Animate: nadir::animate",
                 "frame Animate: react",
                 "frame Camera: follow",
+                "frame Extract: nadir::sound",
                 "frame Extract: nadir::extract_sprites",
                 "frame Extract: nadir::extract_level",
                 "frame Extract: draw_ground",
@@ -1202,6 +1385,9 @@ mod tests {
         assert!(world.is_registered::<SaveId>());
         assert!(world.is_registered::<Facing>());
         assert!(world.is_registered::<Animator>());
+        assert!(world.is_registered::<AudioListener>());
+        assert!(world.is_registered::<AudioEmitter>());
+        assert!(world.is_registered::<MusicArea>());
         let registry = world.resource::<TypeRegistry>();
         let names: Vec<&str> = registry.iter().map(|it| it.name()).collect();
         assert_eq!(
@@ -1217,10 +1403,13 @@ mod tests {
                 "Animator"
             ]
         );
-        // The engine's own, the prefabs a game loads, and no level yet.
+        // The engine's own, the prefabs a game loads, no level yet, and
+        // the mixer's handle, with no music sent.
         assert!(world.contains_resource::<CollisionLayers>());
         assert!(world.contains_resource::<PrefabLibrary>());
         assert_eq!(world.resource::<CurrentLevel>().name(), None);
+        assert!(world.contains_resource::<nadir_audio::Audio>());
+        assert_eq!(world.resource::<AudioState>().music_area(), None);
     }
 
     nadir_scene::reflect_newtype! {

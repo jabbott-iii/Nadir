@@ -1858,7 +1858,9 @@ bytes, its samples, the resampled ones, and the file).
   incremental cook against a clean one, what each change cooks again,
   stale files removed, and the workspace's `assets/` cooked to its PNGs'
   pixels, cell by cell, into a file the game's reader takes, with the
-  person's clips; Aseprite exports placed in their canvas, their clips,
+  person's clips, and its sounds, the sound files sample for sample as
+  their WAVs and the tunes QOA that the game's reader takes (M6.6);
+  Aseprite exports placed in their canvas, their clips,
   their sidecars and their mistakes; fonts' frames and files, their
   fallbacks and their mistakes; sounds, by their folders and sidecars,
   resampled, as loops, their warnings and their mistakes

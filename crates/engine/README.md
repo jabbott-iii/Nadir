@@ -7,9 +7,10 @@ names it `nadir`.
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine for
 top-down games on Windows, macOS and Linux, written in Rust with no
 third-party crates. This is the crate a game depends on: it re-exports the
-ECS, input, rendering, collision, assets and reflection as `nadir::ecs`,
-`nadir::input`, `nadir::render`, `nadir::collision`, `nadir::assets` and
-`nadir::scene`, so a game needs nothing else.
+ECS, input, rendering, sound, collision, assets and reflection as
+`nadir::ecs`, `nadir::input`, `nadir::render`, `nadir::audio`,
+`nadir::collision`, `nadir::assets` and `nadir::scene`, so a game needs
+nothing else.
 
 ## Status
 
@@ -27,6 +28,10 @@ Built:
 - kinematic collision: boxes and circles, a grid of solid tiles,
   move-and-slide, triggers, and queries;
 - sprite animation, from clips made in code or from Aseprite's tags;
+- sound on Linux, through ALSA: a mixer of voices on four buses, sounds
+  that play at entities and pan and fade by where they are from the
+  listener, and music that crossfades as the listener goes from one area
+  to another;
 - prefabs, which extend one another, spawned through the
   `PrefabLibrary`, with the engine's sprites, colliders and animators
   reflected for them;
@@ -35,8 +40,8 @@ Built:
   their tall tiles and entities spawned;
 - assets loaded on worker threads, and an offline cook that packs images,
   Aseprite exports and bitmap fonts into atlases, makes level files of
-  LDtk projects, and puts all it cooks in one pack file, which release
-  builds read;
+  LDtk projects, turns WAVs into the game's sounds and music, and puts
+  all it cooks in one pack file, which release builds read;
 - hot reload in development builds: textures, atlases and their clips,
   prefabs, the current level and shaders, reloaded while the game runs,
   behind the handles it holds;
@@ -45,8 +50,9 @@ Built:
 Not built yet:
 
 - drawing on Windows and macOS: the window stays empty until the OpenGL
-  contexts there land (roadmap tasks M2.6 and M2.7);
-- audio (M6), text (M7.1), the debug tools (M7), gamepads (M8);
+  contexts there land (roadmap tasks M2.6 and M2.7), and sound there
+  (M6.4 and M6.5);
+- text (M7.1), the debug tools (M7), gamepads (M8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 
@@ -56,8 +62,9 @@ Not built yet:
   with the stable toolchain its repository pins (`rust-toolchain.toml`);
   older versions are not tested.
 - On Linux: an X11 session, or Wayland with XWayland, and OpenGL 3.3. The
-  engine loads `libX11`, `libEGL` and OpenGL at run time, so it needs no
-  development packages to build.
+  engine loads `libX11`, `libEGL` and OpenGL at run time, and ALSA's
+  `libasound` for sound, so it needs no development packages to build.
+  Without `libasound` the game runs, silent.
 - On Windows: the MSVC build tools and the Windows SDK. On macOS: the
   Xcode command-line tools. A game builds and runs on both, but its window
   stays empty for now (see [Platforms](#platforms)).
@@ -86,7 +93,8 @@ fn main() -> Result<(), nadir::Error> {
 }
 ```
 
-`App::run` opens the window and runs the game until the window is closed.
+`App::run` opens the window and the audio output, and runs the game until
+the window is closed.
 
 ### A walking hero
 
@@ -343,8 +351,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 A game makes an `App` from a `Config`, adds its resources, actions and
 systems with the builder methods, sets its world up through
-`App::world_mut`, and calls `App::run`. That opens the log file and the
-window, and then each frame:
+`App::world_mut`, and calls `App::run`. That opens the log file, the
+window and the audio output, and then each frame:
 
 1. hands the window's events to `Input`;
 2. runs the simulation ticks that are due, 60 a second however fast the
@@ -357,8 +365,9 @@ A frame counts for at most 250 ms, so after a stall the game falls behind
 rather than running a burst of ticks to catch up. `Config` sets the window
 (title, size, resizing, fullscreen), the pacing (`frame_rate_limit`, 60 by
 default, and `vsync`), the size of the image the world is drawn into
-(`virtual_resolution`, 480 × 270 by default), and the folder the assets
-load from (`assets`). `studio` and `game` name the folders of the log file.
+(`virtual_resolution`, 480 × 270 by default), the folder the assets
+load from (`assets`), and each sound bus's volume as the game starts
+(`volumes`). `studio` and `game` name the folders of the log file.
 
 ### The world, systems and stages
 
@@ -398,6 +407,7 @@ adds its own first in their stages:
 | tick `PostMovement` | `nadir::parent_offsets` | Puts each entity with a `Parent` at its parent's position, plus its offset |
 | tick `PostMovement` | `nadir::triggers` | Sends `TriggerEnter` and `TriggerExit` |
 | frame `Animate` | `nadir::animate` | Advances each `Animator`, writes its frame into its `Sprite`, and mirrors the sprites that face left |
+| frame `Extract` | `nadir::sound` | Puts the listener at the `AudioListener` or the camera, plays each `AudioEmitter` at its entity, and sends the track of the `MusicArea` the listener is in |
 | frame `Extract` | `nadir::extract_sprites` | Draws each `Sprite` into the `RenderFrame`, between the last two ticks |
 | frame `Extract` | `nadir::extract_level` | Draws the `CurrentLevel`'s tile layers, with its background as the clear colour |
 
@@ -476,6 +486,33 @@ sends `AnimationFinished` when it ends.
 Animators move in frames, by how long the simulation ran. Their time is
 frame state: decide nothing in a tick system by it.
 
+### Sound
+
+The resource `Audio` (`nadir::audio`) is the game's handle on the mixer,
+which runs on the audio output's thread. `audio.play(&assets, sound,
+params)` plays a `Sound`, a cooked `.kpcm` or `.qoa`, on a `Bus` (music,
+sound effects, the interface or ambience), and `play_at` plays one at a
+position in the world, which pans and fades it by where it is from the
+listener. `play_music` crossfades from one `Music` track to another.
+`Config::volumes` sets each bus's volume as the game starts, in percent,
+heard as its square: 50 is −12 dB.
+
+Entities make sound through the engine's `nadir::sound`, each frame:
+
+- an `AudioEmitter` plays its sound at its entity, following it, from
+  when it is within 800 pixels of the listener; it stops a little past
+  that, or when its entity or the emitter goes. `AudioEmitter::looped`
+  makes one for an ambient loop;
+- the listener is the first entity with an `AudioListener`, or else the
+  camera;
+- a `MusicArea` is a box around its entity whose track plays when the
+  listener comes into it; outside every area, the music plays on.
+
+A sound played once, as something happens, plays only if it has loaded:
+load it before with `AssetServer::load_now`. `App::update` and
+`App::offscreen` play nothing, so tests and recordings are silent;
+`App::take_mixer` hands a test the mixer to render itself.
+
 ### Assets
 
 The resource `AssetServer` loads files from `Config::assets`. A relative
@@ -490,7 +527,8 @@ path there is found from the folder the game runs in.
   only an asset that needs none, an atlas but not a texture, can be made
   then.
 - The asset types so far are `Texture`, a QOI image, `Atlas`, the cook's
-  `atlas/<group>.kbj`, and `nadir::scene`'s `Level` and `PrefabAsset`,
+  `atlas/<group>.kbj`, `nadir::audio`'s `Sound`, a `.kpcm` or `.qoa`, and
+  `Music`, a `.qoa`, and `nadir::scene`'s `Level` and `PrefabAsset`,
   which `App::load_level` and the `PrefabLibrary` load. Asset paths are
   lowercase.
 - Assets load in a `Scope`, `Global`, `Level` or `Transient`, and
@@ -552,6 +590,10 @@ nadir-cook assets cooked
 - Each LDtk 1.5.3 project, `.ldtk`, with its `.ldtkl` level files, becomes
   a level file of each level, `levels/<name>.klvl`, whose entities spawn
   the prefabs of their names.
+- Each WAV below `audio/` becomes a sound: `audio/sfx/step.wav` the sound
+  file `audio/sfx/step.kpcm`, and one below `audio/music/` a QOA track,
+  `audio/music/field.qoa`; a sidecar `<name>.sound.jsonc` can set its
+  format, its rate and whether it loops.
 - Every file above goes into one pack too, `game.kpak`, each file of the
   same bytes stored once, compressed where that makes it smaller.
 
@@ -604,11 +646,15 @@ cargo run --features dev
 ## Platforms
 
 - **Linux:** everything above works, under X11, or under Wayland through
-  XWayland. Drawing needs OpenGL 3.3, through EGL.
+  XWayland. Drawing needs OpenGL 3.3, through EGL, and sound ALSA's
+  `libasound.so.2`, whose `default` device a sound server, PipeWire or
+  PulseAudio, usually provides.
 - **Windows and macOS:** a game builds, and the engine's tests pass, but its
   window stays empty: there is no OpenGL context there yet (roadmap tasks
   M2.6 and M2.7). `App::run` logs the error and runs the game without
   drawing, and so without reloading; `App::offscreen` returns the error.
+  Nor is there audio output yet (M6.4 and M6.5): `App::run` logs that, and
+  the game is silent.
 - Call `App::run` on the main thread: macOS opens windows only there.
 
 ## The sandbox

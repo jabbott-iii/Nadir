@@ -30,9 +30,10 @@ Nothing here is planned work: the diagrams show only what is built. The
 Metal backend, audio's output on Windows and macOS, the debug tools,
 bitmap text, gamepads, saves and pathfinding are not built yet (see
 `docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
-output on Linux (M6.3), and its assets (M6.9). The members only the `dev` feature compiles, the facade's hot
-reload's (roadmap M5.8), are marked `dev`. One member that exists in the
-code for planned work, `ShaderSource::msl`, carries a note.
+output on Linux (M6.3), its assets (M6.9), and the game's sound (M6.6).
+The members only the `dev` feature compiles, the facade's hot reload's
+(roadmap M5.8), are marked `dev`. One member that exists in the code for
+planned work, `ShaderSource::msl`, carries a note.
 
 ## Overview: types across crates
 
@@ -1652,7 +1653,8 @@ master. The sounds it is done with go back through the return queue,
 and `Audio::update` drops them. `Sound` and `Music`, nadir-assets
 assets, hold `SoundData` and `MusicData` in `Arc`s: `play`, `play_at` and
 `play_music` look a handle up in the `AssetServer` and play what is under
-it (M6.9, ADR-0050). M6.6 puts the facade's components over `Audio`.
+it (M6.9, ADR-0050). The facade's `nadir::sound` drives `Audio` from its
+components (M6.6, "engine: sound" below).
 
 ```mermaid
 classDiagram
@@ -1764,9 +1766,9 @@ classDiagram
 
 `open_audio` starts the audio thread, which opens the device (ALSA's, on
 Linux) and calls the `AudioRender` for each period, until the
-`AudioStream` is dropped. Nothing joins it to the mixer yet: M6.6's facade
-wraps the `Mixer` in an `AudioRender`, whose `underrun` calls
-`Mixer::count_underrun`.
+`AudioStream` is dropped. The facade's private `MixerOutput` wraps the
+`Mixer` in an `AudioRender`, whose `underrun` calls
+`Mixer::count_underrun`, and `App::run` opens the output with it (M6.6).
 
 ```mermaid
 classDiagram
@@ -1796,12 +1798,18 @@ classDiagram
     class Pcm["linux::alsa::Pcm"] {
         -pcm NonNull~snd_pcm_t~
     }
+    class MixerOutput["nadir::MixerOutput"] {
+        -0 Mixer
+    }
+    class Mixer["audio::Mixer"]
     open_audio ..> AudioOutputConfig : takes
     open_audio ..> AudioRender : moves to the thread
     open_audio ..> AudioStream : returns
     AudioStream *-- Stream
     Stream ..> Pcm : its thread opens, writes and closes
     Stream ..> AudioRender : its thread calls
+    AudioRender <|.. MixerOutput
+    MixerOutput *-- Mixer
 ```
 
 ## engine: the App and what owns it
@@ -1811,7 +1819,10 @@ set and the fixed clock. It does not own the GPU: the main loop's private
 `EngineCore` owns a `Graphics` beside it, or none when there is no GPU
 device. `Offscreen` does the same for headless rendering. Under `dev`,
 `EngineCore` also owns the `HotReload`, where there is a `Graphics`, which
-reloads what changed after each drawn frame, and its `ShaderWatch`.
+reloads what changed after each drawn frame, and its `ShaderWatch`. The
+`App` holds the mixer from `App::new` until `App::run` hands it to the
+audio output, `App::take_mixer` takes it, or the first `App::update`
+drops it.
 
 ```mermaid
 classDiagram
@@ -1824,6 +1835,7 @@ classDiagram
         -clock FixedClock
         -profile Vec~ScopeRecord~
         -shader_dir PathBuf, dev
+        -mixer Option~Mixer~
         +new(config) App
         +insert_resource(resource) App
         +add_event~T~() App
@@ -1836,6 +1848,7 @@ classDiagram
         +load_level(name) Result
         +world() World
         +world_mut() World
+        +take_mixer() Option~Mixer~
         +update(elapsed, events)
         +world_hash() u64
         +run() Result
@@ -1852,6 +1865,16 @@ classDiagram
         +vsync bool
         +virtual_resolution UVec2
         +assets PathBuf
+        +volumes Volumes
+    }
+    class Volumes {
+        +music u8
+        +sfx u8
+        +ui u8
+        +ambience u8
+        +get(bus) u8
+        +set(bus, percent)
+        +gain(bus) f32
     }
     class Actions {
         -set Option~str~
@@ -1899,7 +1922,10 @@ classDiagram
     class FixedClock["core::FixedClock"]
     class Renderer["render::Renderer"]
     class Device["gfx::Device"]
+    class Mixer["audio::Mixer"]
     App *-- Config
+    Config *-- Volumes
+    App "1" *-- "0..1" Mixer : until run, take_mixer or update
     App *-- World
     App *-- Schedule
     App *-- Actions
@@ -1917,7 +1943,7 @@ classDiagram
 
 `App::new` adds the engine's own systems to the schedule:
 `nadir::snapshot`, `nadir::movement`, `nadir::parent_offsets` and
-`nadir::triggers` in fixed stages, and `nadir::animate`,
+`nadir::triggers` in fixed stages, and `nadir::animate`, `nadir::sound`,
 `nadir::extract_sprites` and `nadir::extract_level` in frame stages.
 
 ## engine: the resources App::new inserts
@@ -1938,6 +1964,10 @@ classDiagram
     class TypeRegistry["scene::TypeRegistry"]
     class PrefabLibrary["scene::PrefabLibrary"]
     class Events["ecs::Events"]
+    class Audio["audio::Audio"]
+    class AudioState {
+        +music_area() Option~Entity~
+    }
     class TickStats {
         +ticks u32
         +time Duration
@@ -1983,6 +2013,8 @@ classDiagram
     World o-- AnimationClock
     World o-- FrameAllocs
     World o-- TypeRegistry
+    World o-- Audio
+    World o-- AudioState
     World "1" o-- "3" Events : one per event type
     Events ..> TriggerEnter
     Events ..> TriggerExit
@@ -2049,10 +2081,11 @@ classDiagram
 
 ## engine: built-in components and the traits they implement
 
-The facade defines ten components. All implement `Component`. Eight also
-implement `FromValue`, and so `Reflect`: `App::new` registers those in the
-`TypeRegistry`, so prefabs and levels can name them. `PrevTransform` and
-`Parent` are not reflected.
+The facade defines thirteen components. All implement `Component`. Eight
+also implement `FromValue`, and so `Reflect`: `App::new` registers those in
+the `TypeRegistry`, so prefabs and levels can name them. `PrevTransform`,
+`Parent`, `AudioListener`, `AudioEmitter` and `MusicArea` are not
+reflected.
 
 ```mermaid
 classDiagram
@@ -2073,6 +2106,9 @@ classDiagram
     class Parent
     class SaveId
     class Animator
+    class AudioListener
+    class AudioEmitter
+    class MusicArea
     Component <|.. Transform
     Component <|.. PrevTransform
     Component <|.. Velocity
@@ -2083,6 +2119,9 @@ classDiagram
     Component <|.. Parent
     Component <|.. SaveId
     Component <|.. Animator
+    Component <|.. AudioListener
+    Component <|.. AudioEmitter
+    Component <|.. MusicArea
     FromValue <|.. Transform
     FromValue <|.. Velocity
     FromValue <|.. Player
@@ -2203,6 +2242,65 @@ classDiagram
     ClipFrame --> Texture : Handle
 ```
 
+## engine: sound
+
+Each frame, `nadir::sound` reads the three sound components and sends the
+mixer, through `Audio`, where the listener is, what each emitter plays and
+where, and the track of the area the listener is in. `AudioState` keeps
+what it sent: an entry for each emitter it started, or warned of, which a
+private marker on the entity, `Tracked`, finds in one lookup, and the area
+whose track it sent last. None of the three is reflected.
+
+```mermaid
+classDiagram
+    direction LR
+    class AudioListener
+    class AudioEmitter {
+        +sound Handle~Sound~
+        +params PlayParams
+        +new(sound, params) AudioEmitter
+        +looped(sound) AudioEmitter
+    }
+    class MusicArea {
+        +music Handle~Music~
+        +half Vec2
+        +crossfade_ms u32
+        +new(music, half) MusicArea
+    }
+    class AudioState {
+        -emitters Vec~Entry~
+        -area Option
+        -failed Vec
+        -placed Option~Vec2~
+        -listener Vec2
+        -range f32
+        +music_area() Option~Entity~
+    }
+    class Entry {
+        -entity Entity
+        -emitter AudioEmitter
+        -voice Option~VoiceId~
+        -position Vec2
+    }
+    class Tracked
+    class Audio["audio::Audio"]
+    class Sound["audio::Sound"]
+    class Music["audio::Music"]
+    class PlayParams["audio::PlayParams"]
+    class VoiceId["audio::VoiceId"]
+    class Entity["ecs::Entity"]
+    AudioEmitter --> Sound : Handle
+    AudioEmitter *-- PlayParams
+    MusicArea --> Music : Handle
+    AudioState "1" *-- "0..*" Entry
+    Entry --> Entity
+    Entry *-- AudioEmitter : as it was sent
+    Entry "1" *-- "0..1" VoiceId : none if it did not load
+    Tracked ..> Entry : marks the entity of each
+    AudioState --> MusicArea : by its entity, the one sent last
+    AudioState ..> Audio : the frame system sends through
+```
+
 ## Error enums across crates
 
 An error enum wraps the error that caused it, from a crate below or from
@@ -2317,5 +2415,5 @@ The main files these diagrams were drawn from:
 - `crates/audio/src/lib.rs`, `asset.rs`, `audio.rs`, `mixer.rs`,
   `voice.rs`, `music.rs`, `data.rs`, `params.rs`, `shared.rs`
 - `crates/engine/src/app.rs`, `components.rs`, `collisions.rs`,
-  `animation.rs`, `level.rs`, `reflected.rs`, `pack.rs`, `error.rs`,
-  `hot_reload.rs`
+  `animation.rs`, `level.rs`, `reflected.rs`, `pack.rs`, `sound.rs`,
+  `error.rs`, `hot_reload.rs`

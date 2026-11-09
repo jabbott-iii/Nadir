@@ -22,6 +22,7 @@ name = "nadir"
 
 [dependencies]
 nadir-assets.workspace = true
+nadir-audio.workspace = true
 nadir-collision.workspace = true
 nadir-core.workspace = true
 nadir-ecs.workspace = true

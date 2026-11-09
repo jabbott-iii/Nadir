@@ -139,7 +139,7 @@ crates. Nothing else is signed or notarized until M11.2.
 
 | Where | What |
 | :- | :- |
-| The GitHub release `v<version>` | `nadir-<version>-<target>.tar.gz` (Linux, macOS) or `.zip` (Windows) for each of the six targets, `{x86_64,aarch64}-{unknown-linux-gnu,pc-windows-msvc,apple-darwin}`. Each holds `nadir-cook`, the sandbox with its cooked atlases, prefabs and levels in one pack, `assets/game.kpak` (ADR-0041), `README.txt`, `LICENSE` and `NOTICE` (ADR-0037). On Windows and macOS the sandbox runs in an empty window until the engine draws there (M2.6, M2.7), which their READMEs say |
+| The GitHub release `v<version>` | `nadir-<version>-<target>.tar.gz` (Linux, macOS) or `.zip` (Windows) for each of the six targets, `{x86_64,aarch64}-{unknown-linux-gnu,pc-windows-msvc,apple-darwin}`. Each holds `nadir-cook`, the sandbox with its cooked atlases, sounds, prefabs and levels in one pack, `assets/game.kpak` (ADR-0041), `README.txt`, `LICENSE` and `NOTICE` (ADR-0037). On Windows and macOS the sandbox runs in an empty window until the engine draws there (M2.6, M2.7), and without sound until it has audio output there (M6.4, M6.5), which their READMEs say |
 | The same release | `nadir-cook_<version>_<arch>.deb` and `nadir-sandbox_<version>_<arch>.deb` for `amd64` and `arm64` (the file named for the release's version, as GitHub turns Debian's `~` into `.` in an asset's name); the apt repository's `Packages`, `Packages.gz`, `Release`, `InRelease`, `Release.gpg` and `nadir-archive-keyring.gpg`; and `SHA256SUMS` of every file |
 | ghcr.io | `ghcr.io/jabbott-iii/nadir-cook:<version>`, and `:latest` unless the version is a pre-release, for `linux/amd64` and `linux/arm64`: the cook linked statically, `FROM scratch` (`tools/cook/Dockerfile`) |
 | crates.io | 14 crates at `<version>`: `nadir_engine`, the facade (`nadir` in code; ADR-0039); `nadir-cook`; and `nadir-core`, `-sys`, `-platform`, `-gfx`, `-codec`, `-ecs`, `-input`, `-render`, `-assets`, `-audio` (from the release after 0.3.0, ADR-0050), `-collision` and `-scene`, each with copies of `LICENSE` and `NOTICE` (ADR-0037). The sandbox, `xtask`, `nadir-bench` and `nadir-debug` have `publish = false` |
@@ -220,9 +220,9 @@ for it, so push the next tag once the release before it has finished.
    - `cargo xtask dist` (`xtask/src/dist.rs`):
      - cooks `assets/`, and builds the cook and the sandbox in release,
        `--locked`;
-     - lays them out with the cooked atlases, prefabs and levels in one
-       pack, `assets/game.kpak` (ADR-0041), `README.txt`, `LICENSE` and
-       `NOTICE`;
+     - lays them out with the cooked atlases, sounds, prefabs and levels
+       in one pack, `assets/game.kpak` (ADR-0041), `README.txt`, `LICENSE`
+       and `NOTICE`;
      - runs them: `nadir-cook --version` must print the version, the
        laid-out cook must cook `assets/` into the same pack byte for byte,
        and the sandbox must refuse an unknown scene,
@@ -230,10 +230,13 @@ for it, so push the next tag once the release before it has finished.
        before it opens a window;
      - packs the archive and, on Linux, the two `.deb`s, whose
        dependencies come from `dpkg-shlibdeps` and, for the sandbox, the
-       libraries it loads at run time (`libx11-6`, `libegl1`,
-       `libopengl0`).
+       libraries it loads at run time with `dlopen`, which
+       `dpkg-shlibdeps` cannot see (`libx11-6`, `libegl1`, `libopengl0`,
+       `libasound2`; Ubuntu 24.04's `libasound2t64` provides
+       `libasound2`).
    - On Linux, the sandbox from its archive draws 10 seconds of the field
-     offscreen (`--capture`) on llvmpipe.
+     offscreen (`--capture`) on llvmpipe. A capture opens no audio output,
+     so this runner, like the demo page's, installs no libasound.
    - On the two Linux runners, the image's cook: `nadir-cook` built for
      `<arch>-unknown-linux-musl`, linked statically, and run.
 3. **`crates`**, when every build passed, in the `crates-io` environment:

@@ -28,7 +28,8 @@
 //! tinted yellow and drawn over the crowd, one
 //! layer up, to be found in it: the crowd covers each spot about 20 deep.
 //! They walk with WASD inside the view, which stays put, and stop at its
-//! edges.
+//! edges. Their steps are heard from the view's centre, the camera, so
+//! they pan to the side of it the player is on.
 
 use std::time::Duration;
 
@@ -274,7 +275,7 @@ fn fix_camera(world: &World, _frame: &Frame) {
 mod tests {
     use super::*;
     use crate::Scene;
-    use crate::tests::{TICK, player, position, scene};
+    use crate::tests::{TICK, assert_panned, hear, listening, player, position, scene, sounds_in};
 
     #[test]
     fn a_frame_draws_the_grass_and_everything_on_it_from_one_page() {
@@ -356,6 +357,38 @@ mod tests {
         }
         let feet = position(&app, player);
         assert_eq!(feet.x, VIEW.x - PERSON_SIZE.x * 0.5, "{feet:?}");
+    }
+
+    #[test]
+    fn the_players_steps_pan_to_the_side_of_the_view_they_are_on() {
+        // The camera hears, from the view's centre, where it stays.
+        let (mut app, mut mixer) = listening(Scene::StressSprites, Volumes::default());
+        let player = player(&app);
+        let key = |key, pressed| nadir::Event::Key {
+            key,
+            pressed,
+            repeat: false,
+        };
+        // To the left of the view for 96 ticks, then to its right for 192,
+        // then standing.
+        let mut out = Vec::new();
+        let mut feet = Vec::new();
+        for tick in 0..318 {
+            let events = match tick {
+                0 => vec![key(Key::A, true)],
+                96 => vec![key(Key::A, false), key(Key::D, true)],
+                288 => vec![key(Key::D, false)],
+                _ => Vec::new(),
+            };
+            hear(&mut app, &mut mixer, &events, &mut out);
+            feet.push(position(&app, player));
+        }
+        assert_eq!(feet[95].x, 48.0);
+        assert_eq!(feet[287].x, 432.0);
+        let steps = sounds_in(&out);
+        let ticks: Vec<usize> = steps.iter().map(|step| step.tick).collect();
+        assert_eq!(ticks, (0..288).step_by(12).collect::<Vec<_>>());
+        assert_panned(&steps, &feet, VIEW * 0.5);
     }
 
     #[test]

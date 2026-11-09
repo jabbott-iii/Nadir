@@ -37,9 +37,10 @@
 //! ```
 //!
 //! This is version 0.3, and the API will change before 1.0. The engine
-//! draws on Linux (X11). On Windows and macOS a game runs, but its window
-//! stays empty until roadmap tasks M2.6 and M2.7. Audio, text, gamepads,
-//! saves and the debug tools are not built yet. The
+//! draws and plays sound on Linux (X11, ALSA). On Windows and macOS a game
+//! runs, but its window stays empty until roadmap tasks M2.6 and M2.7, and
+//! it plays no sound until M6.4 and M6.5. Text, gamepads, saves and the
+//! debug tools are not built yet. The
 //! [README](https://github.com/jabbott-iii/Nadir/blob/main/crates/engine/README.md)
 //! is a guide to how the parts fit together, with a game that walks a hero
 //! about a tile map.
@@ -49,8 +50,8 @@
 //! [`App`] holds the game's [`Config`], its world and its systems. A game
 //! adds resources, actions and systems with its builder methods, sets its
 //! world up through [`App::world_mut`], and calls [`App::run`], which opens
-//! the log file and the window and runs the main loop until the window is
-//! closed. Each frame, the loop:
+//! the log file, the window and the audio output and runs the main loop
+//! until the window is closed. Each frame, the loop:
 //!
 //! 1. hands the window's [`Event`]s to [`Input`](input::Input);
 //! 2. runs the ticks that are due, [`TICK_HZ`] a second however fast the
@@ -109,10 +110,14 @@
 //! | [`Player`] | A tag for the entity the player controls |
 //! | [`SaveId`] | Its id in saves, which come with roadmap M9.4 |
 //! | [`PrevTransform`] | Where it was at the start of the last tick, for drawing between ticks: the engine keeps it |
+//! | [`AudioListener`] | Where the game hears from, in place of the camera |
+//! | [`AudioEmitter`] | A sound that plays at it, and follows it |
+//! | [`MusicArea`] | A box whose music plays while the listener is in it |
 //!
 //! [`Transform`], [`Velocity`], [`Player`], [`SaveId`], [`Facing`],
 //! [`Sprite`], [`Collider`] and [`Animator`] are reflected, so prefabs and
-//! levels can give them; [`Parent`] is not yet (roadmap M9.4), and
+//! levels can give them; [`Parent`], [`AudioListener`], [`AudioEmitter`]
+//! and [`MusicArea`] are not yet (M9.4 brings `Parent`), and
 //! [`PrevTransform`] is the engine's own, and is never in data. A
 //! [`Sprite`] is written with its texture's path, and a prefab may name a
 //! frame of a cooked atlas instead, `{"atlas": "atlas/sprites.kbj",
@@ -165,6 +170,27 @@
 //! tags. An [`Animator`] plays one on its entity's [`Sprite`], and sends
 //! [`AnimationFinished`] when a clip that plays once ends. [`ClipError`]
 //! says why a clip could not be made or added.
+//!
+//! # Sound
+//!
+//! The resource [`Audio`](audio::Audio), from [`audio`], is the game's
+//! handle on the mixer: it plays a [`Sound`](audio::Sound), cooked to a
+//! `.kpcm` or `.qoa` file, on a [`Bus`](audio::Bus), at a position in the
+//! world or not, and crossfades from one [`Music`](audio::Music) track to
+//! another. [`Config::volumes`] sets each bus's volume as the game starts
+//! ([`Volumes`]). [`App::run`] opens the audio output with it, while
+//! [`App::update`] and [`App::offscreen`] play nothing, and
+//! [`App::take_mixer`] hands a test the mixer to render itself.
+//!
+//! The engine's `nadir::sound` plays the world's sound each frame. An
+//! [`AudioEmitter`] plays its sound at its entity, panned and fading by
+//! where it is from the listener: the first [`AudioListener`], or else the
+//! camera. When the listener comes into a [`MusicArea`], the music
+//! crossfades to its track, and [`AudioState`] says whose track was sent
+//! last. An emitter and an area wait for what they play to load; a sound
+//! played once as something happens, a footstep say, is lost if it has
+//! not loaded, so load it first with
+//! [`AssetServer::load_now`](assets::AssetServer::load_now).
 //!
 //! # Input, drawing and assets
 //!
@@ -223,6 +249,7 @@
 //! | Module | Crate | What it holds |
 //! | :- | :- | :- |
 //! | [`assets`] | `nadir-assets` | Handles, the asset server, sources and scopes |
+//! | [`audio`] | `nadir-audio` | Sounds, music, the mixer, its buses and voices |
 //! | [`collision`] | `nadir-collision` | Shapes, layers, the tile grid, move-and-slide, triggers, queries |
 //! | [`ecs`] | `nadir-ecs` | The world, components, resources, events, commands, the schedule |
 //! | [`input`] | `nadir-input` | Actions, bindings, their state, replays |
@@ -340,8 +367,9 @@
 //! - **Threads.** The world, the systems, the window and the GPU all live
 //!   on the thread that runs the app, and systems run one at a time. The
 //!   asset server reads and decodes files on 1 to 4 worker threads of its
-//!   own. Call [`App::run`] on the main thread: macOS opens windows only
-//!   there.
+//!   own, and the mixer runs on the audio output's thread, which
+//!   [`Audio`](audio::Audio)'s commands reach through a queue. Call
+//!   [`App::run`] on the main thread: macOS opens windows only there.
 //! - **Borrows.** Storages and resources are borrowed at run time. A system
 //!   that borrows one mutably while it is borrowed panics, with the
 //!   system's name and the type.
@@ -366,9 +394,12 @@
 //!   error, and [`App::run`] also writes the log to `nadir.log` in the
 //!   game's logs folder, named by [`Config::studio`] and [`Config::game`].
 //! - **Platforms.** On Linux the engine needs X11, or XWayland, and OpenGL
-//!   3.3, which it loads at run time. On Windows and macOS it has no OpenGL
-//!   context yet: [`App::run`] logs that and runs the game without drawing,
-//!   and so without reloading, and [`App::offscreen`] fails.
+//!   3.3, which it loads at run time, and plays sound through ALSA's
+//!   `libasound.so.2`, loaded at run time too: without it the game is
+//!   silent. On Windows and macOS it has no OpenGL context yet:
+//!   [`App::run`] logs that and runs the game without drawing, and so
+//!   without reloading, and [`App::offscreen`] fails; nor has it audio
+//!   output, so the game is silent there.
 //!
 //! # Features
 //!
@@ -404,6 +435,7 @@ mod log_file;
 mod pack;
 mod reflected;
 mod replay;
+mod sound;
 mod tick_stats;
 
 pub use nadir_core::{cli, log};
@@ -411,17 +443,18 @@ pub use nadir_platform::Event;
 #[cfg(feature = "dev")]
 pub use nadir_platform::{AllocCounts, process_alloc_counts, thread_alloc_counts};
 pub use {
-    nadir_assets as assets, nadir_collision as collision, nadir_ecs as ecs, nadir_input as input,
-    nadir_render as render, nadir_scene as scene,
+    nadir_assets as assets, nadir_audio as audio, nadir_collision as collision, nadir_ecs as ecs,
+    nadir_input as input, nadir_render as render, nadir_scene as scene,
 };
 
 pub use animation::{
     AnimationFinished, Animator, Clip, ClipError, ClipFrame, Clips, Placement, Playback,
 };
-pub use app::{App, Config, Offscreen, TICK_HZ};
+pub use app::{App, Config, Offscreen, TICK_HZ, Volumes};
 pub use collisions::{Collisions, TriggerEnter, TriggerExit};
 pub use components::{
-    Collider, Facing, Parent, Player, PrevTransform, SaveId, Sprite, Transform, Velocity,
+    AudioEmitter, AudioListener, Collider, Facing, MusicArea, Parent, Player, PrevTransform,
+    SaveId, Sprite, Transform, Velocity,
 };
 pub use error::Error;
 #[cfg(feature = "dev")]
@@ -429,11 +462,13 @@ pub use frame_allocs::FrameAllocs;
 pub use level::{CurrentLevel, LevelError, load_level, unload_level};
 pub use reflected::{CollisionLayers, loading_context, reflect_context};
 pub use replay::{Replay, world_hash};
+pub use sound::AudioState;
 pub use tick_stats::TickStats;
 
 /// What most games use, for one `use nadir::prelude::*`.
 pub mod prelude {
     pub use nadir_assets::{AssetServer, FinalizeCtx, Handle, LoadState};
+    pub use nadir_audio::{Audio, Bus, Music, PlayParams, Sound, VoiceChange, VoiceId};
     pub use nadir_collision::{LayerMask, Shape, TileGrid};
     pub use nadir_core::time::{Frame, Stopwatch, Tick};
     pub use nadir_core::{Color, IVec2, Key, MouseButton, Pcg32, Rect, UVec2, Vec2};
@@ -448,8 +483,9 @@ pub mod prelude {
     };
 
     pub use crate::{
-        AnimationFinished, Animator, App, Clip, ClipError, ClipFrame, Clips, Collider, Collisions,
-        Config, Facing, Parent, Placement, Playback, Player, PrevTransform, SaveId, Sprite,
-        TickStats, Transform, TriggerEnter, TriggerExit, Velocity,
+        AnimationFinished, Animator, App, AudioEmitter, AudioListener, AudioState, Clip, ClipError,
+        ClipFrame, Clips, Collider, Collisions, Config, Facing, MusicArea, Parent, Placement,
+        Playback, Player, PrevTransform, SaveId, Sprite, TickStats, Transform, TriggerEnter,
+        TriggerExit, Velocity, Volumes,
     };
 }

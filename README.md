@@ -36,13 +36,13 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
 - **On Windows and macOS,** everything builds and passes the tests, but the
   window stays empty until the OpenGL contexts land (roadmap tasks M2.6 and
   M2.7).
-- **Audio:** the mixer is built (voices, buses, positional sound, QOA
-  music streamed as it plays), and tested offline, and so is the audio
-  output on Linux, through ALSA; the cook turns WAVs into the game's sound
-  files and QOA, resampled to 48 kHz, and the asset server loads them as
-  sounds and music, which the mixer plays by handle. The game does not
-  play sounds yet (roadmap M6.6), and Windows and macOS have no output yet
-  (M6.4, M6.5).
+- **Audio:** on Linux the game plays its sound through ALSA: a mixer of
+  voices on four buses, with QOA music streamed as it plays; sounds that
+  play at entities, panned and faded by where they are from the listener;
+  and music that crossfades as the listener goes from one area to another.
+  The cook turns WAVs into the game's sound files and QOA, resampled to
+  48 kHz, which the asset server loads. Windows and macOS have no audio
+  output yet (roadmap M6.4, M6.5), so there the game is silent.
 - **Not built yet:** text, the debug tools, gamepads, hot reload, saves
   and the Metal backend.
 
@@ -54,7 +54,7 @@ system also needs:
 
 | System | You need |
 | :- | :- |
-| Linux | An X11 session (or Wayland with XWayland) and OpenGL 3.3. The engine loads `libX11`, `libEGL` and OpenGL at run time, so no development packages are needed. |
+| Linux | An X11 session (or Wayland with XWayland) and OpenGL 3.3. The engine loads `libX11`, `libEGL` and OpenGL at run time, and ALSA's `libasound` for sound (without it the game runs silent), so no development packages are needed. |
 | Windows | The MSVC build tools and the Windows SDK. |
 | macOS | The Xcode command-line tools. |
 
@@ -68,7 +68,9 @@ cargo run -p sandbox
 `cargo xtask cook` cooks `assets/` into `target/cooked/`, which the sandbox
 draws from. Run it again after you change the assets.
 
-In the sandbox, WASD or the arrow keys walk. Close the window to quit.
+In the sandbox, WASD or the arrow keys walk. On Linux you hear your steps,
+a pond, and the music change as you walk from the north of the field into
+its south. Close the window to quit.
 
 Other ways to run it:
 
@@ -104,7 +106,9 @@ It has:
 - a tile map;
 - a walking character that collides;
 - a camera that follows them;
-- sprites cooked from an Aseprite export.
+- sprites cooked from an Aseprite export;
+- footsteps, a pond and music that crossfades between two areas, from
+  sounds that `games/sandbox/make_sounds.py` makes.
 
 ## Repository layout
 
@@ -162,8 +166,9 @@ releases"; ADR-0036). Each one has:
 - **Programs** on the
   [GitHub release](https://github.com/jabbott-iii/Nadir/releases/latest),
   for Linux, Windows and macOS on x86_64 and arm64: `nadir-cook`, the asset
-  pipeline, and the sandbox game, which draws on Linux only so far (an
-  empty window on Windows and macOS until roadmap tasks M2.6 and M2.7).
+  pipeline, and the sandbox game, which draws and plays sound on Linux
+  only so far (an empty, silent window on Windows and macOS until roadmap
+  tasks M2.6 and M2.7, and M6.4 and M6.5).
   They are not signed yet.
 - **apt** packages `nadir-cook` and `nadir-sandbox`, for amd64 and arm64:
 

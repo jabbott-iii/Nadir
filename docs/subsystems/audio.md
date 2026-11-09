@@ -134,7 +134,7 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
   - pan comes from the horizontal offset to the listener, clamped by
     `pan_width`
   - attenuation is linear between `min_dist` and `max_dist`, then silent
-  - positions update each frame from the facade (entity transforms). A
+  - positions come from the facade (entity transforms), when they move. A
     voice's gains move to a change of position, volume or pan over 16 ms,
     about a tick, whatever the callback's length, to avoid zipper noise
     (ADR-0046: one callback can be 64 frames)
@@ -215,6 +215,88 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
   the audio thread, and the facade's wrapper of the mixer passes it to
   `Mixer::count_underrun` (M6.6).
 
+## The game's sound: the facade
+
+Built in M6.6 (ADR-0051). nadir-audio knows nothing of the ECS
+(ADR-0014): the facade, `nadir`, opens the output, defines the components
+and plays them, and re-exports the crate as `nadir::audio`.
+
+- **Opening:** `App::new` makes the mixer of `AudioConfig::default()`,
+  inserts `Audio` and `AudioState` as resources, and sets each bus to
+  `Config::volumes`. `App::run` opens the default output, 48 kHz stereo,
+  with the mixer, once the window and the GPU device are open, and closes
+  it as soon as the loop ends, before an error is shown (2 s at most).
+  Where it does not open, on Windows and macOS until M6.4 and M6.5, or on
+  Linux without `libasound.so.2`, a warning says why and the game runs
+  silent. A missing device is no error: the output plays on without one
+  and opens it when it comes (M6.3).
+- **What is silent:** `App::update`'s first call drops a mixer the app
+  still holds. So tests, benchmarks, `--headless` replays,
+  `App::offscreen` and the sandbox's `--capture` open no device, and
+  `Audio` does nothing there; only `AudioStats::unplayed` still counts.
+  `App::take_mixer` takes the mixer before then, for a test or a tool
+  that renders it itself, as the facade's tests do; `App::run` then opens
+  no output, and logs why.
+- **Each frame, `nadir::sound`**, the engine's, first in frame `Extract`,
+  after the game's camera:
+  1. puts the listener where the first entity with an `AudioListener` and
+     a `Transform` is drawn, or else at the camera,
+     `RenderFrame::camera.position`;
+  2. starts each `AudioEmitter` whose entity has a `Transform`, once its
+     sound has loaded and it is within `max_dist` (800 px) of the
+     listener, and sends its position; stops it, over 100 ms, more than
+     64 px past that, or when its entity is despawned or loses the emitter
+     or the `Transform`; and starts it again back in range;
+  3. sends the track of the `MusicArea` the listener is in, a box, its
+     entity's position ± `half`, which crossfades over `crossfade_ms`;
+  4. calls `Audio::update`.
+
+  Positions are where the entities are drawn, between ticks, as sprites
+  are: `PrevTransform.lerp(Transform, alpha)`, or the `Transform`. The
+  listener and each emitter that plays are placed when they are not where
+  the queue last took them, so a frame where nothing moves sends nothing,
+  and a move the half-full queue dropped is sent again the next frame; so
+  is a play, a stop, a change or a track it dropped. Once its table and its
+  marker's storage hold the emitters, it allocates nothing; it writes no
+  reflected component and spawns nothing, so world hashes are as they
+  were.
+- **The components**, not reflected: a game gives them in code, not in
+  prefabs or levels.
+  - `AudioListener`: where the game hears from, in place of the camera.
+  - `AudioEmitter { sound, params }`: `new(sound, params)`, or
+    `looped(sound)`, for a sound of the place, looped on `Bus::Ambience`
+    at priority 192, with no limit to its voices, so that the sound's
+    limit does not make its emitters take one another's voices; when all
+    the mixer's voices play, a play of the same priority or higher still
+    takes the oldest. A new `sound`, `bus`, `looped`,
+    `priority` or `max_instances` restarts it; a new `volume` or `pitch`
+    reaches the voice as it plays; its `pan` is not used. A voice stolen
+    for another stays silent until the emitter starts again: a priority
+    protects it only from plays of a lower one.
+  - `MusicArea { music, half, crossfade_ms }`: `new(music, half)`
+    crossfades over 1,500 ms. Where areas overlap, the one whose track
+    plays stays while the listener is in it, and otherwise the first that
+    holds it plays. Outside every area the music plays on; coming back to
+    the area whose track plays, it goes on as it is (ADR-0046).
+    `AudioState::music_area()` names the area whose track was sent last.
+  - A sound or track still loading waits; one that failed, or that the
+    asset server does not hold, is warned of once, with the entity and
+    its path, and not tried again until its component changes. With
+    `dev`'s placeholders, a failed sound or track plays its placeholder,
+    silence, instead, and the asset server logs the failure.
+- **Volumes:** `Config::volumes` holds each bus's percent, 0 to 100, 100
+  by default, more counting as 100. A percent is heard as its square,
+  `Volumes::gain(bus)`, so 50 is −12 dB. A game changes one while it runs
+  with `audio.set_bus_volume(bus, volumes.gain(bus), fade)`; M9.3's
+  settings file will fill them. There is no master volume.
+- **A sound played once**, as something happens, a footstep say, plays
+  only if it has loaded: load it first with `load_now` (M6.9).
+- **Not built yet:** a level's own `music` and `ambience`, which
+  `load_level` does not play, as the cook writes neither (the roadmap's
+  backlog, ADR-0051); the components in prefabs and levels; an emitter
+  that comes back on its own when its voice is stolen; output on Windows
+  and macOS (M6.4, M6.5); the settings file (M9.3).
+
 ## Tests
 
 - **Offline rendering:** feed commands and render N frames into a buffer,
@@ -264,6 +346,46 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
   (zero-crossing count) and amplitude (±0.5 dB), and stays within linear
   interpolation's error of the sine itself: the mixer resamples a loaded
   sound only when the output's rate is not its own (M6.9).
+- **The facade** (`crates/engine/src/sound.rs`, M6.6): with the mixer
+  taken and rendered offline at 48 kHz stereo, and sounds and tracks the
+  test writes as the cook does into an asset server in memory, so that
+  `dev` changes nothing: `MixerOutput` renders the mixer and counts its
+  underruns; the first `update` drops a mixer not taken, and `Audio` then
+  queues nothing; the listener at the camera, at an `AudioListener`, and
+  between ticks; an emitter waits for its sound, follows its entity,
+  takes a new volume as it plays, restarts for a new sound, stops when it
+  goes or is far and plays again when near; five looped emitters of one
+  sound all sound; the crossfade into another area, by its level at 0, ½
+  and 1 of its length; the music plays on outside every area, and where
+  areas overlap changes only when the listener leaves the one playing; a
+  play, a move and a track that a full queue dropped are sent again, and
+  a frame where nothing moves sends nothing; the area playing plays on
+  when its music changes to a track that did not load, and is named no
+  more once despawned; a sound played to its end is given back the frame
+  after; the configured volumes scale what is heard; a sound or track
+  that did not load is warned of once, until it changes, and an emitter
+  warned of is not warned of again for losing its `Transform`; a looped
+  emitter's parameters. With `dev`, a steady frame of
+  40 emitters moving in and out of range, a listener and two areas
+  allocates nothing (`docs/04-quality.md`).
+- **The sandbox** (M6.6): its four sounds load from the loose files and
+  from the pack; the player's footsteps, one at the first tick it moves
+  and then every 12 ticks, panned to its side of a listener beside its
+  path, and none once it stops; in `stress-sprites`, with the camera as
+  the listener, the steps pan to the side of the view the player is on;
+  the capture's tour crosses from the north's music to the south's,
+  heard.
+- **By ear** (Linux, headphones; the user's check, as no test plays
+  sound): `cargo xtask cook`, then `cargo dev`. The north's tune fades in
+  over 1.5 s, and the pond laps from the right. Walking east along the
+  path, the steps thud twice a cycle, none when stopped or against a
+  wall, and the pond moves from the right through the centre to the left,
+  fading with distance. Standing for 10 s, no loop clicks. Walking south
+  through the gap at column 50 (y 576), the music crossfades to the
+  south's over 1.5 s, and back. The report still says 0 allocations, with
+  no warning of underruns, and closing quits within 2 s. Then `cargo dev
+  --scene stress-sprites`: walking left and right, the steps pan to the
+  person's side; and `cargo run -p sandbox`, the pack, the same.
 - **Bench:** `mixer_32_voices` (`cargo xtask bench mixer`), a callback of
   512 frames with 32 voices and a track.
 - **Soak** (`xtask soak --audio`, manual or nightly on hardware): 10 minutes

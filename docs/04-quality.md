@@ -8,7 +8,7 @@ below is our own code (dependency policy items 26–28).
 
 | Layer | Where | Runs in | What it catches |
 | :- | :- | :- | :- |
-| Unit tests | `#[cfg(test)]` beside code | `cargo test` on all OSes | Logic errors in math, codecs, ECS, collision, mixer |
+| Unit tests | `#[cfg(test)]` beside code | `cargo test` on all OSes | Logic errors in math, codecs, ECS, collision, the mixer, and the game's sound through it, rendered offline |
 | Layout tests | `nadir-sys` tests | `cargo test` on each OS | FFI struct size/alignment/offset mismatches |
 | Property tests | `nadir-core::testing::check` | `cargo test` | Edge cases: collision never leaves overlap, codecs round-trip, sort keys monotonic |
 | Integration tests | `crates/*/tests/` | `cargo test` | Cross-module behavior (asset load → GPU upload with the headless device) |
@@ -190,7 +190,9 @@ pub fn check_sized<T: std::fmt::Debug>(
 - A game replays alike at any frame rate only if its frame systems write
   no reflected state and spawn or despawn nothing, and its tick systems
   read nothing that frames set (an `Animator`'s time, the `Sprite` fields
-  `nadir::animate` writes, `TickStats`).
+  `nadir::animate` writes, `TickStats`). The engine's `nadir::sound` keeps
+  to it: the marker it puts on the emitters it plays is not reflected
+  (ADR-0051).
 - Each new reflected type, or change to the simulation's results, changes
   the stored hashes: bless them again, and say why.
 
@@ -290,6 +292,15 @@ pub fn check_sized<T: std::fmt::Debug>(
     facings and drawing (M4.6). Its frames have fixed lengths, unlike
     `steady_frames`', whose real-time frames could not place a burst of
     finishes before the counting;
+  - the facade's unit test
+    `a_steady_frame_of_moving_emitters_a_listener_and_areas_allocates_nothing`
+    in `crates/engine/src/sound.rs` moves 40 looped emitters in and out of
+    the listener's range, and the listener from one music area to another
+    and back, rendering the taken mixer offline each frame. It runs three
+    identical passes of 120 frames of a tick, and counts the third, on
+    the one thread: `nadir::sound`'s plays, stops, moves and tracks,
+    `Audio::update` and the mixer's render. Each pass starts and stops
+    voices and changes area twice (M6.6);
   - the sandbox's stress scene, `--scene stress-sprites`, runs 100 frames
     through `App::update`, without a GPU.
 - The sandbox's `--scene stress-entities` (5,000 colliding entities)
@@ -365,7 +376,7 @@ pub fn check_sized<T: std::fmt::Debug>(
 | :- | :- |
 | `fmt` | `cargo fmt --all -- --check` |
 | `clippy` | `cargo clippy --workspace --all-targets --all-features -- -D warnings` |
-| `cook` | `cargo run --release --package nadir-cook -- assets target/cooked`, as `cargo xtask cook` runs it: before `test`, since the sandbox's tests draw the cooked sprites and read the cooked level and prefabs (ADR-0033). It cooks the jobs (atlas groups, sounds, data files, LDtk projects) whose files changed, so it is quick when nothing did |
+| `cook` | `cargo run --release --package nadir-cook -- assets target/cooked`, as `cargo xtask cook` runs it: before `test`, since the sandbox's tests draw the cooked sprites, read the cooked level and prefabs, and load the cooked sounds (ADR-0033). It cooks the jobs (atlas groups, sounds, data files, LDtk projects) whose files changed, so it is quick when nothing did. nadir-cook's own test of the workspace's `assets/` (`tools/cook/tests/cook/workspace.rs`) cooks them apart, and checks each job, the sounds' among them, with nothing skipped and no warning |
 | `test` | `cargo test --workspace --all-features` |
 | `deps` | `cargo metadata --format-version 1`, parsed with `nadir-codec::json`; every package with a non-null `source` must appear in `xtask/deps-allowlist.txt` with its exact version. A path package from outside the workspace also fails (vendored code) |
 | `layers` | Same metadata; each workspace crate's dependencies (normal, dev and build) must be a subset of its row in the dependency matrix, and a workspace crate without a row fails. The matrix is a `const` table in `xtask` that mirrors `docs/01-architecture.md`; a unit test compares the two |
@@ -466,7 +477,8 @@ understood.
        that passes.
   2. On `ubuntu-latest`, with `contents: read`, the build checks out the
      commit CI passed, installs EGL, Mesa and GStreamer
-     (`gstreamer1.0-tools`, `-plugins-base`, `-plugins-good`) and runs
+     (`gstreamer1.0-tools`, `-plugins-base`, `-plugins-good`), and no
+     libasound, as a capture opens no audio output (ADR-0051), and runs
      `cargo xtask site` with `LIBGL_ALWAYS_SOFTWARE=1`:
      - it checks `docs/features.jsonc` as `cargo xtask features` does;
      - builds the sandbox in release, and captures each scene with

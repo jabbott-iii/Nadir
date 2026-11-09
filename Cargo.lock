@@ -125,6 +125,7 @@ name = "nadir_engine"
 version = "0.3.0"
 dependencies = [
  "nadir-assets",
+ "nadir-audio",
  "nadir-codec",
  "nadir-collision",
  "nadir-core",

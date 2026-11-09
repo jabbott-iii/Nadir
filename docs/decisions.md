@@ -3951,7 +3951,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0048 — M6.6 split into three tasks: the cook's sounds (M6.8), the audio assets and handles (M6.9), the game's sound (M6.6); bus volumes in `Config` until the settings file
 
-- **Status:** Accepted: the user chose the split on 2026-11-08
+- **Status:** Accepted: the user chose the split on 2026-11-08; its
+  revisit taken in M6.6, whose fourth package is nadir-cook's workspace
+  test, test only, as the user chose on 2026-11-08 (ADR-0051)
 - **Date:** 2026-11-08
 - **Context:**
   - Roadmap task M6.6 asks for the cook's WAV to PCM16 or QOA, the
@@ -4234,3 +4236,224 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     keeps a loop's seam);
   - crates.io's trusted publishing replaces the token (nadir-audio must
     exist there first).
+
+## ADR-0051 — M6.6: audio opens in `App::run` alone; `nadir::sound` plays the listener, the emitters and the music areas each frame, from components not reflected; bus volumes in percent, heard squared; a level's own music waits; sounds of our own
+
+- **Status:** Accepted in part: on 2026-11-08 the user chose nadir-cook's
+  workspace test as a fourth package (ADR-0048's revisit), the percent
+  volumes with the squared curve, the camera as the default listener, and
+  48 kHz sources of about 1.9 MB; the rest is Proposed
+- **Date:** 2026-11-08
+- **Context:**
+  - M6.6 (ADR-0048) asks the `App` to open audio with the mixer and call
+    `Audio::update` once a frame; the `AudioEmitter` and `AudioListener`
+    components and their systems; music that crossfades between areas;
+    bus volumes in `Config`; the sandbox's footsteps and its areas' music,
+    sounds of our own; and `libasound2` for the sandbox's `.deb`. Its
+    Accept: sandbox audio plays; footsteps follow the player positionally;
+    music crossfades between areas.
+  - `open_audio` (ADR-0047) takes the render box whether or not it opens:
+    `Unsupported` on Windows and macOS until M6.4 and M6.5, and on Linux
+    `LibraryNotFound` or `MissingSymbols` without libasound. A missing
+    device is no error, and dropping the stream waits 2 s at most.
+  - Tests, benchmarks and `--headless` replays run `App::update` faster
+    than real time; `--capture` runs `App::offscreen` in the release and
+    demo page workflows, which install no libasound. A mixer that nothing
+    renders fills its queue, and every command after is dropped, counted,
+    and warned of once a second.
+  - The queue drops a voice's changes and the listener's moves once it is
+    half full, as the next frame sends them again, and anything once it is
+    full (ADR-0046). The mixer tells the main thread nothing of a voice
+    stolen, refused or ended, and a voice past `max_dist`, 800 px, is
+    silent but holds one of its 48 slots. A play of a sound still loading
+    is lost, and unloading a scope stops no voice (ADR-0050).
+  - `Handle<T>` has no `Default`; `PlayParams` and `Bus` are not
+    `Reflect`, as nadir-audio may not depend on nadir-scene; and each
+    reflected type a game registers changes its world hash.
+  - `Config` derives `Eq` and has public fields, and is not
+    `#[non_exhaustive]`, so a field more breaks it, as ADR-0043 noted for
+    `Sprite` and `Config`. The settings file that will set the volumes is
+    M9.3's.
+  - A level file has optional `music` and `ambience` paths (M5.10), but
+    the cook writes neither, and drops a level's own LDtk fields with a
+    warning (ADR-0038).
+  - `tools/cook/tests/cook/workspace.rs` cooks the real `assets/`, and
+    pinned its four jobs, the level job at index 3 and a pack of 6 files:
+    the sandbox's sounds fail it, and it is nadir-cook's, a fourth package.
+  - The sandbox had no sounds, and sounds not ours would need their
+    licences beside them (ADR-0037).
+- **Decision:**
+  - **Audio opens in `App::run` alone.** `App::new` makes the mixer of
+    `AudioConfig::default()`, which is valid, inserts `Audio`, always
+    there, and the resource `AudioState`, queues each bus's volume, and
+    keeps the `Mixer` in a private field. `App::run` opens the default
+    output, 48 kHz stereo, once the window and the device are open, with
+    the mixer in a private `MixerOutput`, an `AudioRender` whose
+    `underrun` is `Mixer::count_underrun`. Where it does not open, a
+    warning says why and the game runs silent; with no mixer left, the log
+    says so. The stream drops as soon as the loop ends, before an error is
+    shown; `Error` is unchanged.
+    - **Every other path is silent:** `App::update`'s first call drops a
+      mixer the app still holds, so tests, benchmarks, `--headless`
+      replays, `App::offscreen` and `--capture` open no device, and
+      `Audio` does nothing there. `App::take_mixer`, new, hands the mixer
+      before then to a test or a tool that renders it itself.
+  - **`nadir::sound`**, an engine frame system, first in `Extract`: after
+    the game's camera, before `nadir::extract_sprites`. In order:
+    1. **The listener:** where the first entity with an `AudioListener`
+       and a `Transform` is drawn, or else the camera's position,
+       `RenderFrame::camera.position` (the user's choice), sent when it
+       is not where the queue last took it.
+    2. **The emitters:** each `AudioEmitter` with a `Transform` starts
+       once its sound has loaded and it is within `max_dist` of the
+       listener, and its position is sent when it moves; it stops, fading
+       over 100 ms, past `max_dist + 64`, or when its entity is despawned
+       or loses the emitter or its `Transform`, and plays again back in
+       range. A new `sound`, `bus`, `looped`, `priority` or
+       `max_instances` stops the voice and starts another; a new `volume`
+       or `pitch`, compared bit for bit, goes to the voice. A sound that
+       failed, or that the asset server does not hold, is warned of once,
+       naming the entity and the path, and not tried again until the
+       emitter changes; one still loading waits.
+    3. **The music areas:** a `MusicArea` is a box, its entity's position
+       ± `half`. The area whose track was sent last stays while it holds
+       the listener, so overlaps do not flap; else the first in the
+       storage's order that holds it sends its track with `play_track`,
+       over its `crossfade_ms`. Outside every area the music plays on, and
+       no area is current, so coming back sends the track again, which the
+       mixer carries on (ADR-0046). A track still loading waits; one that
+       failed is warned of once, as a sound is, and an area playing whose
+       music changes to it plays on as it was.
+    4. `Audio::update`.
+    - One position for all three: `PrevTransform.lerp(Transform, alpha)`
+      where there is a `PrevTransform`, else `Transform`, as sprites are
+      drawn.
+    - Each play, stop, move and change of a voice, each move of the
+      listener and each track is checked against `AudioStats::dropped`
+      around its send: one the queue dropped is not recorded, and the
+      next frame sends it again, so there is no dead voice, no voice twice
+      and no stale position, and a frame where nothing moves sends
+      nothing (the review measured 560 emitters, sent every frame, freeze
+      the live voices at their start; more than about 500 moving in one
+      frame still lose the same tail).
+    - Each emitter costs O(1) a frame: a table of those it started, and a
+      private marker component, not reflected, on their entities. Once
+      they have room for the emitters, a frame allocates nothing.
+    - It writes no reflected component and spawns nothing, so world hashes
+      and replays are as they were.
+  - **The components** are the facade's: `AudioListener`, a unit struct;
+    `AudioEmitter { sound, params }`, with `new` and `looped`, a looped
+    sound on `Bus::Ambience` at priority 192 with no limit to its voices,
+    so that the sound's limit does not make emitters of one sound take
+    one another's voices, and default plays, at 128, take none of theirs
+    (when all the voices play, one of the same priority or higher still
+    takes the oldest); and `MusicArea { music, half,
+    crossfade_ms }`, with `new`, 1,500 ms; the last two are
+    `#[non_exhaustive]`. All three are registered with the world and **not
+    reflected**: a game gives them in code, not in prefabs or levels; a
+    task that wants them in data reflects them by hand, as `Sprite` is.
+    `AudioState::music_area()` names the area whose track was sent last.
+  - **`Config::volumes: Volumes`**, a percent per bus (`u8`: music, sfx,
+    ui, ambience), 100 each by default, more counting as 100. A percent is
+    heard as its square (the user's choice): `Volumes::gain(bus)` is
+    (percent / 100)², so 50 is −12 dB, nearer half as loud than half the
+    gain's −6 dB; `get` and `set` serve menus that go through `Bus::ALL`.
+    `App::new` applies them; a game changes one while it runs with
+    `Audio::set_bus_volume(bus, volumes.gain(bus), fade)`. `Config` keeps
+    `Eq`. **Breaking:** a `Config` literal without `..` no longer
+    compiles; the release after 0.3.0 raises the version (ADR-0050). No
+    master volume: the mixer has none, and M9.3 decides the settings.
+  - **A level's own `music` and `ambience` wait,** with its camera
+    bounds, for the roadmap's backlog: the cook writes none of them, which
+    would be a fourth package more, and the task's music comes from areas.
+    `load_level` neither plays nor stops them. The task that builds them
+    decides how a level's music and its areas' share the music: the
+    level's outside every area, or an area's over the level's.
+  - **Sounds of our own:** `games/sandbox/make_sounds.py`, Python's
+    standard library alone and seeded, writes the sandbox's four WAVs,
+    mono at 48 kHz, so the cook resamples none of them: a footstep on
+    grass, 80 ms; a pond's lapping water, 4 s, looped by its sidecar; and
+    two tunes of 8 s, the north's bright and the south's darker and
+    slower: about 1.9 MB in all (the user's choice). The WAVs are
+    committed, and made again by hand.
+  - **The sandbox:** `footsteps`, a tick system in `Cleanup` in every
+    scene, plays a step at the player's feet every 12 ticks it moves, the
+    first at once, at volume 0.6, its pitch 1 and 0.94 in turn. The field
+    spawns, after its level and its player, two `MusicArea`s, the north
+    (y 0 to 576) and the south (576 to 768), and the pond's looped emitter
+    at (560, 112), at volume 0.5.
+  - **The `.deb`:** the sandbox's depends on `libasound2` too, which it
+    loads with `dlopen`, where `dpkg-shlibdeps` cannot see it; the release
+    texts say the pack holds sounds, and that Windows and macOS play none
+    until M6.4 and M6.5 (`docs/05-release.md`).
+  - **The field's world hash changes:** its three new entities have a
+    `Transform`, `298521738b5650ef` → `09b32c266f3b59f4` over the
+    capture, its 600 frames the same bytes (SHA-256 `6a8ab445…`).
+  - **Four packages:** the facade, the sandbox, xtask, and nadir-cook's
+    workspace test, test only: its eight jobs, the level job found by
+    name, the sounds' outputs, a pack of 10 files. No cook code changes.
+- **Consequences:**
+  - Good: tests, recordings and CI open no device and need no libasound,
+    and nothing plays sped up; `Audio` is always a resource, so any system
+    can play; a command the queue dropped is sent again; emitters out of
+    range free their voices, and a stolen one comes back when it starts
+    again; a game sets volumes in one unit and one curve, which M9.2's
+    sliders and M9.3's settings can share; the sounds are ours, under the
+    repository's licence.
+  - Bad: a looped emitter whose voice is stolen is silent until it leaves
+    range and comes back, or changes; a sound played once, as something
+    happens, is lost if it has not loaded, so a game loads it first;
+    `App::run` opens the output after the window, so a device slow to
+    open holds the first frame up to 2 s; the components cannot be given
+    in prefabs or levels; a `Config` literal without `..` breaks; a
+    level's `music` and `ambience` are not played; with `dev`'s
+    placeholders a failed sound plays as silence, so the emitter does not
+    warn, and the asset server's log says why; while an area's track
+    loads, `music_area()` still names the area before; the field's world
+    hash changes.
+  - The Accept is shown offline, through the mixer, by the facade's and
+    the sandbox's tests; how it sounds only the user's check by ear shows
+    (`docs/subsystems/audio.md`), so the task stays unticked until the
+    user reports it, as M6.3 did.
+  - The cook's QOA encoder starts each file with an empty history, so a
+    looped track that starts loud errs on its first 20 samples at every
+    pass: the tunes start at a zero crossing.
+- **Alternatives considered:**
+  - Audio opened in `App::new`: tests, captures and replays would open
+    the device, the workflows' runners would need libasound, and a
+    headless replay would play sped up.
+  - The mixer kept in runs of `App::update` alone: nothing renders it, so
+    its queue fills and `update` warns every second.
+  - `NADIR_ALSA_DEVICE=null` in tests: Linux's alone, and a variable each
+    test must set.
+  - Positions sent only when they change: one that the half-full queue
+    dropped would not be sent again.
+  - The listener on the player: the player's own steps would always be
+    centred.
+  - Distant emitters left playing: each holds a slot, silent.
+  - The components reflected: `Handle` has no `Default`, nadir-audio's
+    types are not `Reflect`, and every game's world hash would change.
+  - `f32` volumes in `Config`: they drop `Eq`, a break of more than
+    literals; a linear percent: 50 is −6 dB, and saved settings would fix
+    whatever curve came first.
+  - A level's music played by `load_level` now: nothing writes it, and
+    its share of the music with areas would be fixed before a game needs
+    it. Areas as levels, each with its `music`: the cook writes none.
+    Areas as prefabs of a trigger: LDtk cannot give one its size.
+  - Sources at 22,050 Hz, about 1 MB: the cook would resample them,
+    rounding a loop's seam, and its debug tests would take longer.
+  - `Recommends: libasound2`, as the game runs silent without it: the
+    other libraries it loads are `Depends`, as the roadmap asks of this
+    one.
+- **Revisit when:**
+  - M6.4 or M6.5 opens output on Windows or macOS (`App::run` needs no
+    change);
+  - a game needs a level's own music, ambience or camera bounds (the
+    roadmap's backlog), or emitters, listeners or areas in prefabs and
+    levels;
+  - a stolen emitter's silence is heard in a game (then the mixer tells
+    the main thread of its voices);
+  - M9.3's settings file sets `Config::volumes`, or a game asks for a
+    master volume;
+  - or the cook primes a looped track's first QOA frame with its last
+    samples, so that a tune need not start at a zero crossing.

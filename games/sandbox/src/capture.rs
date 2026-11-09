@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `--capture DIR`: draws the scene offscreen, with no window, one tick a
-//! frame, and writes its frames and what they showed into `DIR`, for the
-//! demo page (ADR-0029). `cargo xtask site` runs it for each scene and
+//! `--capture DIR`: draws the scene offscreen, with no window and no
+//! sound, one tick a frame, and writes its frames and what they showed into
+//! `DIR`, for the demo page (ADR-0029). `cargo xtask site` runs it for each scene and
 //! makes videos of the frames.
 //!
 //! - `frames.rgba`: [`FRAMES`] frames, one after another, each [`SIZE`]
@@ -239,7 +239,12 @@ fn quoted(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
+    use nadir::audio::AudioConfig;
+
     use super::*;
+    use crate::tests::{BLOCK, RATE, hear, listening};
 
     #[test]
     fn the_tour_holds_each_steps_keys_for_its_ticks_and_then_none() {
@@ -303,6 +308,94 @@ mod tests {
         // Then past its end, at column 44, up and west.
         let last = at[at.len() - 1];
         assert!(last.x < 44.0 * 16.0 && last.y < slide[0].y, "{last:?}");
+    }
+
+    /// `track` alone, `ticks` ticks of it, as the mixer plays it when it is
+    /// sent before tick `from`, fading in over `fade_ms`.
+    fn alone(track: &Music, fade_ms: u32, from: usize, ticks: usize) -> Vec<f32> {
+        let (audio, mut mixer) =
+            nadir::audio::new(AudioConfig::default()).expect("the default config is valid");
+        let mut out = vec![0.0; ticks * BLOCK * 2];
+        for (tick, sound) in out.chunks_mut(BLOCK * 2).enumerate() {
+            if tick == from {
+                audio.play_track(track, fade_ms);
+            }
+            mixer.render(sound, 2, RATE);
+            audio.update();
+        }
+        out
+    }
+
+    /// How far `heard` is from `expected`, over `ticks`: the root mean
+    /// square of their difference, as a part of `expected`'s.
+    fn off(heard: &[f32], expected: &[f32], ticks: Range<usize>) -> f32 {
+        let samples = ticks.start * BLOCK * 2..ticks.end * BLOCK * 2;
+        let (mut difference, mut energy) = (0.0f64, 0.0f64);
+        for (&a, &b) in heard[samples.clone()].iter().zip(&expected[samples]) {
+            difference += f64::from(a - b).powi(2);
+            energy += f64::from(b).powi(2);
+        }
+        (difference / energy).sqrt() as f32
+    }
+
+    #[test]
+    fn on_the_tour_the_north_s_music_crossfades_to_the_south_s() {
+        // The music alone: the steps and the pond at 0.
+        let volumes = Volumes {
+            sfx: 0,
+            ambience: 0,
+            ..Volumes::default()
+        };
+        let (mut app, mut mixer) = listening(Scene::Field, volumes);
+        let areas: Vec<(Entity, MusicArea)> = {
+            let areas = app.world().read::<MusicArea>();
+            areas.iter().map(|(entity, &area)| (entity, area)).collect()
+        };
+        let [(north, north_area), (south, south_area)] = areas[..] else {
+            panic!("two areas: {areas:?}");
+        };
+        let track = |area: MusicArea| {
+            let server = app.world().resource::<AssetServer>();
+            server.get(area.music).cloned().expect("loaded")
+        };
+        let (north_track, south_track) = (track(north_area), track(south_area));
+        let playing = |app: &App| app.world().resource::<AudioState>().music_area();
+        // As `capture` runs it, hearing each tick, and a second more,
+        // standing.
+        app.update(Duration::ZERO, &[]);
+        assert_eq!(playing(&app), Some(north));
+        let mut held: &[Key] = &[];
+        let mut events = Vec::new();
+        let mut out = Vec::new();
+        let mut changes = Vec::new();
+        let ticks = FRAMES as usize + 60;
+        for frame in 0..ticks {
+            events.clear();
+            let keys = keys_at(frame as u32);
+            key_changes(held, keys, &mut events);
+            held = keys;
+            let before = playing(&app);
+            hear(&mut app, &mut mixer, &events, &mut out);
+            if playing(&app) != before {
+                changes.push((frame, playing(&app)));
+            }
+        }
+        // Once, through the gap in the tall walls of row 36.
+        let [(crossed, Some(now))] = changes[..] else {
+            panic!("{changes:?}");
+        };
+        assert_eq!(now, south);
+        assert!(crossed < FRAMES as usize, "{crossed}");
+        // The north's tune alone until then, both while it crossfades, and
+        // the south's alone after.
+        let north_alone = alone(&north_track, north_area.crossfade_ms, 0, ticks);
+        let south_alone = alone(&south_track, south_area.crossfade_ms, crossed, ticks);
+        let fade = (south_area.crossfade_ms * TICK_HZ / 1_000) as usize;
+        assert!(off(&out, &north_alone, crossed - 60..crossed) < 1e-4);
+        let during = crossed + fade / 2 - 5..crossed + fade / 2 + 5;
+        assert!(off(&out, &north_alone, during.clone()) > 0.3);
+        assert!(off(&out, &south_alone, during) > 0.3);
+        assert!(off(&out, &south_alone, crossed + fade..ticks) < 1e-4);
     }
 
     #[test]
