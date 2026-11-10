@@ -4840,3 +4840,59 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   the font's page); the native-resolution or smooth-camera mode lands
   (then pixel UI needs another anchor); or a consumer needs the scale of
   a view to change the order.
+
+## ADR-0056 — M7.2 split in three: the debug UI core (M7.2: nadir-debug), typed text and capture (M7.9: sys, platform, input), and the debug UI in the game (M7.10: the facade)
+
+- **Status:** Accepted: the user chose the split, and window positions kept
+  as data in nadir-debug with the file in the facade, on 2026-11-10
+- **Date:** 2026-11-10
+- **Context:**
+  - M7.2 asks for IDs, hot and active state, layout, windows (drag,
+    collapse, scroll), the widget set, input capture and position
+    persistence, accepted by the debug spec's UI logic tests.
+  - Typed text does not exist yet (M3.1's note): on Linux it needs an X
+    input method, `XOpenIM`, `XCreateIC` and `Xutf8LookupString`, declared
+    in nadir-sys and used in nadir-platform, and `WM_CHAR` and
+    `characters` on Windows and macOS. `Input` ignores key repeats, which
+    editing needs, and capturing the keyboard only or the mouse only needs
+    new nadir-input API.
+  - Feeding the debug UI, suppressing gameplay actions while it has the
+    pointer or the keyboard, and writing `debug_ui.jsonc` in the user
+    config directory are the facade's: nadir-debug may depend on neither
+    nadir-platform nor nadir-codec (`01-architecture.md`).
+  - That is five crates: nadir-debug, nadir-input, nadir-platform,
+    nadir-sys and the facade. CLAUDE.md asks a task to stay within three.
+- **Decision:** three tasks, in this order:
+  1. **M7.2** (nadir-debug): the UI core, fed by an input of its own that
+     tests fill with synthetic events: IDs, hot and active state, layout,
+     windows that drag, collapse, resize and scroll, the widget set,
+     `wants_mouse` and `wants_keyboard`, and each window's position, size
+     and collapse given and taken as plain data. It keeps M7.2's number,
+     and its Accept and Verify.
+  2. **M7.9** (nadir-sys, nadir-platform, nadir-input): typed text
+     (`Event::Text`; on Linux an X input method, on Windows and macOS left
+     to their OS), key repeats for a UI, and capturing the keyboard only
+     or the mouse only.
+  3. **M7.10** (the facade): the debug UI in the game under `dev`: the
+     window's size as a resource, the debug UI's input fed from window
+     events, the UI drawn after the game's, gameplay actions suppressed
+     while it wants the pointer or the keyboard, `debug_ui.jsonc` read and
+     written in the user config directory, and the spec's golden of a
+     fixed debug window layout.
+- **Consequences:**
+  - M7.9 and M7.10 come after M7.2 and before M7.3 in the roadmap; M7.10
+    depends on M7.2 and M7.9. M7.3 to M7.6 depend on M7.10 too, so that
+    each tool can be seen in the game.
+  - The Developer tools feature holds both new tasks.
+  - nadir-debug keeps `publish = false` until the facade uses it (M7.10),
+    as ADR-0036's "Revisit when" has it.
+- **Alternatives considered:**
+  - M7.2 whole, in five crates.
+  - Two tasks, the facade's wiring with the UI core: the debug UI could not
+    edit text typed in the game, and its first review would span two
+    crates' designs.
+  - nadir-codec allowed to nadir-debug, so that it writes the file itself:
+    a change to the dependency matrix for one file's format.
+- **Revisit when:** M7.9 or M7.10 finds that the debug UI's input needs
+  what M7.2's does not carry (then a change to it there, recorded).
+

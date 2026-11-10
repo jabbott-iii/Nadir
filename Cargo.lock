@@ -64,6 +64,10 @@ version = "0.3.0"
 [[package]]
 name = "nadir-debug"
 version = "0.3.0"
+dependencies = [
+ "nadir-core",
+ "nadir-render",
+]
 
 [[package]]
 name = "nadir-ecs"

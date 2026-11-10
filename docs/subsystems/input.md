@@ -6,7 +6,7 @@ reads keys or buttons directly.
 Built so far (M3.1): keyboard and mouse bindings, latching, text mode, rebind
 conflict detection, and replays. Gamepads, deadzones and the active device
 come with M8.4, the rebind capture flow with M9.2, and typed text
-(`Event::Text`) with the first text field, M7.2.
+(`Event::Text`) with M7.9, for the debug UI's text fields (ADR-0056).
 
 ## Layers
 
@@ -164,7 +164,7 @@ impl<A: ActionSet> ActionState<A> {
 
 - When a text field is focused (debug console, name entry), the input crate
   enters text mode (`Input::set_text_mode`), in order with the events:
-  - `Event::Text` goes to the text consumer (from M7.2, when the platform
+  - `Event::Text` goes to the text consumer (from M7.9, when the platform
     reports typed text)
   - gameplay actions read as released
   - only actions flagged `ui_allowed` stay live

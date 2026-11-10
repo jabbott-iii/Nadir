@@ -8,7 +8,7 @@ whose remaining work needs an OS you cannot run. This document also describes
 what is not built yet, such as the Metal backend (and
 `cargo xtask golden --backend`), audio's devices on Windows and macOS
 (its mixer, its assets and its Linux output are built), and the debug tools,
-whose crate is still empty. Some of what it mentions may not exist yet, and some exists
+whose crate has only the debug UI's core so far (M7.2). Some of what it mentions may not exist yet, and some exists
 before its roadmap task is ticked: check before assuming.
 
 ## What we are building

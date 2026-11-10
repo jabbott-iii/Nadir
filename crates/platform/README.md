@@ -37,7 +37,7 @@ Built today:
 - With the `dev` feature, an allocation counter.
 
 Not yet: OpenGL on Windows and macOS (roadmap tasks M2.6 and M2.7), audio
-output on Windows and macOS (M6.4 and M6.5), typed text (M7.2), gamepads
+output on Windows and macOS (M6.4 and M6.5), typed text (M7.9), gamepads
 (M8.1 to M8.3), Metal (M10.1), noticing that the window was minimized,
 holding the pointer inside the window, and native Wayland.
 

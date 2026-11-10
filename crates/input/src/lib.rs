@@ -86,7 +86,7 @@
 //! Built so far (roadmap M3.1): keyboard and mouse bindings, latching, text
 //! mode, rebinding conflicts and replays. Gamepads, deadzones and the
 //! active device come with M8.4, the rebinding capture flow with M9.2,
-//! bindings in the settings file with M9.3, and typed text with M7.2.
+//! bindings in the settings file with M9.3, and typed text with M7.9.
 //!
 //! # The parts
 //!

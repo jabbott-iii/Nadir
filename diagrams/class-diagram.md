@@ -31,7 +31,8 @@ Metal backend, audio's output on Windows and macOS, the debug tools,
 gamepads, saves and pathfinding are not built yet (see
 `docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
 output on Linux (M6.3), its assets (M6.9), and the game's sound (M6.6);
-bitmap text in the world is (M7.1), and the UI pass (M7.8).
+bitmap text in the world is (M7.1), the UI pass (M7.8), and the debug
+UI's core (M7.2), which nothing draws yet.
 The members only the `dev` feature compiles, the facade's hot reload's
 (roadmap M5.8), are marked `dev`. One member that exists in the code for
 planned work, `ShaderSource::msl`, carries a note.
@@ -1518,6 +1519,92 @@ classDiagram
     TileLayer "1" *-- "0..*" Tile : cells
     TileSet --> Texture : Handle
     TileLayerDraw --> TileLayer : Handle
+```
+
+## debug: the UI core
+
+`DebugUi` is an immediate-mode UI: each frame takes its events from a
+`DebugInput`, its windows are filled through a `Frame` and their `Ui`, each
+widget answering with a `Response`, and `Frame::finish` pushes the shapes
+into render's `UiList`. Text is measured through `TextMetrics`.
+
+```mermaid
+classDiagram
+    direction LR
+    class DebugInput {
+        -events VecDeque
+        +pointer_moved(position)
+        +button(button, pressed)
+        +wheel(lines)
+        +key(key, pressed, repeat)
+        +text(text)
+        +focus_lost()
+    }
+    class TextMetrics {
+        <<trait>>
+        +line_height() f32
+        +caret_x(text, byte) f32
+    }
+    class FontMetrics {
+        -font Font
+        +new(font)$ FontMetrics
+    }
+    class DebugUi {
+        -style Style
+        -windows Vec
+        -active Option
+        -focus Option
+        +new(font, metrics, white)$ DebugUi
+        +frame(input, virtual_resolution, output_size) Frame
+        +wants_mouse() bool
+        +wants_keyboard() bool
+        +places() Iterator~WindowPlace~
+        +set_place(title, rect, collapsed)
+        +places_revision() u64
+    }
+    class Frame {
+        +window(title, first, add) bool
+        +finish(out)
+    }
+    class Ui {
+        +with_id(key, add)
+        +horizontal(add)
+        +key_pressed(key) bool
+        +focus_next()
+        +label(text)
+        +button(text) Response
+        +checkbox(text, value) Response
+        +slider_f32(text, value, range) Response
+        +text_input(text, value) Response
+        +combo(text, selected, items) Response
+        +tree_node(text, add) Response
+        +plot(text, values, plot) PlotResponse
+        +color_edit(text, color) Response
+    }
+    class Response {
+        +hovered bool
+        +active bool
+        +clicked bool
+        +changed bool
+        +submitted bool
+        +lost_focus bool
+    }
+    class WindowPlace {
+        +title str
+        +rect Rect
+        +collapsed bool
+    }
+    class Style
+    class UiList["render::UiList"]
+    FontMetrics ..|> TextMetrics
+    DebugUi *-- Style
+    DebugUi o-- TextMetrics
+    DebugUi ..> DebugInput : frame takes its events
+    DebugUi ..> Frame : frame
+    Frame ..> Ui : window
+    Frame ..> UiList : finish
+    Ui ..> Response
+    DebugUi ..> WindowPlace : places
 ```
 
 ## gfx: the device and its backend

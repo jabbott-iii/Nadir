@@ -4739,7 +4739,10 @@ by the batched sprite renderer.
     warm (render may not count allocations); the lists are reused, as the
     world's are.
 
-- [ ] **M7.2 — debug: immediate-mode UI core**
+- [x] **M7.2 — debug: immediate-mode UI core**
+  - Split on 2026-11-10 (ADR-0056): typed text, key repeats and capture in
+    the platform and input are M7.9's, and the debug UI in the game, with
+    `debug_ui.jsonc`, is M7.10's; M7.2 is nadir-debug's alone.
   - Note (from M4.7): while a replay plays (`App::play_replay`), the
     actions come from it, not from the input. Capturing input for the debug
     UI must not stop a replayed tick.
@@ -4773,8 +4776,105 @@ by the batched sprite renderer.
     keyboard only, or of the mouse only (`wants_mouse`), needs new API.
   - Do: IDs, hot/active state, layout, windows (drag, collapse, scroll),
     the widget set, input capture, position persistence.
+    - As split (ADR-0056): all in nadir-debug, fed by an input of its own
+      that tests fill with synthetic events; input capture is
+      `wants_mouse` and `wants_keyboard`, and position persistence each
+      window's position, size and collapse state given and taken as data.
   - Accept: the UI logic tests in the debug spec pass.
   - Verify: `cargo test -p nadir-debug`
+  - Built (ADR-0056; `debug-tools.md`, "As built (M7.2)"): nadir-debug's
+    `DebugUi`, depending on core and render. `DebugInput` takes the
+    window's events in order, a frame at most one press and one release,
+    ending at its release, a press after typing waiting a frame; `frame`,
+    `Frame::window` (title bar drag, collapse box, grip, wheel and thumb
+    scrolling, z-order), `Frame::finish` into `RenderFrame::ui` (layer 255,
+    `Fixed(u32::MAX)`); `Ui` with `with_id`, `horizontal`, `key_pressed`,
+    `focus_next`, `label`, `label_colored`, `button`, `checkbox`,
+    `slider_f32`, `slider_i32`, `drag_f32`, `text_input`, `combo`,
+    `tree_node`, `separator`, `plot` and `color_edit`, each a `Response`;
+    identity by text or `##` explicit ID; `wants_mouse`, `wants_keyboard`;
+    `places`, `set_place`, `places_revision`; `TextMetrics`, and
+    `FontMetrics` for a `Font`.
+  - Tests: `cargo test -p nadir-debug`: 54 unit tests and the crate's
+    example, all with synthetic input and a test font: the spec's three
+    (a button clicks on release only after a press on it, in one frame or
+    two, judged where each edge happened; sliders held in their range,
+    reversed, NaN, the whole `i32`; text editing, with Shift, Control or
+    Super, multi-byte text, a text the caller changed, Enter, Escape, a
+    press elsewhere), windows (drag, collapse, resize, scroll by wheel and
+    thumb, z-order, two calls in a frame, places on and off screen), IDs,
+    the other widgets, capture, and what a frame pushes. Clippy for Linux,
+    and x86_64 and aarch64 Windows and macOS, from Linux; `cargo xtask ci`.
+  - Review: three critics of the design (explicit IDs, the ordered input,
+    owned metrics, the text field's keys); two reviewers with a skeptic a
+    finding, 19 confirmed and fixed. Of 53 planted bugs, 7 passed the tests
+    at first; 6 fail them now, and the seventh, a clamp the slider's
+    arithmetic cannot reach, changes nothing.
+  - Not checked by a test: that a frame allocates nothing once warm
+    (nadir-debug may not count allocations; M7.10's facade can, with
+    `FrameAllocs`); `FontMetrics` with a real `Font`, which nadir-debug
+    cannot make (it reads the pen from `Font::layout`, the caret logic
+    being tested with synthetic glyphs); the golden of a debug window,
+    M7.10's.
+
+- [ ] **M7.9 — platform and input: typed text, key repeats and capture**
+  - Added on 2026-11-10 (ADR-0056), from M7.2's note from M3.1: typed text
+    does not exist yet, `Input` ignores key repeats, and the debug UI
+    needs gameplay actions held off while it has the keyboard or the
+    pointer.
+  - Depends: M3.1, M7.2
+  - Note (from M7.2): `nadir_debug::DebugInput` takes `key(key, pressed,
+    repeat)`, a repeat being a press again, and `text(&str)`, which leaves
+    control characters out; `focus_lost()` when the window loses the
+    focus. Text and keys must reach it in the order they happened.
+  - Do: `Event::Text` from the platform: on Linux an X input method
+    (`XOpenIM`, `XCreateIC`, `Xutf8LookupString`, declared in nadir-sys),
+    on Windows `WM_CHAR`, on macOS `characters`; key repeats and typed text
+    within reach of a UI; capturing the keyboard only, or the mouse only,
+    from gameplay actions.
+  - Accept: unit tests of capture and of repeats and text reaching a UI;
+    on Linux, the events example shows typed text, composed characters
+    included.
+  - Verify: `cargo test -p nadir-platform -p nadir-input`;
+    `cargo run -p nadir-platform --example events` (manual, on each OS)
+
+- [ ] **M7.10 — facade: the debug UI in the game**
+  - Added on 2026-11-10 (ADR-0056): M7.2 builds the debug UI in
+    nadir-debug alone, which may depend on neither nadir-platform nor
+    nadir-codec.
+  - Note (from M4.7): while a replay plays (`App::play_replay`), the
+    actions come from it, not from the input. Capturing input for the debug
+    UI must not stop a replayed tick.
+  - Depends: M7.2, M7.9, M7.8
+  - Note (from M7.2): `DebugUi::new(font, FontMetrics::new(font.clone()),
+    white)`: a copy of the loaded `Font` measures the text, so a frame
+    borrows no asset; `white` is a texture of white texels, which the
+    asset server loads only from a file (one in the engine's or the game's
+    assets). `DebugUi::frame(&mut input, virtual_resolution, output_size)`
+    each rendered frame, windows, then `Frame::finish(&mut
+    render_frame.ui)` after the game's UI. Feed `DebugInput` with every
+    window event in order (`pointer_moved`, `button`, `wheel`, `key`,
+    `text`, `focus_lost`). `wants_mouse` and `wants_keyboard` hold the
+    game's input off. `places()` and `set_place` are the windows' places;
+    write `debug_ui.jsonc` when `places_revision()` changes. When the
+    facade depends on nadir-debug, `publish = false` goes (ADR-0036): then
+    `cargo xtask crates` wants a description, the root's `LICENSE` and
+    `NOTICE` in its folder, a README whose examples lib.rs tests
+    (ADR-0039), and an entry in `[workspace.dependencies]`. Checking that
+    a frame of the debug UI allocates nothing once warm is the facade's
+    (`FrameAllocs`): nadir-debug cannot count allocations.
+  - Do: under `dev`: the window's size as a resource; the debug UI's input
+    fed from window events; the debug UI drawn into `RenderFrame::ui` at
+    the settings' free scale, after the game's UI, in a font of the
+    engine's; gameplay actions held off while it wants the pointer or the
+    keyboard; its windows' places read from and written to
+    `debug_ui.jsonc` in the user config directory; the spec's golden of a
+    fixed debug window layout.
+  - Accept: facade unit tests and the golden pass; manual: in `cargo dev`
+    a debug window drags, collapses, scrolls, takes typed text, and keeps
+    its place across runs.
+  - Verify: `cargo test -p nadir_engine`; `cargo xtask golden`; `cargo dev`
+    (manual)
 
 - [ ] **M7.3 — stats overlay and profiler**
   - Note (from M2.3): `Caps` has no timer-query field yet. It is
@@ -4797,7 +4897,13 @@ by the batched sprite renderer.
     `ui_sprites`, `ui_glyphs`, `ui_texts` and `ui_batches`, not in the
     world's counts; the draws onto the window are the blit and
     `ui_batches`.
-  - Depends: M7.2, M0.4
+  - Depends: M7.2, M7.10, M0.4
+  - Note (from M7.2): `Ui::plot(text, values, Plot { range, height,
+    selected })` gives the value under the pointer and the one clicked;
+    `label_colored` colors a line; a scope tree's nodes keep their state
+    through a changing text with an explicit ID (`"render 1.2 ms##render"`).
+    A window without a title bar, or that takes no input, for the overlay
+    is not built: an option of `Frame::window`, additive.
   - Do: the overlay; profiler ring, graph and scope tree; Chrome trace
     export; GL timer queries.
   - Accept: the exported trace parses with our JSON parser; manual: it
@@ -4814,7 +4920,12 @@ by the batched sprite renderer.
   - Note (from M4.7): edits from the inspector or the console (teleports,
     spawns, values) are not input, so a replay does not hold them: a world
     edited by hand replays differently.
-  - Depends: M7.2, M4.2
+  - Depends: M7.2, M7.10, M4.2
+  - Note (from M7.2): a component's fields go under its own `tree_node`
+    (a scope of their own); `slider_i32` covers `i32`, but no drag of a
+    wider integer (`u64`, `i64`) is built yet, nor a tooltip for a field's
+    doc, nor rows called back only in view for a long entity list: each
+    is additive.
   - Do: the entity list with filter; component editors via `Reflect`;
     add/remove; despawn; save as prefab.
   - Accept: the reflect round-trip edit test passes.
@@ -4826,7 +4937,13 @@ by the batched sprite renderer.
     player_move`, with `(conditional)` for a system with a run condition.
   - Note (from M4.4): `App::schedule()` gives the schedule. The engine's
     own systems are named `nadir::snapshot`, `nadir::movement`, and so on.
-  - Depends: M7.2
+  - Depends: M7.2, M7.10
+  - Note (from M7.2): the command line is a `text_input`: `submitted` on
+    Enter, which keeps the keyboard; `Ui::key_pressed` for Up, Down and
+    Tab, which the field leaves to its caller; `Ui::focus_next` to give it
+    the keyboard when the console opens. A log of thousands of lines wants
+    a scroll area that sticks to its bottom, and rows called back only in
+    view: not built yet, additive.
   - Do: the command registry, history, completion, the log view, the
     initial command set.
   - Accept: unit tests for parsing and completion.
@@ -4847,7 +4964,7 @@ by the batched sprite renderer.
   - Note (from M4.7): a step must go through `App::update`, which takes the
     replay's next tick (`App::play_replay`); a run of `run_fixed` alone
     would skip it.
-  - Depends: M7.2, M4.3
+  - Depends: M7.2, M7.10, M4.3
   - Do: the F4 overlays and the F5–F7 time controls.
   - Accept: manual check on the sandbox.
   - Verify: `cargo dev` (manual); `cargo xtask release-no-dev`

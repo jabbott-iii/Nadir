@@ -55,7 +55,7 @@
 //! - [`Event::CloseRequested`] leaves the window open: the game decides.
 //! - [`Event::Key`] names the physical key, a [`nadir_core::Key`], whatever
 //!   the keyboard layout, and says whether a press is a repeat. Nothing
-//!   reports typed text yet (roadmap task M7.2).
+//!   reports typed text yet (roadmap task M7.9).
 //! - [`Event::MouseMoved`] is in physical pixels from the top-left corner of
 //!   the inside of the window, with y growing downward, on every system.
 //!   [`Event::MouseWheel`] is in lines.
@@ -269,7 +269,7 @@
 //!   [`create_headless_gl`] and [`open_audio`] return
 //!   [`PlatformError::Unsupported`].
 //!
-//! Not built yet on any system: typed text (M7.2), gamepads (M8.1 to M8.3),
+//! Not built yet on any system: typed text (M7.9), gamepads (M8.1 to M8.3),
 //! Metal (M10.1), noticing that the window was minimized, holding the
 //! pointer inside the window, and native Wayland.
 

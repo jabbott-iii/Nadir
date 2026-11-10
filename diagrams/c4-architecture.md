@@ -349,7 +349,7 @@ that no other crate allows it.
 | `nadir-render` | `crates/render` | 3, composed subsystems | deny | assets, codec, core, gfx |
 | `nadir-scene` | `crates/scene` | 3, composed subsystems | deny | assets, codec, core, ecs |
 | `nadir-audio` | `crates/audio` | 3, composed subsystems | deny | assets, codec, core |
-| `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | none: planned, no code yet |
+| `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | core, render (the debug UI's core, M7.2; the tools are planned) |
 | `nadir_engine` (`nadir` in code) | `crates/engine` | 5, facade | deny | assets, audio, collision, core, ecs, gfx, input, platform, render, scene |
 | `nadir-cook` | `tools/cook` | 6, applications | deny | assets, codec with `png`, core |
 | `xtask` | `xtask` | 6, applications | deny | codec with `png`, core |

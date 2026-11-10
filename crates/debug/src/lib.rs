@@ -12,5 +12,93 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Developer tools for the Nadir engine: immediate-mode debug UI, inspector,
-//! console, profiler and trace export.
+//! Developer tools for the Nadir engine: an immediate-mode debug UI, and,
+//! to come, a stats overlay, a profiler with trace export, an inspector, a
+//! console and debug-draw toggles (roadmap M7.3 to M7.6). They are for
+//! development builds only: a game depends on this crate behind its `dev`
+//! feature, and `cargo xtask release-no-dev` checks that a release does
+//! not.
+//!
+//! # The debug UI
+//!
+//! A [`DebugUi`] keeps what lasts from frame to frame. Each frame,
+//! [`DebugUi::frame`] takes that frame's events from a [`DebugInput`], code
+//! fills windows with [`Frame::window`] and their widgets through a
+//! [`Ui`], each widget answering what was done to it (a [`Response`]), and
+//! [`Frame::finish`] pushes what they draw into the frame's
+//! `RenderFrame::ui`, after the game's UI and in front of it.
+//!
+//! - **Input:** the engine feeds a [`DebugInput`] with the window's events
+//!   (roadmap M7.10); a test feeds it its own. A frame takes at most one
+//!   press and one release of the left button, so that a click is judged
+//!   where it was pressed and where it was released.
+//! - **Identity:** a widget is the hash of its scope's identity and its
+//!   text, or its explicit ID after `##`: `"Pause (3)##pause"`.
+//! - **Hot and active:** the widget under the pointer is hot; the one the
+//!   button went down on is active until it goes up, and a click is a
+//!   release over the widget that was pressed.
+//! - **Capture:** [`DebugUi::wants_mouse`] and [`DebugUi::wants_keyboard`]
+//!   tell the game to leave the mouse or the keys alone.
+//! - **Places:** each window's place is kept as data
+//!   ([`DebugUi::places`], [`DebugUi::set_place`]); the engine saves it.
+//! - **Text:** measured by [`TextMetrics`]: [`FontMetrics`] for a `Font`.
+//!
+//! ```
+//! use nadir_core::{GenIndex, Handle, Key, MouseButton, Rect, UVec2, Vec2};
+//! use nadir_debug::{DebugInput, DebugUi, TextMetrics};
+//! use nadir_render::UiList;
+//!
+//! /// A font of 8 units a line, each character 6 wide.
+//! struct Mono;
+//! impl TextMetrics for Mono {
+//!     fn line_height(&self) -> f32 {
+//!         8.0
+//!     }
+//!     fn caret_x(&self, text: &str, byte: usize) -> f32 {
+//!         6.0 * text[..byte].chars().count() as f32
+//!     }
+//! }
+//!
+//! fn handle<T>(index: u32) -> Handle<T> {
+//!     Handle::new(GenIndex::new(index, std::num::NonZeroU32::MIN))
+//! }
+//! let mut ui = DebugUi::new(handle(0), Mono, handle(1));
+//! let mut input = DebugInput::new();
+//! let mut paused = false;
+//! let mut name = String::from("hero");
+//! let mut renamed = false;
+//! let mut out = UiList::new();
+//! let output = UVec2::new(640, 360);
+//! for _ in 0..2 {
+//!     // A click on the checkbox, in the second frame, where the first drew it.
+//!     let mut frame = ui.frame(&mut input, output, output);
+//!     frame.window("Tools", Rect::new(Vec2::ZERO, Vec2::new(200.0, 120.0)), |ui| {
+//!         ui.checkbox("Paused", &mut paused);
+//!         // Enter in the field, once it has the keyboard.
+//!         renamed |= ui.text_input("Name", &mut name).submitted;
+//!     });
+//!     frame.finish(&mut out);
+//!     input.pointer_moved(Vec2::new(8.0, 18.0));
+//!     input.button(MouseButton::Left, true);
+//!     input.button(MouseButton::Left, false);
+//! }
+//! assert!(paused && !renamed);
+//! assert!(!ui.wants_keyboard());
+//! # let _ = Key::Enter;
+//! ```
+
+mod edit;
+mod id;
+mod input;
+mod metrics;
+mod style;
+#[cfg(test)]
+mod tests;
+mod ui;
+mod widgets;
+
+pub use input::DebugInput;
+pub use metrics::{FontMetrics, TextMetrics};
+pub use style::Style;
+pub use ui::{DebugUi, Frame, WindowPlace};
+pub use widgets::{Plot, PlotResponse, Response, Ui};

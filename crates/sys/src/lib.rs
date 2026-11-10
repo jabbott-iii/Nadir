@@ -84,7 +84,7 @@
 //! Not declared yet: WGL and NSOpenGL (roadmap tasks M2.6 and M2.7), WASAPI
 //! and CoreAudio (M6.4 and M6.5), the gamepad APIs (evdev's, XInput and
 //! GameController, M8.1 to M8.3), Metal (M10.1), and X input methods for
-//! typed text (M7.2).
+//! typed text (M7.9).
 //!
 //! # Examples
 //!

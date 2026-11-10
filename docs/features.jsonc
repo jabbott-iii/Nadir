@@ -253,8 +253,9 @@
     {
       "name": "Developer tools",
       "area": "Tools",
-      "summary": "An immediate-mode debug UI will carry a stats overlay, a profiler that exports traces, an entity inspector, a console, debug drawing and time controls, all left out of release builds.",
-      "tasks": ["M7.2", "M7.3", "M7.4", "M7.5", "M7.6"]
+      "summary": "An immediate-mode debug UI of our own is built: windows that drag, collapse, resize and scroll, with buttons, checkboxes, sliders, text fields, lists, trees, line graphs and color editors, each answering what was done to it, and a click judged where it was pressed and where it was released at any frame rate. It will appear in the game, with typed text from the window, and carry a stats overlay, a profiler that exports traces, an entity inspector, a console, debug drawing and time controls, all left out of release builds.",
+      "tasks": ["M7.2", "M7.9", "M7.10", "M7.3", "M7.4", "M7.5", "M7.6"],
+      "ticked": ["M7.2"]
     },
     {
       "name": "Gamepads",

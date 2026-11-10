@@ -29,7 +29,7 @@ Built today:
 
 Not yet: gamepads, deadzones and the active device come with roadmap task
 M8.4, the rebinding capture flow with M9.2, bindings in the settings file
-with M9.3, and typed text with M7.2.
+with M9.3, and typed text with M7.9.
 
 ## Usage
 
