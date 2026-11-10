@@ -246,9 +246,9 @@
     {
       "name": "Bitmap text",
       "area": "Graphics",
-      "summary": "Text is drawn in the world from bitmap fonts made with BMFont or Hiero: wrapped at a width, aligned left, in the middle or right, kerned, colored in runs with a small markup, and with a fallback glyph for a character a font lacks. Glyphs are a mask in the text's color, or keep their own colors for outlined fonts, and land on whole pixels. The cook's font files are read by a reader of our own, which checks each one strictly, and the cook reads back every font file it writes; a fuzzer throws about a million damaged files a second at it. Text on screen, at the window's resolution, comes with the UI pass.",
+      "summary": "Text is drawn from bitmap fonts made with BMFont or Hiero: wrapped at a width, aligned left, in the middle or right, kerned, colored in runs with a small markup, and with a fallback glyph for a character a font lacks. Glyphs are a mask in the text's color, or keep their own colors for outlined fonts, and land on whole pixels. Text goes in the world, or on the window in a UI with sprites, drawn after the world at the window's resolution in the order it is pushed: in the game's own pixels or at the settings' UI scale, each window cut to its clip, and the mouse mapped to it. The cook's font files are read by a reader of our own, which checks each one strictly, and the cook reads back every font file it writes; a fuzzer throws about a million damaged files a second at it.",
       "tasks": ["M7.7", "M7.1", "M7.8"],
-      "ticked": ["M7.7", "M7.1"]
+      "ticked": ["M7.7", "M7.1", "M7.8"]
     },
     {
       "name": "Developer tools",

@@ -26,6 +26,12 @@ input. None of it ships: `cargo xtask release-no-dev` verifies that.
 - **Rendering:** UI sprites and text go into `RenderFrame.ui_sprites` /
   `texts` at native resolution, scaled by the UI scale setting, after the
   game UI.
+  - As built in M7.8 (ADR-0055), the renderer's UI is `RenderFrame::ui`,
+    a `UiList` drawn in the order pushed: the debug UI sets its own view
+    (`UiView::new(UiScale::Free(setting))`), and pushes after the game's
+    UI, which puts it on top; a window's clip is `UiView::clipped`, which
+    intersects for a scrolled region inside it. `UiSpace::to_ui` maps the
+    pointer, with no GPU.
 - **Input capture:** when the pointer is over any debug window, or a debug
   text field has focus, the UI reports `wants_mouse`/`wants_keyboard` and the
   facade suppresses gameplay actions.

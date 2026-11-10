@@ -18,6 +18,8 @@
 //! instances go into a `Vec<f32>` instead (`docs/subsystems/render.md`,
 //! "Instance data").
 
+use nadir_core::Vec2;
+
 use crate::SpriteDraw;
 
 /// The `f32`s of one sprite instance, in the order of the `sprite`
@@ -46,6 +48,29 @@ pub(crate) fn push_instance(
     placeholder: bool,
     snap_zoom: Option<f32>,
 ) {
+    let (uv, pivot) = uv_and_pivot(sprite, placeholder);
+    let offset = pivot_offset(pivot, sprite.size);
+    let position = match snap_zoom {
+        Some(zoom) if sprite.rotation == 0.0 => {
+            let corner = sprite.position - offset;
+            crate::view::snap(corner * zoom) * (1.0 / zoom) + offset
+        }
+        _ => sprite.position,
+    };
+    out.extend_from_slice(&instance(
+        position,
+        sprite.size,
+        pivot,
+        uv,
+        sprite,
+        sprite.rotation,
+    ));
+}
+
+/// The uv rect of `sprite` (all of it for a `placeholder`) and its pivot,
+/// both mirrored by its flip: the quad mirrors about the pivot, as its
+/// texture does in it.
+pub(crate) fn uv_and_pivot(sprite: &SpriteDraw, placeholder: bool) -> ([f32; 4], Vec2) {
     let (mut u0, mut v0, mut u1, mut v1) = if placeholder {
         (0.0, 0.0, 1.0, 1.0)
     } else {
@@ -62,7 +87,6 @@ pub(crate) fn push_instance(
     if sprite.flip.y {
         (v0, v1) = (v1, v0);
     }
-    // The quad mirrors about the pivot, as its texture does in it.
     let mut pivot = sprite.pivot;
     if sprite.flip.x {
         pivot.x = 1.0 - pivot.x;
@@ -70,35 +94,30 @@ pub(crate) fn push_instance(
     if sprite.flip.y {
         pivot.y = 1.0 - pivot.y;
     }
-    // To 1/256 of a world unit: a normalized pivot rounds in `f32`
-    // (7/13 × 13 is 7.0000005), which would snap a corner on a half-pixel
-    // tie to the pixel below.
-    let offset = (pivot * sprite.size * 256.0).round() * (1.0 / 256.0);
-    let position = match snap_zoom {
-        Some(zoom) if sprite.rotation == 0.0 => {
-            let corner = sprite.position - offset;
-            crate::view::snap(corner * zoom) * (1.0 / zoom) + offset
-        }
-        _ => sprite.position,
-    };
+    ([u0, v0, u1, v1], pivot)
+}
+
+/// The offset of the corner from the pivot, `pivot` × `size`, to 1/256 of
+/// a unit: a normalized pivot rounds in `f32` (7/13 × 13 is 7.0000005),
+/// which would snap a corner on a half-pixel tie to the pixel below.
+pub(crate) fn pivot_offset(pivot: Vec2, size: Vec2) -> Vec2 {
+    (pivot * size * 256.0).round() * (1.0 / 256.0)
+}
+
+/// The floats of an instance, in attribute order, with `sprite`'s color.
+pub(crate) fn instance(
+    position: Vec2,
+    size: Vec2,
+    pivot: Vec2,
+    [u0, v0, u1, v1]: [f32; 4],
+    sprite: &SpriteDraw,
+    rotation: f32,
+) -> [f32; SPRITE_INSTANCE_FLOATS] {
     let color = sprite.color.to_linear();
-    out.extend_from_slice(&[
-        position.x,
-        position.y,
-        sprite.size.x,
-        sprite.size.y,
-        pivot.x,
-        pivot.y,
-        u0,
-        v0,
-        u1,
-        v1,
-        color.r,
-        color.g,
-        color.b,
-        color.a,
-        sprite.rotation,
-    ]);
+    [
+        position.x, position.y, size.x, size.y, pivot.x, pivot.y, u0, v0, u1, v1, color.r, color.g,
+        color.b, color.a, rotation,
+    ]
 }
 
 #[cfg(test)]

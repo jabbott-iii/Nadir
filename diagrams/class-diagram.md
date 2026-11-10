@@ -27,11 +27,11 @@ shows only a few of its fields and methods: the ones the design rests on.
   error type of a `Result` are left out.
 
 Nothing here is planned work: the diagrams show only what is built. The
-Metal backend, audio's output on Windows and macOS, the debug tools, text
-on screen (the UI pass), gamepads, saves and pathfinding are not built yet
-(see `docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
+Metal backend, audio's output on Windows and macOS, the debug tools,
+gamepads, saves and pathfinding are not built yet (see
+`docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
 output on Linux (M6.3), its assets (M6.9), and the game's sound (M6.6);
-bitmap text in the world is (M7.1).
+bitmap text in the world is (M7.1), and the UI pass (M7.8).
 The members only the `dev` feature compiles, the facade's hot reload's
 (roadmap M5.8), are marked `dev`. One member that exists in the code for
 planned work, `ShaderSource::msl`, carries a note.
@@ -1017,7 +1017,7 @@ The `Renderer` draws one `RenderFrame` with the textures, fonts and atlases
 the asset server holds and the tile layers in `TileLayers`. It draws the
 world at the
 virtual resolution, then scales it up to the window by a whole number, the
-`Upscale`. While the game runs, it can rebuild one of its `Program`s
+`Upscale`, and draws the frame's UI on the window after it. While the game runs, it can rebuild one of its `Program`s
 from new GLSL sources, keeping the one it had when they do not build or
 do not declare the program's interface.
 
@@ -1034,11 +1034,13 @@ classDiagram
         -world RenderTargetId
         -batcher SpriteBatcher~TextureId~
         -texts TextPass~TextureId~
+        -ui UiPass~TextureId~
         -tiles TileCache
         +new(device, config) Result~Renderer~
         +render(device, assets, tiles, frame, output) Result~FrameStats~
         +reload_program(device, program, source) Result
         +upscale(size) Upscale
+        +ui_space(scale, size) UiSpace
         +screen_to_world(camera, size, screen) Vec2
         +world_to_screen(camera, size, world) Vec2
     }
@@ -1058,6 +1060,10 @@ classDiagram
         +texts u32
         +glyphs u32
         +skipped_texts u32
+        +ui_sprites u32
+        +ui_glyphs u32
+        +ui_texts u32
+        +ui_batches u32
     }
     class Upscale {
         +factor u32
@@ -1171,7 +1177,8 @@ classDiagram
 ## render: a frame's contents
 
 Each frame, the facade's extract systems fill the `RenderFrame` resource
-with sprite draws and tile layer draws, and a game's systems may push texts.
+with sprite draws and tile layer draws, and a game's systems may push texts,
+and sprites and texts into the UI (see "render: the UI").
 
 ```mermaid
 classDiagram
@@ -1182,6 +1189,7 @@ classDiagram
         +sprites Vec~SpriteDraw~
         +tile_layers Vec~TileLayerDraw~
         +texts TextList
+        +ui UiList
         +time Duration
         +new() RenderFrame
         +clear()
@@ -1228,10 +1236,12 @@ classDiagram
     }
     class Texture
     class TileLayer
+    class UiList
     RenderFrame *-- Camera2D
     RenderFrame "1" *-- "0..*" SpriteDraw
     RenderFrame "1" *-- "0..*" TileLayerDraw
     RenderFrame *-- TextList
+    RenderFrame *-- UiList
     SpriteDraw *-- SortMode
     SpriteDraw *-- Flip
     SpriteDraw --> Texture : Handle
@@ -1396,6 +1406,68 @@ classDiagram
     TextDraw --> Font : Handle
     TextDraw *-- TextLayout
     TextDraw *-- GlyphMode
+```
+
+## render: the UI
+
+`RenderFrame::ui` is a `UiList`: sprites and texts in UI units, drawn on
+the output after the world in the order pushed, each in the `UiView` set
+before it, a `UiScale` and a clip. `UiSpace` is where a scale puts the UI
+in an output, and maps the pointer to UI units.
+
+```mermaid
+classDiagram
+    direction LR
+    class UiList {
+        -items Vec
+        -sprites Vec~SpriteDraw~
+        -texts TextList
+        -views Vec~UiView~
+        +set_view(view)
+        +view() UiView
+        +sprite(sprite)
+        +text(draw, text)
+        +write(draw, args)
+        +iter() Iterator
+        +clear()
+    }
+    class UiView {
+        -scale UiScale
+        -clip Option~Rect~
+        +new(scale)$ UiView
+        +clipped(rect) UiView
+        +scale() UiScale
+        +clip() Option~Rect~
+    }
+    class UiScale {
+        <<enumeration>>
+        Pixel(u32)
+        Free(f32)
+    }
+    class UiSpace {
+        +scale f32
+        +origin IVec2
+        +size Vec2
+        +rect IRect
+        +new(scale, virtual_resolution, output_size)$ UiSpace
+        +to_ui(screen) Vec2
+        +to_screen(ui) Vec2
+    }
+    class UiDraw {
+        <<enumeration>>
+        Sprite(SpriteDraw)
+        Text(TextDraw, str)
+    }
+    class SpriteDraw
+    class TextDraw
+    class TextList
+    UiList "1" *-- "*" SpriteDraw
+    UiList "1" *-- "1" TextList
+    UiList "1" *-- "*" UiView
+    UiList ..> UiDraw : iter
+    UiView *-- UiScale
+    UiSpace ..> UiScale : new
+    TextList "1" *-- "*" TextDraw
 ```
 
 ## render: tile layers

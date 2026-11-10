@@ -98,6 +98,11 @@ pub fn check_sized<T: std::fmt::Debug>(
       wrapped and kerned, with a glyph left of its block; a color run; the
       fallback for a missing character; a glyph with a black ring in its
       own colors and as a mask; and a text placed by its middle
+    - `ui_pass` (M7.8): the UI over a 64×36 image upscaled by 2 into
+      151×91, with bars of uneven widths: in pixel UI, a panel and its
+      label, a text clipped through a glyph, and a sprite cut at the
+      image's corner; at a free scale of 3, pushed later, a panel over a
+      pixel-UI sprite and over the bars, with its label
 
     Each sprite is drawn at a whole number of pixels per texel, with its
     corner on a whole pixel, so that every GPU draws it alike.

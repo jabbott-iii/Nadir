@@ -40,8 +40,9 @@
 //! draws and plays sound on Linux (X11, ALSA). On Windows and macOS a game
 //! runs, but its window stays empty until roadmap tasks M2.6 and M2.7, and
 //! it plays no sound until M6.4 and M6.5. Text is drawn in the world
-//! (`nadir::render::Font`, `RenderFrame::texts`), not yet on screen (M7.8);
-//! gamepads, saves and the debug tools are not built yet. The
+//! (`nadir::render::Font`, `RenderFrame::texts`), and on the window with
+//! the UI's sprites (`RenderFrame::ui`); gamepads, saves and the debug
+//! tools are not built yet. The
 //! [README](https://github.com/jabbott-iii/Nadir/blob/main/crates/engine/README.md)
 //! is a guide to how the parts fit together, with a game that walks a hero
 //! about a tile map.
@@ -204,7 +205,8 @@
 //!   loop draws; the resource [`TileLayers`](render::TileLayers), whose
 //!   layers a frame names in [`RenderFrame::tile_layers`](render::RenderFrame::tile_layers);
 //!   the texts a frame draws in the world, in
-//!   [`RenderFrame::texts`](render::RenderFrame::texts); and the
+//!   [`RenderFrame::texts`](render::RenderFrame::texts); the UI it draws on
+//!   the window, in [`RenderFrame::ui`](render::RenderFrame::ui); and the
 //!   [`Texture`](render::Texture), [`Atlas`](render::Atlas) and
 //!   [`Font`](render::Font) assets.
 //! - [`assets`]: the resource [`AssetServer`](assets::AssetServer), which

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 //! The 2D renderer of the Nadir engine: y-sorted, batched sprites, tile
-//! layers drawn in chunks, bitmap text, a pixel-perfect camera, and the
-//! texture, atlas and font assets.
+//! layers drawn in chunks, bitmap text, a pixel-perfect camera, a UI drawn
+//! at the window's resolution, and the texture, atlas and font assets.
 //!
 //! It draws with [`nadir_gfx`] and finds its textures in a
 //! [`nadir_assets::AssetServer`]. It knows nothing of entities: each frame
@@ -35,7 +35,9 @@
 //! says what it drew in [`FrameStats`]. [`Renderer::upscale`] gives where
 //! the virtual image lands in an output ([`Upscale`]), and
 //! [`Renderer::screen_to_world`] and [`Renderer::world_to_screen`] map
-//! points between the two. Failures are [`RenderError`]s.
+//! points between the two. [`Renderer::ui_space`], or [`UiSpace::new`]
+//! with no renderer, gives where the UI lands at a [`UiScale`], and maps
+//! the pointer to UI units. Failures are [`RenderError`]s.
 //!
 //! **Reloading.** [`Renderer::reload_program`] builds one of the renderer's
 //! [`Program`]s again from GLSL it is given, such as its files under
@@ -49,8 +51,14 @@
 //!
 //! **What a frame draws.** A [`RenderFrame`] holds the [`Camera2D`], the
 //! clear color, the [`SpriteDraw`]s (each with a [`SortMode`] and a
-//! [`Flip`]), the [`TileLayerDraw`]s, the texts in a [`TextList`], and the
-//! time that animated tiles show.
+//! [`Flip`]), the [`TileLayerDraw`]s, the texts in a [`TextList`], the UI
+//! in a [`UiList`], and the time that animated tiles show.
+//!
+//! **The UI.** A [`UiList`] holds sprites and texts in UI units, drawn on
+//! the output after the world, in the order they are pushed, each in the
+//! [`UiView`] set before it: a [`UiScale`], pixel UI or a free scale, and a
+//! clip. [`UiList::iter`] gives them back as [`UiDraw`]s, each with its
+//! view.
 //!
 //! **Text.** A [`TextDraw`] draws a text in a [`Font`]: laid out with a
 //! [`TextLayout`] (a width to wrap at, an [`Align`]ment, and the color
@@ -203,6 +211,62 @@
 //! # let _ = (ui_font, Color::WHITE);
 //! ```
 //!
+//! # Example: a UI
+//!
+//! A HUD in pixel UI, the virtual image's own pixels, and a window at the
+//! settings' free scale over it, its list clipped inside it. The pointer,
+//! in the window's pixels, is mapped to each view's units for hit tests:
+//!
+//! ```
+//! use nadir_assets::Handle;
+//! use nadir_core::{Rect, UVec2, Vec2};
+//! use nadir_render::{
+//!     Font, RenderFrame, SpriteDraw, TextDraw, Texture, UiDraw, UiScale, UiSpace, UiView,
+//! };
+//!
+//! /// A sprite of all of `texture` over `rect`, by its top-left corner.
+//! fn panel(texture: Handle<Texture>, rect: Rect) -> SpriteDraw {
+//!     let mut sprite = SpriteDraw::new(texture, rect.min, rect.size());
+//!     sprite.pivot = Vec2::ZERO;
+//!     sprite
+//! }
+//!
+//! fn ui(frame: &mut RenderFrame, white: Handle<Texture>, font: Handle<Font>, scale: f32) {
+//!     // The HUD: a panel, then its label over it.
+//!     frame.ui.set_view(UiView::new(UiScale::Pixel(1)));
+//!     frame.ui.sprite(panel(white, Rect::new(Vec2::new(4.0, 4.0), Vec2::new(60.0, 14.0))));
+//!     frame.ui.write(TextDraw::new(font, Vec2::new(6.0, 6.0)), format_args!("HP {}", 12));
+//!     // A window, drawn after the HUD, so over it; its rows cut to its
+//!     // list, which is cut to the window.
+//!     let window = UiView::new(UiScale::Free(scale));
+//!     let area = Rect::new(Vec2::new(10.0, 10.0), Vec2::new(210.0, 160.0));
+//!     frame.ui.set_view(window);
+//!     frame.ui.sprite(panel(white, area));
+//!     frame.ui.set_view(window.clipped(area).clipped(Rect::new(
+//!         Vec2::new(14.0, 30.0),
+//!         Vec2::new(206.0, 156.0),
+//!     )));
+//!     for row in 0..20 {
+//!         let at = Vec2::new(16.0, 30.0 + 12.0 * row as f32);
+//!         frame.ui.write(TextDraw::new(font, at), format_args!("entity {row}"));
+//!     }
+//! }
+//!
+//! let mut frame = RenderFrame::new();
+//! let (white, font) = (Handle::new(nadir_core::GenIndex::new(0, std::num::NonZeroU32::MIN)),
+//!                      Handle::new(nadir_core::GenIndex::new(1, std::num::NonZeroU32::MIN)));
+//! ui(&mut frame, white, font, 2.0);
+//! assert_eq!(frame.ui.len(), 23);
+//! assert!(matches!(frame.ui.iter().nth(1), Some((UiDraw::Text(_, "HP 12"), _))));
+//!
+//! // A 1280 × 720 window over a 320 × 180 world: the pointer at (60, 70)
+//! // is over the window, at the free scale of 2.
+//! let window = UiSpace::new(UiScale::Free(2.0), UVec2::new(320, 180), UVec2::new(1280, 720));
+//! assert_eq!(window.to_ui(Vec2::new(60.0, 70.0)), Vec2::new(30.0, 35.0));
+//! let hud = UiSpace::new(UiScale::Pixel(1), UVec2::new(320, 180), UVec2::new(1280, 720));
+//! assert_eq!(hud.to_ui(Vec2::new(60.0, 70.0)), Vec2::new(15.0, 17.5));
+//! ```
+//!
 //! # Example: reloading a shader
 //!
 //! The renderer reads no file. A game that watches its shader files reads
@@ -274,6 +338,27 @@
 //! unrotated sprite and glyph, and each tile layer's origin are moved to
 //! whole virtual pixels, so that texels land on whole pixels (ADR-0018).
 //!
+//! # The UI
+//!
+//! After the blit, the frame's [`UiList`] is drawn on the output, at its
+//! resolution: by layer, then by a [`SortMode::Fixed`] depth
+//! ([`SortMode::YSort`] is 0 there), then in the order pushed, sprites and
+//! texts alike, so a later window is over an earlier one (ADR-0055). The
+//! camera plays no part. Each sprite and text is in its [`UiView`]'s
+//! [`UiScale`]:
+//!
+//! - [`UiScale::Pixel`]: a UI unit is a whole number of the virtual
+//!   image's pixels, from the image's corner, cut to the image; corners
+//!   snap to whole UI units, so the UI's texels line up as the world's.
+//! - [`UiScale::Free`]: output pixels a unit, from the output's corner,
+//!   bars included; corners snap to whole output pixels.
+//!
+//! Both corners of an unrotated sprite snap, so sprites that share an edge
+//! share it on the output at any scale; a glyph's corner snaps and keeps
+//! its size. A view's clip cuts what it draws, as a scissor; a quad wholly
+//! outside it is not drawn nor counted. [`UiSpace`] gives where a scale
+//! puts the UI, and maps the pointer to UI units.
+//!
 //! # Textures that are not ready
 //!
 //! A sprite whose texture is still loading is not drawn, and is counted in
@@ -288,7 +373,8 @@
 //! or does not fit is not drawn at all ([`FrameStats::skipped_texts`]). An
 //! atlas or a page never loaded, and an atlas that lacks the glyphs'
 //! frames, are logged once for the font. A character a font lacks draws
-//! the font's fallback glyph, and is logged once.
+//! the font's fallback glyph, and is logged once. The UI's sprites and
+//! texts are the same, counted with the world's in the same fields.
 //!
 //! # Tile layers
 //!
@@ -317,9 +403,10 @@
 //! # Allocation and threading
 //!
 //! The renderer's lists and buffers are reused from frame to frame, the
-//! frame's texts' one buffer of characters too. Its instance buffer, of
-//! sprites and glyphs, grows by doubling and never shrinks; a steady frame
-//! allocates nothing on the heap. The renderer runs on the device's
+//! frame's texts' one buffer of characters too, and its [`UiList`]'s. Its
+//! instance buffer, of the world's sprites and glyphs and then the UI's,
+//! grows by doubling and never shrinks; a steady frame allocates nothing
+//! on the heap. The renderer runs on the device's
 //! thread, as the [`nadir_gfx::Device`] stays there.
 //!
 //! # Platforms
@@ -331,10 +418,8 @@
 //!
 //! # Not built yet
 //!
-//! Text and sprites on screen, at the window's resolution (the UI pass,
-//! roadmap M7.8), debug draw (M7.6), post effects, camera rotation, the
-//! smooth-camera and native-resolution modes, and the Metal shaders
-//! (M10.3).
+//! Debug draw (M7.6), post effects, camera rotation, the smooth-camera and
+//! native-resolution modes, and the Metal shaders (M10.3).
 //!
 //! # Features
 //!
@@ -359,6 +444,7 @@ mod sort;
 mod text;
 mod texture;
 mod tiles;
+mod ui;
 mod view;
 
 // The README's examples are compiled as doc tests too.
@@ -377,4 +463,5 @@ pub use shader::{Program, SHADER_DIR};
 pub use text::{Align, Escaped, PlacedGlyph, TextLayout};
 pub use texture::{DecodedTexture, Texture};
 pub use tiles::{TILE_INSTANCE_FLOATS, Tile, TileLayer, TileLayerDraw, TileLayers, TileSet};
+pub use ui::{UiDraw, UiList, UiScale, UiSpace, UiView};
 pub use view::Upscale;

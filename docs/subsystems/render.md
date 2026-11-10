@@ -45,9 +45,10 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
 - M7.1: bitmap text in the world (ADR-0054), in "Text" below: the `Font`
   asset, layout, the `text` program, the fallback, and the golden scene
   `text_alignment`
+- M7.8: the UI pass (ADR-0055), in "The UI pass" below: `UiList`,
+  `UiView`, `UiScale`, `UiSpace`, and the golden scene `ui_pass`
 - Not built yet:
-  - UI sprites and screen-space text (the UI pass, M7.8), debug draw and
-    post
+  - debug draw and post
   - the smooth-camera and native-resolution modes
   - the Metal sources (M10.3)
 
@@ -61,13 +62,16 @@ impl Renderer {
     pub fn reload_program(&mut self, device: &mut Device, program: Program,
                           source: ShaderSource<'_>) -> Result<(), RenderError>;  // "Reloading"
     pub fn upscale(&self, output_size: UVec2) -> Upscale;          // factor + where the image lands
+    pub fn ui_space(&self, scale: UiScale, output_size: UVec2) -> UiSpace;  // M7.8: where the UI lands
     pub fn screen_to_world(&self, camera: &Camera2D, output_size: UVec2, screen: Vec2) -> Vec2;
     pub fn world_to_screen(&self, camera: &Camera2D, output_size: UVec2, world: Vec2) -> Vec2;
 }
 pub struct Output { pub target: PassTarget, pub size: UVec2 }      // the caller knows the window's size
 pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
                         pub tiles: u32, pub chunks: u32,
-                        pub texts: u32, pub glyphs: u32, pub skipped_texts: u32 }  // texts: M7.1
+                        pub texts: u32, pub glyphs: u32, pub skipped_texts: u32,  // texts: M7.1
+                        pub ui_sprites: u32, pub ui_glyphs: u32, pub ui_texts: u32,
+                        pub ui_batches: u32 }                                    // the UI: M7.8
 ```
 
 - Textures are looked up in the `AssetServer`.
@@ -76,8 +80,9 @@ pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
     whatever its `uv`, when the server shows placeholders. Without them
     (`OnFailure::Nothing`) it is skipped too.
 - `RenderFrame` so far has `camera`, `clear`, `sprites`, since M4.5
-  `tile_layers` and `time`, and since M7.1 `texts`, a `TextList`
-  (ADR-0054). The other fields below come with their tasks: it is
+  `tile_layers` and `time`, since M7.1 `texts`, a `TextList` (ADR-0054),
+  and since M7.8 `ui`, a `UiList` (ADR-0055), in place of the planned
+  `ui_sprites`. The other fields below come with their tasks: it is
   `#[non_exhaustive]` since M7.1, made with `RenderFrame::new`.
   `Camera2D` has no rotation yet.
 - **`Atlas`** (M5.9, ADR-0033; clips in M5.5, ADR-0035): the asset of a
@@ -123,9 +128,13 @@ pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
   image are `batches + chunks`. `texts` counts the texts laid out,
   `glyphs` their glyph quads drawn, and `skipped_texts` the texts not laid
   out; `skipped` counts the glyphs whose page is not ready with the
-  sprites. `SpriteBatcher::stats` knows no tile layers or texts: its
-  `batches` is before any split, and its `tiles`, `chunks`, `texts` and
-  `skipped_texts` are 0.
+  sprites. The UI's are apart (M7.8, ADR-0055): `ui_sprites`, `ui_glyphs`
+  and `ui_texts`, and `ui_batches` its draws onto the output, after the
+  blit; a quad wholly outside its view's clip is in none. `skipped` and
+  `skipped_texts` count the UI's with the world's. `SpriteBatcher::stats`
+  knows no tile layers, texts or UI: its `batches` is before any split,
+  and its `tiles`, `chunks`, `texts`, `skipped_texts` and `ui_` counts are
+  0.
 
 ## Input: `RenderFrame`
 
@@ -138,8 +147,8 @@ pub struct RenderFrame {
     pub clear: Color,
     pub sprites: Vec<SpriteDraw>,         // world-space sprites
     pub tile_layers: Vec<TileLayerDraw>,  // layers in the TileLayers store + layer/depth info
-    pub ui_sprites: Vec<SpriteDraw>,      // screen-space (M7.8)
-    pub texts: TextList,                  // world space; screen space with M7.8 (ADR-0054)
+    pub texts: TextList,                  // world space (ADR-0054)
+    pub ui: UiList,                       // the UI's sprites and texts, in push order (M7.8, ADR-0055)
     pub debug: DebugDrawList,             // lines/rects/circles, cleared per frame
     pub post: PostSettings,               // fade, tint, color grade LUT handle (optional)
     pub time: Duration,                   // for animated tiles/shaders (and the facade's clips, ADR-0024); whole ms reach the shader
@@ -372,6 +381,9 @@ pub struct TileLayerDraw { pub tiles: Handle<TileLayer>, pub layer: u8, pub dept
   - a pixel-UI scale (an integer multiple of virtual pixels), or
   - a free scale from the settings UI-scale value.
 
+  As built in M7.8 (ADR-0055), each `UiView` has one, `UiScale::Pixel(n)`
+  or `UiScale::Free(s)`: see "The UI pass".
+
 ## Reloading
 
 As built (M5.17, ADR-0042):
@@ -461,7 +473,8 @@ impl Program {
 ## Text
 
 As built in M7.1 (ADR-0054), in the world pass. Screen-space text, at the
-window's resolution after the upscale, comes with the UI pass (M7.8).
+window's resolution after the upscale, is the UI pass's (M7.8, ADR-0055):
+`UiList::text` takes the same `TextDraw`, laid out alike.
 
 ```rust
 impl Font {                                  // the asset of atlas/<font>.font.kbj
@@ -546,6 +559,75 @@ impl TextList { push(draw, &str), write(draw, fmt::Arguments), iter() -> (&TextD
   (`write` formats into it), and the renderer's lists of laid-out glyphs,
   pages and quads are reused.
 
+## The UI pass
+
+As built in M7.8 (ADR-0055): sprites and texts drawn on the output after
+the blit, at the output's resolution, in `RenderFrame::ui`.
+
+```rust
+pub struct UiList { /* private */ }          // RenderFrame::ui; cleared with the frame
+impl UiList {
+    pub fn set_view(&mut self, view: UiView);  // the view of what is pushed from now on
+    pub fn view(&self) -> UiView;              // the default before any: pixel UI, unclipped
+    pub fn sprite(&mut self, sprite: SpriteDraw);
+    pub fn text(&mut self, draw: TextDraw, text: &str);
+    pub fn write(&mut self, draw: TextDraw, args: fmt::Arguments<'_>);
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (UiDraw<'_>, UiView)>;
+    pub fn len(&self) -> usize; is_empty(); clear();
+}
+#[non_exhaustive] pub enum UiDraw<'a> { Sprite(&'a SpriteDraw), Text(&'a TextDraw, &'a str) }
+pub struct UiView { /* private */ }          // Default: UiScale::Pixel(1), unclipped
+impl UiView { new(scale) -> Self, clipped(self, rect: Rect) -> Self, scale(), clip() -> Option<Rect> }
+#[non_exhaustive] pub enum UiScale { Pixel(u32) /* default 1 */, Free(f32) }
+pub struct UiSpace { pub scale: f32, pub origin: IVec2, pub size: Vec2, pub rect: IRect, /* private */ }
+impl UiSpace { new(scale, virtual_resolution, output_size), to_ui(screen), to_screen(ui) }
+```
+
+- **Units:** a sprite's position and size, and a text's position, are in
+  UI units; a UI unit is a pixel of a text's font.
+- **Order:** by layer, then by a `Fixed` depth (`YSort` is 0: nothing on
+  screen is sorted by its y), then in the order pushed, sprites and texts
+  alike: a window's panel, its labels, then a later window over both. A
+  text's glyphs keep its place, grouped by page. Runs of one texture, one
+  program and one view are one draw. The camera plays no part.
+- **Views:** `set_view` holds across the systems that push until the next
+  call, so each sets its own; a view nothing was pushed in is dropped. A
+  view changes no order. `UiView::clipped` intersects the clip it had,
+  for a list inside a window; a rect outside it, with no area, or with a
+  NaN edge cuts everything, never "no clip". Edges may be infinite.
+  `UiView::new` holds the scale it is given (`Pixel(0)` is `Pixel(1)`, a
+  free scale held as below), so views of one scale are equal.
+- **Scales** (`UiSpace::new`):
+  - `Pixel(n)`: a UI unit is `n` virtual pixels (0 is 1): `n` × the
+    upscale factor output pixels from the image's corner, the size the
+    virtual resolution over `n`, cut to the image (not the bars). Corners
+    snap to whole UI units, halves up.
+  - `Free(s)`: `s` physical output pixels a unit, from the output's
+    corner, over all of it. Below 1/8 is 1/8, above 64 is 64, NaN is 1.
+    Corners snap to whole output pixels. Only a whole `s` puts every texel
+    on whole pixels.
+- **Packing:** the UI's instances are in output pixels, after the
+  world's in the one instance buffer; its camera uniform maps pixels to
+  clip space, once a frame. An unrotated sprite's two corners snap (its
+  pivot's offset rounded to 1/256 first, the flip mirrored about it), so
+  sprites that share an edge share it at any scale; it is packed by its
+  corner. A rotated one is scaled, not snapped. A glyph's corner snaps,
+  and its size is its own scaled (rounded to whole pixels at a free
+  scale), so a character is one width wherever it lands.
+- **Clips:** a view's clip in output pixels, its edges snapped as corners
+  are, inside the space's `rect`, is the scissor of its draws. A quad
+  with no pixels, or wholly outside it (a rotated one by the box around
+  its corners), is not drawn nor counted; a text is still laid out whole.
+- **Mapping:** `UiSpace::to_ui` maps the pointer (`Input::pointer`, the
+  output's pixels) to UI units; `Renderer::ui_space` is `UiSpace::new`
+  with the renderer's virtual resolution, and needs no GPU.
+- **Not ready:** as the world's: a sprite whose texture is loading is not
+  drawn, a failed one shows its placeholder; a text's font, atlas and
+  pages are found by path (see "Text"). What is not ready counts in
+  `skipped` whether a clip would cut it or not.
+- **No allocation once warm:** the list's buffers, and the renderer's
+  plan, quads and packed instances for the UI, are reused.
+
 ## Debug draw
 
 - `DebugDrawList`: `line(a, b, color)`, `rect(r, color)`, `circle(c, r, color, segments)`,
@@ -582,12 +664,21 @@ Measured on min-spec; see `docs/00-overview.md`.
   - text layout (wrapping, alignment, kerning; M7.1: also markup, the
     fallback, and a property test that layout and measure agree)
   - `screen_to_world` round-trip
+  - the UI (M7.8): each scale's space (bars, cropping, no output, the
+    free scale's bounds), the pointer's mapping, clips inside clips and
+    their edges, the list's order and views, the order of layers, depths
+    and pushes, a text's glyphs by page, batches by view, culling, not
+    ready, and both corners snapping (abutting edges, the pivot's
+    rounding, flips, rotation, a glyph's width)
 - **Golden:**
   - y-sort scene (character walking behind and in front of a tree)
   - tilemap with animated tiles at fixed `time` values
   - text alignment (`text_alignment`, M7.1: aligned lines over a panel, a
     wrapped and kerned paragraph, a color run, the fallback, both glyph
     modes, a text placed by its middle)
+  - the UI pass (`ui_pass`, M7.8: pixel UI over a letterboxed image with
+    odd bars, a clip through a glyph, a sprite cut at the image's corner,
+    a later view at a free scale over it and the bars)
   - pixel-perfect upscale at 3 window sizes
   - debug draw primitives
 - **Benchmarks:** sort+batch for 10k sprites; chunk rebuild
@@ -626,3 +717,10 @@ Measured on min-spec; see `docs/00-overview.md`.
   layers among sprites. The headless tests draw placement, a change, a
   replaced layer or store, empty, unknown and removed layers, texture
   states, culling, order and batch splits, animation and flips.
+- As built (M7.8), the UI's headless tests draw pixel UI where its space
+  says and cut at the image, a free scale from the output's corner over
+  the bars, the UI unmoved by the camera, clips (one inside another, one
+  scrolled out), a later view over an earlier one with texts in their
+  place, texts with both programs after the world, a texture loading and
+  a failed one, each texel on its pixels, and the world's and the UI's
+  instances sharing a buffer that grows.

@@ -52,8 +52,7 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
-- text on screen, at the window's resolution (M7.8), the debug tools (M7),
-  gamepads (M8);
+- the debug tools (M7), gamepads (M8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 
@@ -609,7 +608,8 @@ files. `App::load_level`
 loads a level file into the world, its prefabs with it. A cooked font is
 `nadir::render::Font`: `Font::load_now_in` loads it with its atlas and
 pages, and a system pushes texts into `RenderFrame::texts`, drawn in the
-world (M7.1). The engine has no asset type for the other data files yet.
+world (M7.1), or into `RenderFrame::ui` with the UI's sprites, drawn on the
+window after it (M7.8). The engine has no asset type for the other data files yet.
 
 ## Features
 

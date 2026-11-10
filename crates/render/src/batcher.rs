@@ -106,10 +106,10 @@ impl<K: Copy + Eq> SpriteBatcher<K> {
         &self.packed
     }
 
-    /// What the last build drew. It knows nothing of tile layers or of
-    /// texts: `tiles`, `chunks`, `texts` and `skipped_texts` are 0, and
-    /// `batches` counts the batches before a tile layer drawn among the
-    /// sprites splits one in two.
+    /// What the last build drew. It knows nothing of tile layers, of texts
+    /// or of the UI: `tiles`, `chunks`, `texts`, `skipped_texts` and the
+    /// `ui_` counts are 0, and `batches` counts the batches before a tile
+    /// layer drawn among the sprites splits one in two.
     pub fn stats(&self) -> FrameStats {
         // The plan numbers its sprites and glyphs with a u32, so these fit.
         FrameStats {
@@ -121,6 +121,10 @@ impl<K: Copy + Eq> SpriteBatcher<K> {
             texts: 0,
             glyphs: self.plan.glyphs,
             skipped_texts: 0,
+            ui_sprites: 0,
+            ui_glyphs: 0,
+            ui_texts: 0,
+            ui_batches: 0,
         }
     }
 

@@ -36,7 +36,7 @@ use nadir_core::{Color, IVec2, Rect, UVec2, Vec2};
 use nadir_gfx::Device;
 use nadir_render::{
     Align, Camera2D, Flip, FrameStats, GlyphMode, RenderFrame, SortMode, SpriteDraw, TextDraw,
-    Tile, TileLayer, TileLayerDraw, TileSet, Upscale,
+    Tile, TileLayer, TileLayerDraw, TileSet, UiScale, UiView, Upscale,
 };
 
 use crate::common::{Art, EXPECT_RENDERER, Stage, near};
@@ -829,6 +829,100 @@ scene! {
         checks.pixel(&shot, (71, 47), DARK);
         checks.pixel(&shot, (69, 50), RED);
         checks.pixel(&shot, (67, 47), DARK);
+        shot
+    }
+}
+
+const MAROON: [u8; 4] = opaque(128, 0, 0);
+
+scene! {
+    /// The UI over a world upscaled by 2 into 151 × 91, bars of 11 and 12,
+    /// and 9 and 10, around it: in pixel UI, a panel with its label, a text
+    /// cut by a clip through a glyph, a sprite cut at the image's corner,
+    /// and a sprite under a panel at a free scale of 3, pushed later, which
+    /// reaches over the bars, with its label.
+    fn ui_pass(stage: SMALL, checks) {
+        let font = stage.font("letters", 7, LETTERS, '?', &[('A', 'V', -1), ('V', 'A', -1)]);
+        let ground = stage.image("ground.qoi", 1, 1, &[GRASS]);
+        let panel = stage.image("panel.qoi", 1, 1, &[PANEL]);
+        let red = stage.image("red.qoi", 1, 1, &[RED]);
+        let gold = stage.image("gold.qoi", 1, 1, &[GOLD]);
+        let maroon = stage.image("maroon.qoi", 1, 1, &[MAROON]);
+        stage.finish();
+
+        let rect = |texture, x: f32, y: f32, w: f32, h: f32| {
+            let mut sprite = SpriteDraw::new(texture, Vec2::new(x, y), Vec2::new(w, h));
+            sprite.pivot = Vec2::ZERO;
+            sprite
+        };
+        let mut frame = RenderFrame::new();
+        frame.camera = Camera2D {
+            position: Vec2::new(32.0, 18.0),
+            ..Camera2D::default()
+        };
+        frame.clear = Color::rgb(DARK[0], DARK[1], DARK[2]);
+        frame.sprites.push(rect(ground, 0.0, 0.0, 64.0, 36.0));
+        // Pixel UI, two output pixels a unit from (11, 9).
+        frame.ui.sprite(rect(panel, 2.0, 2.0, 24.0, 9.0));
+        frame.ui.text(TextDraw::new(font, Vec2::new(4.0, 3.0)), "TIE");
+        let clip = Rect::new(Vec2::new(30.0, 2.0), Vec2::new(38.0, 9.0));
+        frame.ui.set_view(UiView::default().clipped(clip));
+        frame.ui.text(TextDraw::new(font, Vec2::new(30.0, 2.0)), "AVA TIE");
+        frame.ui.set_view(UiView::default());
+        frame.ui.sprite(rect(red, 60.0, 30.0, 8.0, 8.0));
+        frame.ui.sprite(rect(gold, 0.0, 26.0, 10.0, 6.0));
+        // Three output pixels a unit from the output's corner.
+        frame.ui.set_view(UiView::new(UiScale::Free(3.0)));
+        frame.ui.sprite(rect(maroon, 2.0, 21.0, 12.0, 8.0));
+        let mut label = TextDraw::new(font, Vec2::new(3.0, 22.0));
+        label.color = Color::rgb(255, 255, 0);
+        frame.ui.text(label, "TI");
+
+        let (shot, stats) = shoot_counting(stage, &frame, UVec2::new(151, 91));
+        checks.that(
+            (stats.sprites, stats.texts, stats.ui_sprites, stats.ui_texts, stats.ui_glyphs)
+                == (1, 0, 4, 3, 8),
+            &format!("{stats:?}"),
+        );
+        // The bars, and the image's corner.
+        checks.pixel(&shot, (5, 5), DARK);
+        checks.pixel(&shot, (140, 50), DARK);
+        checks.pixel(&shot, (10, 9), DARK);
+        checks.pixel(&shot, (11, 9), GRASS);
+        // The panel from (15, 13) to (63, 31), and T's top row and stem.
+        checks.pixel(&shot, (15, 13), PANEL);
+        checks.pixel(&shot, (14, 13), GRASS);
+        checks.pixel(&shot, (62, 30), PANEL);
+        checks.pixel(&shot, (63, 30), GRASS);
+        checks.pixel(&shot, (19, 17), INK);
+        checks.pixel(&shot, (24, 18), INK);
+        checks.pixel(&shot, (21, 19), INK);
+        checks.pixel(&shot, (19, 19), PANEL);
+        // AVA, kerned, the second A cut after two of its three columns;
+        // the T after it is past the clip.
+        checks.pixel(&shot, (83, 19), INK);
+        checks.pixel(&shot, (86, 19), INK);
+        checks.pixel(&shot, (87, 19), GRASS);
+        checks.pixel(&shot, (95, 15), GRASS);
+        // Red from (131, 69), cut at the image's corner.
+        checks.pixel(&shot, (131, 69), RED);
+        checks.pixel(&shot, (130, 69), GRASS);
+        checks.pixel(&shot, (138, 80), RED);
+        checks.pixel(&shot, (139, 80), DARK);
+        checks.pixel(&shot, (138, 81), DARK);
+        // The free panel from (6, 63) to (42, 87), over the gold sprite and
+        // the bars.
+        checks.pixel(&shot, (12, 62), GOLD);
+        checks.pixel(&shot, (12, 63), MAROON);
+        checks.pixel(&shot, (30, 72), MAROON);
+        checks.pixel(&shot, (6, 63), MAROON);
+        checks.pixel(&shot, (41, 86), MAROON);
+        checks.pixel(&shot, (42, 86), DARK);
+        // Its T in gold: three pixels a texel from (9, 69).
+        checks.pixel(&shot, (9, 69), GOLD);
+        checks.pixel(&shot, (17, 71), GOLD);
+        checks.pixel(&shot, (12, 72), GOLD);
+        checks.pixel(&shot, (9, 72), MAROON);
         shot
     }
 }

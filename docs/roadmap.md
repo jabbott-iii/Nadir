@@ -4688,7 +4688,7 @@ by the batched sprite renderer.
     allocates nothing each frame (render may not count allocations); its
     error is a `Copy` value, formatted only when logged.
 
-- [ ] **M7.8 — render: the UI pass**
+- [x] **M7.8 — render: the UI pass**
   - Added on 2026-11-09 (ADR-0054): M7.1 draws texts in the world pass
     only, and M7.2's debug UI and M9.2's menus need text and sprites on
     screen.
@@ -4704,6 +4704,40 @@ by the batched sprite renderer.
     mapping from window to UI coordinates.
   - Accept: UI pass unit tests and goldens pass.
   - Verify: `cargo test -p nadir-render`; `cargo xtask golden`
+  - Built (ADR-0055, with the user's two choices): `RenderFrame::ui`, a
+    `UiList` of sprites and texts in UI units, in place of the planned
+    `ui_sprites`, drawn on the output after the blit by layer, then a
+    `Fixed` depth (`YSort` is 0), then in the order pushed, sprites and
+    texts alike; `UiList::set_view` sets the `UiView` (a `UiScale` and a
+    clip) of what is pushed after it, and `UiView::clipped` intersects.
+    `UiScale::Pixel(n)` is `n` virtual pixels a unit from the image's
+    corner, cut to it; `UiScale::Free(s)` is `s` output pixels a unit
+    from the output's corner. `UiSpace::new`, pure, and
+    `Renderer::ui_space` give where a scale puts the UI and map the
+    pointer to UI units. The UI is packed in output pixels, both corners
+    of a sprite snapped, a glyph's corner snapped and its size kept;
+    each view's clip is a scissor, and a quad outside it is not drawn nor
+    counted. `FrameStats` gains `ui_sprites`, `ui_glyphs`, `ui_texts` and
+    `ui_batches`.
+  - Golden: `ui_pass`, drawn on llvmpipe and blessed on 2026-11-10 after
+    the user looked at it; the 14 other scenes kept.
+  - Tests: `cargo test -p nadir-render`, and with `headless-test` on
+    llvmpipe (the UI's 20 unit tests: each scale's space, the pointer's
+    mapping, clips and their edges, the list's order and views, layers,
+    depths and pushes, glyphs by page, batches by view, culling, not
+    ready, held scales, both corners snapping; the frame's clear; 9
+    headless: pixel UI where its space says and cut at the image, a free
+    scale over the bars, the camera's part (none), clips inside clips, a
+    later view over an earlier one, texts with both programs, textures
+    loading and failed, texels on their pixels, the instance buffer shared
+    and grown); `cargo xtask golden`; clippy for Linux, and x86_64 and
+    aarch64 Windows and macOS, from Linux; `cargo xtask ci`. Review: three
+    critics of the design, two reviewers with a skeptic a finding (9
+    confirmed and fixed, 1 refuted); of 32 planted bugs, 3 passed the tests
+    at first, and all 32 fail them now.
+  - Not checked by a test: that a frame with a UI allocates nothing once
+    warm (render may not count allocations); the lists are reused, as the
+    world's are.
 
 - [ ] **M7.2 — debug: immediate-mode UI core**
   - Note (from M4.7): while a replay plays (`App::play_replay`), the
@@ -4714,6 +4748,17 @@ by the batched sprite renderer.
     `PlacedGlyph::byte` places a caret in a laid-out text; `Escaped` keeps
     a typed text's `{` from the markup, or `TextLayout::markup` turns it
     off. Text on screen comes with M7.8 (ADR-0054).
+  - Note (from M7.8, ADR-0055): the UI is `RenderFrame::ui`, a `UiList`
+    drawn after the world in the order pushed (by layer and a `Fixed`
+    depth first). Set the debug UI's own view,
+    `UiView::new(UiScale::Free(setting))`, and push after the game's UI to
+    be on top of it; a window's clip is `UiView::clipped`, which
+    intersects, so a scrolled region inside it is cut by both. `UiList::iter`
+    gives what a frame pushed, each with its view, for the UI logic tests,
+    and `UiSpace::new` maps `Input::pointer` to UI units with no GPU. The
+    facade does not publish the window's size yet: a resource with it,
+    set each frame, is needed to make the `UiSpace`. A panel, a label and
+    a panel are three draws.
   - Note (from M3.1): typed text does not exist yet. The platform needs
     `Event::Text`:
     - on Linux, an X input method: `XOpenIM`, `XCreateIC` and
@@ -4748,6 +4793,10 @@ by the batched sprite renderer.
     `skipped_texts`; `batches` counts the draws of sprites and glyphs, so
     the draw calls into the virtual image are `batches + chunks`. The
     overlay's own text counts in `glyphs`, not `sprites`.
+  - Note (from M7.8, ADR-0055): an overlay drawn in the UI counts in
+    `ui_sprites`, `ui_glyphs`, `ui_texts` and `ui_batches`, not in the
+    world's counts; the draws onto the window are the blit and
+    `ui_batches`.
   - Depends: M7.2, M0.4
   - Do: the overlay; profiler ring, graph and scope tree; Chrome trace
     export; GL timer queries.
@@ -4898,6 +4947,12 @@ by the batched sprite renderer.
   - Note (from M7.1): text is drawn in the world pass only until M7.8, the
     UI pass (ADR-0054); `Font` and `TextDraw` are reached as
     `nadir::render::*`, not from `nadir::prelude`.
+  - Note (from M7.8, ADR-0055): menus go into `RenderFrame::ui`, a
+    `UiList`, in pixel UI (`UiScale::Pixel(n)`, the default) or at the
+    settings' free scale (`UiScale::Free`), and are drawn in the order
+    pushed. `UiSpace::new` maps `Input::pointer` to UI units with no GPU,
+    given the window's size, which the facade does not publish yet.
+    `UiList`, `UiView`, `UiScale` and `UiSpace` are `nadir::render::*`.
   - Note (from M3.1): `ActionMap::conflict` returns the first other slot
     whose binding shares a key or button. A swap is an `unbind` and a
     `bind`. `begin_capture` is this task's.
@@ -4916,6 +4971,10 @@ by the batched sprite renderer.
     source `Value` to preserve unknown keys: `apply_value` warns about them
     and leaves them out.
   - Depends: M9.2
+  - Note (from M7.8, ADR-0055): the UI scale setting is a
+    `UiScale::Free(s)` in physical output pixels, held to 1/8 to 64; a
+    default from the window's scale factor (`Platform::scale_factor`) keeps
+    the UI its size on a display that doubles its pixels.
   - Note (from M3.1): bindings are saved by action name
     (`ActionSet::from_name`). `Key` and `MouseButton` have no names to
     read back yet, beyond their `Debug` text.

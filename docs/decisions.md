@@ -4619,7 +4619,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 - **Status:** Accepted: the user chose world-only text with a new task for
   the UI pass, and `FrameStats`' new fields, on 2026-11-09; a design
-  critique led to the rest
+  critique led to the rest; its plan that texts gain a space with M7.8 is
+  superseded by ADR-0055: the UI's texts are in `RenderFrame::ui`, a
+  `UiList`, with its sprites
 - **Date:** 2026-11-09
 - **Context:**
   - M7.1 asks for the font asset, layout (wrap, align, kerning, color
@@ -4724,3 +4726,117 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** a game draws text whose glyphs on two pages overlap
   (then order a text's glyphs by their place in it, at the cost of a batch
   per page change), or M7.8 builds the UI pass (then texts gain a space).
+
+## ADR-0055 — The UI pass: one list drawn in the order pushed, views of a scale and a clip, packed in output pixels, with counts of its own
+
+- **Status:** Accepted: the user chose one UI list in push order, in place
+  of the spec's `ui_sprites`, and new `ui_` counts in `FrameStats`, on
+  2026-11-10; three critics of the design led to the rest
+- **Date:** 2026-11-10
+- **Context:**
+  - M7.8 asks for `RenderFrame::ui_sprites` and screen-space texts, drawn
+    after the upscale at the window's resolution by a UI scale; clip
+    rects; and the mapping from window to UI coordinates.
+  - `render.md` gives the UI two scales, "a pixel-UI scale (an integer
+    multiple of virtual pixels), or a free scale from the settings UI-scale
+    value". `debug-tools.md` draws the debug UI "at native resolution,
+    scaled by the UI scale setting, after the game UI", in windows that
+    scroll by "clip rect + offset": a game's pixel UI and the debug UI's
+    free scale in one frame.
+  - ADR-0054 planned a space on `TextDraw` for screen text.
+  - An immediate-mode UI (M7.2) and a menu kit (M9.2) emit back to front.
+    The world's order at a tie, by texture (a handle's index, so the order
+    assets were loaded in), then sprites before texts, then y, would draw
+    one window's labels through the next window's panel, a caret under
+    its text, and a label under its own panel with `SpriteDraw::new`'s
+    feet pivot and `YSort`.
+  - `Input::pointer` is the output's pixels. M7.2's tests have no GPU,
+    and `nadir-debug` may not depend on `nadir-gfx`.
+  - A free scale that is not whole, at 1.5, leaves a row of pixels between
+    a title bar and its window when only a sprite's top-left corner snaps.
+- **Decision:**
+  - **The list:** `RenderFrame::ui` is a `UiList`, in place of
+    `ui_sprites`: `sprite`, `text`, `write` (with no allocation once
+    warm), `set_view`, `view`, `iter` (each sprite or text, a `UiDraw`,
+    with its view: for tests with no GPU), `len`, `is_empty`, `clear`. Its
+    storage is private. The UI's texts are in it, not a space on
+    `TextDraw`; `RenderFrame::clear` clears it.
+  - **Order:** by layer, then by depth, `Fixed(n)`, with `YSort` 0, then
+    in the order pushed, sprites and texts alike; a text's glyphs keep its
+    place, grouped by page. A view changes no order. Runs of one texture,
+    one program and one view are one draw.
+  - **Views:** `UiView` holds a `UiScale` and a clip; `set_view` sets the
+    view of what is pushed after it, until the next call, across systems.
+    A view nothing was pushed in is dropped; `UiView::new` holds its scale
+    as drawn, so views of one scale are equal. `UiView::clipped` intersects
+    the clip it had; a rect outside it, with no area or with a NaN edge
+    cuts everything, never "no clip". The clip is in the view's UI units.
+  - **Scales:** `UiScale` is `#[non_exhaustive]`: `Pixel(n)`, a UI unit
+    `n` virtual pixels (0 is 1), from the image's corner, cut to the image,
+    corners snapped to whole units, the default `Pixel(1)`; and `Free(s)`,
+    `s` physical output pixels a unit from the output's corner, over all
+    of it, clamped to 1/8 to 64 (NaN is 1), corners snapped to whole
+    pixels.
+  - **Mapping:** `UiSpace::new(scale, virtual_resolution, output_size)`,
+    pure, gives the scale, origin, size and pixel rect, with `to_ui` and
+    `to_screen`; `Renderer::ui_space` calls it with the renderer's
+    virtual resolution.
+  - **Packing:** the UI's instances are in output pixels, in the world's
+    instance buffer after the world's, drawn after the blit with one
+    camera uniform, pixels to clip space. An unrotated sprite snaps both
+    corners, its pivot's offset rounded to 1/256 and mirrored by the flip
+    first (ADR-0035), and is packed by its corner; a rotated one is scaled,
+    not snapped. A glyph snaps its corner and keeps its own size scaled,
+    rounded to whole pixels at a free scale, so a character is one width
+    wherever it lands.
+  - **Clips:** a view's clip in output pixels, edges snapped as corners,
+    inside its space's rect, is its draws' scissor. A quad with no
+    pixels, or wholly outside it (a rotated one by the box around its
+    corners), is not drawn nor counted; a view that cuts everything draws
+    nothing. What is not ready counts in `skipped`, cut or not.
+  - **Counts:** `FrameStats` gains `ui_sprites`, `ui_glyphs`, `ui_texts`
+    and `ui_batches`; `sprites`, `glyphs`, `texts` and `batches` stay the
+    world's, so `batches + chunks` stays the draws into the virtual image.
+    `skipped` and `skipped_texts` count the UI's with the world's. The two
+    test literals outside render, in `nadir_engine` and `nadir-bench`,
+    gain the fields.
+- **Consequences:**
+  - A window's panel, then its label, then the next panel are three draws:
+    a UI that alternates textures or programs draws once an item. A white
+    texel on a font's page, its glyphs drawn `GlyphMode::Rgba`, would put
+    panels and labels in one texture and one program.
+  - The debug UI sets its own view and pushes after the game's UI, which
+    puts it on top; each system that draws UI sets its view first.
+  - The facade keeps the window's size and the renderer to itself: a
+    resource with the output size, for mapping the pointer, is M7.2's and
+    M9.2's.
+  - At a free scale that is not whole, some texels cover more pixels than
+    others, and a texel's edge may fall on a pixel's middle, which GPUs
+    may sample differently; the golden scene uses a whole free scale.
+  - A text in a clip is laid out whole; a long scrolled list should push
+    only its visible rows.
+  - Snapping both corners rounds a UI sprite's size to whole units (pixel
+    UI) or pixels (a free scale): 10.4 units wide is drawn 10.
+- **Alternatives considered:**
+  - The spec's `ui_sprites: Vec<SpriteDraw>` and a `TextList` of screen
+    texts, ordered as the world, with views marked by the lists' lengths:
+    the world's ties misorder windows, and two public `Vec`s cannot keep
+    one order across sprites and texts.
+  - Views as the first key, the world's order inside each: a clip set
+    mid-window would change what draws over what.
+  - A space on `TextDraw` (ADR-0054's plan): the UI's sprites and texts
+    would still need one order.
+  - One scale a frame: the debug UI could not keep a free scale over a
+    pixel-UI game.
+  - The UI's counts folded into `sprites`, `glyphs` and `batches`: a stats
+    overlay's own panels would change the counts it shows.
+  - Packing in UI units with a uniform a view, and snapping the top-left
+    corner only: corners at 1/1.5 pixels are not exact, and sprites that
+    share an edge part at a free scale.
+  - Leaving every quad outside a clip to the GPU: counted as drawn, and
+    uploaded.
+- **Revisit when:** a UI's draws alternate textures or programs enough to
+  show in a frame's time (then a solid-color program, or a white texel on
+  the font's page); the native-resolution or smooth-camera mode lands
+  (then pixel UI needs another anchor); or a consumer needs the scale of
+  a view to change the order.

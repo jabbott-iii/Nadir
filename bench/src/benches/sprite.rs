@@ -125,6 +125,10 @@ mod tests {
                 texts: 0,
                 glyphs: 0,
                 skipped_texts: 0,
+                ui_sprites: 0,
+                ui_glyphs: 0,
+                ui_texts: 0,
+                ui_batches: 0,
             }
         );
     }

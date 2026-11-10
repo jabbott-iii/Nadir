@@ -13,12 +13,13 @@
 // limitations under the License.
 
 //! The renderer: draws a frame's sprites, texts and tile layers into the
-//! virtual image, then scales that up into the output.
+//! virtual image, scales that up into the output, then draws the UI on
+//! it.
 
 use std::mem;
 
 use nadir_assets::{AssetServer, LoadState};
-use nadir_core::{UVec2, Vec2};
+use nadir_core::{IRect, IVec2, UVec2, Vec2};
 use nadir_gfx::{
     BufferDesc, BufferId, BufferKind, BufferUsage, Device, GfxError, PassTarget, PipelineDesc,
     PipelineId, RenderTargetId, Sampler, ShaderSource, TextureFormat, TextureId, Topology,
@@ -29,9 +30,11 @@ use crate::batcher::Pipe;
 use crate::chunks::{self, ChunkDraw, Step, TileCache};
 use crate::glyphs::{Server, TextPass};
 use crate::shader::{BLIT, Interface, Program, SPRITE, TEXT, TILE_CHUNK, packed};
+use crate::ui::UiPass;
 use crate::view::{self, Upscale, View};
 use crate::{
     Camera2D, RenderError, RenderFrame, SPRITE_INSTANCE_FLOATS, SpriteBatcher, Texture, TileLayers,
+    UiScale, UiSpace,
 };
 
 /// How the renderer draws.
@@ -54,29 +57,39 @@ pub struct Output {
 }
 
 /// What a frame drew. Its draw calls into the virtual image are `batches`
-/// and `chunks`.
+/// and `chunks`, and onto the output the blit and `ui_batches`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FrameStats {
-    /// The sprites drawn.
+    /// The sprites of the world drawn.
     pub sprites: u32,
-    /// The sprites, and the glyphs of texts laid out, not drawn because
-    /// their texture is not ready: still loading, failed with no
-    /// placeholder to show ([`OnFailure::Nothing`](nadir_assets::OnFailure)),
-    /// or unknown to the asset server.
+    /// The sprites, and the glyphs of texts laid out, of the world and of
+    /// the UI, not drawn because their texture is not ready: still loading,
+    /// failed with no placeholder to show
+    /// ([`OnFailure::Nothing`](nadir_assets::OnFailure)), or unknown to the
+    /// asset server.
     pub skipped: u32,
-    /// The instanced draws of sprites and of texts' glyphs.
+    /// The instanced draws of the world's sprites and texts' glyphs.
     pub batches: u32,
     /// The tiles drawn, of every tile layer.
     pub tiles: u32,
     /// The instanced draws of tiles: one for each chunk drawn.
     pub chunks: u32,
-    /// The texts laid out and drawn, glyphs not ready aside.
+    /// The world's texts laid out and drawn, glyphs not ready aside.
     pub texts: u32,
-    /// The glyphs drawn, of every text: each a quad, as a sprite is.
+    /// The glyphs drawn, of every text of the world: each a quad, as a
+    /// sprite is.
     pub glyphs: u32,
-    /// The texts not drawn: their font, its atlas or its sprite not ready,
-    /// not loaded, or not the font's.
+    /// The texts of the world and of the UI not drawn: their font, its
+    /// atlas or its sprite not ready, not loaded, or not the font's.
     pub skipped_texts: u32,
+    /// The UI's sprites drawn: not those wholly outside their view's clip.
+    pub ui_sprites: u32,
+    /// The UI's glyphs drawn: not those wholly outside their view's clip.
+    pub ui_glyphs: u32,
+    /// The UI's texts laid out, glyphs not ready or cut aside.
+    pub ui_texts: u32,
+    /// The instanced draws of the UI's sprites and glyphs onto the output.
+    pub ui_batches: u32,
 }
 
 /// The unit quad, as a triangle strip: (0, 0) to (1, 1).
@@ -131,7 +144,9 @@ enum Bound {
 /// the texts' glyphs sorted by layer and depth and batched by texture and
 /// program, each tile layer at its own layer and depth among them, a chunk
 /// at a time. It then scales that image up into the output by the largest
-/// whole factor that fits, with bars in the clear color around it.
+/// whole factor that fits, with bars in the clear color around it, and
+/// draws the frame's [`UiList`](crate::UiList) on the output, at its
+/// resolution.
 pub struct Renderer {
     virtual_size: UVec2,
     sprite: PipelineId,
@@ -146,6 +161,7 @@ pub struct Renderer {
     world: RenderTargetId,
     batcher: SpriteBatcher<TextureId>,
     texts: TextPass<TextureId>,
+    ui: UiPass<TextureId>,
     tiles: TileCache,
     // The tile work of a frame, in lists reused from frame to frame.
     ready: Vec<ReadyLayer>,
@@ -203,6 +219,7 @@ impl Renderer {
             world,
             batcher: SpriteBatcher::new(),
             texts: TextPass::new(),
+            ui: UiPass::new(),
             tiles: TileCache::default(),
             ready: Vec::new(),
             chunk_draws: Vec::new(),
@@ -298,6 +315,11 @@ impl Renderer {
     /// again only after one of its tiles changes, and frees a layer's chunks
     /// at the first frame after it leaves `tiles`.
     ///
+    /// The UI is drawn last, on the output, in the order its
+    /// [`UiList`](crate::UiList) says, each sprite and text in its view's
+    /// [`UiSpace`] for an output of `output.size` and cut to its clip; its
+    /// textures and fonts are found as the world's are.
+    ///
     /// # Errors
     ///
     /// [`RenderError::Gfx`] if the device refuses a call.
@@ -321,15 +343,36 @@ impl Renderer {
             .build_with(&frame.sprites, &self.texts.quads, &frame.camera, |sprite| {
                 texture(sprite.texture)
             });
+        // The world's glyphs are packed: the text pass lays out the UI's
+        // next, its logs once a font and character for both.
+        let world_texts = (
+            self.texts.texts,
+            self.texts.skipped_texts,
+            self.texts.skipped_glyphs,
+        );
+        self.texts.build(frame.ui.texts(), &Server(assets));
+        self.ui.build(
+            &frame.ui,
+            &self.texts.quads,
+            self.virtual_size,
+            output.size,
+            |sprite| texture(sprite.texture),
+        );
 
         let view = View::new(&frame.camera, self.virtual_size);
         self.prepare_tiles(device, tiles, frame, &view, texture)?;
         let mut stats = self.batcher.stats();
-        stats.skipped += self.texts.skipped_glyphs;
-        stats.texts = self.texts.texts;
-        stats.skipped_texts = self.texts.skipped_texts;
-        // The plan numbers its sprites and glyphs together with a u32.
-        let count = (stats.sprites + stats.glyphs) as usize;
+        let (texts, skipped_texts, skipped_glyphs) = world_texts;
+        stats.skipped += skipped_glyphs + self.ui.skipped + self.texts.skipped_glyphs;
+        stats.texts = texts;
+        stats.skipped_texts = skipped_texts + self.texts.skipped_texts;
+        stats.ui_sprites = self.ui.sprites;
+        stats.ui_glyphs = self.ui.glyphs;
+        stats.ui_texts = self.texts.texts;
+        // Each plan numbers its sprites and glyphs together with a u32;
+        // the UI's instances go after the world's.
+        let world = (stats.sprites + stats.glyphs) as usize;
+        let count = world + (self.ui.sprites + self.ui.glyphs) as usize;
         if count > self.capacity {
             let capacity = count.next_power_of_two().max(self.capacity * 2);
             let instances = instance_buffer(device, capacity)?;
@@ -337,8 +380,12 @@ impl Renderer {
             self.instances = instances;
             self.capacity = capacity;
         }
-        if count > 0 {
+        if world > 0 {
             device.write_buffer(self.instances, 0, self.batcher.instances())?;
+        }
+        if count > world {
+            let offset = world * SPRITE_INSTANCE_FLOATS;
+            device.write_buffer(self.instances, offset, &self.ui.packed)?;
         }
 
         let clear = frame.clear.to_linear();
@@ -398,6 +445,41 @@ impl Renderer {
             pass.set_vertex_buffer(0, self.blit_quad, 0)?;
             pass.set_texture(0, self.world, Sampler::NearestClamp)?;
             pass.draw(0..4, 0..1)?;
+
+            if !self.ui.batches.is_empty() {
+                // The UI is packed in output pixels: one camera for all of
+                // it, each view's clip a scissor.
+                let side = |side: u32| i32::try_from(side).unwrap_or(i32::MAX);
+                let pixels = IVec2::new(side(output.size.x), side(output.size.y));
+                pass.set_viewport(IRect::new(IVec2::ZERO, pixels));
+                let size = output.size.as_vec2();
+                pass.set_uniforms(0, &[2.0 / size.x, -2.0 / size.y, -1.0, 1.0])?;
+                // The UI's instances follow the world's, fewer than u32::MAX.
+                let base = world as u32;
+                let mut bound = Bound::Nothing;
+                let mut view = None;
+                for batch in &self.ui.batches {
+                    let (texture, pipe) = batch.texture;
+                    let (wanted, pipeline) = match pipe {
+                        Pipe::Sprite => (Bound::Sprites, self.sprite),
+                        Pipe::Text => (Bound::Text, self.text),
+                    };
+                    if bound != wanted {
+                        pass.set_pipeline(pipeline)?;
+                        pass.set_vertex_buffer(0, self.instances, 0)?;
+                        pass.set_vertex_buffer(1, self.quad, 0)?;
+                        bound = wanted;
+                    }
+                    if view != Some(batch.view) {
+                        pass.set_scissor(self.ui.scissor(batch.view));
+                        view = Some(batch.view);
+                    }
+                    pass.set_texture(0, texture, Sampler::NearestClamp)?;
+                    let start = base + batch.start;
+                    pass.draw(0..4, start..start + batch.count)?;
+                    stats.ui_batches += 1;
+                }
+            }
         }
         Ok(stats)
     }
@@ -462,6 +544,13 @@ impl Renderer {
     /// Where the virtual image lands in an output of `size`.
     pub fn upscale(&self, size: UVec2) -> Upscale {
         Upscale::new(self.virtual_size, size)
+    }
+
+    /// Where the UI at `scale` lands in an output of `size`, as it is drawn
+    /// there: [`UiSpace::new`] with the renderer's virtual resolution. Its
+    /// [`UiSpace::to_ui`] gives the UI point under the pointer.
+    pub fn ui_space(&self, scale: UiScale, size: UVec2) -> UiSpace {
+        UiSpace::new(scale, self.virtual_size, size)
     }
 
     /// The world point under `screen`, in pixels from the top left of an

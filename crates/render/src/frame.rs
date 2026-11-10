@@ -21,7 +21,7 @@ use std::time::Duration;
 use nadir_assets::Handle;
 use nadir_core::{Color, Rect, Vec2};
 
-use crate::{Font, TextLayout, Texture, TileLayerDraw};
+use crate::{Font, TextLayout, Texture, TileLayerDraw, UiList};
 
 /// The view of the world: what is at the centre of the screen, and how
 /// large.
@@ -228,6 +228,12 @@ impl TextList {
             .map(|(draw, range)| (draw, &self.text[range.clone()]))
     }
 
+    /// The `index`th text, which must be one of the list's.
+    pub(crate) fn at(&self, index: usize) -> (&TextDraw, &str) {
+        let (draw, range) = &self.draws[index];
+        (draw, &self.text[range.clone()])
+    }
+
     /// How many texts there are.
     pub fn len(&self) -> usize {
         self.draws.len()
@@ -264,6 +270,10 @@ pub struct RenderFrame {
     pub tile_layers: Vec<TileLayerDraw>,
     /// The texts of the world, in any order.
     pub texts: TextList,
+    /// The UI: sprites and texts drawn on the output after the world is
+    /// scaled up into it, each in its [`UiView`](crate::UiView)'s scale and
+    /// clip, by layer and depth and then in the order they are pushed.
+    pub ui: UiList,
     /// The time animated tiles show. The shader reads it in whole
     /// milliseconds, which wrap after 2^32 (49.7 days).
     pub time: Duration,
@@ -278,16 +288,19 @@ impl RenderFrame {
             sprites: Vec::new(),
             tile_layers: Vec::new(),
             texts: TextList::new(),
+            ui: UiList::new(),
             time: Duration::ZERO,
         }
     }
 
-    /// Empties the lists for the next frame, keeping their capacity. The
-    /// camera, the clear color and the time stay as they are.
+    /// Empties the lists for the next frame, keeping their capacity, and
+    /// puts the UI's view back to the default. The camera, the clear color
+    /// and the time stay as they are.
     pub fn clear(&mut self) {
         self.sprites.clear();
         self.tile_layers.clear();
         self.texts.clear();
+        self.ui.clear();
     }
 }
 
@@ -349,10 +362,16 @@ mod tests {
             }
         };
         fill(&mut frame);
+        frame
+            .ui
+            .set_view(crate::UiView::new(crate::UiScale::Free(2.0)));
+        frame.ui.text(draw(0.0), "a");
         let capacity = (frame.texts.text.capacity(), frame.texts.draws.capacity());
         let pointers = (frame.texts.text.as_ptr(), frame.texts.draws.as_ptr());
         frame.clear();
         assert!(frame.texts.is_empty());
+        assert!(frame.ui.is_empty());
+        assert_eq!(frame.ui.view(), crate::UiView::default());
         fill(&mut frame);
         assert_eq!(
             (frame.texts.text.capacity(), frame.texts.draws.capacity()),

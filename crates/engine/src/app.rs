@@ -3440,6 +3440,10 @@ mod tests {
                     texts: 0,
                     glyphs: 0,
                     skipped_texts: 0,
+                    ui_sprites: 0,
+                    ui_glyphs: 0,
+                    ui_texts: 0,
+                    ui_batches: 0,
                 };
                 assert_eq!(seen[WARM_UP].1, all, "drawn before the counting starts");
                 assert_eq!(seen[WARM_UP + COUNTED - 1].1, all);

@@ -424,6 +424,9 @@ sequenceDiagram
         end
     end
     Rend->>Dev: begin_pass(Surface), blit, upscaled
+    opt the frame has UI
+        Rend->>Dev: sprite or text pipeline, a scissor a view, draw in push order
+    end
     Rend-->>Gfx: FrameStats
     Gfx->>Gfx: set the FrameStats resource
     Gfx->>Dev: end_frame(surface)
@@ -684,9 +687,10 @@ second.
 
 ## Not shown, because it is not built yet
 
-- Gamepads (M8), text on screen (the UI pass, M7.8), and the debug UI,
-  profiler and console (M7.2 to M7.6). Text in the world is the renderer's,
-  from the frame's `TextList`, within its draw.
+- Gamepads (M8), and the debug UI, profiler and console (M7.2 to M7.6).
+  Text in the world, and the UI (M7.8), are the renderer's, from the
+  frame's `TextList` and `UiList`, within its draw: the UI planned in the
+  order pushed, its instances written after the world's.
 - Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).
   There the loop runs as section 3 shows, with no `Graphics`.
 - Sound on Windows and macOS (M6.4, M6.5): there `open_audio` fails, and

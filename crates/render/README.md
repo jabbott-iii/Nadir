@@ -1,8 +1,9 @@
 # nadir-render
 
 The 2D renderer of the Nadir engine: y-sorted, batched sprites, tile layers
-drawn in chunks, bitmap text, a pixel-perfect camera, and the texture, atlas
-and font assets, drawn with [nadir-gfx](https://crates.io/crates/nadir-gfx).
+drawn in chunks, bitmap text, a pixel-perfect camera, a UI drawn at the
+window's resolution, and the texture, atlas and font assets, drawn with
+[nadir-gfx](https://crates.io/crates/nadir-gfx).
 
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine for
 top-down games on Windows, macOS and Linux, written in Rust with no
@@ -34,14 +35,17 @@ Built:
   are frames of an atlas; layout with wrapping, alignment, kerning and a
   color markup; the glyphs as a mask in the text's color or in their own
   colors; and a fallback glyph for a character a font lacks;
+- a UI of sprites and texts drawn on the window after the world, in the
+  order they are pushed: in pixel UI, the virtual image's pixels scaled
+  with the world, or at a free scale of the window's pixels, each with a
+  clip, and the mapping from the pointer to UI units;
 - a program rebuilt from new GLSL sources while the game runs, the one it
   had kept when they do not compile or do not declare its interface, and
   textures reloaded behind their handles drawn from the next frame.
 
 Not yet:
 
-- text and sprites on screen, at the window's resolution (the UI pass,
-  roadmap M7.8), and debug draw (M7.6);
+- debug draw (M7.6);
 - post effects, camera rotation, and the smooth-camera and
   native-resolution modes;
 - the Metal shaders (M10.3).
