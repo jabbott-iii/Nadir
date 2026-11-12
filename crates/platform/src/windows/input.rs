@@ -21,14 +21,15 @@
 use nadir_core::{Key, MouseButton, UVec2, Vec2};
 use nadir_sys::windows::types::{LPARAM, WPARAM};
 use nadir_sys::windows::user32::{
-    SIZE_MINIMIZED, WHEEL_DELTA, WM_CLOSE, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
-    WM_XBUTTONUP, XBUTTON1, XBUTTON2,
+    SIZE_MINIMIZED, WHEEL_DELTA, WM_CHAR, WM_CLOSE, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WM_XBUTTONDOWN, WM_XBUTTONUP, XBUTTON1, XBUTTON2,
 };
 
 use super::keymap;
 use crate::Event;
+use crate::text::{self, Utf16};
 
 /// A window message, reduced to the kinds and fields we use.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,6 +37,9 @@ pub(super) enum Incoming {
     /// A key went down or up. Its scan code has `0xE0` in the high byte for
     /// an extended key.
     Key { pressed: bool, scan_code: u16 },
+    /// A UTF-16 code unit of a character typed, with the modifiers held
+    /// then, which the window procedure reads: decoding gives none.
+    Char { unit: u16, modifiers: Modifiers },
     /// A button went down or up, with the pointer at (`x`, `y`).
     Button {
         pressed: bool,
@@ -78,6 +82,12 @@ impl Incoming {
                 pressed: false,
                 scan_code: keymap::scan_code(lparam),
             },
+            // The unit is the low word; the rest of `wParam` is 0. Alt's
+            // characters, `WM_SYSCHAR`, are the window menu's.
+            WM_CHAR => Self::Char {
+                unit: low_word(wparam),
+                modifiers: Modifiers::default(),
+            },
             WM_MOUSEMOVE => {
                 let (x, y) = position(lparam);
                 Self::Motion { x, y }
@@ -112,6 +122,18 @@ impl Incoming {
             _ => Self::Other,
         }
     }
+}
+
+/// The modifiers held as a message was posted, which make a typed character
+/// a shortcut's (see [`text::shortcut`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Modifiers {
+    /// Either Control.
+    pub(super) control: bool,
+    /// Either Alt: with Control, Alt Gr.
+    pub(super) alt: bool,
+    /// Either Windows key.
+    pub(super) command: bool,
 }
 
 /// `minwindef.h`: `LOWORD(l) ((WORD)(((DWORD_PTR)(l)) & 0xffff))`
@@ -157,6 +179,8 @@ pub(super) struct Translator {
     keys_down: [bool; 256],
     /// Which buttons are down, in the order of [`MouseButton::ALL`].
     buttons_down: [bool; MouseButton::ALL.len()],
+    /// The typed character's units so far.
+    typed: Utf16,
 }
 
 impl Translator {
@@ -171,6 +195,7 @@ impl Translator {
             pointer: None,
             keys_down: [false; 256],
             buttons_down: [false; MouseButton::ALL.len()],
+            typed: Utf16::default(),
         }
     }
 
@@ -212,6 +237,7 @@ impl Translator {
     pub(super) fn handle(&mut self, incoming: Incoming, out: &mut Vec<Event>) {
         match incoming {
             Incoming::Key { pressed, scan_code } => self.key(pressed, scan_code, out),
+            Incoming::Char { unit, modifiers } => self.char(unit, modifiers, out),
             Incoming::Button {
                 pressed,
                 button,
@@ -266,6 +292,14 @@ impl Translator {
         });
     }
 
+    fn char(&mut self, unit: u16, modifiers: Modifiers, out: &mut Vec<Event>) {
+        let Some(typed) = self.typed.push(unit) else {
+            return;
+        };
+        let shortcut = text::shortcut(modifiers.control, modifiers.alt, modifiers.command);
+        text::push_text([typed], shortcut, out);
+    }
+
     fn button(&mut self, pressed: bool, button: MouseButton, out: &mut Vec<Event>) {
         let down = &mut self.buttons_down[button as usize];
         if pressed == *down {
@@ -286,12 +320,15 @@ impl Translator {
     }
 
     fn focus(&mut self, gained: bool, out: &mut Vec<Event>) {
-        if !gained {
-            self.release_everything(out);
-        }
         if gained != self.focused {
             self.focused = gained;
             out.push(Event::Focused(gained));
+        }
+        // After the news, so that a reader can tell these releases from the
+        // ones the user made.
+        if !gained {
+            self.release_everything(out);
+            self.typed.reset();
         }
     }
 
@@ -724,14 +761,15 @@ mod tests {
         assert_eq!(
             out[out.len() - 4..],
             [
-                // In the order of `Key::ALL`, which is by usage: A first.
+                // The news, then the keys in the order of `Key::ALL`, which
+                // is by usage: A first.
+                Event::Focused(false),
                 key_event(Key::A, false, false),
                 key_event(Key::LeftShift, false, false),
                 Event::MouseButton {
                     button: MouseButton::Right,
                     pressed: false
                 },
-                Event::Focused(false),
             ]
         );
         assert!(!translator.any_button_down());
@@ -781,5 +819,131 @@ mod tests {
             run(&mut translator, &[Incoming::Close]),
             [Event::CloseRequested]
         );
+    }
+
+    // -- typed text ---------------------------------------------------------
+
+    /// `WinUser.h`: `#define VK_PROCESSKEY 0xE5`, the virtual key of a key
+    /// that an input method editor took.
+    const VK_PROCESSKEY: WPARAM = 0xE5;
+
+    /// A character typed with nothing held.
+    fn char(unit: char) -> Incoming {
+        char_with(unit, Modifiers::default())
+    }
+
+    fn char_with(unit: char, modifiers: Modifiers) -> Incoming {
+        let unit = u16::try_from(u32::from(unit)).expect("in the basic plane");
+        Incoming::Char { unit, modifiers }
+    }
+
+    fn unit(unit: u16) -> Incoming {
+        Incoming::Char {
+            unit,
+            modifiers: Modifiers::default(),
+        }
+    }
+
+    #[test]
+    fn a_key_that_an_input_method_editor_took_is_still_a_key() {
+        // Its virtual key says so, and its scan code is the key's.
+        assert_eq!(
+            Incoming::decode(WM_KEYDOWN, VK_PROCESSKEY, 0x001E_0001),
+            press(A)
+        );
+        assert_eq!(
+            Incoming::decode(WM_SYSKEYDOWN, VK_PROCESSKEY, 0x001E_0001),
+            press(A)
+        );
+    }
+
+    #[test]
+    fn a_character_message_is_decoded_with_nothing_held() {
+        assert_eq!(Incoming::decode(WM_CHAR, 0x00E9, 0x0012_0001), unit(0x00E9));
+        assert_eq!(Incoming::decode(WM_CHAR, 0xD83D, 0), unit(0xD83D));
+    }
+
+    #[test]
+    fn a_character_follows_the_key_that_typed_it_and_repeats_with_it() {
+        let mut translator = translator();
+        let out = run(
+            &mut translator,
+            &[press(A), char('a'), press(A), char('a'), release(A)],
+        );
+        assert_eq!(
+            out,
+            [
+                key_event(Key::A, true, false),
+                Event::Text('a'),
+                key_event(Key::A, true, true),
+                Event::Text('a'),
+                key_event(Key::A, false, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_character_beyond_the_basic_plane_comes_as_one() {
+        let mut translator = translator();
+        let units = [unit(0xD83D), unit(0xDE00)];
+        assert_eq!(run(&mut translator, &units), [Event::Text('😀')]);
+        // A lone low surrogate is nothing, and a high one lost with the focus
+        // is forgotten.
+        let lost = [
+            unit(0xDE00),
+            unit(0xD83D),
+            Incoming::Focus { gained: false },
+            unit(0xDE00),
+        ];
+        assert_eq!(run(&mut translator, &lost), []);
+    }
+
+    #[test]
+    fn control_characters_are_not_typed() {
+        let mut translator = translator();
+        // Enter, Backspace, Escape, Tab.
+        let controls = [char('\r'), char('\u{8}'), char('\u{1b}'), char('\t')];
+        assert_eq!(run(&mut translator, &controls), []);
+    }
+
+    #[test]
+    fn control_and_the_windows_key_make_shortcuts_and_alt_gr_does_not() {
+        let mut translator = translator();
+        let held = |control, alt, command| Modifiers {
+            control,
+            alt,
+            command,
+        };
+        // Control+Space types a space on Windows, and Control+A a control
+        // character: neither is text. The modifiers are the message's, also
+        // a Control that went down before the window had the focus.
+        let control = held(true, false, false);
+        let out = run(
+            &mut translator,
+            &[char_with(' ', control), char_with('\u{1}', control)],
+        );
+        assert_eq!(out, []);
+        // Alt Gr: the Left Control that Windows makes up, and Right Alt.
+        let alt_gr = held(true, true, false);
+        assert_eq!(
+            run(&mut translator, &[char_with('€', alt_gr)]),
+            [Event::Text('€')]
+        );
+        let windows = held(false, false, true);
+        assert_eq!(run(&mut translator, &[char_with('e', windows)]), []);
+        // A surrogate pair typed as a shortcut is nothing, and leaves nothing
+        // waiting.
+        let pair = [
+            Incoming::Char {
+                unit: 0xD83D,
+                modifiers: control,
+            },
+            Incoming::Char {
+                unit: 0xDE00,
+                modifiers: control,
+            },
+            char('x'),
+        ];
+        assert_eq!(run(&mut translator, &pair), [Event::Text('x')]);
     }
 }

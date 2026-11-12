@@ -49,6 +49,22 @@ const WORDS: usize = 5;
 pub(crate) struct CodeSet([u64; WORDS]);
 
 impl CodeSet {
+    /// Every key's code: those below [`MOUSE`].
+    pub(crate) const KEYS: Self = Self([u64::MAX, u64::MAX, u64::MAX, u64::MAX, 0]);
+
+    /// Every mouse button's code: those from [`MOUSE`] on.
+    pub(crate) const MOUSE: Self = Self([0, 0, 0, 0, u64::MAX]);
+
+    /// The codes in either set.
+    pub(crate) fn union(self, other: Self) -> Self {
+        Self(core::array::from_fn(|word| self.0[word] | other.0[word]))
+    }
+
+    /// The codes in both sets.
+    pub(crate) fn intersection(self, other: Self) -> Self {
+        Self(core::array::from_fn(|word| self.0[word] & other.0[word]))
+    }
+
     pub(crate) fn contains(&self, code: Code) -> bool {
         let (word, bit) = code.word_and_bit();
         self.0[word] & bit != 0
@@ -116,6 +132,37 @@ mod tests {
         }
         assert_eq!(set.iter().collect::<Vec<_>>(), codes);
         assert!(Code::mouse(MouseButton::Forward).0 < (WORDS * 64) as u16);
+    }
+
+    #[test]
+    fn the_keys_and_the_mouse_split_every_code() {
+        for &key in Key::ALL {
+            assert!(CodeSet::KEYS.contains(Code::key(key)), "{key:?}");
+            assert!(!CodeSet::MOUSE.contains(Code::key(key)), "{key:?}");
+        }
+        for &button in MouseButton::ALL {
+            assert!(CodeSet::MOUSE.contains(Code::mouse(button)), "{button:?}");
+            assert!(!CodeSet::KEYS.contains(Code::mouse(button)), "{button:?}");
+        }
+        assert_eq!(
+            CodeSet::KEYS.intersection(CodeSet::MOUSE),
+            CodeSet::default()
+        );
+    }
+
+    #[test]
+    fn union_and_intersection_combine_sets() {
+        let mut both = CodeSet::default();
+        both.insert(Code::key(Key::W));
+        both.insert(Code::mouse(MouseButton::Left));
+        let mut keys = CodeSet::default();
+        keys.insert(Code::key(Key::W));
+        assert_eq!(both.intersection(CodeSet::KEYS), keys);
+        let mut mouse = CodeSet::default();
+        mouse.insert(Code::mouse(MouseButton::Left));
+        assert_eq!(both.intersection(CodeSet::MOUSE), mouse);
+        assert_eq!(keys.union(mouse), both);
+        assert_eq!(both.union(both), both);
     }
 
     #[test]

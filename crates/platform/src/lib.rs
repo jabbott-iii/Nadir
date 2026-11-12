@@ -54,14 +54,18 @@
 //!   Windows and macOS another comes each time the scale factor changes.
 //! - [`Event::CloseRequested`] leaves the window open: the game decides.
 //! - [`Event::Key`] names the physical key, a [`nadir_core::Key`], whatever
-//!   the keyboard layout, and says whether a press is a repeat. Nothing
-//!   reports typed text yet (roadmap task M7.9).
+//!   the keyboard layout, and says whether a press is a repeat.
+//! - [`Event::Text`] is a character typed, after the key press that typed
+//!   it: one a character, a composed one included, never a control
+//!   character, and none for a shortcut. On Linux it comes from an X input
+//!   method, on Windows from `WM_CHAR`, and on macOS from a key press's
+//!   `characters`.
 //! - [`Event::MouseMoved`] is in physical pixels from the top-left corner of
 //!   the inside of the window, with y growing downward, on every system.
 //!   [`Event::MouseWheel`] is in lines.
-//! - Before [`Event::Focused`]`(false)`, every key and button that is down
-//!   gets a release, so nothing stays held while the window cannot see it go
-//!   up.
+//! - Right after [`Event::Focused`]`(false)`, every key and button that is
+//!   down gets a release, so nothing stays held while the window cannot see
+//!   it go up.
 //!
 //! # Drawing
 //!
@@ -250,6 +254,8 @@
 //!   [`create_headless_gl`] are OpenGL 3.3 core through EGL; the headless
 //!   one needs `EGL_MESA_platform_surfaceless`, which Mesa and NVIDIA have.
 //!   The scale factor is read once, from `Xft.dpi`, when the window opens.
+//!   Typed text comes from the X input method that `XMODIFIERS` names, or
+//!   else Xlib's own, which composes from the locale's Compose file.
 //!   Audio goes to ALSA's `default` device, which PipeWire or PulseAudio
 //!   usually provides.
 //! - **Windows** 10 and later: a Win32 window, aware of each monitor's DPI,
@@ -269,9 +275,10 @@
 //!   [`create_headless_gl`] and [`open_audio`] return
 //!   [`PlatformError::Unsupported`].
 //!
-//! Not built yet on any system: typed text (M7.9), gamepads (M8.1 to M8.3),
-//! Metal (M10.1), noticing that the window was minimized, holding the
-//! pointer inside the window, and native Wayland.
+//! Not built yet on any system: gamepads (M8.1 to M8.3), Metal (M10.1),
+//! showing a text being composed, noticing that the window was minimized,
+//! holding the pointer inside the window, and native Wayland. macOS has no
+//! input method for typed text yet.
 
 // One of the three crates allowed to contain `unsafe` (AGENTS.md, rule 3). The
 // workspace denies `unsafe_code` everywhere else.
@@ -291,6 +298,8 @@ mod event;
 mod gpu;
 mod paths;
 mod sleep;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+mod text;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -369,6 +378,14 @@ pub struct Platform {
 
 impl Platform {
     /// Opens the window.
+    ///
+    /// On Linux, it first sets the C library's character locale
+    /// (`LC_CTYPE`) from the environment, if it is still "C", which a Rust
+    /// program never changes: X's input methods type in it, and in "C" they
+    /// compose Latin-1 characters only. The locale is the whole process's,
+    /// and changing it races with another thread's C code that reads it
+    /// meanwhile, so open the window before starting threads that call such
+    /// code. A program that has set a locale of its own keeps it.
     ///
     /// # Errors
     ///

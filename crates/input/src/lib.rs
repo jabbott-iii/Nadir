@@ -21,6 +21,10 @@
 //! - [`Input`] takes in the window's events and keeps every change between
 //!   two ticks, so that a tap between them is not lost.
 //! - [`Input::latch`] makes the [`ActionState`] of a tick.
+//! - [`UiEvents`] keeps what a UI reads of the same events, a frame at a
+//!   time: the keys with their repeats, typed text and the mouse, in order.
+//!   [`Input::set_capture`] holds the keys or the mouse back from every
+//!   action while a UI has them.
 //! - [`InputRecorder`] and [`InputPlayer`] write and read replays: the
 //!   state of every tick, which plays back exactly.
 //!
@@ -83,10 +87,10 @@
 //! and on `nadir-platform`, for [`Event`](nadir_platform::Event). It has
 //! no OS code of its own.
 //!
-//! Built so far (roadmap M3.1): keyboard and mouse bindings, latching, text
-//! mode, rebinding conflicts and replays. Gamepads, deadzones and the
-//! active device come with M8.4, the rebinding capture flow with M9.2,
-//! bindings in the settings file with M9.3, and typed text with M7.9.
+//! Built so far: keyboard and mouse bindings, latching, text mode, rebinding
+//! conflicts and replays (roadmap M3.1); a UI's events and capture (M7.9).
+//! Gamepads, deadzones and the active device come with M8.4, the rebinding
+//! capture flow with M9.2, and bindings in the settings file with M9.3.
 //!
 //! # The parts
 //!
@@ -101,8 +105,12 @@
 //! - **Devices.** [`Input`] takes the window's events with
 //!   [`Input::handle`] and makes a tick's state with [`Input::latch`].
 //!   [`Input::set_text_mode`] and [`Input::text_mode`] turn text mode on
-//!   and off. [`Input::pointer`] and [`Input::wheel`] are for the UI and
-//!   aiming: they are not actions.
+//!   and off, and [`Input::set_capture`] and [`Input::capture`] hold a
+//!   [`Capture`] of the keyboard or the mouse. [`Input::pointer`] and
+//!   [`Input::wheel`] are for the UI and aiming: they are not actions.
+//! - **A UI's events.** [`UiEvents`] takes the same events with
+//!   [`UiEvents::handle`] and gives a UI each [`UiEvent`], in order, until
+//!   [`UiEvents::clear`], once a frame.
 //! - **State.** [`ActionState`] is what gameplay code reads:
 //!   [`ActionState::pressed`], [`ActionState::just_pressed`],
 //!   [`ActionState::just_released`], [`ActionState::value`] and
@@ -183,6 +191,16 @@
 //!   buttons held when it begins, or pressed during it, stay hidden from
 //!   gameplay actions until they are released, so leaving text mode presses
 //!   nothing.
+//! - **Capture.** While a UI has the keyboard or the mouse, such as a
+//!   debug window under the pointer, [`Input::set_capture`] hides that
+//!   device from every action, `ui_allowed` ones too, the same way: what
+//!   is held when it begins, or pressed during it, until it is released.
+//!   The wheel's turns while the mouse is held back are not counted.
+//! - **A UI's events.** [`UiEvents`] keeps the keys with their repeats, the
+//!   typed text, the pointer, the buttons, the wheel and the loss of the
+//!   focus, in order, and holds nothing back. The platform reports the loss
+//!   of the focus before the releases of what was held, so that a UI lets
+//!   go of a held widget with no click.
 //! - **Errors.** [`ActionMap::new`], [`InputRecorder::new`] and
 //!   [`InputPlayer::new`] check the [`ActionSet`]'s rules: some actions,
 //!   no more than 65,535, each at its index in `ALL`, with names that are
@@ -200,8 +218,10 @@
 //! - **Limits.** Each action has [`SLOTS`] bindings. Between two latches,
 //!   [`Input`] keeps up to 1,024 changes; past that, the oldest half is
 //!   folded into the state they started from, and their edges are lost.
-//! - **Allocation.** [`Input`] reuses its buffer of changes, so handling
-//!   events and latching allocate nothing once it has grown. An
+//! - **Allocation.** [`Input`] reuses its buffer of changes, and
+//!   [`UiEvents`] its events, so handling events, latching and clearing
+//!   allocate nothing once they have grown; a [`UiEvents`] keeps at most
+//!   4,096 events, dropping the oldest half past that. An
 //!   [`ActionState`] allocates when it is made, and an [`InputRecorder`]'s
 //!   bytes grow with each tick.
 
@@ -212,13 +232,15 @@ mod error;
 mod input;
 mod replay;
 mod state;
+mod ui;
 
 pub use action::{ActionKind, ActionSet};
 pub use binding::{ActionMap, Binding, SLOTS};
 pub use error::{BindErrorKind, InputError, ReplayErrorKind, SetProblem};
-pub use input::Input;
+pub use input::{Capture, Input};
 pub use replay::{InputPlayer, InputRecorder};
 pub use state::ActionState;
+pub use ui::{UiEvent, UiEvents};
 
 // The README's examples are compiled as doc tests too.
 #[cfg(doctest)]

@@ -34,15 +34,20 @@
 //! the modal frame callback, so frames come only while the window changes
 //! size. Moving a window does not stop the loop.
 //!
+//! Typed text is a key press's `characters`, read by the pump too.
+//!
 //! What this backend does not do yet, because nothing has needed it:
 //!
-//! - It reports no typed text.
+//! - It has no input method: a text being composed is not shown, and
+//!   characters that only an input method types (in Chinese or Japanese,
+//!   say) are not typed. That needs `NSTextInputClient`.
 //! - It does not notice the window being minimized.
 //! - It does not put back the two keys that ISO keyboards swap (see the key
 //!   table).
 
 use core::any::Any;
 use core::cell::{Cell, RefCell};
+use core::ffi::{CStr, c_char};
 use core::ptr;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -131,6 +136,8 @@ selectors! {
     in_live_resize = c"inLiveResize",
     event_type = c"type",
     key_code = c"keyCode",
+    characters = c"characters",
+    utf8_string = c"UTF8String",
     modifier_flags = c"modifierFlags",
     location_in_window = c"locationInWindow",
     button_number = c"buttonNumber",
@@ -675,6 +682,10 @@ impl Backend {
             if let Some(incoming) = self.decode(event) {
                 self.state
                     .record(|translator, events| translator.handle(incoming, events));
+                // What the key typed comes after it.
+                if let Incoming::Key { pressed: true, .. } = incoming {
+                    self.record_text(event);
+                }
             }
             // SAFETY: `-sendEvent:(NSEvent *)` returns nothing. It is where
             // AppKit runs its own loop while the window is resized.
@@ -762,6 +773,36 @@ impl Backend {
             }
             _ => None,
         }
+    }
+
+    /// Reports what a key press for our window typed: its `-characters`.
+    fn record_text(&self, event: Id) {
+        let sel = self.selectors;
+        // SAFETY: `-modifierFlags` takes nothing and returns an
+        // `NSEventModifierFlags`, which is an `NSUInteger`.
+        let flags = unsafe { msg_send![event, sel.modifier_flags, () -> NSUInteger] };
+        // SAFETY: a key event's `-characters` takes nothing and returns an
+        // `NSString` that the pool owns, or nil.
+        let characters = unsafe { msg_send![event, sel.characters, () -> Id] };
+        if characters.is_null() {
+            return;
+        }
+        // SAFETY: `-[NSString UTF8String]` takes nothing and returns a
+        // NUL-terminated UTF-8 string, or null if it cannot be converted.
+        // The string may live less long than the `NSString`, no longer than
+        // the pool that holds both: it is read here, at once.
+        let bytes = unsafe { msg_send![characters, sel.utf8_string, () -> *const c_char] };
+        if bytes.is_null() {
+            return;
+        }
+        // SAFETY: the string is NUL-terminated, and is read before anything
+        // else runs that could free it: nothing of AppKit runs until the
+        // copy into events below is done.
+        let Ok(text) = unsafe { CStr::from_ptr(bytes) }.to_str() else {
+            return;
+        };
+        self.state
+            .record(|translator, events| translator.text(text, flags, events));
     }
 
     /// Where a mouse event happened, in physical pixels from the top left of

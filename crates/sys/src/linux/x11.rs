@@ -58,7 +58,7 @@
 // so that each one can be compared with its header.
 #![allow(non_upper_case_globals)]
 
-use core::ffi::{c_char, c_int, c_long, c_short, c_uchar, c_uint, c_ulong, c_ushort, c_void};
+use core::ffi::{CStr, c_char, c_int, c_long, c_short, c_uchar, c_uint, c_ulong, c_ushort, c_void};
 use core::marker::{PhantomData, PhantomPinned};
 use core::mem::offset_of;
 
@@ -482,6 +482,21 @@ pub const NotifyGrab: c_int = 1;
 /// `X11/X.h`: `#define NotifyUngrab 2`
 pub const NotifyUngrab: c_int = 2;
 
+/// A modifier in a key event's `state`: Control.
+/// `X11/X.h`: `#define ControlMask (1<<2)`
+pub const ControlMask: c_uint = 1 << 2;
+
+/// A modifier in a key event's `state`: the first modifier, Alt (and Meta)
+/// by convention.
+/// `X11/X.h`: `#define Mod1Mask (1<<3)`
+pub const Mod1Mask: c_uint = 1 << 3;
+
+/// A modifier in a key event's `state`: the fourth modifier, Super by
+/// convention. Alt Gr, which picks a key's third character, is the fifth
+/// (`Mod5Mask`), and Num Lock usually the second.
+/// `X11/X.h`: `#define Mod4Mask (1<<6)`
+pub const Mod4Mask: c_uint = 1 << 6;
+
 /// A key going down ([`KeyPress`]) or up ([`KeyRelease`]).
 /// `X11/Xlib.h`: `typedef struct { ... } XKeyEvent;`
 #[repr(C)]
@@ -522,6 +537,8 @@ pub struct XKeyEvent {
 
 const _: () = assert!(size_of::<XKeyEvent>() == 96);
 const _: () = assert!(align_of::<XKeyEvent>() == 8);
+const _: () = assert!(offset_of!(XKeyEvent, time) == 56);
+const _: () = assert!(offset_of!(XKeyEvent, state) == 80);
 const _: () = assert!(offset_of!(XKeyEvent, keycode) == 84);
 
 /// A pointer button going down ([`ButtonPress`]) or up ([`ButtonRelease`]).
@@ -756,6 +773,126 @@ pub union XEvent {
 
 const _: () = assert!(size_of::<XEvent>() == 192);
 const _: () = assert!(align_of::<XEvent>() == 8);
+
+// ---------------------------------------------------------------------------
+// Input methods: from key presses to text
+// ---------------------------------------------------------------------------
+
+/// A pointer to bytes Xlib does not look into: a callback's own data.
+/// `X11/Xlib.h`: `typedef char *XPointer;`
+pub type XPointer = *mut c_char;
+
+/// A symbol on a key, as the keyboard layout names it.
+/// `X11/X.h`: `typedef XID KeySym;`
+pub type KeySym = XID;
+
+/// An open input method: what turns key presses into text, by a Compose
+/// sequence or through an input method server. Only Xlib looks inside it.
+/// `X11/Xlib.h`: `typedef struct _XIM *XIM;`
+#[repr(C)]
+pub struct XIMRec {
+    _opaque: [u8; 0],
+    _marker: PhantomData<(*mut u8, PhantomPinned)>,
+}
+
+/// An input method.
+/// `X11/Xlib.h`: `typedef struct _XIM *XIM;`
+pub type XIM = *mut XIMRec;
+
+/// An input context: an input method's state for one window. Only Xlib
+/// looks inside it.
+/// `X11/Xlib.h`: `typedef struct _XIC *XIC;`
+#[repr(C)]
+pub struct XICRec {
+    _opaque: [u8; 0],
+    _marker: PhantomData<(*mut u8, PhantomPinned)>,
+}
+
+/// An input context.
+/// `X11/Xlib.h`: `typedef struct _XIC *XIC;`
+pub type XIC = *mut XICRec;
+
+/// A function an input method calls back: with the input method, the
+/// callback's `client_data`, and data of the call.
+/// `X11/Xlib.h`: `typedef void (*XIMProc)(XIM, XPointer, XPointer);`
+pub type XIMProc =
+    Option<unsafe extern "C" fn(im: XIM, client_data: XPointer, call_data: XPointer)>;
+
+/// A callback and its data, as the value of an input method's
+/// [`XNDestroyCallback`].
+/// `X11/Xlib.h`: `typedef struct { XPointer client_data; XIMProc callback; }
+/// XIMCallback;`
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct XIMCallback {
+    /// Passed to the callback as it is.
+    pub client_data: XPointer,
+    /// The function to call.
+    pub callback: XIMProc,
+}
+
+const _: () = assert!(size_of::<XIMCallback>() == 16);
+const _: () = assert!(align_of::<XIMCallback>() == 8);
+const _: () = assert!(offset_of!(XIMCallback, client_data) == 0);
+const _: () = assert!(offset_of!(XIMCallback, callback) == 8);
+
+/// How an input context shows what is being composed, and its status.
+/// `X11/Xlib.h`: `typedef unsigned long XIMStyle;`
+pub type XIMStyle = c_ulong;
+
+/// An [`XIMStyle`]: the application shows nothing of a text being composed.
+/// `X11/Xlib.h`: `#define XIMPreeditNothing 0x0008L`
+pub const XIMPreeditNothing: XIMStyle = 0x0008;
+
+/// An [`XIMStyle`]: the application shows no status of the input method.
+/// `X11/Xlib.h`: `#define XIMStatusNothing 0x0400L`
+pub const XIMStatusNothing: XIMStyle = 0x0400;
+
+/// The name of an input context's style, an [`XIMStyle`].
+/// `X11/Xlib.h`: `#define XNInputStyle "inputStyle"`
+pub const XNInputStyle: &CStr = c"inputStyle";
+
+/// The name of the window an input context belongs to, a [`Window`].
+/// `X11/Xlib.h`: `#define XNClientWindow "clientWindow"`
+pub const XNClientWindow: &CStr = c"clientWindow";
+
+/// The name of the window whose key presses an input context reads, a
+/// [`Window`].
+/// `X11/Xlib.h`: `#define XNFocusWindow "focusWindow"`
+pub const XNFocusWindow: &CStr = c"focusWindow";
+
+/// The name of the events an input context needs the window to select, an
+/// `unsigned long` event mask, read with `XGetICValues`.
+/// `X11/Xlib.h`: `#define XNFilterEvents "filterEvents"`
+pub const XNFilterEvents: &CStr = c"filterEvents";
+
+/// The name of the callback an input method calls when it stops working,
+/// as an input method server does when it exits: a pointer to an
+/// [`XIMCallback`]. Xlib then frees the input method and its contexts
+/// itself, and they must not be used, nor closed, again.
+/// `X11/Xlib.h`: `#define XNDestroyCallback "destroyCallback"`
+pub const XNDestroyCallback: &CStr = c"destroyCallback";
+
+/// A lookup's status: the text did not fit the buffer, whose size the
+/// lookup returned. Look it up again with a buffer of that size.
+/// `X11/Xlib.h`: `#define XBufferOverflow -1`
+pub const XBufferOverflow: Status = -1;
+
+/// A lookup's status: nothing was typed.
+/// `X11/Xlib.h`: `#define XLookupNone 1`
+pub const XLookupNone: Status = 1;
+
+/// A lookup's status: text, and no key symbol.
+/// `X11/Xlib.h`: `#define XLookupChars 2`
+pub const XLookupChars: Status = 2;
+
+/// A lookup's status: a key symbol, and no text.
+/// `X11/Xlib.h`: `#define XLookupKeySym 3`
+pub const XLookupKeySym: Status = 3;
+
+/// A lookup's status: text and a key symbol.
+/// `X11/Xlib.h`: `#define XLookupBoth 4`
+pub const XLookupBoth: Status = 4;
 
 // ---------------------------------------------------------------------------
 // Functions
@@ -1023,6 +1160,105 @@ dynlib! {
             detectable: Bool,
             supported: *mut Bool,
         ) -> Bool;
+
+        /// Returns whether Xlib can work in the C library's current locale
+        /// (its `LC_CTYPE`), which input methods need.
+        /// `X11/Xlib.h`: `Bool XSupportsLocale(void)`
+        fn XSupportsLocale() -> Bool;
+
+        /// Sets the locale modifiers, which choose the input method: an empty
+        /// list reads them from the `XMODIFIERS` environment variable, and
+        /// `@im=none` asks for Xlib's own, which composes from the locale's
+        /// Compose file. Returns null on failure, or else the modifiers, in a
+        /// string that belongs to Xlib.
+        /// `X11/Xlib.h`: `char *XSetLocaleModifiers(const char*
+        /// modifier_list)`
+        fn XSetLocaleModifiers(modifier_list: *const c_char) -> *mut c_char;
+
+        /// Opens the input method that the locale and its modifiers choose,
+        /// for the current locale. `rdb`, `res_name` and `res_class` may be
+        /// null. Returns null on failure.
+        /// `X11/Xlib.h`: `XIM XOpenIM(Display* dpy, struct _XrmHashBucketRec*
+        /// rdb, char* res_name, char* res_class)`
+        ///
+        /// The input method is ours. Close it with `XCloseIM`, before the
+        /// display, unless its destroy callback was called.
+        fn XOpenIM(
+            display: *mut Display,
+            rdb: *mut c_void,
+            res_name: *mut c_char,
+            res_class: *mut c_char,
+        ) -> XIM;
+
+        /// Closes an input method. Its input contexts must be destroyed
+        /// first. Xlib gives the result no meaning here.
+        /// `X11/Xlib.h`: `Status XCloseIM(XIM im)`
+        fn XCloseIM(im: XIM) -> Status;
+
+        /// Sets values of an input method: pairs of a name (`XN...`) and its
+        /// value, each passed as a pointer-sized argument, then a null
+        /// pointer. Returns null on success, or else the name of the first
+        /// value it could not set.
+        /// `X11/Xlib.h`: `char *XSetIMValues(XIM im, ...)`
+        fn XSetIMValues(im: XIM, ...) -> *mut c_char;
+
+        /// Creates an input context of an input method: pairs of a name and
+        /// its value, as for `XSetIMValues`, then a null pointer. Returns null
+        /// on failure.
+        /// `X11/Xlib.h`: `XIC XCreateIC(XIM im, ...)`
+        ///
+        /// The context is ours. Destroy it with `XDestroyIC`, before its
+        /// window and its input method, unless the input method's destroy
+        /// callback was called.
+        fn XCreateIC(im: XIM, ...) -> XIC;
+
+        /// Destroys an input context.
+        /// `X11/Xlib.h`: `void XDestroyIC(XIC ic)`
+        fn XDestroyIC(ic: XIC);
+
+        /// Reads values of an input context: pairs of a name and a pointer to
+        /// where its value goes, then a null pointer. Returns null on
+        /// success, or else the name of the first value it could not read.
+        /// `X11/Xlib.h`: `char *XGetICValues(XIC ic, ...)`
+        fn XGetICValues(ic: XIC, ...) -> *mut c_char;
+
+        /// Tells the input method that the context's window has the keyboard
+        /// focus.
+        /// `X11/Xlib.h`: `void XSetICFocus(XIC ic)`
+        fn XSetICFocus(ic: XIC);
+
+        /// Tells the input method that the context's window lost the
+        /// keyboard focus.
+        /// `X11/Xlib.h`: `void XUnsetICFocus(XIC ic)`
+        fn XUnsetICFocus(ic: XIC);
+
+        /// Gives an event to the input methods that asked for it, and returns
+        /// [`True`] if one of them took it: a key press that is a step of a
+        /// Compose sequence, or one sent on to an input method server. The
+        /// event must then be left alone. A `window` of 0 (`None` in C)
+        /// stands for the event's own window.
+        /// `X11/Xlib.h`: `Bool XFilterEvent(XEvent* event, Window window)`
+        fn XFilterEvent(event: *mut XEvent, window: Window) -> Bool;
+
+        /// Writes what a key press typed, in UTF-8, to the `bytes_buffer`
+        /// bytes at `buffer_return`, with no NUL, and returns how many bytes
+        /// that is; `status_return` says what was returned
+        /// ([`XLookupChars`] and the others). If the text does not fit, the
+        /// status is [`XBufferOverflow`] and the result is the size it needs:
+        /// look the same event up again with a buffer that large.
+        /// `keysym_return` may be null. The event must be a [`KeyPress`]
+        /// that `XFilterEvent` did not take.
+        /// `X11/Xlib.h`: `int Xutf8LookupString(XIC ic, XKeyPressedEvent*
+        /// event, char* buffer_return, int bytes_buffer, KeySym*
+        /// keysym_return, Status* status_return)`
+        fn Xutf8LookupString(
+            ic: XIC,
+            event: *mut XKeyEvent,
+            buffer_return: *mut c_char,
+            bytes_buffer: c_int,
+            keysym_return: *mut KeySym,
+            status_return: *mut Status,
+        ) -> c_int;
     }
 }
 

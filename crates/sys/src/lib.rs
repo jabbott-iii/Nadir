@@ -48,12 +48,15 @@
 //!
 //! - `linux::libc`: the dynamic loader, `dlopen`, `dlsym` and `dlerror`.
 //!   There is no `dlclose`: a library stays loaded until the process exits,
-//!   so the function pointers of a table never dangle. Also the three error
+//!   so the function pointers of a table never dangle. `setlocale`, which
+//!   Xlib's input methods follow. Also the three error
 //!   numbers of ALSA's that the engine tells apart: `EAGAIN`, too little
 //!   room to write in a stream that does not block, `EPIPE`, an underrun,
 //!   and `ESTRPIPE`, a suspend.
 //! - `linux::x11`: the Xlib types, constants and events the engine uses,
-//!   and `Xlib`, the table of its functions in `libX11.so.6`.
+//!   its input methods (`XIM`, `XIC`), which turn key presses into text, and
+//!   `Xlib`, the table of its functions in `libX11.so.6`. A function that C
+//!   declares with `...` ends with `...` in the table too.
 //! - `linux::egl`: the EGL types and constants, `Egl`, the table of its
 //!   functions of EGL 1.4 and earlier in `libEGL.so.1`, and the type of
 //!   EGL 1.5's `eglGetPlatformDisplay`, which is looked up apart, after a
@@ -83,8 +86,7 @@
 //!
 //! Not declared yet: WGL and NSOpenGL (roadmap tasks M2.6 and M2.7), WASAPI
 //! and CoreAudio (M6.4 and M6.5), the gamepad APIs (evdev's, XInput and
-//! GameController, M8.1 to M8.3), Metal (M10.1), and X input methods for
-//! typed text (M7.9).
+//! GameController, M8.1 to M8.3), and Metal (M10.1).
 //!
 //! # Examples
 //!

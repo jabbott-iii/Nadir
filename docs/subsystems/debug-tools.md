@@ -39,8 +39,10 @@ input. None of it ships: `cargo xtask release-no-dev` verifies that.
 ### As built (M7.2)
 
 The UI core is nadir-debug's alone (ADR-0056): the engine feeds it, draws
-it, holds the game's input off and saves its windows' places in M7.10;
-typed text from the window comes with M7.9. It depends on core and render.
+it, holds the game's input off and saves its windows' places in M7.10. The
+window's typed text and the keys' repeats reach it through
+`nadir_input::UiEvents`, and `nadir_input::Input::set_capture` holds the
+game's actions off (M7.9, ADR-0057). It depends on core and render.
 
 ```rust
 pub struct DebugInput;   // pointer_moved, button, wheel, key(key, pressed, repeat), text, focus_lost, clear

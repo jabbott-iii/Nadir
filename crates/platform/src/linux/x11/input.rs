@@ -16,7 +16,8 @@
 //!
 //! [`Incoming::decode`] reads an X event out of Xlib's union, and
 //! [`Translator`] turns it into the events of this crate. The translator
-//! needs no X server, so its rules are tested here.
+//! needs no X server, so its rules are tested here. What a key press typed
+//! is looked up by the backend, which hands it to [`Translator::text`].
 
 use core::ffi::{c_int, c_long, c_uint};
 
@@ -24,10 +25,10 @@ use nadir_core::{Key, MouseButton, UVec2, Vec2};
 // The constants are used as `xlib::KeyPress`, not imported by name: in a
 // pattern, a bare name that is not upper case reads as a new variable, and
 // the compiler warns about it.
-use nadir_sys::linux::x11::{self as xlib, Atom, XEvent};
+use nadir_sys::linux::x11::{self as xlib, Atom, Time, XEvent};
 
 use super::super::keymap;
-use crate::Event;
+use crate::{Event, text};
 
 /// The X button numbers above [`xlib::Button5`], which `X11/X.h` does not
 /// name. X.Org's input drivers use them like this by convention.
@@ -47,8 +48,18 @@ mod extra_buttons {
 /// An X event, reduced to the kinds and fields we use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Incoming {
-    /// A key went down or up.
-    Key { pressed: bool, keycode: c_uint },
+    /// A key went down or up, at `time`, with the modifiers `state` held
+    /// before it. `taken` says whether an input method took it, which the
+    /// backend learns from `XFilterEvent` after decoding. A key press of
+    /// keycode 0 is no key, but text that an input method typed: a finished
+    /// Compose sequence, or what a server committed.
+    Key {
+        pressed: bool,
+        keycode: c_uint,
+        time: Time,
+        state: c_uint,
+        taken: bool,
+    },
     /// A pointer button went down or up, with the pointer at (`x`, `y`).
     Button {
         pressed: bool,
@@ -93,6 +104,9 @@ impl Incoming {
                 Self::Key {
                     pressed: type_ == xlib::KeyPress,
                     keycode: key.keycode,
+                    time: key.time,
+                    state: key.state,
+                    taken: false,
                 }
             }
             xlib::ButtonPress | xlib::ButtonRelease => {
@@ -179,6 +193,44 @@ fn pointer(button: c_uint) -> Option<Pointer> {
     })
 }
 
+/// Whether the server time `time` is after `than`. The server counts
+/// milliseconds in 32 bits, which wrap after 49 days: the later of two
+/// times is the one less than half the range ahead.
+fn is_later(time: Time, than: Time) -> bool {
+    // The times are 32-bit, in a `long`.
+    let ahead = time.wrapping_sub(than) as u32;
+    ahead != 0 && ahead < 1 << 31
+}
+
+/// Appends what a key press typed, `typed`, which the backend looked up
+/// after the press, whose modifiers were `state`.
+///
+/// Nothing is typed with Control, Alt or Super held: it is a shortcut.
+/// The state is the press's own, so a modifier that went down before the
+/// window had the focus counts too. Alt Gr is another modifier on X (the
+/// fifth, for the third level of a key), and types.
+pub(super) fn push_typed(typed: &str, state: c_uint, out: &mut Vec<Event>) {
+    let shortcut = state & (xlib::ControlMask | xlib::Mod1Mask | xlib::Mod4Mask) != 0;
+    text::push_text(typed.chars(), shortcut, out);
+}
+
+/// Whether `incoming` gives or takes the keyboard focus: `None` for any
+/// other event, and for a focus event that is no change.
+///
+/// A keyboard grab, such as a window manager takes for a shortcut or while
+/// it switches windows, moves the focus away and back. The window is still
+/// the one the user works in, so this is not a change of focus. If another
+/// window gets the focus while the grab lasts, a normal event says so.
+pub(super) fn focus_change(incoming: Incoming) -> Option<bool> {
+    match incoming {
+        Incoming::Focus { mode, .. } if mode == xlib::NotifyGrab || mode == xlib::NotifyUngrab => {
+            None
+        }
+        Incoming::Focus { gained, .. } => Some(gained),
+        _ => None,
+    }
+}
+
 /// The atoms that mark the window manager's "close" message.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CloseMessage {
@@ -202,6 +254,9 @@ pub(super) struct Translator {
     keys_down: [bool; 256],
     /// Which buttons are down, in the order of [`MouseButton::ALL`].
     buttons_down: [bool; MouseButton::ALL.len()],
+    /// When each keycode last went down in a press that an input method
+    /// took, or 0, which the server never sends.
+    taken_times: [Time; 256],
 }
 
 impl Translator {
@@ -217,6 +272,7 @@ impl Translator {
             pointer: None,
             keys_down: [false; 256],
             buttons_down: [false; MouseButton::ALL.len()],
+            taken_times: [0; 256],
         }
     }
 
@@ -243,7 +299,13 @@ impl Translator {
     /// Appends the events that `incoming` amounts to, which may be none.
     pub(super) fn handle(&mut self, incoming: Incoming, out: &mut Vec<Event>) {
         match incoming {
-            Incoming::Key { pressed, keycode } => self.key(pressed, keycode, out),
+            Incoming::Key {
+                pressed,
+                keycode,
+                time,
+                taken,
+                ..
+            } => self.key(pressed, keycode, time, taken, out),
             Incoming::Button {
                 pressed,
                 button,
@@ -256,7 +318,11 @@ impl Translator {
                 self.button(pressed, button, out);
             }
             Incoming::Motion { x, y } => self.move_pointer(x, y, out),
-            Incoming::Focus { gained, mode } => self.focus(gained, mode, out),
+            Incoming::Focus { .. } => {
+                if let Some(gained) = focus_change(incoming) {
+                    self.focus(gained, out);
+                }
+            }
             Incoming::Configure { width, height } => self.configure(width, height, out),
             Incoming::ClientMessage {
                 message_type,
@@ -275,7 +341,34 @@ impl Translator {
         }
     }
 
-    fn key(&mut self, pressed: bool, keycode: c_uint, out: &mut Vec<Event>) {
+    fn key(
+        &mut self,
+        pressed: bool,
+        keycode: c_uint,
+        time: Time,
+        taken: bool,
+        out: &mut Vec<Event>,
+    ) {
+        if pressed
+            && time != 0
+            && let Some(last) = self.taken_times.get_mut(keycode as usize)
+        {
+            if taken {
+                *last = time;
+            } else if *last != 0 {
+                // An input method server sends a press it took back to us,
+                // as the same event, maybe after a later press it took:
+                // not a press of its own. GLFW leaves such copies out too,
+                // by the time of the last press it reported.
+                if !is_later(time, *last) {
+                    return;
+                }
+                // A later press it did not take comes after every copy, so
+                // the time is not needed any more, and kept would make the
+                // presses of half a clock's turn later look early.
+                *last = 0;
+            }
+        }
         let Some(key) = keymap::from_x_keycode(keycode) else {
             return;
         };
@@ -322,21 +415,15 @@ impl Translator {
         out.push(Event::MouseMoved(Vec2::new(x as f32, y as f32)));
     }
 
-    fn focus(&mut self, gained: bool, mode: c_int, out: &mut Vec<Event>) {
-        // A keyboard grab, such as a window manager takes for a shortcut or
-        // while it switches windows, moves the focus away and back. The
-        // window is still the one the user works in, so this is not a
-        // change of focus. If another window gets the focus while the grab
-        // lasts, a normal event says so.
-        if mode == xlib::NotifyGrab || mode == xlib::NotifyUngrab {
-            return;
-        }
-        if !gained {
-            self.release_everything(out);
-        }
+    fn focus(&mut self, gained: bool, out: &mut Vec<Event>) {
         if gained != self.focused {
             self.focused = gained;
             out.push(Event::Focused(gained));
+        }
+        // After the news, so that a reader can tell these releases from the
+        // ones the user made.
+        if !gained {
+            self.release_everything(out);
         }
     }
 
@@ -423,10 +510,29 @@ mod tests {
         out
     }
 
+    /// A press with no time, as `XSendEvent` sends one: never a duplicate.
     fn press(keycode: c_uint) -> Incoming {
+        press_at(keycode, 0)
+    }
+
+    fn press_at(keycode: c_uint, time: Time) -> Incoming {
         Incoming::Key {
             pressed: true,
             keycode,
+            time,
+            state: 0,
+            taken: false,
+        }
+    }
+
+    /// A press at `time` that an input method took.
+    fn taken_at(keycode: c_uint, time: Time) -> Incoming {
+        Incoming::Key {
+            pressed: true,
+            keycode,
+            time,
+            state: 0,
+            taken: true,
         }
     }
 
@@ -434,6 +540,9 @@ mod tests {
         Incoming::Key {
             pressed: false,
             keycode,
+            time: 0,
+            state: 0,
+            taken: false,
         }
     }
 
@@ -739,13 +848,13 @@ mod tests {
         assert_eq!(
             out[out.len() - 5..],
             [
-                // Keys in the order of `Key::ALL`, then buttons in the
-                // order of `MouseButton::ALL`, then the news itself.
+                // The news itself, then keys in the order of `Key::ALL`,
+                // then buttons in the order of `MouseButton::ALL`.
+                Event::Focused(false),
                 key_event(Key::W, false, false),
                 key_event(Key::LeftShift, false, false),
                 button_event(MouseButton::Left, false),
                 button_event(MouseButton::Right, false),
-                Event::Focused(false),
             ]
         );
 
@@ -808,7 +917,7 @@ mod tests {
         let out = run(&mut translator, &[grab(false, NOTIFY_WHILE_GRABBED)]);
         assert_eq!(
             out,
-            [key_event(Key::W, false, false), Event::Focused(false)]
+            [Event::Focused(false), key_event(Key::W, false, false)]
         );
     }
 
@@ -880,6 +989,227 @@ mod tests {
         assert_eq!(run(&mut translator(), &others), []);
     }
 
+    // -- typed text and input methods ---------------------------------------
+
+    const KEYCODE_E: c_uint = 18 + 8;
+
+    /// Feeds a key event, and then, for a press, what the backend looked up
+    /// for it.
+    fn key_typing(translator: &mut Translator, incoming: Incoming, typed: &str) -> Vec<Event> {
+        let mut out = Vec::new();
+        translator.handle(incoming, &mut out);
+        if let Incoming::Key {
+            pressed: true,
+            state,
+            ..
+        } = incoming
+        {
+            push_typed(typed, state, &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn what_a_press_typed_comes_after_it_and_with_each_repeat() {
+        let mut translator = translator();
+        let mut out = key_typing(&mut translator, press_at(KEYCODE_A, 10), "a");
+        out.extend(key_typing(&mut translator, press_at(KEYCODE_A, 40), "a"));
+        out.extend(key_typing(&mut translator, release(KEYCODE_A), ""));
+        assert_eq!(
+            out,
+            [
+                key_event(Key::A, true, false),
+                Event::Text('a'),
+                key_event(Key::A, true, true),
+                Event::Text('a'),
+                key_event(Key::A, false, false),
+            ]
+        );
+        // A press that typed nothing, and control characters, add no text.
+        let out = key_typing(&mut translator, press_at(KEYCODE_W, 50), "");
+        assert_eq!(out, [key_event(Key::W, true, false)]);
+        let out = key_typing(&mut translator, press_at(KEYCODE_W, 60), "\r\u{8}");
+        assert_eq!(out, [key_event(Key::W, true, true)]);
+    }
+
+    #[test]
+    fn a_composed_character_comes_as_text_with_no_key_of_its_own() {
+        let mut translator = translator();
+        // A dead key and E, which the input method takes, so that their
+        // presses type nothing, then the character it composed, as a press
+        // of keycode 0.
+        let mut out = run(
+            &mut translator,
+            &[taken_at(KEYCODE_W, 10), release(KEYCODE_W)],
+        );
+        out.extend(run(&mut translator, &[taken_at(KEYCODE_E, 20)]));
+        out.extend(key_typing(&mut translator, press_at(0, 20), "é"));
+        out.extend(run(&mut translator, &[release(KEYCODE_E)]));
+        assert_eq!(
+            out,
+            [
+                key_event(Key::W, true, false),
+                key_event(Key::W, false, false),
+                key_event(Key::E, true, false),
+                Event::Text('é'),
+                key_event(Key::E, false, false),
+            ]
+        );
+        // A server's commit can be several characters.
+        let out = key_typing(&mut translator, press_at(0, 30), "日本");
+        assert_eq!(out, [Event::Text('日'), Event::Text('本')]);
+    }
+
+    #[test]
+    fn a_press_sent_back_by_an_input_method_is_not_a_repeat() {
+        let mut translator = translator();
+        // Taken by a server, then sent back as the same event, which types.
+        let mut out = run(&mut translator, &[taken_at(KEYCODE_A, 100)]);
+        out.extend(key_typing(&mut translator, press_at(KEYCODE_A, 100), "a"));
+        // A repeat it takes, and its copy.
+        out.extend(run(&mut translator, &[taken_at(KEYCODE_A, 133)]));
+        out.extend(key_typing(&mut translator, press_at(KEYCODE_A, 133), "a"));
+        assert_eq!(
+            out,
+            [
+                key_event(Key::A, true, false),
+                Event::Text('a'),
+                key_event(Key::A, true, true),
+                Event::Text('a'),
+            ]
+        );
+        // Copies that come back after a later press was taken.
+        let taken = [taken_at(KEYCODE_A, 166), taken_at(KEYCODE_A, 199)];
+        let mut out = run(&mut translator, &taken);
+        let copies = [press_at(KEYCODE_A, 166), press_at(KEYCODE_A, 199)];
+        out.extend(run(&mut translator, &copies));
+        assert_eq!(
+            out,
+            [key_event(Key::A, true, true), key_event(Key::A, true, true)]
+        );
+        // Each keycode keeps its own time.
+        let out = run(&mut translator, &[press_at(KEYCODE_W, 133)]);
+        assert_eq!(out, [key_event(Key::W, true, false)]);
+    }
+
+    #[test]
+    fn a_press_half_the_server_clock_after_a_taken_one_is_reported() {
+        let mut translator = translator();
+        const HALF: Time = 1 << 31;
+        // Taken once, at a dead key that did not compose, say; then never.
+        let presses = [
+            taken_at(KEYCODE_A, 1000),
+            release(KEYCODE_A),
+            press_at(KEYCODE_A, 2000),
+            release(KEYCODE_A),
+            press_at(KEYCODE_A, 1000 + HALF + 5),
+        ];
+        let out = run(&mut translator, &presses);
+        let presses = out
+            .iter()
+            .filter(|event| matches!(event, Event::Key { pressed: true, .. }))
+            .count();
+        assert_eq!(presses, 3, "{out:?}");
+    }
+
+    #[test]
+    fn presses_no_input_method_took_are_all_reported() {
+        let mut translator = translator();
+        // Two presses in one millisecond, as a burst of synthetic typing
+        // can give.
+        let presses = [
+            press_at(KEYCODE_A, 50),
+            release(KEYCODE_A),
+            press_at(KEYCODE_A, 50),
+        ];
+        assert_eq!(
+            run(&mut translator, &presses),
+            [
+                key_event(Key::A, true, false),
+                key_event(Key::A, false, false),
+                key_event(Key::A, true, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_time_is_later_across_the_wrap_of_the_server_clock() {
+        assert!(is_later(2, 1));
+        assert!(!is_later(1, 1));
+        assert!(!is_later(1, 2));
+        // The clock wraps at 2^32 milliseconds.
+        assert!(is_later(5, 0xFFFF_FFF0));
+        assert!(!is_later(0xFFFF_FFF0, 5));
+        assert!(is_later(0x8000_0000, 1));
+        assert!(!is_later(0x8000_0001, 1));
+    }
+
+    #[test]
+    fn a_press_with_no_time_is_never_a_duplicate() {
+        let mut translator = translator();
+        let out = run(&mut translator, &[press(KEYCODE_A), press(KEYCODE_A)]);
+        assert_eq!(
+            out,
+            [
+                key_event(Key::A, true, false),
+                key_event(Key::A, true, true)
+            ]
+        );
+        // Not even after a press that an input method took, which has a
+        // time: a press sent with `XSendEvent` has none.
+        let presses = [
+            taken_at(KEYCODE_W, 100),
+            release(KEYCODE_W),
+            press(KEYCODE_W),
+        ];
+        assert_eq!(
+            run(&mut translator, &presses),
+            [
+                key_event(Key::W, true, false),
+                key_event(Key::W, false, false),
+                key_event(Key::W, true, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn nothing_is_typed_with_control_alt_or_super_and_alt_gr_types() {
+        /// `X11/X.h`: `#define ShiftMask (1<<0)`, `#define Mod2Mask (1<<4)`
+        /// (Num Lock, by convention), `#define Mod5Mask (1<<7)` (Alt Gr).
+        const SHIFT: c_uint = 1 << 0;
+        const NUM_LOCK: c_uint = 1 << 4;
+        const ALT_GR: c_uint = 1 << 7;
+        let typed = |state| {
+            let mut out = Vec::new();
+            push_typed("1€", state, &mut out);
+            out
+        };
+        // Control+1 types "1" in X, and Alt+1 and Super+1 do too.
+        for shortcut in [xlib::ControlMask, xlib::Mod1Mask, xlib::Mod4Mask] {
+            assert_eq!(typed(shortcut), [], "{shortcut:#x}");
+            assert_eq!(typed(shortcut | SHIFT | NUM_LOCK), [], "{shortcut:#x}");
+        }
+        let both = [Event::Text('1'), Event::Text('€')];
+        for typing in [0, SHIFT, NUM_LOCK, ALT_GR, SHIFT | ALT_GR | NUM_LOCK] {
+            assert_eq!(typed(typing), both, "{typing:#x}");
+        }
+    }
+
+    #[test]
+    fn only_a_focus_event_outside_a_grab_changes_the_focus() {
+        let focus = |gained, mode| Incoming::Focus { gained, mode };
+        assert_eq!(focus_change(focus(true, NOTIFY_NORMAL)), Some(true));
+        assert_eq!(focus_change(focus(false, NOTIFY_NORMAL)), Some(false));
+        assert_eq!(
+            focus_change(focus(false, NOTIFY_WHILE_GRABBED)),
+            Some(false)
+        );
+        assert_eq!(focus_change(focus(true, NotifyGrab)), None);
+        assert_eq!(focus_change(focus(false, NotifyUngrab)), None);
+        assert_eq!(focus_change(press(KEYCODE_A)), None);
+        assert_eq!(focus_change(Incoming::Other), None);
+    }
+
     // -- decoding -----------------------------------------------------------
 
     /// An event with every byte set, so that any member can be read.
@@ -939,8 +1269,22 @@ mod tests {
 
     #[test]
     fn key_events_are_decoded() {
-        assert_eq!(decode(&x_key(KeyPress, 25)), press(25));
-        assert_eq!(decode(&x_key(KeyRelease, 38)), release(38));
+        let press = Incoming::Key {
+            pressed: true,
+            keycode: 25,
+            time: 5,
+            state: 10,
+            taken: false,
+        };
+        assert_eq!(decode(&x_key(KeyPress, 25)), press);
+        let release = Incoming::Key {
+            pressed: false,
+            keycode: 38,
+            time: 5,
+            state: 10,
+            taken: false,
+        };
+        assert_eq!(decode(&x_key(KeyRelease, 38)), release);
     }
 
     #[test]

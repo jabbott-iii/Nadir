@@ -22,9 +22,13 @@ Built today:
 - A window (`Platform`): borderless fullscreen (native fullscreen on
   macOS), the title, hiding the pointer, size limits, and the scale factor.
 - Its events, polled without waiting: close requests, resizes, scale
-  factors, focus, physical keys with repeats, mouse motion, buttons and the
-  wheel. When the window loses the focus, every key and button still down
-  gets a release first.
+  factors, focus, physical keys with repeats, typed text, mouse motion,
+  buttons and the wheel. When the window loses the focus, every key and
+  button still down gets a release right after.
+- Typed text (`Event::Text`), a character at a time after the key press
+  that typed it, composed characters included: on Linux from an X input
+  method, on Windows from `WM_CHAR`, on macOS from a key press's
+  `characters`, with no input method there yet.
 - Frames while Windows drags or resizes the window, or macOS resizes it
   (`set_modal_frame_callback`).
 - On Linux, an OpenGL 3.3 core context for the window, and one that draws
@@ -37,9 +41,10 @@ Built today:
 - With the `dev` feature, an allocation counter.
 
 Not yet: OpenGL on Windows and macOS (roadmap tasks M2.6 and M2.7), audio
-output on Windows and macOS (M6.4 and M6.5), typed text (M7.9), gamepads
-(M8.1 to M8.3), Metal (M10.1), noticing that the window was minimized,
-holding the pointer inside the window, and native Wayland.
+output on Windows and macOS (M6.4 and M6.5), gamepads (M8.1 to M8.3), Metal
+(M10.1), showing a text being composed, an input method on macOS, noticing
+that the window was minimized, holding the pointer inside the window, and
+native Wayland.
 
 ## Usage
 

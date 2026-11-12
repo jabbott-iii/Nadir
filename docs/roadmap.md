@@ -4837,6 +4837,66 @@ by the batched sprite renderer.
     included.
   - Verify: `cargo test -p nadir-platform -p nadir-input`;
     `cargo run -p nadir-platform --example events` (manual, on each OS)
+  - Built on 2026-11-11 (ADR-0057, with the user's two choices: a reader
+    in nadir-input, and the locale taken from the environment on Linux):
+    - nadir-platform: `Event::Text(char)` after the key press that typed
+      it, never a control character, none for a shortcut (the rules in a
+      `text` module that every system's tests run). Linux: an X input
+      method, the one `XMODIFIERS` names or Xlib's own, in the
+      environment's `LC_CTYPE`; events decoded before `XFilterEvent`, keys
+      it takes still keys, a server's copies of its presses left out, one
+      window of the process at a time with an input method. Windows:
+      `WM_CHAR`, surrogates joined, shortcuts by `GetKeyState`. macOS: a key
+      press's `characters`, with its `modifierFlags`, without Apple's
+      function-key characters. A focus loss now comes before the releases
+      of what was held.
+    - nadir-sys: Xlib's input method functions (`XCreateIC` and the other
+      variadics through `dynlib!`, which now takes `...`), `setlocale`,
+      `WM_CHAR`, `GetKeyState`.
+    - nadir-input: `UiEvents` (`UiEvent`), a UI's reader of the window's
+      keys with their repeats, typed text and mouse, in order, cleared each
+      frame; `Capture` and `Input::set_capture`, which hide the keyboard or
+      the mouse (and the wheel) from every action, `ui_allowed` ones too.
+  - Tests: `cargo test -p nadir-sys -p nadir-platform -p nadir-input` (sys
+    14, platform 126 and 2 ignored, input 58, and their doc tests): the
+    text rules, each translator's text (Windows and macOS compiled only),
+    an input method's copies, the server clock's wrap, capture and
+    `UiEvents`; the 2 ignored window tests with `--ignored
+    --test-threads=1` in this XWayland session, one of which sends key
+    presses to its own window through the server and Xlib's input method
+    (a, Shift+A typed; Control+A, Alt+A, Enter not). Clippy for Linux
+    (x86_64 and aarch64), and x86_64 and aarch64 Windows and macOS, from
+    Linux; `cargo xtask ci`.
+  - Linux check of the events example, on 2026-11-11, in GNOME's XWayland:
+    key presses sent to its window by a script through the X server
+    (`XSendEvent`), not typed by a person, with `XCOMPOSEFILE` naming a
+    Compose file of test sequences (this keymap has no dead key or Compose
+    key): F12 e gave `Text('é')`, F12 o `Text('ő')`, F12 c e `Text('€')`,
+    each after the press of the key that ended it and before its release;
+    a gave `Text('a')`, Shift+b `Text('B')`. In the C locale the same
+    sequences came out as mojibake, which the locale step avoids.
+  - Review: three critics of the design, whose findings led to decoding
+    before `XFilterEvent`, the process-wide guard, GLFW's rule for copies,
+    shortcuts from each press's own modifiers, capture hiding `ui_allowed`
+    actions too, and the focus loss before its releases; two reviewers
+    with a skeptic a finding, 8 confirmed and fixed (keys a Windows input
+    method editor takes kept as keys, `GetKeyState` for Windows shortcuts,
+    a stale taken time cleared, the locale name asked again, four
+    comments and an offset assertion), 2 refuted. Of the 28 bugs planted
+    in what Linux can test (the text rules, the X translator, capture,
+    `UiEvents`), all fail the tests; one of an earlier run passed them at
+    first (a press with no time, after a taken one), and a test was added.
+  - ⏳ needs Windows: in the events example, typed text (`Text` after its
+    key, repeats), a character outside the Basic Multilingual Plane (an
+    emoji from Win+.), Alt Gr characters on a German layout, nothing typed
+    with Control+Space, Control+1 or the Windows key, nothing with Alt+key;
+    with Microsoft Pinyin on, the keys still reported; `cargo test -p
+    nadir-platform` there (the translator's tests).
+  - ⏳ needs macOS: in the events example, typed text after its key and
+    with repeats, Option characters (Option+a gives å), a dead key
+    (Option+e, then e, gives é) through `characters`, nothing with ⌘ or
+    Control, no character for the arrows and function keys; `cargo test -p
+    nadir-platform` there.
 
 - [ ] **M7.10 — facade: the debug UI in the game**
   - Added on 2026-11-10 (ADR-0056): M7.2 builds the debug UI in
@@ -4863,6 +4923,27 @@ by the batched sprite renderer.
     (ADR-0039), and an entry in `[workspace.dependencies]`. Checking that
     a frame of the debug UI allocates nothing once warm is the facade's
     (`FrameAllocs`): nadir-debug cannot count allocations.
+  - Note (from M7.9, ADR-0057):
+    - Feed a `nadir_input::UiEvents` with the frame's events beside
+      `Input`, and `DebugInput` from it in order: `PointerMoved` to
+      `pointer_moved`, `Button` to `button`, `Wheel` to `wheel`, `Key` to
+      `key`, `Text(c)` to `text(c.encode_utf8(..))`, `FocusLost` to
+      `focus_lost`. Clear it every frame, also while the debug UI is hidden
+      (then `DebugInput::clear()` too): past 4096 events it drops the oldest
+      half, releases among them.
+    - `Input::set_capture(Capture { keyboard: wants_keyboard, mouse:
+      wants_mouse })` holds the game's actions off, `ui_allowed` ones too,
+      and the wheel's turns; set it before the frame's events are fed, and
+      to `Capture::NONE` while the debug UI is hidden.
+    - `wants_mouse` is the last frame's: a press in the frame the pointer
+      arrives over a window reaches the game for a tick, and is then
+      released; one in the frame it leaves is hidden from the game. Feeding
+      `Input` an event at a time, with the capture decided at each press by
+      a hit test against the last frame's windows, avoids both.
+    - `Capture` is one value: combine the debug UI's with any the game's
+      own UI sets. A game UI that reads `UiEvents` too must skip what the
+      debug UI took.
+    - On Linux, one window of the process at a time has an X input method.
   - Do: under `dev`: the window's size as a resource; the debug UI's input
     fed from window events; the debug UI drawn into `RenderFrame::ui` at
     the settings' free scale, after the game's UI, in a font of the
@@ -5339,7 +5420,7 @@ three OSes from a tag, and the release checklist is complete.
 | :- | :- |
 | Native Wayland (`libwayland-client` via `dlopen`, xdg-shell, `libxkbcommon`, client-side decorations) | A target distro ships without XWayland by default, or player reports from Wayland-only setups |
 | HID gamepads on Windows (DualSense, Switch Pro) | Player demand; Steam Input covers many Steam players meanwhile |
-| IME (`NSTextInputClient`, XIM preedit, Windows IMM) | Localization into CJK languages or a name-entry feature |
+| IME (`NSTextInputClient`, XIM preedit, Windows IMM): macOS types through a key press's `characters` only, with no input method, and no system shows a text being composed; on Linux and Windows a key that an input method takes still reaches gameplay and a UI as a key (M7.9, ADR-0057) | Localization into CJK languages, a name-entry feature, or a Mac whose dead keys do not compose through `characters` |
 | TrueType rasterizer in cook (glyf outlines → bitmap atlases) | Localization beyond the hand-made bitmap fonts |
 | 2D lighting pass (`light2d`) | Art direction asks for it |
 | Native PipeWire audio | ALSA-compatibility issues reported |

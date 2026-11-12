@@ -22,16 +22,66 @@ use crate::code::{Code, CodeSet};
 use crate::state::{self, HELD, JUST_PRESSED, JUST_RELEASED, Latched, ONE};
 use crate::{ActionKind, ActionMap, ActionSet, ActionState, Binding};
 
+/// What a UI holds back from gameplay actions, while it has them: the keys,
+/// the mouse, both or neither. See [`Input::set_capture`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Capture {
+    /// The keys: while a text field has the keyboard.
+    pub keyboard: bool,
+    /// The mouse buttons and the wheel: while the pointer is over a UI's
+    /// window, or holding one of its widgets.
+    pub mouse: bool,
+}
+
+impl Capture {
+    /// Nothing held back.
+    pub const NONE: Self = Self {
+        keyboard: false,
+        mouse: false,
+    };
+
+    /// The keys.
+    pub const KEYBOARD: Self = Self {
+        keyboard: true,
+        mouse: false,
+    };
+
+    /// The mouse buttons and the wheel.
+    pub const MOUSE: Self = Self {
+        keyboard: false,
+        mouse: true,
+    };
+
+    /// The keys, the mouse buttons and the wheel.
+    pub const ALL: Self = Self {
+        keyboard: true,
+        mouse: true,
+    };
+
+    /// The codes of the devices it holds back.
+    fn codes(self) -> CodeSet {
+        let mut codes = CodeSet::default();
+        if self.keyboard {
+            codes = codes.union(CodeSet::KEYS);
+        }
+        if self.mouse {
+            codes = codes.union(CodeSet::MOUSE);
+        }
+        codes
+    }
+}
+
 /// A change to the keys and buttons, kept in the order it happened.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Change {
     Press(Code),
     Release(Code),
     TextMode(bool),
+    Capture(Capture),
 }
 
-/// The keys and buttons that are down, and which of those gameplay actions
-/// cannot see.
+/// The keys and buttons that are down, and which of those actions cannot
+/// see.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Devices {
     down: CodeSet,
@@ -39,7 +89,12 @@ struct Devices {
     /// mode began or was pressed during it, until it is released. Always
     /// part of `down`.
     hidden: CodeSet,
+    /// Down, but hidden from every action, `ui_allowed` ones too: whatever
+    /// was held when the capture of its device began or was pressed during
+    /// it, until it is released. Always part of `down`.
+    captured: CodeSet,
     text_mode: bool,
+    capture: Capture,
 }
 
 impl Devices {
@@ -50,10 +105,14 @@ impl Devices {
                 if self.text_mode {
                     self.hidden.insert(code);
                 }
+                if self.capture.codes().contains(code) {
+                    self.captured.insert(code);
+                }
             }
             Change::Release(code) => {
                 self.down.remove(code);
                 self.hidden.remove(code);
+                self.captured.remove(code);
             }
             Change::TextMode(on) => {
                 if on {
@@ -61,13 +120,20 @@ impl Devices {
                 }
                 self.text_mode = on;
             }
+            Change::Capture(capture) => {
+                let held = self.down.intersection(capture.codes());
+                self.captured = self.captured.union(held);
+                self.capture = capture;
+            }
         }
     }
 
-    /// Whether an action sees `code` down. A `ui_allowed` action sees
-    /// everything.
+    /// Whether an action sees `code` down. A `ui_allowed` action sees what
+    /// text mode hides, and no action sees what a capture hides.
     fn sees_down(&self, code: Code, ui_allowed: bool) -> bool {
-        self.down.contains(code) && (ui_allowed || !self.hidden.contains(code))
+        self.down.contains(code)
+            && !self.captured.contains(code)
+            && (ui_allowed || !self.hidden.contains(code))
     }
 }
 
@@ -114,9 +180,12 @@ impl Input {
     /// - Key repeats are ignored, and so are a press of a key that is down
     ///   and a release of one that is up.
     /// - When the window loses the focus, everything still down is
-    ///   released. (The platform releases them first anyway.)
+    ///   released. (The platform releases them right after anyway.)
+    /// - The wheel's turns while the mouse is captured
+    ///   ([`Input::set_capture`]) are not counted.
     /// - Other events than keys, mouse buttons, the pointer, the wheel and
-    ///   the focus are ignored.
+    ///   the focus are ignored, typed text among them: a UI reads it, with
+    ///   the keys' repeats, from [`UiEvents`](crate::UiEvents).
     pub fn handle(&mut self, event: &Event) {
         match *event {
             Event::Key {
@@ -136,7 +205,7 @@ impl Input {
                 }
             }
             Event::MouseMoved(position) => self.pointer = position,
-            Event::MouseWheel(delta) => self.pending_wheel += delta,
+            Event::MouseWheel(delta) if !self.now.capture.mouse => self.pending_wheel += delta,
             _ => {}
         }
     }
@@ -158,6 +227,33 @@ impl Input {
     /// Whether text mode is on.
     pub fn text_mode(&self) -> bool {
         self.now.text_mode
+    }
+
+    /// Holds the keyboard, the mouse, both or neither back from gameplay
+    /// actions, from this point among the events: for a UI that has them,
+    /// such as a debug window under the pointer or its text field.
+    ///
+    /// A device it holds back is the UI's alone: its keys or buttons that
+    /// are down when its capture begins, and those pressed while it lasts,
+    /// are hidden from every action until they are released, `ui_allowed`
+    /// ones too, which text mode leaves live: Escape that leaves a UI's text
+    /// field does not also pause the game. An action held when its device's
+    /// capture begins is just released on the next tick, and ending it
+    /// presses nothing. While the mouse is held back, the wheel's turns are
+    /// not counted in [`Input::wheel`]; the pointer still moves.
+    ///
+    /// It is separate from text mode: a key or button is hidden if either
+    /// hides it. Replays are not held back: while one plays, the actions come
+    /// from it.
+    pub fn set_capture(&mut self, capture: Capture) {
+        if self.now.capture != capture {
+            self.change(Change::Capture(capture));
+        }
+    }
+
+    /// What is held back from gameplay actions: see [`Input::set_capture`].
+    pub fn capture(&self) -> Capture {
+        self.now.capture
     }
 
     /// Where the pointer is: physical pixels from the top-left corner of
@@ -390,6 +486,16 @@ mod tests {
 
         fn text_mode(&mut self, on: bool) -> &mut Self {
             self.input.set_text_mode(on);
+            self
+        }
+
+        fn capture(&mut self, capture: Capture) -> &mut Self {
+            self.input.set_capture(capture);
+            self
+        }
+
+        fn wheel(&mut self, lines: f32) -> &mut Self {
+            self.input.handle(&Event::MouseWheel(Vec2::new(0.0, lines)));
             self
         }
 
@@ -671,6 +777,150 @@ mod tests {
     }
 
     #[test]
+    fn capturing_the_keyboard_hides_the_keys_and_not_the_mouse() {
+        let mut game = Game::new();
+        game.press(Key::W).press(Key::Escape).tick();
+        game.capture(Capture::KEYBOARD).tick();
+        assert_eq!(game.input.capture(), Capture::KEYBOARD);
+        assert!(!game.input.text_mode(), "capture is not text mode");
+        assert_eq!(game.edges(Act::Move), RELEASED);
+        assert_eq!(
+            game.edges(Act::Pause),
+            RELEASED,
+            "not even a ui_allowed action sees it"
+        );
+        // Keys pressed while it lasts are hidden; the mouse is not.
+        game.press(Key::Space).tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        game.release(Key::Space)
+            .mouse(MouseButton::Left, true)
+            .tick();
+        assert_eq!(game.edges(Act::Jump), PRESSED);
+        game.wheel(2.0).tick();
+        assert_eq!(game.input.wheel(), Vec2::new(0.0, 2.0));
+    }
+
+    #[test]
+    fn capturing_the_mouse_hides_the_buttons_and_the_wheel_and_not_the_keys() {
+        let mut game = Game::new();
+        game.mouse(MouseButton::Left, true).tick();
+        assert_eq!(game.edges(Act::Jump), PRESSED);
+        game.capture(Capture::MOUSE).wheel(1.0).tick();
+        assert_eq!(game.edges(Act::Jump), RELEASED, "held when it began");
+        assert_eq!(game.input.wheel(), Vec2::ZERO);
+        game.input.handle(&Event::MouseMoved(Vec2::new(3.0, 4.0)));
+        assert_eq!(
+            game.input.pointer(),
+            Vec2::new(3.0, 4.0),
+            "the pointer moves"
+        );
+        // A key still drives its action.
+        game.press(Key::Space).tick();
+        assert_eq!(game.edges(Act::Jump), PRESSED);
+        game.release(Key::Space)
+            .mouse(MouseButton::Left, false)
+            .mouse(MouseButton::Left, true)
+            .tick();
+        assert_eq!(game.edges(Act::Jump), RELEASED, "the click is the UI's");
+        // The wheel counts again from the end of the capture, in order.
+        game.wheel(1.0).capture(Capture::NONE).wheel(3.0).tick();
+        assert_eq!(game.input.wheel(), Vec2::new(0.0, 3.0));
+    }
+
+    #[test]
+    fn escape_that_leaves_a_ui_field_does_not_pause_the_game() {
+        let mut game = Game::new();
+        game.capture(Capture::KEYBOARD)
+            .press(Key::Escape)
+            .release(Key::Escape)
+            .capture(Capture::NONE)
+            .tick();
+        assert_eq!(game.edges(Act::Pause), UP);
+        // In text mode, the game's own field, it is live.
+        game.text_mode(true)
+            .press(Key::Escape)
+            .release(Key::Escape)
+            .tick();
+        assert_eq!(game.edges(Act::Pause), TAPPED);
+        // With both, the capture wins.
+        game.capture(Capture::KEYBOARD).press(Key::Escape).tick();
+        assert_eq!(game.edges(Act::Pause), UP);
+    }
+
+    #[test]
+    fn ending_a_capture_presses_nothing_that_is_still_held() {
+        let mut game = Game::new();
+        game.capture(Capture::ALL)
+            .press(Key::Space)
+            .press(Key::D)
+            .tick();
+        game.capture(Capture::NONE).tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        assert_eq!(game.movement(), Vec2::ZERO);
+        game.release(Key::Space).release(Key::D).tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        game.press(Key::Space).tick();
+        assert_eq!(game.edges(Act::Jump), PRESSED);
+    }
+
+    #[test]
+    fn a_press_just_before_a_capture_is_a_tap() {
+        let mut game = Game::new();
+        game.press(Key::Space).capture(Capture::KEYBOARD).tick();
+        assert_eq!(game.edges(Act::Jump), TAPPED);
+        game.tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        // Taken back within the tick, it still hides what it saw held.
+        game.capture(Capture::NONE).tick();
+        game.release(Key::Space).press(Key::W).tick();
+        assert_eq!(game.movement(), Vec2::new(0.0, -1.0));
+        game.capture(Capture::KEYBOARD)
+            .capture(Capture::NONE)
+            .tick();
+        assert_eq!(game.edges(Act::Move), RELEASED);
+    }
+
+    #[test]
+    fn a_capture_and_text_mode_hide_what_either_hides() {
+        let mut game = Game::new();
+        // Text mode ends while the keyboard is held back: keys pressed then
+        // are still hidden.
+        game.text_mode(true).capture(Capture::KEYBOARD).tick();
+        game.text_mode(false).press(Key::Space).tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        // The mouse is held back by neither now.
+        game.mouse(MouseButton::Left, true).tick();
+        assert_eq!(game.edges(Act::Jump), PRESSED);
+        // Text mode hides the mouse while only the keyboard is held back.
+        game.mouse(MouseButton::Left, false).text_mode(true).tick();
+        game.mouse(MouseButton::Left, true).tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        // The capture ends, text mode stays: still hidden.
+        game.mouse(MouseButton::Left, false)
+            .capture(Capture::NONE)
+            .press(Key::W)
+            .tick();
+        assert_eq!(game.movement(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn captures_never_latched_use_bounded_memory() {
+        let mut game = Game::new();
+        for _ in 0..MAX_CHANGES {
+            game.capture(Capture::ALL).capture(Capture::NONE);
+        }
+        assert!(game.input.changes.len() <= MAX_CHANGES);
+        game.press(Key::Space).capture(Capture::KEYBOARD).tick();
+        assert_eq!(game.edges(Act::Jump), TAPPED);
+        game.tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        // A capture set again to what it is changes nothing.
+        let before = game.input.changes.len();
+        game.capture(Capture::KEYBOARD);
+        assert_eq!(game.input.changes.len(), before);
+    }
+
+    #[test]
     fn the_wheel_is_counted_per_tick_and_the_pointer_is_the_latest() {
         let mut game = Game::new();
         for delta in [Vec2::new(0.0, 1.0), Vec2::new(0.5, 2.0)] {
@@ -691,6 +941,7 @@ mod tests {
         let mut game = Game::new();
         game.input.handle(&Event::Focused(true));
         game.input.handle(&Event::CloseRequested);
+        game.input.handle(&Event::Text('a'));
         game.input
             .handle(&Event::Resized(nadir_core::UVec2::new(10, 10)));
         assert!(game.input.changes.is_empty());

@@ -70,6 +70,10 @@ impl std::error::Error for MissingSymbols {}
 /// field has the function's C name and is an `unsafe extern` function pointer
 /// with the calling convention given. The struct also gets
 /// `unsafe fn load(&dyn Library) -> Result<Self, MissingSymbols>`.
+///
+/// A function that C declares with `...` ends its parameters with `...` here
+/// too: `fn XCreateIC(im: XIM, ...) -> XIC;`. Each argument after the named
+/// ones must then be passed with the exact type that C reads it as.
 //
 // Only Linux has tables so far. An unused macro is a warning, which CI treats
 // as an error, so the macro exists only where something uses it. Name each
@@ -81,7 +85,9 @@ macro_rules! dynlib {
         $vis:vis struct $table:ident: extern $abi:literal {
             $(
                 $(#[$symbol_attr:meta])*
-                fn $symbol:ident($($arg:ident: $arg_ty:ty),* $(,)?) $(-> $ret:ty)?;
+                // The parameters as they are, `...` included: a function
+                // pointer type takes the same list.
+                fn $symbol:ident($($params:tt)*) $(-> $ret:ty)?;
             )+
         }
     ) => {
@@ -92,7 +98,7 @@ macro_rules! dynlib {
         $vis struct $table {
             $(
                 $(#[$symbol_attr])*
-                pub $symbol: unsafe extern $abi fn($($arg: $arg_ty),*) $(-> $ret)?,
+                pub $symbol: unsafe extern $abi fn($($params)*) $(-> $ret)?,
             )+
         }
 
@@ -144,7 +150,7 @@ macro_rules! dynlib {
                         $symbol: unsafe {
                             ::core::mem::transmute::<
                                 *const ::core::ffi::c_void,
-                                unsafe extern $abi fn($($arg_ty),*) $(-> $ret)?,
+                                unsafe extern $abi fn($($params)*) $(-> $ret)?,
                             >($symbol)
                         },
                     )+
@@ -310,6 +316,57 @@ mod tests {
         let empty = Fake::with(Vec::new());
         assert!(load(&empty).is_err());
         assert_eq!(*empty.asked.borrow(), expected);
+    }
+
+    /// The C library's `snprintf`, which takes a variable number of
+    /// arguments.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    mod variadic {
+        use core::ffi::{CStr, c_char, c_int, c_long, c_void};
+
+        use super::Fake;
+
+        unsafe extern "C" {
+            /// `stdio.h`: `int snprintf(char *str, size_t size, const char
+            /// *format, ...)`
+            fn snprintf(str: *mut c_char, size: usize, format: *const c_char, ...) -> c_int;
+        }
+
+        dynlib! {
+            /// A table whose function takes more arguments than it names.
+            struct Formatting: extern "C" {
+                /// `stdio.h`: `int snprintf(char *str, size_t size, const
+                /// char *format, ...)`
+                fn snprintf(str: *mut c_char, size: usize, format: *const c_char, ...) -> c_int;
+            }
+        }
+
+        #[test]
+        fn a_variadic_function_gets_the_arguments_after_its_named_ones() {
+            let library = Fake::with(vec![("snprintf", snprintf as *const c_void)]);
+            // SAFETY: the only symbol is the C library's `snprintf`, of the
+            // type the table declares, which is never unloaded.
+            let table =
+                unsafe { Formatting::load(&library) }.unwrap_or_else(|error| panic!("{error}"));
+            let mut buffer = [0 as c_char; 32];
+            // SAFETY: the buffer has room for the size given, and the format
+            // reads an `int`, a string and a `long`, which follow it.
+            let written = unsafe {
+                (table.snprintf)(
+                    buffer.as_mut_ptr(),
+                    buffer.len(),
+                    c"%d %s %ld".as_ptr(),
+                    -7 as c_int,
+                    c"text".as_ptr(),
+                    1_234_567 as c_long,
+                )
+            };
+            assert_eq!(written, 15);
+            // SAFETY: `snprintf` ended what it wrote with a NUL, within the
+            // buffer.
+            let text = unsafe { CStr::from_ptr(buffer.as_ptr()) };
+            assert_eq!(text, c"-7 text 1234567");
+        }
     }
 
     #[test]

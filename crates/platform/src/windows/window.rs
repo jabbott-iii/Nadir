@@ -27,9 +27,15 @@
 //! own inside [`DispatchMessageW`], and our pump does not return. A timer
 //! then runs the modal frame callback, so that the game goes on.
 //!
+//! Typed text comes from `WM_CHAR`, which `TranslateMessage` posts after the
+//! key press that typed it, with the modifiers `GetKeyState` gives for it.
+//! Alt's characters (`WM_SYSCHAR`) and dead keys (`WM_DEADCHAR`) are left to
+//! `DefWindowProcW`: they are the window menu's, and the start of a
+//! character `WM_CHAR` brings. A key that an input method editor takes
+//! (`VK_PROCESSKEY`) is still reported, by its scan code.
+//!
 //! What this backend does not do yet, because nothing has needed it:
 //!
-//! - It reports no typed text (`WM_CHAR`).
 //! - It does not notice the window being minimized, except that a minimized
 //!   window reports no size.
 //! - It does not hold the pointer inside the window (`ClipCursor`).
@@ -54,19 +60,20 @@ use nadir_sys::windows::types::{
 use nadir_sys::windows::user32::{
     AdjustWindowRectExForDpi, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW,
     DefWindowProcW, DestroyWindow, DispatchMessageW, GWL_STYLE, GWLP_USERDATA, GetDpiForWindow,
-    GetMonitorInfoW, GetWindowLongPtrW, GetWindowPlacement, HWND_TOP, IDC_ARROW, KillTimer,
-    LoadCursorW, MINMAXINFO, MONITOR_DEFAULTTONEAREST, MONITORINFO, MSG, MonitorFromWindow,
-    PM_REMOVE, PeekMessageW, RegisterClassExW, ReleaseCapture, SC_KEYMENU, SW_HIDE, SW_SHOW,
-    SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-    SWP_NOZORDER, SetCapture, SetProcessDpiAwarenessContext, SetTimer, SetWindowLongPtrW,
-    SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowCursor, ShowWindow, TranslateMessage,
-    USER_DEFAULT_SCREEN_DPI, UnregisterClassW, WINDOWPLACEMENT, WM_DPICHANGED, WM_ENTERSIZEMOVE,
-    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER,
-    WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED,
-    WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU,
+    GetKeyState, GetMonitorInfoW, GetWindowLongPtrW, GetWindowPlacement, HWND_TOP, IDC_ARROW,
+    KillTimer, LoadCursorW, MINMAXINFO, MONITOR_DEFAULTTONEAREST, MONITORINFO, MSG,
+    MonitorFromWindow, PM_REMOVE, PeekMessageW, RegisterClassExW, ReleaseCapture, SC_KEYMENU,
+    SW_HIDE, SW_SHOW, SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetCapture, SetProcessDpiAwarenessContext,
+    SetTimer, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowCursor,
+    ShowWindow, TranslateMessage, USER_DEFAULT_SCREEN_DPI, UnregisterClassW, VK_CONTROL, VK_LWIN,
+    VK_MENU, VK_RWIN, WINDOWPLACEMENT, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+    WM_GETMINMAXINFO, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN,
+    WM_XBUTTONUP, WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_OVERLAPPEDWINDOW,
+    WS_POPUP, WS_SYSMENU,
 };
 
-use super::input::{Incoming, Translator};
+use super::input::{Incoming, Modifiers, Translator};
 use super::wide;
 use crate::no_gl::NO_GL;
 use crate::{Event, GpuSurface, ModalFrame, PlatformError, WindowConfig};
@@ -577,7 +584,10 @@ impl WindowState {
                 Some(0)
             }
             _ => {
-                let incoming = Incoming::decode(message, wparam, lparam);
+                let mut incoming = Incoming::decode(message, wparam, lparam);
+                if let Incoming::Char { modifiers, .. } = &mut incoming {
+                    *modifiers = held_modifiers();
+                }
                 let any_button_down = {
                     let mut translator = self.translator.borrow_mut();
                     translator.handle(incoming, &mut self.events.borrow_mut());
@@ -633,6 +643,18 @@ impl WindowState {
         callback(frame);
         let replaced = self.modal_frame.take();
         self.modal_frame.set(replaced.or(Some(callback)));
+    }
+}
+
+/// The modifiers down as of the message being handled, which Windows keeps
+/// with the thread's queue: also one that went down before the window had
+/// the focus, whose press the translator never saw.
+fn held_modifiers() -> Modifiers {
+    let down = |key| GetKeyState(key).cast_unsigned() & 0x8000 != 0;
+    Modifiers {
+        control: down(VK_CONTROL),
+        alt: down(VK_MENU),
+        command: down(VK_LWIN) || down(VK_RWIN),
     }
 }
 

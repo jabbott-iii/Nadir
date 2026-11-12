@@ -25,11 +25,15 @@ Built today:
 - latching once a tick that keeps every change between two ticks, so that
   a tap between them is not lost;
 - text mode, in which only the actions allowed in the UI stay live;
+- capture of the keyboard or the mouse, which hides it from every action
+  while a UI has it;
+- a UI's events (`UiEvents`): the keys with their repeats, typed text and the
+  mouse, in order, a frame at a time;
 - replays of the actions' state, tick by tick, read strictly.
 
 Not yet: gamepads, deadzones and the active device come with roadmap task
-M8.4, the rebinding capture flow with M9.2, bindings in the settings file
-with M9.3, and typed text with M7.9.
+M8.4, the rebinding capture flow with M9.2, and bindings in the settings
+file with M9.3.
 
 ## Usage
 

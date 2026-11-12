@@ -18,10 +18,21 @@
 //! the frame buffer config first, and the window is made with the X visual
 //! of that config.
 //!
+//! Typed text comes from an X input method: the one `XMODIFIERS` names, if
+//! it opens, or else Xlib's own, which composes characters from the
+//! locale's Compose file. Each event goes to `XFilterEvent` first. A key
+//! press that an input method takes (a dead key, a step of a Compose
+//! sequence, a press sent to a server) is still reported as a key, but types
+//! nothing then; what it composes comes later, as a key press of keycode 0
+//! that `Xutf8LookupString` reads. Opening the window takes the C library's
+//! character locale from the environment if it is still "C", in which Xlib
+//! would type Latin-1 only.
+//!
 //! What this backend does not do yet, because nothing has needed it:
 //!
-//! - It reports no typed text. Key events say which physical keys moved,
-//!   and nothing about the characters they stand for.
+//! - It shows nothing of a text being composed (an input method's preedit),
+//!   and opens the input method only once: if its server exits, nothing is
+//!   typed until the game starts again.
 //! - It reads the scale factor once, when the window opens, from the
 //!   `Xft.dpi` resource. A change of the desktop's scale while the game runs
 //!   goes unnoticed. Under XWayland the compositor decides what it tells X
@@ -176,7 +187,8 @@ impl Backend {
             connection,
         };
 
-        backend.connection.select_input(window, EVENT_MASK);
+        let typing = backend.connection.open_text_input(window);
+        backend.connection.select_input(window, EVENT_MASK | typing);
         backend.set_title(&config.title);
         let mut protocols = [backend.atoms.wm_delete_window];
         if !backend.connection.set_protocols(window, &mut protocols) {
@@ -213,11 +225,40 @@ impl Backend {
         self.translator.begin_pump(out);
         // `pending` also sends the requests that the other methods queued.
         while self.connection.pending() > 0 {
-            let event = self.connection.next_event();
+            let mut event = self.connection.next_event();
+            // Read before the input methods see it: Xlib's own sets the
+            // keycode of the press that ends a Compose sequence to 0 when it
+            // takes it, and sends its text as a copy of that press.
             // SAFETY: Xlib wrote the event, so its type and the member that
             // the type selects are initialized.
-            let incoming = unsafe { Incoming::decode(&event) };
+            let mut incoming = unsafe { Incoming::decode(&event) };
+            // SAFETY: the event came from `next_event`.
+            let taken = unsafe { self.connection.filter_event(&mut event) };
+            if let Incoming::Key { taken: key, .. } = &mut incoming {
+                *key = taken;
+            }
+            let is_key = matches!(incoming, Incoming::Key { .. });
+            // Any other event an input method takes is its own. A key it
+            // takes still moved: only what it types is the input method's.
+            if taken && !is_key {
+                continue;
+            }
             self.translator.handle(incoming, out);
+            if let Incoming::Key {
+                pressed: true,
+                state,
+                ..
+            } = incoming
+                && !taken
+            {
+                // SAFETY: the event came from `next_event`, is a key press,
+                // and no input method took it.
+                let typed = unsafe { self.connection.lookup_text(&mut event) };
+                input::push_typed(typed, state, out);
+            }
+            if let Some(focused) = input::focus_change(incoming) {
+                self.connection.set_text_focus(focused);
+            }
         }
     }
 
@@ -311,8 +352,10 @@ impl Backend {
 
 impl Drop for Backend {
     fn drop(&mut self) {
-        // The window's surface goes before the window does.
+        // The window's surface and its input context go before the window
+        // does.
         self.gl.release();
+        self.connection.close_text_input();
         if let Some(cursor) = self.blank_cursor.take() {
             self.connection.free_cursor(cursor);
         }
@@ -592,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "opens windows: run it with --ignored in an X11 or XWayland session"]
+    #[ignore = "opens windows: run it with --ignored --test-threads=1 in an X11 or XWayland session"]
     fn a_window_gets_an_opengl_3_3_core_context_each_time() {
         // Three times, because an EGL display that is not terminated before
         // its connection closes breaks a later window (seen on Mesa's iris).
@@ -615,6 +658,112 @@ mod tests {
                 gl.swap_buffers().unwrap();
             }
         }
+    }
+
+    #[test]
+    #[ignore = "opens a window: run it with --ignored --test-threads=1 in an X11 or XWayland session"]
+    fn key_presses_sent_to_the_window_type_text_through_its_input_method() {
+        use core::ffi::c_uint;
+
+        // X keycodes: the evdev code plus 8.
+        const A: c_uint = 30 + 8;
+        const LEFT_SHIFT: c_uint = 42 + 8;
+        const LEFT_CONTROL: c_uint = 29 + 8;
+        const ENTER: c_uint = 28 + 8;
+        const LEFT_ALT: c_uint = 56 + 8;
+        /// `X11/X.h`: `#define ShiftMask (1<<0)`
+        const SHIFT_MASK: c_uint = 1 << 0;
+        const CONTROL_MASK: c_uint = nadir_sys::linux::x11::ControlMask;
+        const MOD1_MASK: c_uint = nadir_sys::linux::x11::Mod1Mask;
+
+        let config = WindowConfig {
+            title: "Nadir test".to_string(),
+            size: UVec2::new(320, 180),
+            min_size: UVec2::ZERO,
+            resizable: true,
+            fullscreen: false,
+            vsync: true,
+        };
+        let mut backend = Backend::new(&config).unwrap();
+        assert!(
+            backend.connection.has_text_input(),
+            "no X input method opened"
+        );
+        // The focus is the compositor's to give; the input method is told
+        // it has it.
+        backend.connection.set_text_focus(true);
+        let sent = [
+            (A, true, 0),
+            (A, false, 0),
+            (LEFT_SHIFT, true, 0),
+            (A, true, SHIFT_MASK),
+            (A, false, SHIFT_MASK),
+            (LEFT_SHIFT, false, SHIFT_MASK),
+            (LEFT_CONTROL, true, 0),
+            (A, true, CONTROL_MASK),
+            (A, false, CONTROL_MASK),
+            (LEFT_CONTROL, false, CONTROL_MASK),
+            (LEFT_ALT, true, 0),
+            (A, true, MOD1_MASK),
+            (A, false, MOD1_MASK),
+            (LEFT_ALT, false, MOD1_MASK),
+            (ENTER, true, 0),
+            (ENTER, false, 0),
+        ];
+        for (keycode, pressed, state) in sent {
+            backend
+                .connection
+                .send_key(backend.window, keycode, pressed, state);
+        }
+        // An input method server types after a round trip: pump until both
+        // characters came, then a little longer, for any that should not.
+        let mut out = Vec::new();
+        let typed = |out: &[Event]| -> Vec<(usize, char)> {
+            out.iter()
+                .enumerate()
+                .filter_map(|(at, event)| match *event {
+                    Event::Text(typed) => Some((at, typed)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let start = std::time::Instant::now();
+        let mut settled = None;
+        while start.elapsed() < std::time::Duration::from_secs(5) {
+            backend.pump_events(&mut out);
+            if typed(&out).len() >= 2 {
+                let since = *settled.get_or_insert_with(std::time::Instant::now);
+                if since.elapsed() > std::time::Duration::from_millis(200) {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let typed = typed(&out);
+        let characters: Vec<char> = typed.iter().map(|&(_, typed)| typed).collect();
+        // Control+A, Alt+A and Enter type nothing.
+        assert_eq!(characters, ['a', 'A'], "{out:?}");
+        // Each character after the press that typed it, and the first before
+        // the second press.
+        let presses: Vec<usize> = out
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| {
+                **event
+                    == Event::Key {
+                        key: nadir_core::Key::A,
+                        pressed: true,
+                        repeat: false,
+                    }
+            })
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(presses.len(), 4, "{out:?}");
+        assert!(
+            presses[0] < typed[0].0 && typed[0].0 < presses[1],
+            "{out:?}"
+        );
+        assert!(presses[1] < typed[1].0, "{out:?}");
     }
 
     #[test]

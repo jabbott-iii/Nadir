@@ -32,6 +32,7 @@ use nadir_sys::macos::foundation::{CGFloat, NSInteger, NSPoint, NSUInteger};
 
 use super::keymap;
 use crate::Event;
+use crate::text;
 
 /// How many points a trackpad scrolls for one line of a mouse wheel. A
 /// trackpad reports its scrolling in points, and a wheel in lines.
@@ -302,14 +303,36 @@ impl Translator {
         out.push(Event::MouseMoved(position));
     }
 
+    /// Appends what a key press typed: `characters`, the press's
+    /// `-characters`, with `flags`, its `-modifierFlags`. Apple types the
+    /// keys that type nothing, the arrows and the function keys among them,
+    /// as characters of its own, which are left out; and nothing is typed
+    /// with ⌘, or with Control without Option. The press's own flags say
+    /// what is held, also a ⌘ that went down before the window had the
+    /// focus.
+    pub(super) fn text(&mut self, characters: &str, flags: NSUInteger, out: &mut Vec<Event>) {
+        let held = |flag: NSUInteger| flags & flag != 0;
+        let shortcut = text::shortcut(
+            held(NSEventModifierFlagControl),
+            held(NSEventModifierFlagOption),
+            held(NSEventModifierFlagCommand),
+        );
+        let typed = characters
+            .chars()
+            .filter(|&c| !text::is_apple_function_key(c));
+        text::push_text(typed, shortcut, out);
+    }
+
     /// The window got the keyboard focus, or lost it.
     pub(super) fn focus(&mut self, gained: bool, out: &mut Vec<Event>) {
-        if !gained {
-            self.release_everything(out);
-        }
         if gained != self.focused {
             self.focused = gained;
             out.push(Event::Focused(gained));
+        }
+        // After the news, so that a reader can tell these releases from the
+        // ones the user made.
+        if !gained {
+            self.release_everything(out);
         }
     }
 
@@ -717,13 +740,13 @@ mod tests {
         assert_eq!(
             out,
             [
+                Event::Focused(false),
                 key_event(Key::A, false, false),
                 key_event(Key::LeftShift, false, false),
                 Event::MouseButton {
                     button: MouseButton::Right,
                     pressed: false
                 },
-                Event::Focused(false),
             ]
         );
         out.clear();
@@ -745,5 +768,69 @@ mod tests {
             [Event::Resized(UVec2::new(1600, 900)), Event::CloseRequested]
         );
         assert_eq!(translator.size(), UVec2::new(1600, 900));
+    }
+
+    // -- typed text ---------------------------------------------------------
+
+    /// What a key press typed, as the pump reports it after the press,
+    /// with no modifiers.
+    fn typed(translator: &mut Translator, characters: &str) -> Vec<Event> {
+        typed_with(translator, characters, 0)
+    }
+
+    fn typed_with(translator: &mut Translator, characters: &str, flags: NSUInteger) -> Vec<Event> {
+        let mut out = Vec::new();
+        translator.text(characters, flags, &mut out);
+        out
+    }
+
+    #[test]
+    fn a_key_press_types_its_characters() {
+        let mut translator = translator();
+        assert_eq!(typed(&mut translator, "a"), [Event::Text('a')]);
+        // Option types the layout's other characters.
+        assert_eq!(typed(&mut translator, "å"), [Event::Text('å')]);
+        assert_eq!(
+            typed(&mut translator, "é😀"),
+            [Event::Text('é'), Event::Text('😀')]
+        );
+        // A dead key alone types nothing.
+        assert_eq!(typed(&mut translator, ""), []);
+    }
+
+    #[test]
+    fn the_keys_that_type_nothing_and_controls_are_left_out() {
+        let mut translator = translator();
+        // `NSUpArrowFunctionKey`, `NSF1FunctionKey`; Return, Tab, Delete
+        // (backward), Escape.
+        assert_eq!(typed(&mut translator, "\u{F700}\u{F704}"), []);
+        assert_eq!(typed(&mut translator, "\r\t\u{7f}\u{1b}"), []);
+        // The Apple logo is typed.
+        assert_eq!(
+            typed(&mut translator, "\u{F8FF}"),
+            [Event::Text('\u{F8FF}')]
+        );
+    }
+
+    #[test]
+    fn nothing_is_typed_with_command_or_with_control_without_option() {
+        let mut translator = translator();
+        let command = NSEventModifierFlagCommand | NX_DEVICELCMDKEYMASK;
+        // ⌘A gives "a", also with a ⌘ that went down before the focus came,
+        // which no flags change reported.
+        assert_eq!(typed_with(&mut translator, "a", command), []);
+        let control = NSEventModifierFlagControl | NX_DEVICELCTLKEYMASK;
+        // Control+1 gives "1".
+        assert_eq!(typed_with(&mut translator, "1", control), []);
+        // Option, and Shift, type.
+        let option = NSEventModifierFlagOption | NX_DEVICELALTKEYMASK;
+        assert_eq!(typed_with(&mut translator, "å", option), [Event::Text('å')]);
+        let shift = NSEventModifierFlagShift | NX_DEVICELSHIFTKEYMASK;
+        assert_eq!(typed_with(&mut translator, "A", shift), [Event::Text('A')]);
+        assert_eq!(
+            typed_with(&mut translator, "x", control | option),
+            [Event::Text('x')]
+        );
+        assert_eq!(typed_with(&mut translator, "x", command | option), []);
     }
 }

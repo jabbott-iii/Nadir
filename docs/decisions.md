@@ -4896,3 +4896,127 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** M7.9 or M7.10 finds that the debug UI's input needs
   what M7.2's does not carry (then a change to it there, recorded).
 
+
+## ADR-0057 — Typed text, a UI's events and capture: `Event::Text`, an X input method in the environment's locale, `UiEvents`, and `Capture`
+
+- **Status:** Accepted: the user chose a reader in nadir-input for a UI's
+  repeats and text, and setting the character locale from the environment
+  on Linux, on 2026-11-11
+- **Date:** 2026-11-11
+- **Context:**
+  - M7.9 (ADR-0056) asks for typed text from the platform, key repeats and
+    typed text within reach of a UI, and capturing the keyboard only or the
+    mouse only from gameplay actions.
+  - `Event` is `Copy`, and the platform spec already lists `Text(char)`.
+  - `Input` is latched once a tick, ignores repeats, and hides keys from
+    gameplay actions only in text mode, which hides the keys and the
+    buttons together and leaves `ui_allowed` actions live.
+  - On Linux, Xlib's input methods compose in the C library's `LC_CTYPE`,
+    which a Rust program leaves at "C": there Xlib composes from
+    `iso8859-1/Compose`, Latin-1 only. Measured here: a test Compose file's
+    "é", "ő" and "€" came through in `en_US.UTF-8` and came out as
+    mojibake in "C". `XMODIFIERS=@im=ibus` named a server that was not
+    running, and `XOpenIM` failed with it; with `@im=none` it opened
+    Xlib's own.
+  - `nadir_debug::DebugInput` (M7.2) judges what typing goes to by the
+    order of presses and edits in a frame, and lets go of a held widget
+    without a click on a loss of the focus.
+- **Decision:**
+  - **`Event::Text(char)`**, after the key press that typed it, one event
+    a character, a composed one included; a held key types again with each
+    repeat; never a control character (Enter, Tab, Backspace, Escape and
+    Delete are keys only). A key pressed with a shortcut's modifier types
+    nothing: on Linux Control, Alt (Mod1) or Super (Mod4), from the event's
+    own state, Alt Gr (Mod5) typing; on Windows Control without Alt (with
+    Alt it is Alt Gr), or the Windows key, as `GetKeyState` gives them for
+    the message, Alt alone being the window menu's (`WM_SYSCHAR`); on macOS
+    ⌘, or Control without Option, from the press's own `modifierFlags`,
+    Option typing. Each reads what was held with the press itself, so a
+    modifier that went down before the window had the focus counts. The pure rules are in
+    nadir-platform's `text` module, tested on every system.
+  - **Linux:** opening the window takes `LC_CTYPE` from the environment if
+    it is still "C" or "POSIX" (as GLFW does), and puts "C" back if Xlib
+    cannot work in it. It then opens the input method `XMODIFIERS` names,
+    or else Xlib's own (`@im=none`), with a destroy callback, and an input
+    context of no preedit and no status for the window. Every event goes to
+    `XFilterEvent`, after it is decoded: Xlib's own input method zeroes
+    the keycode of the press that ends a Compose sequence when it takes it.
+    A key press or release it takes is still a key (a dead key is a key);
+    only its text is the input method's, which comes as a key press of
+    keycode 0 that `Xutf8LookupString` reads. A press no input method took,
+    of a keycode whose last taken press is as late or later by the
+    server's 32-bit clock, is a copy that a server sent back, and is left
+    out (GLFW's rule). Focus changes outside a grab go to `XSetICFocus` and
+    `XUnsetICFocus`. If the input method stops, Xlib frees it, and nothing
+    more is typed. Xlib keeps the state of locales and input methods for
+    the whole process, unlocked without `XInitThreads`: one window at a
+    time has an input method, and one opened on another thread meanwhile
+    types nothing.
+  - **Windows:** `WM_CHAR`, its UTF-16 surrogates joined. A key press that
+    an input method editor took (`VK_PROCESSKEY`) is still a key, by its
+    scan code, as on Linux: under an editor that composes by default
+    (Microsoft Pinyin), gameplay would lose every letter otherwise.
+  - **macOS:** a key press's `characters`, without Apple's function-key
+    characters (U+F700 to U+F7FF). No input method (`NSTextInputClient`):
+    a backlog item.
+  - **`nadir_input::UiEvents`**, the user's reader: a UI owns one, feeds it
+    the same window events, and clears it every frame. It keeps the keys,
+    repeats included, the typed text, and the pointer, the buttons, the
+    wheel and the loss of the focus among them, in order: a click and
+    typing in one frame then go where they happened, as `DebugInput`
+    judges them. A move right after a move replaces it. Past 4096 events,
+    the oldest half is dropped.
+  - **The loss of the focus before its releases:** every backend now
+    reports `Focused(false)` first and then a release for each key and
+    button held, which came before it until now. A UI can then tell them
+    from the user's own releases, and lets go of a held widget with no
+    click; a real click just before the loss stays a click. `Input`
+    releases everything on `Focused(false)` either way.
+  - **`nadir_input::Capture { keyboard, mouse }`** and
+    `Input::set_capture`, in order with the events: a captured device's
+    keys or buttons, held when its capture begins or pressed while it
+    lasts, are hidden from every action until released, `ui_allowed` ones
+    too (Escape that leaves a debug field does not pause the game); while
+    the mouse is captured the wheel's turns are not counted; the pointer
+    stays. Text mode is unchanged, and the two combine.
+- **Consequences:**
+  - A new variant of `Event`, which is not `#[non_exhaustive]`: an
+    exhaustive match on it breaks. None in the workspace was. The order of
+    a focus loss and its releases changed; nothing in the workspace relied
+    on it.
+  - The Linux window changes a process-wide setting. Setting it races with
+    another thread's C code that reads the locale meanwhile; the engine
+    opens the window before its audio thread, its other threads are Rust
+    code, and `Platform::new` says to open the window first. A program that
+    has set its own locale keeps it. The window tests that open windows run
+    one at a time (`--ignored --test-threads=1`).
+  - On Linux and Windows, a key that an input method takes while it
+    composes (Japanese, say) still reaches gameplay and a UI as a key: a
+    UI's text field may take Backspace or Enter meant for the composition.
+    Neither shows the text being composed.
+  - `Capture` is one value. M7.10 sets it from the debug UI's
+    `wants_mouse` and `wants_keyboard`, which are the last frame's: a press
+    in the frame the pointer arrives over a window reaches the game for one
+    tick. The roadmap's M7.10 note says what to do about it, and that the
+    game's own UI must be combined with it.
+- **Alternatives considered:**
+  - The facade handing each frame's window events to each UI, with
+    nothing new in nadir-input (the user chose the reader).
+  - Leaving the locale alone: Latin-1 composing only (the user chose to
+    set it).
+  - Keys and text only in the reader: a click and typing in one frame
+    would lose their order.
+  - The releases kept before the focus loss, and `UiEvents` moving it
+    before the releases right before it: a real click just before the loss
+    would be lost too.
+  - Capture as a second text mode, with `ui_allowed` actions live: the
+    debug UI and the game would both take the same Escape.
+  - Shortcuts from the keys the translator saw go down: a modifier held as
+    the window gains the focus would be missed, and X's Alt could not be
+    told from Alt Gr.
+  - Keys that a Windows input method editor took left out, as GLFW does:
+    gameplay would lose them.
+- **Revisit when:** a game needs text from an input method shown as it is
+  composed (preedit), or on macOS from an input method at all; or the
+  input method server's restart must bring typing back without a restart
+  of the game.

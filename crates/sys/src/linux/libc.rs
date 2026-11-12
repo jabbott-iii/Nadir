@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The C library on Linux (glibc): the dynamic loader, and the error
-//! numbers that ALSA's functions return and the engine tells apart.
+//! The C library on Linux (glibc): the dynamic loader, the locale, and the
+//! error numbers that ALSA's functions return and the engine tells apart.
 //!
-//! Sources: `<dlfcn.h>`, and `<bits/dlfcn.h>` for the flag values; the
+//! Sources: `<dlfcn.h>`, and `<bits/dlfcn.h>` for the flag values;
+//! `<locale.h>`, and `<bits/locale.h>` for the category's value; the
 //! kernel's `<asm-generic/errno-base.h>` and `<asm-generic/errno.h>` for the
 //! error numbers, which x86_64 and aarch64 both use.
 //!
@@ -33,6 +34,12 @@ pub const RTLD_NOW: c_int = 0x00002;
 /// libraries loaded after it. This is the default.
 /// `bits/dlfcn.h`: `#define RTLD_LOCAL 0`.
 pub const RTLD_LOCAL: c_int = 0;
+
+/// A [`setlocale`] category: how bytes are read as characters, and which
+/// characters are letters. Xlib's input methods follow it.
+/// `locale.h`: `#define LC_CTYPE __LC_CTYPE`, and `bits/locale.h`: `#define
+/// __LC_CTYPE 0`.
+pub const LC_CTYPE: c_int = 0;
 
 /// Try again: for an ALSA stream that does not block, no room to write in
 /// yet (`snd_pcm_writei` returns it negated).
@@ -90,11 +97,41 @@ unsafe extern "C" {
     pub safe fn dlerror() -> *mut c_char;
 }
 
+// In libc itself, which every Rust program on Linux links.
+unsafe extern "C" {
+    /// Sets the locale of `category` for the whole process, and returns its
+    /// name, or null if `locale` names one that is not installed. A null
+    /// `locale` only returns the name; an empty one takes the locale from
+    /// the environment (`LC_ALL`, then the category's own variable, then
+    /// `LANG`).
+    /// `locale.h`: `char *setlocale (int __category, const char *__locale)`.
+    ///
+    /// The string belongs to the C library: do not free it. It is valid
+    /// until the next call of `setlocale`.
+    ///
+    /// # Safety
+    ///
+    /// - `locale` is null or points to a NUL-terminated string.
+    /// - No other thread is calling `setlocale`, nor reading the locale in a
+    ///   way that breaks if it changes meanwhile. glibc marks it
+    ///   `MT-Unsafe const:locale env`.
+    pub fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
+}
+
 #[cfg(test)]
 mod tests {
     use core::ffi::CStr;
 
     use super::*;
+
+    #[test]
+    fn the_character_locale_has_a_name() {
+        // SAFETY: a null locale only reads the name, which no test changes.
+        let name = unsafe { setlocale(LC_CTYPE, core::ptr::null()) };
+        assert!(!name.is_null());
+        // SAFETY: the C library returned a NUL-terminated string.
+        assert!(!unsafe { CStr::from_ptr(name) }.is_empty());
+    }
 
     #[test]
     fn the_program_itself_can_be_opened_and_searched() {

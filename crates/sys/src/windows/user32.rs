@@ -311,6 +311,28 @@ pub const WM_KEYDOWN: u32 = 0x0100;
 /// A key went up. `WinUser.h`: `#define WM_KEYUP 0x0101`
 pub const WM_KEYUP: u32 = 0x0101;
 
+/// A character was typed: `wParam` is one UTF-16 code unit of it, and a
+/// character outside the Basic Multilingual Plane comes as two of these, its
+/// surrogates. `TranslateMessage` posts it after the [`WM_KEYDOWN`] that
+/// typed it. `WinUser.h`: `#define WM_CHAR 0x0102`
+pub const WM_CHAR: u32 = 0x0102;
+
+/// The virtual key of either Control key, for [`GetKeyState`].
+/// `WinUser.h`: `#define VK_CONTROL 0x11`
+pub const VK_CONTROL: i32 = 0x11;
+
+/// The virtual key of either Alt key, for [`GetKeyState`].
+/// `WinUser.h`: `#define VK_MENU 0x12`
+pub const VK_MENU: i32 = 0x12;
+
+/// The virtual key of the left Windows key, for [`GetKeyState`].
+/// `WinUser.h`: `#define VK_LWIN 0x5B`
+pub const VK_LWIN: i32 = 0x5B;
+
+/// The virtual key of the right Windows key, for [`GetKeyState`].
+/// `WinUser.h`: `#define VK_RWIN 0x5C`
+pub const VK_RWIN: i32 = 0x5C;
+
 /// A key went down while Alt was held, or F10 or Alt itself went down.
 /// `WinUser.h`: `#define WM_SYSKEYDOWN 0x0104`
 pub const WM_SYSKEYDOWN: u32 = 0x0104;
@@ -749,6 +771,13 @@ unsafe extern "system" {
     /// Ends what [`SetCapture`] started. `WinUser.h`: `BOOL
     /// ReleaseCapture(VOID)`
     pub safe fn ReleaseCapture() -> BOOL;
+
+    /// Returns the state of the virtual key `nVirtKey` ([`VK_CONTROL`] and
+    /// the others) as the thread's messages so far left it: as of the
+    /// message being handled, not of the keyboard now. The high bit of the
+    /// result is set while the key is down. `WinUser.h`: `SHORT
+    /// GetKeyState(int nVirtKey)`
+    pub safe fn GetKeyState(nVirtKey: i32) -> i16;
 
     /// Shows a message box and waits until the user closes it. Returns the
     /// button the user chose, or 0 on failure.

@@ -224,6 +224,36 @@ pub fn create_headless_gl() -> Result<HeadlessGl, PlatformError>;               
 - If this proves fragile, fall back to the two-thread design described in
   `docs/03-platforms.md` and record an ADR.
 
+### Typed text (M7.9, ADR-0057)
+
+- `Event::Text(char)` comes after the key press that typed it: one a
+  character, a composed one included, again with each repeat, never a
+  control character (Enter, Tab, Backspace, Escape and Delete are keys
+  only).
+- A key pressed with a shortcut's modifier types nothing: on Linux Control,
+  Alt (Mod1) or Super (Mod4), from the event's own state, Alt Gr (Mod5)
+  typing; on Windows Control without Alt, or the Windows key, Alt alone
+  being the window menu's; on macOS ⌘, or Control without Option, from the
+  press's `modifierFlags`, Option typing. The rules are in the crate's
+  `text` module, which every system's tests run.
+- Linux: an X input method, the one `XMODIFIERS` names or else Xlib's own
+  (`@im=none`), with an input context of no preedit and no status. Opening
+  the window first takes `LC_CTYPE` from the environment if it is still "C"
+  or "POSIX", and puts "C" back if Xlib cannot work in it: in "C", Xlib
+  composes Latin-1 only. Only one window of the process at a time has an
+  input method, Xlib's locale and input-method state being process-wide and
+  unlocked. Each event is decoded, then given to `XFilterEvent`: a key it
+  takes is still a key, its text the input method's, which comes as a key
+  press of keycode 0. A press no input method took, of a keycode whose last
+  taken press is as late or later, is a copy that a server sent back, and
+  is left out (GLFW's rule). If the input method stops, nothing more is
+  typed.
+- Windows: `WM_CHAR`, its surrogates joined, its shortcut's modifiers from
+  `GetKeyState`; a key an input method editor took (`VK_PROCESSKEY`) is
+  still a key, by its scan code.
+- macOS: a key press's `characters`, without Apple's function-key
+  characters (U+F700 to U+F7FF). No input method yet (backlog).
+
 ### Allocation counter (feature `dev`)
 
 The counter wraps `std::alloc::System` with a `#[global_allocator]`. It keeps
@@ -242,8 +272,11 @@ it requires `unsafe impl GlobalAlloc`.
 ## Invariants
 
 - Each window has its own event sequence. Events are delivered in OS order.
-- Focus loss emits a synthetic release for every held key and button.
-- `Key` values are physical. Text comes only through `Event::Text`.
+- Focus loss emits a synthetic release for every held key and button,
+  right after `Focused(false)`, so that a reader can tell them from the
+  user's own (ADR-0057; they came before it until M7.9).
+- `Key` values are physical. Text comes only through `Event::Text`, after
+  the key press that typed it.
 - Mouse coordinates are in physical pixels with a top-left origin on every
   OS.
 - `GpuSurface` stays valid for the lifetime of `Platform`. Window recreation
@@ -273,6 +306,12 @@ it requires `unsafe impl GlobalAlloc`.
     based, with the variables passed in, touching no folder)
   - a manual interactive test binary, `cargo run -p nadir-platform --example events`,
     which prints every event; used in milestone exit checks on each OS
+  - typed text (M7.9): the shared rules (control characters, shortcuts,
+    UTF-16 surrogates, Apple's function keys) on every system; each
+    translator's text after its key, repeats, composed text, shortcuts and,
+    on Linux, an input method's copies; on Linux, an ignored test (run with
+    `--ignored --test-threads=1` in an X session) that sends key presses to
+    its own window through the server and its input method
 - **Headless GL** creation is tested in Linux CI: the tests behind the
   `headless-test` feature, which `cargo xtask ci` turns on, fail without a
   working driver. `NADIR_EXPECT_GL_RENDERER` (such as `llvmpipe`) makes

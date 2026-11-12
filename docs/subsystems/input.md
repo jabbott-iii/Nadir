@@ -3,10 +3,11 @@
 Turns platform events into per-tick **action state**. Gameplay code never
 reads keys or buttons directly.
 
-Built so far (M3.1): keyboard and mouse bindings, latching, text mode, rebind
-conflict detection, and replays. Gamepads, deadzones and the active device
-come with M8.4, the rebind capture flow with M9.2, and typed text
-(`Event::Text`) with M7.9, for the debug UI's text fields (ADR-0056).
+Built so far: keyboard and mouse bindings, latching, text mode, rebind
+conflict detection, and replays (M3.1); a UI's events, typed text
+(`Event::Text`) among them, and capture of the keyboard or the mouse
+(M7.9, ADR-0057). Gamepads, deadzones and the active device come with
+M8.4, and the rebind capture flow with M9.2.
 
 ## Layers
 
@@ -164,8 +165,8 @@ impl<A: ActionSet> ActionState<A> {
 
 - When a text field is focused (debug console, name entry), the input crate
   enters text mode (`Input::set_text_mode`), in order with the events:
-  - `Event::Text` goes to the text consumer (from M7.9, when the platform
-    reports typed text)
+  - `Event::Text` goes to the text consumer: the UI reads it from its
+    `UiEvents` (below); `Input` ignores it
   - gameplay actions read as released
   - only actions flagged `ui_allowed` stay live
 - Leaving text mode does not generate phantom presses for keys still held.
@@ -176,6 +177,59 @@ impl<A: ActionSet> ActionState<A> {
   - Keys and buttons held then, and those pressed during text mode, stay
     hidden from gameplay actions until they are released.
   - A press just before text mode begins, in the same tick, is a tap.
+
+## Capture (M7.9, ADR-0057)
+
+```rust
+pub struct Capture { pub keyboard: bool, pub mouse: bool }   // NONE, KEYBOARD, MOUSE, ALL
+impl Input {
+    pub fn set_capture(&mut self, capture: Capture);   // in order with the events
+    pub fn capture(&self) -> Capture;
+}
+```
+
+- For a UI that has the keyboard or the pointer, such as the debug UI's
+  `wants_keyboard` and `wants_mouse` (M7.10).
+- A captured device's keys or buttons, held when its capture begins or
+  pressed while it lasts, are hidden from every action until released,
+  `ui_allowed` ones too: Escape that leaves a debug field does not pause the
+  game. An action held when it begins is just released on the next tick;
+  ending it presses nothing.
+- While the mouse is captured, the wheel's turns are not added to
+  `Input::wheel`. The pointer stays.
+- Text mode is unchanged. A key or button is hidden if either hides it.
+- Replays are not captured: while one plays, the actions come from it.
+
+## A UI's events (M7.9, ADR-0057)
+
+```rust
+pub enum UiEvent {
+    PointerMoved(Vec2),                          // physical pixels
+    Button { button: MouseButton, pressed: bool },
+    Wheel(Vec2),                                 // lines
+    Key { key: Key, pressed: bool, repeat: bool },   // repeats included
+    Text(char),
+    FocusLost,
+}
+pub struct UiEvents { /* … */ }
+impl UiEvents {
+    pub fn new() -> Self;
+    pub fn handle(&mut self, event: &Event);
+    pub fn events(&self) -> &[UiEvent];
+    pub fn clear(&mut self);
+}
+```
+
+- A UI owns one, feeds it the same events as `Input`, and clears it every
+  frame, also while it is hidden. It holds nothing back.
+- It keeps what `Input` leaves out, the keys' repeats and typed text, and the
+  mouse among them, so that a click and typing in one frame keep their
+  order.
+- A move right after a move replaces it. The platform reports the loss of
+  the focus before the releases of what was held, so `FocusLost` comes
+  before them and a held widget is let go with no click.
+- Past 4096 events, the oldest half is dropped: the bound of a reader that
+  never clears it, which would then lose releases.
 
 ## Replays
 

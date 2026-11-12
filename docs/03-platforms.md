@@ -79,7 +79,14 @@ releases build on `ubuntu-24.04`, whose symbols set their glibc floor
     release. A release with no press is reported as a press and a release.
   - While a mouse button is down the window holds the capture, so that the
     release arrives even outside it.
-  - Text comes from `WM_CHAR`. Join UTF-16 surrogate pairs.
+  - Text comes from `WM_CHAR`, which `TranslateMessage` posts after the
+    key's `WM_KEYDOWN`. Join UTF-16 surrogate pairs. Leave `WM_SYSCHAR`
+    (Alt's, the window menu's) and `WM_DEADCHAR` to `DefWindowProcW`. A
+    character typed with Control held and no Alt, or with the Windows key,
+    as `GetKeyState` gives them for the message, is a shortcut's and not
+    text (with Alt, Control is Alt Gr's). A `WM_KEYDOWN` whose `wParam` is
+    `VK_PROCESSKEY` is a key an input method editor took: it is still
+    reported, by its scan code, so that gameplay keeps its keys.
 - **Mouse:** position and buttons from `WM_MOUSEMOVE`, the button messages and
   `WM_MOUSEWHEEL`/`WM_MOUSEHWHEEL`. Relative motion (for future aim modes)
   uses Raw Input, `RegisterRawInputDevices` on usage page 0x01, usage 0x02.
@@ -215,8 +222,12 @@ we call, with the full slot ordering preserved.
     ISO keyboards `kVK_ISO_Section` and `kVK_ANSI_Grave` come out swapped
     compared with ANSI; putting them back needs the keyboard type from
     HIToolbox (as SDL does), which is not done yet.
-  - Text comes from `characters`. Full IME through `NSTextInputClient` is
-    backlog.
+  - Text comes from `characters`, read by the pump after the key press,
+    without Apple's function-key characters (U+F700 to U+F7FF; U+F8FF, the
+    Apple logo, is typed). Nothing is typed with ⌘, or with Control without
+    Option, as the press's `modifierFlags` say. Full IME through
+    `NSTextInputClient` is backlog, and whether `characters` composes dead
+    keys is to be checked on a Mac.
 - **Mouse:** `mouseMoved:`/`mouseDragged:`/`scrollWheel:`. Enable
   `acceptsMouseMovedEvents`. Flip Y: Cocoa's origin is bottom-left; ours is
   top-left. The content view returns `YES` from `isFlipped`, and points are
@@ -325,6 +336,27 @@ directly: no locks that can block, and no allocation.
     Map evdev codes to `Key` with a table: physical, layout-independent.
   - Text uses `Xutf8LookupString` with an input context (`XOpenIM` /
     `XCreateIC`). Full IME (preedit) is backlog.
+    - Set `LC_CTYPE` from the environment (`setlocale(LC_CTYPE, "")`) if it
+      is still "C", as GLFW does, and back to "C" if `XSupportsLocale`
+      fails: in "C", Xlib composes from `iso8859-1/Compose`, Latin-1 only.
+    - Try the input method `XMODIFIERS` names (`XSetLocaleModifiers("")`),
+      then Xlib's own (`"@im=none"`). Set `XNDestroyCallback`: after it is
+      called, Xlib has freed the input method and its contexts. Create the
+      context with `XIMPreeditNothing | XIMStatusNothing`, and add its
+      `XNFilterEvents` to the window's event mask.
+    - Decode each event before `XFilterEvent`: Xlib's own input method sets
+      the keycode of the press that ends a Compose sequence to 0 when it
+      takes it, and puts a copy back, which is the text's. A key it takes is
+      still a key.
+    - An input method server sends a press it took back, as the same event:
+      drop a press it did not take whose time is not after the last taken
+      press of that keycode (GLFW's rule, by server time, which wraps at 32
+      bits).
+    - `XSetICFocus` and `XUnsetICFocus` on focus changes outside a grab.
+    - Text is nothing with Control, Mod1 (Alt) or Mod4 (Super) in the
+      press's state; Mod5 is Alt Gr, which types.
+    - Xlib's locale and input-method state is process-wide, and not locked
+      without `XInitThreads`: one window at a time has an input method.
 - **Mouse:** `ButtonPress` 4/5/6/7 are wheel events; motion from
   `MotionNotify`.
 - **Gamepads:** evdev, reading `/dev/input/event*` directly.
@@ -479,7 +511,7 @@ PipeWire backend is backlog.
 - Closing the window produces `CloseRequested`. The OS window never vanishes
   without the engine agreeing.
 - Focus loss releases all held keys and buttons (a synthetic release event for
-  each), so nothing sticks "held".
+  each, right after `Focused(false)`), so nothing sticks "held".
 - The audio device opens at the rate and channels of `AudioOutputConfig`
   (48 kHz stereo by default), in `f32`, or the backend converts, and the
   mixer gets what it asked for.
