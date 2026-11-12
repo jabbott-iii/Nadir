@@ -399,6 +399,13 @@ loop on Linux, Windows and macOS. No GPU yet.
     (`precise_sleep` relies on `std::thread::sleep`, which on Windows 10
     1803+ should use a high-resolution waitable timer), and keeps ticking
     while the window is dragged.
+  - ⏳ needs Windows (moved from M7.9 on 2026-11-11, the user's choice):
+    typed text in the events example: `Text` after its key, and with
+    repeats; a character outside the Basic Multilingual Plane (an emoji
+    from Win+.); Alt Gr characters on a German layout; nothing typed with
+    Control+Space, Control+1 or the Windows key, nor with Alt+key; with
+    Microsoft Pinyin on, the keys still reported. And `cargo test -p
+    nadir-platform` there, for the translator's typed-text tests.
   - Note: written on Linux on 2026-10-17, without a Windows target or SDK
     headers. A copy of the workspace with the OS `cfg`s swapped compiled the
     Windows code on Linux:
@@ -458,6 +465,12 @@ loop on Linux, Windows and macOS. No GPU yet.
     - "modal frames ran" after resizing the window
   - ⏳ needs macOS: `cargo run -p sandbox` ticks at 60 Hz ± 1% over 10 s,
     on Apple Silicon at least; Intel through the CI build.
+  - ⏳ needs macOS (moved from M7.9 on 2026-11-11, the user's choice): typed
+    text in the events example: `Text` after its key, and with repeats;
+    Option characters (Option+a gives å); a dead key (Option+e, then e,
+    gives é) through `characters`; nothing typed with ⌘ or Control; no
+    character for the arrows and the function keys. And `cargo test -p
+    nadir-platform` there, for the translator's typed-text tests.
   - Note: written on Linux on 2026-10-17, without a macOS target or SDK
     headers. A copy of the workspace with the OS `cfg`s swapped compiled the
     macOS code on Linux, on its x86_64 path only (the arm64 `BOOL` and the
@@ -4817,7 +4830,7 @@ by the batched sprite renderer.
     being tested with synthetic glyphs); the golden of a debug window,
     M7.10's.
 
-- [ ] **M7.9 — platform and input: typed text, key repeats and capture**
+- [x] **M7.9 — platform and input: typed text, key repeats and capture**
   - Added on 2026-11-10 (ADR-0056), from M7.2's note from M3.1: typed text
     does not exist yet, `Input` ignores key repeats, and the debug UI
     needs gameplay actions held off while it has the keyboard or the
@@ -4874,7 +4887,11 @@ by the batched sprite renderer.
     key): F12 e gave `Text('é')`, F12 o `Text('ő')`, F12 c e `Text('€')`,
     each after the press of the key that ended it and before its release;
     a gave `Text('a')`, Shift+b `Text('B')`. In the C locale the same
-    sequences came out as mojibake, which the locale step avoids.
+    sequences came out as mojibake, which the locale step avoids. The user
+    then typed into it on the laptop's own keyboard: A and F each gave
+    their `Text` right after the press, and Escape none; the mouse's five
+    buttons and the wheel came through as before. No composed character
+    was typed by hand (the layout has no dead key or Compose key).
   - Review: three critics of the design, whose findings led to decoding
     before `XFilterEvent`, the process-wide guard, GLFW's rule for copies,
     shortcuts from each press's own modifiers, capture hiding `ui_allowed`
@@ -4886,17 +4903,11 @@ by the batched sprite renderer.
     in what Linux can test (the text rules, the X translator, capture,
     `UiEvents`), all fail the tests; one of an earlier run passed them at
     first (a press with no time, after a taken one), and a test was added.
-  - ⏳ needs Windows: in the events example, typed text (`Text` after its
-    key, repeats), a character outside the Basic Multilingual Plane (an
-    emoji from Win+.), Alt Gr characters on a German layout, nothing typed
-    with Control+Space, Control+1 or the Windows key, nothing with Alt+key;
-    with Microsoft Pinyin on, the keys still reported; `cargo test -p
-    nadir-platform` there (the translator's tests).
-  - ⏳ needs macOS: in the events example, typed text after its key and
-    with repeats, Option characters (Option+a gives å), a dead key
-    (Option+e, then e, gives é) through `characters`, nothing with ⌘ or
-    Control, no character for the arrows and function keys; `cargo test -p
-    nadir-platform` there.
+  - Moved on 2026-11-11, the user's choice: the events example's checks
+    of typed text on Windows and macOS are M1.5's and M1.6's, beside those
+    systems' other events checks, so that M7.9 is ticked on Linux's. Until
+    they are done, Windows's and macOS's typed text is compiled and
+    linted only.
 
 - [ ] **M7.10 — facade: the debug UI in the game**
   - Added on 2026-11-10 (ADR-0056): M7.2 builds the debug UI in
