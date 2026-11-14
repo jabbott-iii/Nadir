@@ -81,6 +81,10 @@ pub struct Collider {
   1. those kept aside, by index;
   2. those moved far, in the order they were moved;
   3. the rest by cell, row by row, then by index.
+- `CollisionWorld::hash_cells(each)` gives each cell that holds colliders,
+  its rect and how many, row by row, as the last rebuild left them, with
+  no allocation: the facade's debug drawing (F4) outlines them (M7.6,
+  ADR-0064). Colliders kept aside are in no cell.
 
 ## Movement: move-and-slide
 

@@ -903,13 +903,19 @@ impl App {
     ///   debug field has. One key may toggle several windows.
     /// - `window` gets the world to read, or to change through its
     ///   resources and storages, as a frame system does.
-    /// - The engine has three windows of its own, hidden at start: the
+    /// - The engine has five windows of its own, hidden at start: the
     ///   stats overlay on F1, named `nadir::stats`; the inspector on F2,
     ///   `nadir::inspector`, which outlines the entity it shows and writes
-    ///   its prefabs into the folder `prefabs` beside the log file; and the
+    ///   its prefabs into the folder `prefabs` beside the log file; the
     ///   profiler on F3, `nadir::profiler`, which writes its traces beside
-    ///   the log file (`docs/subsystems/debug-tools.md`). A game's window
-    ///   on one of those keys shows and hides with it.
+    ///   the log file; the debug drawing on F4, `nadir::debug_draw`, whose
+    ///   ticked overlays draw into the world while it is open; and the
+    ///   console on the backtick, `nadir::console`
+    ///   ([`App::add_console_command`]; `docs/subsystems/debug-tools.md`).
+    ///   A game's window on one of those keys shows and hides with it.
+    /// - F5, F6 and F7 control the game's time: pause, step a tick, scale
+    ///   (with Shift, down). A game's window on one of them still shows
+    ///   and hides, and the time changes too.
     ///
     /// Only [`App::run`] reads and writes `debug_ui.jsonc`:
     /// [`App::update`] and [`App::offscreen`] start each window at `first`.
@@ -923,6 +929,39 @@ impl App {
         window: crate::DebugWindow,
     ) -> Self {
         self.debug.add(toggle, title, first, window);
+        self
+    }
+
+    /// Adds a command to the debug console, under `usage`, whose first word
+    /// is its name, followed by its arguments, with `help`, a line of what
+    /// it does: in development builds only (feature `dev`).
+    ///
+    /// - The console is a window of the engine's on the backtick (`` ` ``,
+    ///   [`Key::Grave`](nadir_core::Key::Grave)), named `nadir::console`:
+    ///   a command line, with history and Tab completion, under the log's
+    ///   records and what the commands print. Its commands are `help` and
+    ///   the engine's (`schedule`, `spawn`, `tp`, `timescale`, `level`,
+    ///   `reload`, `profile dump`, `log level`, `quit`;
+    ///   `docs/subsystems/debug-tools.md`).
+    /// - The usage names each argument: a word to type as it is, a value
+    ///   (`<x>`, or `[x]` if it may be left out), or a choice (`<on|off>`).
+    ///   A line that does not fit it is refused with why, and `command` is
+    ///   not called.
+    /// - `command` gets the world, as a debug window does, the arguments,
+    ///   and where to print. Commands it queues apply after the next tick
+    ///   or the next frame's stages.
+    /// - A command of a name already there replaces it, the engine's too. A
+    ///   usage that starts with no name (a placeholder, a quote, `help`) is
+    ///   logged as an error, and nothing is added.
+    #[cfg(feature = "dev")]
+    #[must_use]
+    pub fn add_console_command(
+        mut self,
+        usage: &str,
+        help: &str,
+        command: crate::ConsoleCommand,
+    ) -> Self {
+        self.debug.add_command(usage, help, command);
         self
     }
 
@@ -958,15 +997,20 @@ impl App {
     ///    gives them to the profiler with the last frame's timing;
     /// 2. feeds the events to [`Input`], holding back from the game's
     ///    actions, with the `dev` feature, what the debug UI has;
-    /// 3. runs the ticks that are due: for each, latches the actions, or
-    ///    takes them from the replay that [`App::play_replay`] plays, and
-    ///    runs the tick stages, which apply their commands;
+    /// 3. runs the ticks that are due, of a frame `elapsed` long, or with
+    ///    the `dev` feature as the time controls leave the game's time
+    ///    (none while paused but a tick for each F6, `elapsed` times the
+    ///    scale of F7 or the console's `timescale`): for each,
+    ///    latches the actions, or takes them from the replay that
+    ///    [`App::play_replay`] plays, and runs the tick stages, which apply
+    ///    their commands;
     /// 4. sets [`TickStats`];
     /// 5. empties the [`RenderFrame`], sets its `time` to how long the
     ///    simulation has run, and runs the frame stages;
     /// 6. with the `dev` feature, fills the open debug windows into the
     ///    `RenderFrame`'s UI, after the game's
-    ///    ([`App::add_debug_window`]).
+    ///    ([`App::add_debug_window`]), and then loads the level the
+    ///    console's `level` asked for, if it did.
     ///
     /// The engine's scopes are `nadir::tick` (each tick),
     /// `nadir::frame_stages` and `nadir::debug_ui`, beside each system's
@@ -1011,6 +1055,10 @@ impl App {
                 input.handle(event);
             }
         }
+        // The time controls (F5 to F7) and the console's `timescale` pause,
+        // step and scale the game's time.
+        #[cfg(feature = "dev")]
+        let elapsed = self.debug.game_time(elapsed);
         let frame = self.clock.begin_frame(elapsed);
         let mut stats = TickStats::default();
         while let Some(tick) = self.clock.consume_tick() {
@@ -1052,15 +1100,25 @@ impl App {
         #[cfg(feature = "dev")]
         {
             profile_scope!("nadir::debug_ui");
-            self.debug
-                .frame(&self.world, self.config.virtual_resolution, frame.alpha);
+            self.debug.frame(
+                &self.world,
+                &self.schedule,
+                self.config.virtual_resolution,
+                frame.alpha,
+            );
+            // The console's `level`, which needs the world whole.
+            if let Some(name) = self.debug.take_level() {
+                let result = crate::load_level(&mut self.world, &name);
+                self.debug.level_loaded(&name, result);
+            }
         }
         #[cfg(feature = "dev")]
         self.debug.add_work(started.elapsed());
     }
 
     /// Opens the log file and the window, and runs the main loop until the
-    /// user closes the window.
+    /// user closes the window, or, with the `dev` feature, until the
+    /// console's `quit`.
     ///
     /// The log file is `nadir.log`, in the game's logs folder: on Linux
     /// `~/.local/share/<game>`. Each run starts a new file and keeps the
@@ -1218,6 +1276,11 @@ impl App {
                 core.frame(&events, surface);
                 if let Some(error) = core.error.take() {
                     return Err(error);
+                }
+                #[cfg(feature = "dev")]
+                if core.app.debug.quit() {
+                    info!("the console's `quit` ends the game");
+                    break;
                 }
             }
             events.clear();

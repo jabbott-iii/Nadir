@@ -14,8 +14,9 @@
 
 //! Developer tools for the Nadir engine: an immediate-mode debug UI, a
 //! stats overlay ([`Stats`]), a profiler with Chrome trace export
-//! ([`Profiler`]) and an inspector of the world's entities ([`Inspector`]),
-//! and, to come, a console and debug-draw toggles (roadmap M7.5 and M7.6).
+//! ([`Profiler`]), an inspector of the world's entities ([`Inspector`]) and
+//! a console of commands ([`Console`]). The debug drawing and the time
+//! controls are the engine's, in nadir_engine's `dev` (roadmap M7.6).
 //! They are for development builds only: a
 //! game depends on this crate behind its `dev` feature, and
 //! `cargo xtask release-no-dev` checks that a release does not.
@@ -60,7 +61,11 @@
 //! clicked, by the types of the world's `nadir-scene` `TypeRegistry`,
 //! through their reflection: [`Inspector::show`] fills its window, and
 //! [`Inspector::prefab`] writes the entity as a prefab when its
-//! [`InspectorResponse`] asks.
+//! [`InspectorResponse`] asks. A [`Console`] is a command line over a log:
+//! commands registered by their usage, a line checked against it and handed
+//! back with its [`Args`] to run ([`Console::show`], [`Console::run_line`]),
+//! with history and Tab completion, and the engine's log records added by
+//! the caller ([`Console::log_record`]).
 //!
 //! ```
 //! use nadir_core::{GenIndex, Handle, Key, MouseButton, Rect, UVec2, Vec2};
@@ -111,6 +116,7 @@
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
+mod console;
 mod edit;
 mod id;
 mod input;
@@ -124,6 +130,7 @@ mod tests;
 mod ui;
 mod widgets;
 
+pub use console::{Args, CONSOLE_HISTORY, CONSOLE_LINES, Console, ConsoleError, ConsoleOut};
 pub use input::DebugInput;
 pub use inspector::{Inspector, InspectorResponse};
 pub use metrics::{FontMetrics, TextMetrics};

@@ -34,10 +34,15 @@ Built:
 - an inspector of a `nadir-ecs` world: its entities, a page at a time,
   filtered by number and component; the components of the one clicked,
   each field edited through `nadir-scene`'s reflection; components added
-  and removed by name, the entity despawned, or written as a prefab.
+  and removed by name, the entity despawned, or written as a prefab;
+- a console: a command line, with history and Tab completion, under a log
+  of what its commands print and the records the caller adds; commands
+  registered by a usage that names their arguments, which it checks before
+  handing the command back to run.
 
-Not yet: the console and the debug-draw toggles (M7.5 and M7.6);
-tooltips, a scroll area inside a window, copy and paste.
+Not yet: tooltips, a scroll area inside a window, copy and paste. The
+debug drawing (F4) and the time controls (F5 to F7) are nadir_engine's,
+under its `dev` feature (ADR-0064).
 
 ## Usage
 
@@ -100,6 +105,37 @@ assert!(paused);
 // The pointer is over the window: the game should leave the mouse alone.
 assert!(ui.wants_mouse());
 assert!(!out.is_empty());
+```
+
+A console hands back the command a line names, with its arguments checked
+against its usage, for the caller to run; `Console::show` fills a window
+with it, and Enter runs the line typed:
+
+```rust
+use nadir_debug::{Console, ConsoleError};
+
+#[derive(Clone, Copy)]
+enum Command {
+    Teleport,
+}
+
+let mut console = Console::new();
+console
+    .register("tp <x> <y>", "moves the player", Command::Teleport)
+    .expect("a usage starts with a name");
+let mut player = (0.0, 0.0);
+console.run_line("tp 10 -4", |command, args, out| {
+    match command {
+        Command::Teleport => player = (args.f32(0)?, args.f32(1)?),
+    }
+    out.print("moved");
+    Ok::<(), ConsoleError>(())
+});
+assert_eq!(player, (10.0, -4.0));
+// A line that does not fit the usage does not run.
+console.run_line("tp 10", |_, _, _| Ok(()));
+let lines: Vec<&str> = console.lines().collect();
+assert_eq!(lines, ["> tp 10 -4", "moved", "> tp 10", "<y> is missing: tp <x> <y>"]);
 ```
 
 ## Documentation

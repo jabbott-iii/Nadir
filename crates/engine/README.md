@@ -51,7 +51,11 @@ Built:
   the engine's own, a stats overlay on F1 and a profiler on F3, whose
   graphs of the last 300 frames' processor and GPU times show a frame's
   scopes as a tree, and which writes them as a Chrome trace for Perfetto
-  UI;
+  UI; a console on the backtick, over the log, with history, Tab
+  completion, the engine's commands and the game's; debug drawing on F4
+  (colliders, triggers, the collision grid, the spatial hash, tile chunks,
+  the camera); and time controls, F5 to pause, F6 to step a tick, F7 to
+  scale the game's time;
 - a world hash, to check that a replay gives the same simulation.
 
 Not built yet:
@@ -59,8 +63,7 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
-- the console, debug drawing and time control (M7.5 and M7.6), gamepads
-  (M8);
+- gamepads (M8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 

@@ -253,6 +253,12 @@
 //! pointer, or one of their text fields the keys, the game's actions do not
 //! see them; and [`App::run`] keeps their places in `debug_ui.jsonc` in the
 //! game's settings folder. The resource `WindowSize` is the window's size.
+//! The engine's own windows are the stats overlay (F1), the inspector (F2),
+//! the profiler (F3), the debug drawing (F4), whose overlays draw into the
+//! world, and the console (the backtick), which runs the engine's commands
+//! and those a game adds with `App::add_console_command`. F5 pauses the
+//! game's time and runs it again, F6 steps it a tick, and F7 and Shift+F7
+//! scale it, a label at the top-right saying so.
 //!
 //! ```
 //! # #[cfg(feature = "dev")]
@@ -508,7 +514,7 @@ pub use components::{
     SaveId, Sprite, Transform, Velocity,
 };
 #[cfg(feature = "dev")]
-pub use debug_ui::DebugWindow;
+pub use debug_ui::{ConsoleCommand, DebugWindow};
 pub use error::Error;
 #[cfg(feature = "dev")]
 pub use frame_allocs::FrameAllocs;

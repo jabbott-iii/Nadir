@@ -687,12 +687,15 @@ second.
 
 ## Not shown, because it is not built yet
 
-- Gamepads (M8), and the debug tools of M7.4 to M7.6. With `dev`, the
-  debug UI (M7.2) is in the game (M7.10, ADR-0058): `App::update` holds
-  the game's input back for it as it feeds the events, and fills its open
-  windows after the frame stages, into the frame's `UiList`. As it starts,
-  it collects the profile scopes since the last frame started and gives
-  them to the profiler (M7.3, ADR-0059).
+- Gamepads (M8), and the debug tools' insides. With `dev`, the debug UI
+  (M7.2) is in the game (M7.10, ADR-0058): `App::update` holds the game's
+  input back for it as it feeds the events, and fills its open windows
+  after the frame stages, into the frame's `UiList`. As it starts, it
+  collects the profile scopes since the last frame started and gives them
+  to the profiler (M7.3, ADR-0059). It gives the clock
+  `DebugTools::game_time(elapsed)` rather than `elapsed`: nothing while
+  the time controls pause the game but a tick's length for each step, the
+  scaled length otherwise (M7.6, ADR-0064).
   Text in the world, and the UI (M7.8), are the renderer's, from the
   frame's `TextList` and `UiList`, within its draw: the UI planned in the
   order pushed, its instances written after the world's.

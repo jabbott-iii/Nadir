@@ -553,6 +553,34 @@ impl AssetServer {
         reloads
     }
 
+    /// Reads the file of every asset again, of every type, as
+    /// [`AssetServer::reload`] does for one path, and returns how many
+    /// reads it queued: an asset whose path failed its type's check has no
+    /// file to read again. For a developer's "reload everything" (the
+    /// debug console's `reload`), when a change was not seen: a source that
+    /// cannot tell when a file changed, or files changed while nothing
+    /// watched them.
+    pub fn reload_all(&mut self) -> usize {
+        let reader = Reader {
+            workers: &self.workers,
+            source: &self.source,
+            limits: self.limits,
+            watch: self.watch.as_ref().map(Watch::shared),
+        };
+        let mut paths = Vec::new();
+        let mut reloads = 0;
+        for storage in &mut self.storages.list {
+            paths.clear();
+            storage.paths(&mut |path| paths.push(path.to_string()));
+            for path in &paths {
+                if storage.reload(path, &reader) {
+                    reloads += 1;
+                }
+            }
+        }
+        reloads
+    }
+
     /// Starts the watcher, a thread, `nadir-assets-watch`, that asks the
     /// source when the file of each loaded path last changed
     /// ([`Source::modified`]) every 250 ms, and hands the paths that changed

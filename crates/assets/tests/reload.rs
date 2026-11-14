@@ -235,6 +235,33 @@ fn a_reload_reaches_every_type_loaded_at_the_path() {
 }
 
 #[test]
+fn reload_all_reads_every_asset_of_every_type_again() {
+    let dir = root("all");
+    fs::write(dir.join("notes/other.txt"), "other").expect("write a file");
+    let mut server = AssetServer::new(&dir, OnFailure::Placeholder);
+    assert_eq!(server.reload_all(), 0, "nothing loaded yet");
+    let hello = server.load::<Text>("notes/hello.txt");
+    let other = server.load::<Text>("notes/other.txt");
+    let raw = server.load::<Raw>("notes/hello.txt");
+    // A path that fails its type's check has no file to read again.
+    server.load::<Text>("notes/hello.text");
+    finish(&mut server);
+    fs::write(dir.join("notes/hello.txt"), "bye").expect("rewrite a file");
+    fs::write(dir.join("notes/other.txt"), "again").expect("rewrite a file");
+    assert_eq!(server.reload_all(), 3);
+    assert!(server.has_pending());
+    let counts = finish(&mut server);
+    assert_eq!(counts.released, 2, "the two old texts");
+    assert_eq!(text(&server, hello), Some("BYE"));
+    assert_eq!(text(&server, other), Some("AGAIN"));
+    assert_eq!(server.get(raw), Some(&Raw(b"bye".to_vec())));
+    let mut swapped: Vec<_> = server.drain_swapped::<Text>().collect();
+    swapped.sort_by_key(|handle| *handle == other);
+    assert_eq!(swapped, [hello, other]);
+    assert_eq!(server.drain_swapped::<Raw>().collect::<Vec<_>>(), [raw]);
+}
+
+#[test]
 fn a_reload_of_a_path_no_asset_is_at_does_nothing() {
     let dir = root("nothing");
     let mut server = AssetServer::new(&dir, OnFailure::Placeholder);

@@ -640,6 +640,10 @@ impl UiSpace { new(scale, virtual_resolution, output_size), to_ui(screen), to_sc
   `text(pos, str)`.
 - Compiled in every build, but only the facade's `dev` systems fill it. In
   release it stays empty and costs one branch.
+- Not built: M7.6's overlays are the facade's, drawn as sprites of the
+  debug UI's white texel in the world's top layer, a virtual pixel wide,
+  and texts (ADR-0064). A list of render's own would draw lines a screen
+  pixel wide at any zoom, and outside `dev` too.
 
 ## Performance targets
 

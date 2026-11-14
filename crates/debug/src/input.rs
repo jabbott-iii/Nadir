@@ -111,7 +111,12 @@ pub(crate) struct Taken {
 /// frame. The frame ends at the release, so that a drag ends where the
 /// button went up; a press after a release, or after text or keys, waits for
 /// the next frame, so that what was typed goes to the field that had the
-/// keyboard. Pointer moves in a row are kept as the last one, and past 4096
+/// keyboard. It ends too at a press of a key whose meaning a text field
+/// leaves to its caller, Enter (and the keypad's), Tab, Up, Down, PageUp
+/// and PageDown, which the caller handles after the field: a console then
+/// runs a line with the text typed before its Enter only, and goes back in
+/// its history before an Enter that follows. Pointer moves in a row are
+/// kept as the last one, and past 4096
 /// events the oldest go: a debug UI not drawn for a while should
 /// [`clear`](DebugInput::clear) its input when it is drawn again.
 #[derive(Clone, Debug, Default)]
@@ -246,6 +251,9 @@ impl DebugInput {
                             shift: self.modifiers.shift(),
                             command: self.modifiers.command(),
                         });
+                        if ends_frame(key) {
+                            break;
+                        }
                     }
                 }
                 Event::Text(character) => out.edits.push(Edit::Char(character)),
@@ -263,9 +271,77 @@ impl DebugInput {
     }
 }
 
+/// Whether a press of `key` ends a frame's events: a key whose meaning a
+/// text field leaves to its caller, who handles it after the field.
+fn ends_frame(key: Key) -> bool {
+    matches!(
+        key,
+        Key::Enter
+            | Key::NumpadEnter
+            | Key::Tab
+            | Key::Up
+            | Key::Down
+            | Key::PageUp
+            | Key::PageDown
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_frame_ends_at_a_press_of_a_key_a_field_leaves_to_its_caller() {
+        let mut input = DebugInput::new();
+        input.text("tp");
+        input.key(Key::Enter, true, false);
+        input.text("5");
+        input.key(Key::Enter, false, false);
+        input.key(Key::Up, true, false);
+        input.key(Key::Up, true, true);
+        input.key(Key::A, true, false);
+        let keys = |taken: &Taken| -> Vec<Edit> { taken.edits.clone() };
+        let edit = |key| Edit::Key {
+            key,
+            shift: false,
+            command: false,
+        };
+        let first = take(&mut input);
+        assert_eq!(
+            keys(&first),
+            [Edit::Char('t'), Edit::Char('p'), edit(Key::Enter)]
+        );
+        // What came after waits: the text, then the next such key.
+        assert_eq!(keys(&take(&mut input)), [Edit::Char('5'), edit(Key::Up)]);
+        // A repeat is a press again.
+        assert_eq!(keys(&take(&mut input)), [edit(Key::Up)]);
+        assert_eq!(keys(&take(&mut input)), [edit(Key::A)]);
+        assert!(input.is_empty());
+        // Left, Right and the rest are the field's: they end nothing.
+        for key in [
+            Key::Left,
+            Key::Right,
+            Key::Home,
+            Key::End,
+            Key::Backspace,
+            Key::Escape,
+        ] {
+            input.key(key, true, false);
+        }
+        assert_eq!(take(&mut input).edits.len(), 6);
+        for key in [
+            Key::NumpadEnter,
+            Key::Tab,
+            Key::Down,
+            Key::PageUp,
+            Key::PageDown,
+        ] {
+            input.key(key, true, false);
+            input.text("x");
+            assert_eq!(keys(&take(&mut input)), [edit(key)], "{key:?}");
+            assert_eq!(keys(&take(&mut input)), [Edit::Char('x')]);
+        }
+    }
 
     fn take(input: &mut DebugInput) -> Taken {
         let mut taken = Taken::default();

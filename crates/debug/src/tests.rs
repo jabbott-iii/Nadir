@@ -29,6 +29,7 @@ use nadir_render::{SortMode, UiList, UiScale, UiView};
 use crate::metrics::tests::Fixed;
 use crate::{DebugInput, DebugUi, Frame, Plot, Response, Ui};
 
+mod console;
 mod inspector;
 
 const SIZE: UVec2 = UVec2::new(400, 300);
@@ -390,17 +391,23 @@ fn keys_a_field_does_not_use_reach_its_caller() {
     field.harness.tap(Key::Up);
     field.harness.tap(Key::Tab);
     field.harness.input.text("\t");
-    let mut seen = (false, false, false);
-    let value = &mut field.value;
-    field.harness.show(|ui| {
-        ui.text_input("T", value);
-        seen = (
-            ui.key_pressed(Key::Up),
-            ui.key_pressed(Key::Tab),
-            ui.key_pressed(Key::Down),
-        );
-    });
-    assert_eq!(seen, (true, true, false));
+    // Each such key ends its frame: the caller sees them one a frame, in
+    // the order pressed.
+    let mut frames = Vec::new();
+    for _ in 0..2 {
+        let mut seen = (false, false, false);
+        let value = &mut field.value;
+        field.harness.show(|ui| {
+            ui.text_input("T", value);
+            seen = (
+                ui.key_pressed(Key::Up),
+                ui.key_pressed(Key::Tab),
+                ui.key_pressed(Key::Down),
+            );
+        });
+        frames.push(seen);
+    }
+    assert_eq!(frames, [(true, false, false), (false, true, false)]);
     assert_eq!(field.value, "", "a tab is not typed");
 }
 

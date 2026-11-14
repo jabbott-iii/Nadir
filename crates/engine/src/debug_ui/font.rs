@@ -37,10 +37,10 @@ const SPRITE: &str = "fonts/nadir_debug";
 const WIDTH: usize = 5;
 const HEIGHT: usize = 9;
 /// The pen's move after each glyph: every glyph is as wide.
-const ADVANCE: i32 = 6;
+pub(super) const ADVANCE: i32 = 6;
 /// From one line to the next, and from a line's top to its baseline: a
 /// row of space above the capitals, which start a row down.
-const LINE_HEIGHT: u32 = 10;
+pub(super) const LINE_HEIGHT: u32 = 10;
 const BASE: u32 = 8;
 /// The glyphs on the page: in cells of `WIDTH + 1` by `HEIGHT + 1` texels,
 /// so that no two touch, this many to a row of cells.

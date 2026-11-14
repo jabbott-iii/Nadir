@@ -35,7 +35,8 @@ Built:
   against its CRC-32 as it is read, so that a damaged one is an error
   naming its path.
 - Placeholders for failed loads, when the server is asked to show them.
-- Reloads: `reload` reads a path's file again, and a later finish swaps
+- Reloads: `reload` reads a path's file again, `reload_all` every
+  asset's, and a later finish swaps
   the new value in behind the same handle, releasing the old one; a reload
   that fails keeps the value. `start_watcher` starts a thread that asks the
   source every 250 ms when each loaded path's file last changed, and

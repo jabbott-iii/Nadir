@@ -576,6 +576,17 @@ impl DebugUi {
         out
     }
 
+    /// The wheel's lines this frame if the pointer is over `rect`, cut to
+    /// `clip`, in `layer`, the one under it; else 0.
+    pub(crate) fn wheel_over(&self, layer: Layer, clip: Rect, rect: Rect) -> f32 {
+        let at = self.pointer;
+        if self.hover_layer == Some(layer) && rect.contains(at) && clip.contains(at) {
+            self.input.wheel.y
+        } else {
+            0.0
+        }
+    }
+
     /// The widget held, if it is `id`.
     pub(crate) fn active_mut(&mut self, id: Id) -> Option<&mut Active> {
         self.active.as_mut().filter(|active| active.id == id)

@@ -424,7 +424,8 @@
 //!
 //! # Not built yet
 //!
-//! Debug draw (M7.6), post effects, camera rotation, the smooth-camera and
+//! A debug draw list (M7.6 draws the facade's overlays as sprites,
+//! ADR-0064), post effects, camera rotation, the smooth-camera and
 //! native-resolution modes, and the Metal shaders (M10.3).
 //!
 //! # Features

@@ -30,8 +30,8 @@
 //! - **stderr**, on by default ([`set_stderr`]);
 //! - a **file** with rotation, off until [`open_file`] is called;
 //! - an in-memory **ring buffer** of the last [`RING_CAPACITY`] records,
-//!   always on, read with [`tail`]. The debug console and crash reports use
-//!   it.
+//!   always on, read with [`tail`], or a record at a time with [`since`].
+//!   The debug console and crash reports use it.
 //!
 //! A record's *target* is the module path of the code that logged it. The
 //! filter has a default level ([`set_level`], initially [`Level::Info`]) and
@@ -233,6 +233,33 @@ pub fn tail(max_records: usize) -> Vec<String> {
     logger().ring.tail(max_records)
 }
 
+/// Calls `each` with each record logged after the process's first `cursor`
+/// records that the ring buffer still holds, oldest first, formatted as
+/// [`tail`] gives them; and returns how many records the process has logged
+/// so far, the cursor for the next call. A cursor of 0 reads all the ring
+/// holds; records that left the ring before they were read are skipped. It
+/// allocates nothing, so a reader can call it every frame.
+///
+/// `each` runs with the logger's lock held: if it logs, or calls another
+/// function of this module (`enabled`, `tail`, `since`, the setters,
+/// `open_file`, `close_file`), it deadlocks or panics.
+///
+/// ```
+/// use nadir_core::log::{self, warn};
+///
+/// log::set_stderr(false);
+/// // Nothing read: only the count so far, from which to read on.
+/// let cursor = log::since(u64::MAX, |_| {});
+/// warn!("texture missing");
+/// let mut read = Vec::new();
+/// let next = log::since(cursor, |record| read.push(record.to_string()));
+/// assert!(read.iter().any(|record| record.ends_with("texture missing")));
+/// assert!(next > cursor);
+/// ```
+pub fn since(cursor: u64, each: impl FnMut(&str)) -> u64 {
+    logger().ring.since(cursor, each)
+}
+
 /// The entry point behind the logging macros.
 #[doc(hidden)]
 pub fn __log(level: Level, target: &str, args: fmt::Arguments<'_>) {
@@ -372,12 +399,15 @@ fn is_inside(target: &str, module: &str) -> bool {
 
 struct Ring {
     records: VecDeque<String>,
+    /// How many records were ever pushed: the last of them are `records`.
+    pushed: u64,
 }
 
 impl Ring {
     const fn new() -> Self {
         Self {
             records: VecDeque::new(),
+            pushed: 0,
         }
     }
 
@@ -391,11 +421,24 @@ impl Ring {
         slot.clear();
         slot.push_str(record);
         self.records.push_back(slot);
+        self.pushed += 1;
     }
 
     fn tail(&self, max_records: usize) -> Vec<String> {
         let skip = self.records.len().saturating_sub(max_records);
         self.records.iter().skip(skip).cloned().collect()
+    }
+
+    /// Calls `each` with the records pushed after the first `cursor` that
+    /// it still holds, and returns how many were pushed.
+    fn since(&self, cursor: u64, mut each: impl FnMut(&str)) -> u64 {
+        // The number of the oldest record held: the ring holds the last.
+        let oldest = self.pushed - self.records.len() as u64;
+        let skip = usize::try_from(cursor.saturating_sub(oldest)).unwrap_or(usize::MAX);
+        for record in self.records.iter().skip(skip) {
+            each(record);
+        }
+        self.pushed
     }
 }
 
@@ -647,6 +690,48 @@ mod tests {
             ]
         );
         assert!(ring.tail(0).is_empty());
+    }
+
+    #[test]
+    fn since_reads_each_record_once_from_its_cursor_and_skips_those_lost() {
+        let mut ring = Ring::new();
+        let read = |ring: &Ring, cursor: u64| {
+            let mut records = Vec::new();
+            let next = ring.since(cursor, |record| records.push(record.to_string()));
+            (records, next)
+        };
+        assert_eq!(read(&ring, 0), (Vec::new(), 0));
+        for n in 0..3 {
+            ring.push(&format!("record {n}"));
+        }
+        assert_eq!(
+            read(&ring, 0),
+            (
+                vec!["record 0".into(), "record 1".into(), "record 2".into()],
+                3
+            )
+        );
+        ring.push("record 3");
+        assert_eq!(read(&ring, 3), (vec!["record 3".to_string()], 4));
+        assert_eq!(read(&ring, 4), (Vec::new(), 4));
+        // A cursor from past the end reads nothing, and gives the count.
+        assert_eq!(read(&ring, u64::MAX), (Vec::new(), 4));
+        // Records that left the ring before they were read are skipped.
+        for n in 4..RING_CAPACITY + 10 {
+            ring.push(&format!("record {n}"));
+        }
+        let (records, next) = read(&ring, 2);
+        assert_eq!(next, RING_CAPACITY as u64 + 10);
+        assert_eq!(records.len(), RING_CAPACITY);
+        assert_eq!(records[0], "record 10");
+        let (records, _) = read(&ring, next - 2);
+        assert_eq!(
+            records,
+            [
+                format!("record {}", RING_CAPACITY + 8),
+                format!("record {}", RING_CAPACITY + 9)
+            ]
+        );
     }
 
     #[test]

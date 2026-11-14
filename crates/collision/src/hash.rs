@@ -214,6 +214,14 @@ impl SpatialHash {
         &self.oversized
     }
 
+    /// Calls `each` with each cell of this build that holds colliders, and
+    /// how many it holds, row by row, top first, then left to right.
+    pub(crate) fn cells(&self, mut each: impl FnMut(IVec2, u32)) {
+        for &(cell, slot) in &self.order {
+            each(cell, self.slots[slot as usize].len);
+        }
+    }
+
     /// Calls `visit` with each collider not kept aside whose hashed bounds
     /// may touch `region`, once each: cell by cell, row by row, each
     /// cell's in the order they were added.
@@ -435,6 +443,40 @@ mod tests {
             found(&hash, Rect::new(Vec2::splat(f32::NAN), Vec2::ONE)),
             [1, 2, 3]
         );
+    }
+
+    #[test]
+    fn the_cells_are_those_that_hold_colliders_row_by_row_with_their_counts() {
+        let mut hash = SpatialHash::new(10.0);
+        let cells = |hash: &SpatialHash| {
+            let mut cells = Vec::new();
+            hash.cells(|cell, count| cells.push((cell, count)));
+            cells
+        };
+        assert!(cells(&hash).is_empty());
+        // One in a cell; two across four each, one of them over the
+        // first's cell; one kept aside, in none.
+        hash.rebuild([
+            square(1.0, 1.0, 2.0),
+            square(21.0, 1.0, 12.0),
+            square(8.0, 8.0, 4.0),
+            square(0.0, 0.0, 1e9),
+        ]);
+        assert_eq!(
+            cells(&hash),
+            [
+                (IVec2::new(0, 0), 2),
+                (IVec2::new(1, 0), 1),
+                (IVec2::new(2, 0), 1),
+                (IVec2::new(3, 0), 1),
+                (IVec2::new(0, 1), 1),
+                (IVec2::new(1, 1), 1),
+                (IVec2::new(2, 1), 1),
+                (IVec2::new(3, 1), 1),
+            ]
+        );
+        hash.rebuild(std::iter::empty());
+        assert!(cells(&hash).is_empty());
     }
 
     #[test]

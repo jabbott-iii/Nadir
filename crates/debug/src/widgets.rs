@@ -166,6 +166,39 @@ impl<'a> Ui<'a> {
         self.core.frames
     }
 
+    /// The UI's look.
+    pub(crate) fn style(&self) -> crate::Style {
+        self.core.style
+    }
+
+    /// How far down a row moves the next: a row and the space under it.
+    pub(crate) fn row_step(&self) -> f32 {
+        self.core.row_height() + self.core.style.spacing
+    }
+
+    /// How much of the window is left below the next row's top, inside
+    /// its padding: rows that fit in it do not make the window scroll.
+    pub(crate) fn room(&self) -> f32 {
+        self.clip.max.y - self.core.style.padding - self.y
+    }
+
+    /// Leaves `rows` rows empty, in a column.
+    pub(crate) fn skip_rows(&mut self, rows: usize) {
+        if self.row.is_none() {
+            self.y += self.row_step() * rows as f32;
+        }
+    }
+
+    /// The wheel's lines this frame, up positive, if the pointer is over
+    /// the next `height` of the window and the window is under it.
+    pub(crate) fn wheel_over(&self, height: f32) -> f32 {
+        let rect = Rect::from_min_size(
+            Vec2::new(self.left + self.indent, self.y),
+            Vec2::new(self.width - self.indent, height),
+        );
+        self.core.wheel_over(self.layer, self.clip, rect)
+    }
+
     /// Fills `add` with the widgets of `key`'s scope: for the same texts
     /// in a loop, say, `ui.with_id(index, |ui| ...)`.
     pub fn with_id(&mut self, key: impl Hash, add: impl FnOnce(&mut Ui<'_>)) {
@@ -406,8 +439,37 @@ impl<'a> Ui<'a> {
     /// are the caller's ([`Ui::key_pressed`]). A `value` the caller changed
     /// puts the caret at its end. Copy and paste are not built.
     pub fn text_input(&mut self, text: impl fmt::Display, value: &mut String) -> Response {
+        self.text_field(text, value, false).0
+    }
+
+    /// A text field across the whole row, its text not shown: a console's
+    /// command line. As [`Ui::text_input`]; and whether it has the keyboard
+    /// once this frame's edits are in.
+    pub(crate) fn text_line(
+        &mut self,
+        text: impl fmt::Display,
+        value: &mut String,
+    ) -> (Response, bool) {
+        self.text_field(text, value, true)
+    }
+
+    /// A text field, its label after it, or across the row with no label
+    /// if `whole`; and whether it has the keyboard.
+    fn text_field(
+        &mut self,
+        text: impl fmt::Display,
+        value: &mut String,
+        whole: bool,
+    ) -> (Response, bool) {
         let (id, shown) = self.labeled(text);
-        let (control, label) = self.control_row(shown);
+        let (control, label) = if whole {
+            let height = self.core.row_height();
+            let rect = self.allocate(None, height);
+            (rect, None)
+        } else {
+            let (control, label) = self.control_row(shown);
+            (control, Some(label))
+        };
         let interaction = self.interact(id, control);
         let mut response = Response::from(interaction);
         let style = self.core.style;
@@ -522,8 +584,10 @@ impl<'a> Ui<'a> {
             );
             self.core.rect(self.layer, field, caret, style.text);
         }
-        self.write_label(label, shown);
-        response
+        if let Some(label) = label {
+            self.write_label(label, shown);
+        }
+        (response, focused)
     }
 
     /// A choice of `items`, `selected` the one shown: a click opens their

@@ -139,6 +139,20 @@ impl CollisionWorld {
         self.hash.rebuild(bounds);
     }
 
+    /// Calls `each` with the rect of each cell of the spatial hash that
+    /// holds colliders, and how many it holds, row by row, top first, as
+    /// the last [`rebuild`](Self::rebuild) left them: a debug view of the
+    /// broadphase. A collider moved since stays in the cells it was hashed
+    /// in, and one kept aside (covering more than 1024 cells, or not
+    /// finite) is in none. It allocates nothing.
+    pub fn hash_cells(&self, mut each: impl FnMut(Rect, u32)) {
+        let side = self.hash.cell_size();
+        self.hash.cells(|cell, count| {
+            let min = Vec2::new(cell.x as f32, cell.y as f32) * side;
+            each(Rect::from_min_size(min, Vec2::splat(side)), count);
+        });
+    }
+
     /// Removes every collider, keeping the buffers.
     pub fn clear(&mut self) {
         self.rebuild(std::iter::empty());
@@ -400,6 +414,32 @@ mod tests {
         Collider::solid(Shape::Aabb {
             half: Vec2::splat(half),
         })
+    }
+
+    #[test]
+    fn the_hash_s_cells_are_the_rects_its_colliders_were_hashed_in() {
+        let mut world = CollisionWorld::with_cell_size(16.0);
+        let cells = |world: &CollisionWorld| {
+            let mut cells = Vec::new();
+            world.hash_cells(|rect, count| cells.push((rect, count)));
+            cells
+        };
+        assert!(cells(&world).is_empty());
+        // Across a cell's edge at x 16, and one at -8 in the cell before 0.
+        world.rebuild([
+            (1, Vec2::new(16.0, 8.0), boxed(2.0)),
+            (2, Vec2::new(-8.0, 8.0), boxed(2.0)),
+        ]);
+        let square = |x: f32| Rect::from_min_size(Vec2::new(x, 0.0), Vec2::splat(16.0));
+        assert_eq!(
+            cells(&world),
+            [(square(-16.0), 1), (square(0.0), 1), (square(16.0), 1)]
+        );
+        // Moved, it stays where it was hashed until the next rebuild.
+        world.set_position(0, Vec2::new(100.0, 100.0));
+        assert_eq!(cells(&world).len(), 3);
+        world.clear();
+        assert!(cells(&world).is_empty());
     }
 
     #[test]

@@ -392,6 +392,202 @@ pub struct Inspector;  // new, selected, select, prefab_name, set_note,
 - **Not built:** picking an entity in the world, setting an option that is
   `None`, a list's length or a `null`, scrolling the list past a page.
 
+### As built (M7.5): the console
+
+A window of the engine's, in the facade's debug UI, over the engine's log
+(ADR-0063).
+
+```rust
+// nadir-debug:
+pub const CONSOLE_LINES: usize = 1000;
+pub const CONSOLE_HISTORY: usize = 100;
+#[non_exhaustive] pub enum ConsoleError { BadUsage, UnclosedQuote, UnknownCommand,
+    MissingArgument { usage, argument }, TooManyArguments { usage },
+    InvalidArgument { usage, argument, found, expected }, Failed(String) }
+pub struct Args<'a>;        // usage, len, is_empty, get, str, f32
+pub struct ConsoleOut<'a>;  // print, print_colored
+pub struct Console<C>;      // new, register(usage, help, command), line, set_line, lines,
+                            // print, print_error, log_record, older, newer, complete,
+                            // run_line(line, run), show(ui, run)
+// run: FnMut(C, &Args, &mut ConsoleOut) -> Result<(), ConsoleError>
+// nadir-core:   log::since(cursor, each: FnMut(&str)) -> u64
+// nadir-assets: AssetServer::reload_all() -> usize
+// nadir_engine, with `dev`:
+pub type ConsoleCommand = fn(&World, &Args<'_>, &mut ConsoleOut<'_>) -> Result<(), ConsoleError>;
+impl App { pub fn add_console_command(self, usage: &str, help: &str,
+                                      command: ConsoleCommand) -> Self; }
+```
+
+- **The registry:** a command is registered by its usage, whose first word
+  is its name, a line of help, and the caller's value for it (`C`: the
+  facade's is an enum of the engine's commands and the game's functions);
+  one of a name already there replaces it. A name is no placeholder, has
+  no quote, and is not `help`, the console's own: `help` lists every
+  command's usage and help in columns, `help <name>` one.
+- **Lines:** words split at whitespace; a double quote groups words,
+  spaces too (`profile dump "C:\My Traces\t.json"`), in which `\"` is a
+  quote and `\\` a backslash, any other backslash kept; outside quotes a
+  backslash is itself; `""` is an empty word; a quote not closed is an
+  error. The first word names the command, matched as typed.
+- **Usages** name each argument: a word to type as it is (`dump` of
+  `profile dump [path]`), a value (`<x>`, or `[path]` if it may be left
+  out), or a choice (`<error|warn|info|debug|trace>`). A line is checked
+  before its command runs: each word typed, each choice one of its own,
+  ignoring case and then spelt as the usage spells it, each required
+  argument there, no more than the usage has. `Args::f32` reads a finite
+  number. Each error names the argument and the usage: `<y> is missing:
+  tp <x> <y>`, ``<scale>: `fast` is not a number: timescale <scale>``.
+- **Completion:** Tab completes the line's last word, or the next after a
+  space: the first from the names, `help`'s argument from the names, the
+  others from their slots in the usage, a word or a choice's choices. One
+  match goes in whole, a space after it; several as far as they agree, or,
+  if they agree no further, are listed in the log, a match a line. A
+  value (a prefab's or
+  a level's name, a number) has no completions, nor a word in quotes.
+- **History:** the last 100 lines run, one the same as the line before
+  kept once; Up goes back, Down forward and, past the newest, to the line
+  that was being typed.
+- **The log:** the last 1000 lines: each line run after `>`, in the
+  accent color; what commands print; errors in red; and the records the
+  caller adds (`log_record`), `WARN` in the stats overlay's amber and
+  `ERROR` in red, a record of several lines a line each. A line too long is
+  cut at the window's edge.
+- **The window** (`show`): as many of the log's newest lines as fit,
+  bottom first, then the command line across the window, the rows sized
+  whole so that the window does not scroll once its size is settled (a
+  frame of a resize that shrinks it may show its scrollbar, as a window
+  measures its content a frame late); only the lines in view are
+  formatted. The command line takes the keyboard when the console is shown
+  after a frame it was not, none of that frame's typing or keys reaching
+  it. While the line has the keyboard: Enter runs it and empties it,
+  keeping the keyboard; Tab, Up and Down, after the frame's typing;
+  PageUp and PageDown a page, before the log is drawn. The wheel over the
+  log scrolls three lines a line; a turn that is not finite scrolls that
+  frame at most. A log scrolled up stays on its lines as new ones come,
+  until a line is run, which brings it to its newest so that the line's
+  output is in view (found in the check of `cargo dev`); one at its bottom
+  shows the newest.
+- **Input** (`DebugInput`, since M7.5): a frame's events end at a press of
+  Enter (the keypad's too), Tab, Up, Down, PageUp or PageDown, the keys a
+  text field leaves to its caller, so a caller handling them after the
+  field sees each after the typing before it and before what follows:
+  text typed after Enter goes to the next line, and Up then Enter runs the
+  line recalled. A caller sees at most one of them in a frame.
+- **The facade** shows it on the backtick (`Key::Grave`), `nadir::console`,
+  first at (8, 316) to (944, 556). The character a window's toggle types
+  as it is pressed, the text after its press and before another key's, is
+  fed to no debug field, so the backtick that shows or hides the console
+  is typed nowhere; a toggle on a key that types (a game's on a letter)
+  cannot be typed into a debug field. While it is open, each frame gives it
+  the log's records since it last read them (`log::since`, which holds the
+  log's lock and allocates nothing), so it first shows what the ring holds.
+  Its commands, after `help`:
+
+  | Command | What it does |
+  | :- | :- |
+  | `schedule` | each system, in the order it runs (`Schedule::describe`) |
+  | `spawn <prefab> [x] [y]` | loads the prefab into the `PrefabLibrary` if it is not there, in `Scope::Level`, and spawns it through the world's commands at (x, y), or where the camera looks; x and y go together |
+  | `tp <x> <y>` | moves each entity with `Player` and a `Transform` there, its `PrevTransform` too |
+  | `timescale <scale>` | 0.25 to 4: each frame's length, times the scale, is the clock's, so ticks, tiles and clips all follow; 1 at start |
+  | `level <name>` | `load_level`, after the frame's debug UI, which says why one did not load; as `load_level` does, it takes the current level away first, so a name that does not load leaves no level (`level <the old name>` brings it back) |
+  | `reload` | `AssetServer::reload_all`; the hot reload of `App::run` swaps each in and makes the level again |
+  | `profile dump [path]` | the profiler's trace to `path`, its folder made, or beside the log as "Write trace" does |
+  | `log level <target> <level>` | `log::set_target_level` of the target, a module path |
+  | `quit` | ends `App::run`'s loop, as closing the window does |
+
+  A game's commands (`App::add_console_command`) get the world, as a debug
+  window does; one whose usage starts with no name is logged as an error
+  and not added. Commands queue as a window's do: a spawn shows after the
+  next tick or frame's stages.
+- **Allocation:** a frame of the open console in which nothing is typed
+  allocates nothing once its 1000 lines are there and no record is longer
+  than the line it reuses; a line run, a Tab, the first Up, and typing
+  that grows the line past its longest allocate (the line keeps its buffer
+  across a run).
+- **Not built:** completion of a value (a prefab's, a level's, a log
+  target's name), the caret's place in completion (the last word is
+  completed), a command typed with a backtick in it, copy and paste, the
+  history kept across runs, `god` (left to games, below). On a layout where
+  the key left of `1` is a dead key (German `^`, US-International `` ` ``),
+  its accent comes with the next key, after the frame that opens the
+  console, and is typed, or combined, into its line.
+
+### As built (M7.6): debug drawing and time control
+
+In the facade's debug UI, under `dev` (ADR-0064): F4's window, whose ticked
+overlays draw into the world, and the time keys F5 to F7, a label in the
+corner while the game's time is not real time.
+
+```rust
+// nadir-collision:
+impl CollisionWorld { pub fn hash_cells(&self, each: impl FnMut(Rect, u32)); }
+// nadir_engine, with `dev`: no public API; crates/engine/src/debug_ui/draw.rs
+// (Overlays, the pen) and debug_ui/time.rs (Time, the keys, SCALES, TICK).
+```
+
+- **The window** (F4, `nadir::debug_draw`, first at (952, 8) to (1092,
+  128)): a checkbox for each overlay, its name in its color. While the
+  window is open, collapsed or not, the ticked overlays draw; closed, none
+  do. At first: colliders, triggers and the tile grid.
+- **The overlays,** each as the frame draws it, entities `alpha` of the
+  way from the last tick's place, culled to the camera's view:
+
+  | Overlay | Drawn | Color |
+  | :- | :- | :- |
+  | Colliders | each solid `Collider`'s box, or circle of 24 sides, at its entity's `Transform` | cyan |
+  | Triggers | the same, of each trigger | magenta |
+  | Tile grid | the collision grid's solid cells, filled | cyan, faint |
+  | Spatial hash | each cell that holds colliders, as the last tick's rebuild left it (`hash_cells`), with its count | white, faint |
+  | Tile chunks | each chunk of each tile layer drawn this frame, `TileLayer::CHUNK` tiles a side, cut at the layer's edge | orange |
+  | Camera | a cross at the camera's position, 6 virtual pixels each way, and the view's rect: the zoom rounded to a whole number, at least 1, about the position and the shake | red |
+
+  A nav grid and the current paths are M9.5's (pathfinding is not built);
+  the engine has no camera limits, so the camera's overlay is its view.
+- **Drawing:** sprites of the debug UI's white texel in the world's
+  sprites, layer 255 at `SortMode::Fixed(u32::MAX)`, in front of every
+  sprite, as the inspector's outline: an outline is four sprites inside the
+  rect, its corners first put on whole virtual pixels, as the renderer puts
+  each sprite's, so that the edges meet and never overlap (a rect too thin
+  for two edges is one sprite, a pixel each way at least); a fill's corners
+  too; a line, one sprite turned about its start; lines a virtual pixel
+  wide (one world unit over the zoom). A child's collider (`Parent`) is
+  drawn where its root is drawn, with its offset, as its sprite would be.
+  A box of no area is drawn. The hash's counts are world texts in the debug
+  font, in the same layer. Render's `DebugDrawList` is not built. A steady
+  frame of every overlay allocates nothing once the frame's buffers have
+  grown.
+- **Time:** the keys reach the debug tools as the window's events come,
+  before the frame's clock, so they act in the frame they were pressed in,
+  whether a debug field has the keyboard or not; the game's actions see
+  them while no debug field has the keyboard, as they see a window's
+  toggle (the capture holds every key back while one has). They change the time the clock is given (`DebugTools::
+  game_time`, before `FixedClock::begin_frame` in `App::update`), so ticks,
+  animated tiles and clips (`RenderFrame::time`) pause, step and scale
+  together, and a step takes a replay's next tick:
+  - **F5** pauses the game's time, and runs it again, dropping steps not
+    taken; a repeat does nothing.
+  - **F6** steps a tick: a frame's worth of a tick's length rounded up to
+    a nanosecond, which runs one tick and keeps the frame's place between
+    two (another tick after 50 million steps, as `App::update` says of
+    such frames). It pauses first if the time runs; held, its repeats step
+    on; the steps asked for in a frame run in its clock, at most 15 a
+    frame (the clock takes 250 ms of a frame at most).
+  - **F7** steps the scale up through 0.25, 0.5, 1, 2 and 4, and with
+    Shift down, wrapping at either end; from a scale between two (the
+    console's `timescale 0.3`), the next one past it. Paused, a step is a
+    tick whatever the scale.
+- **The label:** while the time is paused or not at 1, a panel at the
+  screen's top-right, 8 units in, in the debug font: `paused`, `paused,
+  x0.5` or `time x2`, pushed before the windows, which cover it where they
+  reach the corner. Each pause and change of scale is logged too
+  (`info!`), so the console shows it; a change of scale while paused says
+  the time will run at it once F5 runs it again, as the console's
+  `timescale` does. A step is logged at `debug!`, which the console shows
+  once the log's level lets it through (`log level nadir debug`). The
+  debug UI is made for the label if no window has made it.
+- **Not built:** sound pausing with the game (music and voices play on),
+  render's `DebugDrawList`, a nav grid and paths (M9.5), camera limits.
+
 ## Tools
 
 | Tool | Toggle | Function |
@@ -409,15 +605,19 @@ pub struct Inspector;  // new, selected, select, prefab_name, set_note,
 - `schedule` (prints system order)
 - `spawn <prefab> [x y]`
 - `tp <x> <y>`
-- `god`
+- `god`: left to games (M7.5, the user's choice): the engine has no health
+  or damage to act on
 - `timescale <f>`
 - `level <name>`
-- `reload` (forces re-read of all cooked files)
+- `reload` (forces re-read of all cooked files; as built, every loaded
+  asset's file, `AssetServer::reload_all`)
 - `profile dump [path]`
 - `log level <target> <level>`
 - `quit`
 
-Games register their own commands with `console.register(name, help, fn)`.
+Games register their own commands with `console.register(name, help, fn)`;
+as built (M7.5), `App::add_console_command(usage, help, command)`, over
+nadir-debug's `Console::register(usage, help, command)`.
 
 ## Profiler
 

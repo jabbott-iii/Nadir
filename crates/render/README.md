@@ -47,7 +47,7 @@ Built:
 
 Not yet:
 
-- debug draw (M7.6);
+- a debug draw list (the engine's debug overlays are sprites, M7.6);
 - post effects, camera rotation, and the smooth-camera and
   native-resolution modes;
 - the Metal shaders (M10.3).

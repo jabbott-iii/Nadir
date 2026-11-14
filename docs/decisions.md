@@ -5685,3 +5685,223 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   list could scroll instead of paging); a game needs to set an option, a
   list's length or a `null`; or the inspector's allocations get in the
   way of reading the stats overlay.
+
+## ADR-0063 — M7.5: the console in nadir-debug, commands registered by usage and handed back to run; `log::since` in nadir-core, `AssetServer::reload_all` in nadir-assets; `timescale` scales each frame's length; `god` left to games
+
+- **Status:** Accepted in part: on 2026-11-14 the user chose `god` left to
+  games, the time scale built now for `timescale` (M7.6 adds its keys),
+  and `AssetServer::reload_all` in nadir-assets, four crates in all (core,
+  assets, debug and the facade); the rest is Proposed
+- **Date:** 2026-11-14
+- **Context:**
+  - M7.5 asks for the command registry, history, completion, the log view
+    and the initial commands (`docs/subsystems/debug-tools.md`: `help`,
+    `schedule`, `spawn`, `tp`, `god`, `timescale`, `level`, `reload`,
+    `profile dump`, `log level`, `quit`), with unit tests of parsing and
+    completion; games register their own commands.
+  - The engine has no health or damage for `god`; no time scale (M7.6's
+    F7); no way to quit but closing the window; and no way to read the
+    asset server's paths all at once. A debug window runs after the frame
+    stages with `&World`; `load_level` needs `&mut World`.
+  - The log's ring (`nadir_core::log`) is read only whole, by `tail`, which
+    copies every record it gives: read each frame, the 1000 records would
+    be 1000 allocations a frame, and no reader could tell new ones from old.
+  - The engine's pixel font draws printable ASCII; other characters draw a
+    box (ADR-0058).
+- **Decision:**
+  - **nadir-core:** `log::since(cursor, each) -> u64`: each record logged
+    after the process's first `cursor` that the ring still holds, oldest
+    first, and the count logged so far, the next cursor. The ring counts
+    the records pushed. It allocates nothing; `each` runs with the log's
+    lock held, so it must not log, nor call another `log` function.
+  - **nadir-assets:** `AssetServer::reload_all() -> usize`, as `reload` of
+    every path each storage holds, each type its own.
+  - **nadir-debug:** `Console<C>`, `Args`, `ConsoleOut`, `ConsoleError`
+    (`#[non_exhaustive]`), `CONSOLE_LINES` (1000) and `CONSOLE_HISTORY`
+    (100):
+    - a command is registered by its **usage**, whose first word is its
+      name, and the caller's value `C`, which `run_line` and `show` hand
+      back with its arguments for the caller to run: the console needs to
+      know nothing of the world or the app. A usage's words after the name
+      are words, values (`<x>`, `[x]` optional) or choices (`<a|b>`), from
+      which the console checks a line before it runs (each word as typed,
+      each choice one of its own, ignoring case and then spelt as the usage
+      spells it, required ones there, no more than the usage has), and
+      completes;
+    - **lines** split at whitespace, double quotes grouping, `\"` and `\\`
+      their only escapes, so a Windows path keeps its backslashes;
+    - **completion** of the last word: names, then the usage's words and
+      choices; one match whole with a space after it, several as far as
+      they agree, then listed in the log;
+    - **history** of 100 lines, a repeat kept once, Up and Down back to the
+      line being typed;
+    - **the log** of 1000 lines, strings reused: lines run (after `>`),
+      what commands print, errors in red, records the caller adds, `WARN`
+      amber and `ERROR` red;
+    - **the window:** the newest lines that fit, bottom first, then the
+      command line across the window (a crate-private whole-row text field),
+      the rows sized whole so the window does not scroll once its size is
+      settled, only the lines in view formatted; the command line takes the keyboard when the console is
+      shown after a frame it was not, that frame's typing and keys not its;
+      the wheel and PageUp and PageDown scroll the log, which holds its
+      lines as more come, until a line is run, which brings it back to
+      the newest;
+    - **the input** ends a frame at a press of Enter, Tab, Up, Down, PageUp
+      or PageDown, the keys a field leaves to its caller, so that each is
+      handled in order with the typing: text after Enter goes to the next
+      line, and Up then Enter runs the line recalled.
+  - **The facade,** under `dev`: the console on the backtick
+    (`Key::Grave`), `nadir::console`, first at (8, 316) to (944, 556),
+    reading the log with `since` while it is open. The text a window's
+    toggle types as it is pressed is fed to no debug field. `ConsoleCommand`
+    (`fn(&World, &Args, &mut ConsoleOut) -> Result<(), ConsoleError>`) and
+    `App::add_console_command(usage, help, command)`; a usage that starts
+    with no name is logged as an error and not added. The engine's
+    commands: `schedule`; `spawn <prefab> [x] [y]` (loaded into the
+    library in `Scope::Level` if need be, spawned through commands at the
+    place or where the camera looks); `tp <x> <y>` (each `Player`, its
+    `PrevTransform` too); `timescale <scale>`, 0.25 to 4, which multiplies
+    each frame's length before the fixed clock sees it; `level <name>`,
+    loaded by `App::update` after the debug UI's frame; `reload`
+    (`reload_all`); `profile dump [path]` (to the path, its folder made, or
+    beside the log); `log level <target> <error|warn|info|debug|trace>`;
+    `quit`, which ends `App::run`'s loop. `god` is the game's to add.
+    Messages are ASCII ("2 times real time"), for the pixel font.
+- **Consequences:**
+  - A game adds a command with one line and a function, and gets its
+    arguments checked and completed from its usage. Values (a prefab's, a
+    level's, a target's name) do not complete: a spawn of a missing prefab
+    says the library's error.
+  - The time scale scales ticks, the frame's `dt`, tiles and clips alike,
+    and works under a replay, whose ticks it plays faster or slower; the
+    hitch clamp (250 ms) applies after it. It is kept in the debug tools,
+    for M7.6's F7 to set.
+  - A console spawn is not the level's: unloading the level leaves it, and
+    its assets in `Scope::Level` go. A teleport and a spawn are not input,
+    so a replay does not hold them (M4.7's note).
+  - `level` runs after the frame's debug UI, so the new level shows from
+    the next frame; its success is the log's `loaded the level` record.
+  - `reload` reads files in `App::update` too, but only a drawn frame
+    finishes them, and only `App::run`'s hot reload remakes the level.
+  - Reading the log while the console is open takes the log's lock once a
+    frame. Records that left the ring while it was closed are not shown.
+  - A backtick cannot be typed into the command line, nor into any debug
+    field: it toggles the console (ADR-0058). On a layout where that key is
+    dead, its accent comes with the next key and is typed into the line.
+  - A frame's caller keys come one a frame: a burst of them (a key held
+    past its repeat rate on a slow frame) is handled over as many frames.
+  - A review of the change the same day, a workflow of five reviewers and
+    a skeptic for each finding, upheld 15 findings of 18, all minor, all
+    fixed: text after Enter in one frame joined to the line run; a wheel
+    turn that is not finite stopping the log's scroll for good; Tab and Up
+    acting in the frame that opens the console; the backtick typed into
+    another debug field as it toggles; `spawn rock 5` refused as missing
+    an optional argument; a row's slack that could scroll the window;
+    Tab's matches on one line, cut at the edge; and five claims of the
+    docs, narrowed.
+- **Alternatives considered:**
+  - Commands as `fn(&mut Context)` stored in nadir-debug: a context
+    borrowing the world, the schedule and the profiler cannot be named in
+    a type the debug tools keep across frames; handing the command back
+    keeps nadir-debug free of the facade's types.
+  - Commands that check their own arguments: each would repeat the usage;
+    a usage the console reads gives help, checks and completion from one
+    string.
+  - Reading the log with `tail` each frame: 1000 allocations a frame, and
+    no way to tell which records are new.
+  - A `GodMode` resource in the facade: nothing in the engine would read
+    it (the user's choice).
+  - Leaving `timescale` to M7.6: the console's command set would ship
+    short of one, and M7.6 would build the same scale.
+  - `reload` from the hot reload's watcher only: it does not see files
+    changed while nothing watched them, nor a source that cannot tell.
+- **Revisit when:** M7.6 adds F7 (the scale's range and keys); M9.1's game
+  states change how levels load; a game needs completion of values (a
+  completion hook in the console); or the history should outlive a run.
+
+## ADR-0064 — M7.6: the debug drawing as the facade's sprites in a window of checkboxes on F4; the time controls as the time the clock is given; `CollisionWorld::hash_cells`
+
+- **Status:** Accepted in part: on 2026-11-14 the user chose the overlays
+  drawn as sprites in the facade (render's `DebugDrawList` left unbuilt),
+  F4 as a window of checkboxes, the camera's overlay as its cross and view
+  with the nav grid and paths left to M9.5, and a corner label for the
+  time's state; the rest is Proposed
+- **Date:** 2026-11-14
+- **Context:**
+  - M7.6 asks for F4's overlays (colliders, triggers, the spatial hash's
+    cells, a nav grid, the current paths, chunk bounds, camera bounds) and
+    F5 to F7's time controls (pause, step a tick, scale 0.25 to 4), checked
+    by hand in the sandbox (`docs/subsystems/debug-tools.md`, "Tools").
+  - render's spec plans a `DebugDrawList` in `RenderFrame`, not built; the
+    inspector's outline (ADR-0062) already draws sprites of the debug UI's
+    white texel in the world's top layer. The hash's cells were private
+    (M4.3's note). Pathfinding is M9.5's, and the engine has no camera
+    limits.
+  - The console's `timescale` (ADR-0063) already scales each frame's
+    length before the fixed clock. A step must go through `App::update`,
+    which takes a replay's next tick (M4.7's note); the clock's ticks and
+    `alpha` give `RenderFrame::time`, which animated tiles and clips show
+    (M4.5, M4.6).
+- **Decision:**
+  - **nadir-collision:** `CollisionWorld::hash_cells(each)`, each cell
+    that holds colliders as the last rebuild left it, its rect and count,
+    row by row, allocating nothing.
+  - **The facade,** under `dev`, in `debug_ui/draw.rs` and
+    `debug_ui/time.rs`:
+    - a window of the engine's on F4, `nadir::debug_draw`, at (952, 8) to
+      (1092, 128): a checkbox for each overlay, its name in its color;
+      the ticked ones draw while it is open, collapsed or not; at first
+      colliders, triggers and the tile grid;
+    - the overlays (colliders, triggers, the collision grid's solid
+      cells, the hash's cells and counts, tile layers' chunks, the
+      camera's cross and view), drawn as sprites of the white texel, a
+      virtual pixel wide, in layer 255 at `Fixed(u32::MAX)`, culled to the
+      view, entities where the frame draws them; the hash's counts as
+      world texts in the debug font;
+    - F5 pause, F6 step a tick (pausing first; repeats step on), F7 and
+      Shift+F7 the scale through 0.25, 0.5, 1, 2 and 4, wrapping, taken as
+      the window's events come, before the clock; `DebugTools::game_time`
+      gives the clock none while paused but a tick's length, rounded up to
+      a nanosecond, for each step, and the scaled length otherwise;
+    - a label at the screen's top-right while the time is not real, on a
+      panel, `paused`, `paused, x0.5` or `time x2`; each change logged.
+- **Consequences:**
+  - Overlays are a virtual pixel wide at any zoom of the world, and drawn
+    only in development builds; they show where the frame draws each
+    entity, between its last two ticks, not where the collision world last
+    held it (the hash's cells are the last rebuild's).
+  - Pausing pauses ticks, tiles and clips alike, through the clock; sound
+    plays on. A step from a pause keeps the frame's place between two
+    ticks, so it shows the same blend of them; once in 50 million steps
+    one would run two ticks.
+  - The keys work while a debug field has the keyboard (they type
+    nothing); the game's actions see them while no debug field has it, as
+    they see the window toggles.
+  - A review the same day, a workflow of four reviewers and a skeptic for
+    each finding, upheld 9 of 14 findings, all minor, all fixed: an outline
+    off the pixel grid drawn open or overlapping (now its corners are put
+    on whole pixels first); a child's collider drawn a tick ahead of its
+    root's sprite; boxes under two pixels thick drawing nothing; the label
+    over a window's title strip at the screen's right (now under the
+    windows); a change of scale while paused said to run; and four docs
+    (the game's actions and the capture, a step's log level, and nadir-
+    debug's, the architecture's and the game loop's "not built" lines).
+  - A nav grid and the current paths wait for M9.5; render's
+    `DebugDrawList` stays unbuilt until a need for lines a screen pixel
+    wide, or debug drawing outside `dev`.
+- **Alternatives considered:**
+  - render's `DebugDrawList` now: a list type, a renderer pass and its
+    tests in render, for lines that sprites already draw (the user's
+    choice).
+  - F4 toggling every overlay with no window: no way to choose what
+    draws, and the hash's cells and chunks crowd the colliders.
+  - A pause that skips `run_fixed`: tiles and clips would run on (M4.5's
+    note), and a replay would not step.
+  - A step of exactly one tick through a new `FixedClock` method: exact
+    where the rounded tick is right but for 1 in 50 million steps, and a
+    change to nadir-core for it.
+  - The time's state only in the log: nothing on screen would say why the
+    game stopped.
+- **Revisit when:** M9.5 adds pathfinding (its overlays); camera limits
+  exist; sound should pause with the game; or a game needs debug drawing
+  in a release build.

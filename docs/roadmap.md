@@ -5400,7 +5400,7 @@ by the batched sprite renderer.
     "Add"; rows moving down when the first note appears; a long row cut
     at the window's edge; a pair's label left of a single control's).
 
-- [ ] **M7.5 — console**
+- [x] **M7.5 — console**
   - Note (from M4.1): `Schedule::describe()` lists the systems in run
     order as `SystemInfo`, which displays as `tick  Gameplay:
     player_move`, with `(conditional)` for a system with a run condition.
@@ -5427,8 +5427,88 @@ by the batched sprite renderer.
     initial command set.
   - Accept: unit tests for parsing and completion.
   - Verify: `cargo test -p nadir-debug`
+  - Built on 2026-11-14 (ADR-0063; the user chose `god` left to games, the
+    time scale built now for `timescale`, and `AssetServer::reload_all`,
+    four crates: core, assets, debug and the facade; the rest Proposed):
+    - nadir-core: `log::since(cursor, each) -> u64`, each record after a
+      cursor that the ring still holds, allocating nothing, `each` under
+      the log's lock.
+    - nadir-assets: `AssetServer::reload_all`, `reload` of every path.
+    - nadir-debug: `Console<C>`, commands registered by a usage that names
+      their arguments (words, `<values>`, `[optional]`, `<a|b>` choices),
+      checked before the command, handed back with its `Args` to run
+      (`run_line`, `show`); lines split at whitespace, quotes grouping;
+      Tab completing names, words and choices; a history of 100; a log of
+      1000 lines, the engine's records added by the caller, warnings amber
+      and errors red; a line run brings it to its newest. `DebugInput`
+      ends a frame at a press of Enter, Tab, Up, Down, PageUp or PageDown,
+      so the caller handles each in order with the typing.
+    - nadir_engine, with `dev`: the console on the backtick,
+      `nadir::console`, at (8, 316) to (944, 556); `ConsoleCommand`,
+      `App::add_console_command`; `schedule`, `spawn <prefab> [x] [y]`,
+      `tp`, `timescale` (0.25 to 4, each frame's length scaled before the
+      clock), `level`, `reload`, `profile dump [path]`, `log level`,
+      `quit`; the text a window's toggle types fed to no debug field.
+  - Tests: `cargo test -p nadir-debug` (109 and 3 doc tests, 23 new: the
+    splitting of lines, the usage's slots and the arguments' checks,
+    `Args`, completion of names, words, choices and `help`'s argument,
+    the common prefix, the usages refused, lines run, `help`, the
+    history, Tab's list, the log's tones and its strings reused; in the
+    window, the keyboard taken when shown and Enter, the rows from the
+    bottom with only those in view drawn and no scrollbar, the wheel and
+    the page keys holding the view, Tab, Up and Down with the keyboard
+    only, the typing after Enter going to the next line and Up then Enter
+    running the line recalled, the keys of the frame that shows it not its
+    own, a wheel turn that is not finite, a line run bringing the log to
+    its newest; and `take` ending a frame at those keys;
+    `keys_a_field_does_not_use_reach_its_caller` now sees Up and Tab one
+    frame each, in order); `cargo test -p nadir-core` (1 new and a doc
+    test: `since`); `cargo test -p nadir-assets --test reload` (1 new:
+    `reload_all`); `cargo test -p nadir_engine --features dev` (173, 4 new:
+    each engine command through the window, the log's records, `help` and
+    Tab, the backtick typed into no field, the time scale) and without
+    `dev` (123). `cargo xtask ci` passed, with Mesa forced and
+    `NADIR_EXPECT_GL_RENDERER=llvmpipe`. Mutant caught: the new test of a
+    line run fails without the scroll's reset.
+  - Review: a workflow of five reviewers and a skeptic for each finding, on
+    2026-11-14, upheld 15 of 18 findings, all minor, all fixed with a test
+    or a narrowed doc (ADR-0063's consequences list them); 3 were refuted
+    (the console's first place overlapping the inspector's, `level`
+    leaving no level when one does not load, which `load_level` documents,
+    and the features file, which the tick updates).
+  - Linux check of `cargo dev`, on 2026-11-14, in this XWayland session,
+    driven by `XSendEvent` from a script, the window captured, the config
+    and data folders in a scratch folder, `NADIR_ALSA_DEVICE=null`, Mesa
+    forced, at the user's request: the backtick showed the console over
+    the log's records, its line with the keyboard and no backtick in it;
+    `help` listed the commands in columns; `ti` and Tab made `timescale `,
+    and `timescale 2` made the game tick at 120 Hz; `timescale 9`,
+    `timescale fast`, `tp 1` and `warp` were refused in red, naming the
+    argument and the usage; `schedule` listed the systems; the wheel
+    scrolled the log, which held its lines as records came, and PageDown
+    came back; `tp 100 100` moved the player, the camera with it;
+    `spawn rock` spawned one where the camera looked (61 entities in the
+    inspector); `spawn rock 5` and `spawn boulder` were refused;
+    `level nowhere` was refused, leaving no level, and `level field` made
+    it again; `reload` read every loaded file again and the hot reload
+    made the level again; `profile dump` wrote its traces beside the log;
+    `log level sandbox warn` silenced the game's records; Tab on an empty
+    line listed the commands one a line; Up recalled the lines run; the
+    backtick, with the inspector's filter holding `pl`, hid and showed the
+    console with no backtick in the filter, the console's line taking the
+    keyboard; `quit` ended the game, its log saying so. It found the log
+    left scrolled up after a line ran, its output out of view: a line run
+    now brings the log to its newest, checked again in a second run. Not
+    explained: in the first run, a frame of 1.3 s as the console first
+    opened, and twice a typed line or a turn of the wheel handled only
+    when the next sent event came; neither came back in a second and a
+    third run (F1 first, then the console, and the console first; five
+    timed lines each handled in 0.4 s, the time the typing takes), and the
+    platform's pump drains Xlib's queue every frame (`XPending`), so the
+    input method or the server holding synthetic events is the likelier
+    cause.
 
-- [ ] **M7.6 — debug draw toggles and time control**
+- [x] **M7.6 — debug draw toggles and time control**
   - Note (from M4.3): `CollisionWorld` gives each collider (`len`,
     `collider`, `position`) and the grid. The spatial hash's cells are
     private: add a read-only visitor for the F4 overlay.
@@ -5455,9 +5535,67 @@ by the batched sprite renderer.
     `crates/engine/src/debug_ui.rs`) is four sprites of the debug UI's
     white texel in layer 255 at `SortMode::Fixed(u32::MAX)`, pushed after
     the windows: F4's overlays can draw the same way.
+  - Note (from M7.5, ADR-0063): the time scale is built: `DebugTools`'s
+    `time_scale` (1 at start), which `DebugTools::scaled` multiplies each
+    frame's length by before `FixedClock::begin_frame`, in
+    `App::update`; the console's `timescale` sets it, 0.25 to 4
+    (`TIME_SCALES` in `crates/engine/src/debug_ui.rs`). F7 can step it in
+    that range; pause and step need more than a scale, as 0 is refused.
   - Do: the F4 overlays and the F5–F7 time controls.
   - Accept: manual check on the sandbox.
   - Verify: `cargo dev` (manual); `cargo xtask release-no-dev`
+  - Built on 2026-11-14 (ADR-0064; the user chose the overlays as sprites
+    in the facade, F4 as a window of checkboxes, the camera's cross and
+    view with the nav grid and paths left to M9.5, and a corner label; the
+    rest Proposed):
+    - nadir-collision: `CollisionWorld::hash_cells`, each cell that holds
+      colliders as the last rebuild left it, its rect and count.
+    - nadir_engine, with `dev` (`debug_ui/draw.rs`, `debug_ui/time.rs`):
+      F4's window, `nadir::debug_draw`, at (952, 8) to (1092, 128), a
+      checkbox for each overlay (colliders, triggers, the tile grid, the
+      spatial hash, tile chunks, the camera), the ticked ones drawn while
+      it is open as sprites of the white texel a virtual pixel wide, on
+      whole pixels, culled to the view, children's colliders at their
+      roots'; F5 pause, F6 step a tick, F7 and Shift+F7 the scale through
+      0.25 to 4, taken before the clock and given to it as
+      `DebugTools::game_time`; a label at the top-right, under the
+      windows, while the time is not real.
+  - Tests: `cargo test -p nadir_engine --features dev` (184, 11 new: the
+    overlays' rects and colors, a click on a box, collapsed and closed; a
+    box off the pixel grid as a closed ring, a thin one as a fill; a
+    child's collider at its root's drawn place over fractional frames; F5,
+    F6 (repeats too) and F7, Shift+F7 and the label, under a window; a step
+    taking a replay's next tick; a steady frame of every overlay and the
+    label with no allocation; and in `time.rs` a tick's length, the keys,
+    the scales' wrap, the scale's note, the label's text) and without
+    `dev` (123); `cargo test -p nadir-collision` (39 in its lib,
+    2 new: the hash's cells and `hash_cells`' rects). `cargo xtask ci`
+    passed, `release-no-dev` with it, with Mesa forced and
+    `NADIR_EXPECT_GL_RENDERER=llvmpipe`. Mutants caught: the outline's
+    snap and the child's root, each undone, fail their tests.
+  - Review: a workflow of four reviewers and a skeptic for each finding, on
+    2026-11-14, upheld 9 of 14 findings, all minor, all fixed (ADR-0064's
+    consequences list them); 5 were refuted (input latched after a pause,
+    a name not toggling its box, the tests of claims the hand check made,
+    rects of cells past 2^24, and a log's wording, fixed anyway).
+  - Linux check of `cargo dev`, on 2026-11-14, in this XWayland session,
+    driven by `XSendEvent` from a script, the window captured, the config
+    and data folders in a scratch folder, `NADIR_ALSA_DEVICE=null`, Mesa
+    forced: F4 showed the window, its names in their colors; the colliders
+    outlined the trees', the player's and the rocks' feet, a virtual pixel
+    wide, the wall's solid cells tinted; ticking the spatial hash, the
+    chunks and the camera drew the hash's 64-unit cells with their counts
+    (a rock across a cell edge in two), the camera's cross at the player
+    and its view around the image, and, after `tp 520 200`, the edge of
+    the layer's first two chunks at x 512; collapsed, it drew on, and
+    closed, nothing. F5 froze the pond's animated tiles (two captures
+    0.7 s apart the same, which differed running) and the ticks (0 Hz, 60
+    frames a second), the label saying `paused`; three F6s ran 3 ticks
+    (5075 to 5078); F7 made it `paused, x2`, and F5 `time x2` at 120 Hz;
+    Shift+F7 twice made it `time x0.5` at 30 Hz, and F7 took the label
+    away at 1. After the review's fixes, a second run showed the player's
+    box closed on its feet as it walked, and the label. The log held no
+    warning but llvmpipe's first timer (ADR-0060).
 
 **Exit criteria (M7):** all tools work on all three OSes, and
 `release-no-dev` passes.
@@ -5643,6 +5781,10 @@ by the batched sprite renderer.
     it holds the last tick's colliders, so AI in `Gameplay` checks that an
     entity it finds is alive.
   - Depends: M4.3
+  - Note (from M7.6, ADR-0064): the debug drawing's spec lists a nav grid
+    and the current paths among F4's overlays; M7.6 left them to this
+    task. Add each as a checkbox of `draw::Overlays`
+    (`crates/engine/src/debug_ui/draw.rs`), drawn with its `Pen`.
   - Do: A* with budget and smoothing; flow fields; sandbox enemies that
     chase and patrol.
   - Accept: the A* tests in the collision spec pass; the A* benchmark is

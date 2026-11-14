@@ -23,14 +23,22 @@
 //! frame drawn, from the renderer's timers (roadmap M7.12, ADR-0061); and
 //! the inspector on F2, which outlines the entity it shows in the world and
 //! writes its prefabs to the logs folder's `prefabs` (roadmap M7.4,
-//! ADR-0062).
+//! ADR-0062); the console on the backtick, over the engine's log, with the
+//! engine's commands and the game's (roadmap M7.5, ADR-0063); and the debug
+//! drawing on F4, whose window ticks the overlays drawn into the world, and
+//! the time controls, F5 to F7, which pause, step and scale the game's time,
+//! a label in the corner saying so (roadmap M7.6, ADR-0064).
 
+mod draw;
 mod font;
 #[cfg(test)]
 mod golden;
 mod places;
+mod time;
 
+use std::fmt::Write as _;
 use std::fs;
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
@@ -40,23 +48,25 @@ use nadir_assets::{
 };
 use nadir_audio::Audio;
 use nadir_core::civil::DateTime;
-use nadir_core::log::{error, info, warn};
+use nadir_core::log::{self, Level, error, info, warn};
 use nadir_core::profile::ScopeRecord;
 use nadir_core::{Color, Key, MouseButton, Rect, UVec2, Vec2};
 use nadir_debug::{
-    DebugInput, DebugUi, FontMetrics, FrameTiming, GpuTiming, Inspector, Profiler, Stats, Ui,
+    Args, Console, ConsoleError, ConsoleOut, DebugInput, DebugUi, FontMetrics, FrameTiming,
+    GpuTiming, Inspector, Profiler, Stats, Style, Ui,
 };
-use nadir_ecs::{Entity, World};
+use nadir_ecs::{Entity, Schedule, World};
 use nadir_input::{Capture, Input, UiEvent, UiEvents};
 use nadir_platform::Event;
 use nadir_render::{
-    Font, FrameStats, GpuTimes, RenderFrame, SortMode, SpriteDraw, Texture, UiScale,
+    Font, FrameStats, GpuTimes, RenderFrame, SortMode, SpriteDraw, TextDraw, Texture, UiList,
+    UiScale, UiSpace, UiView,
 };
-use nadir_scene::FromValue;
+use nadir_scene::{FromValue, PrefabError, PrefabLibrary, TypeRegistry};
 
 use crate::{
-    Collider, FrameAllocs, Parent, PrevTransform, SaveId, Sprite, TickStats, Transform, WindowSize,
-    loading_context, reflect_context,
+    Collider, FrameAllocs, LevelError, Parent, Player, PrevTransform, SaveId, Sprite, TickStats,
+    Transform, WindowSize, loading_context, reflect_context,
 };
 
 pub(crate) use places::FILE_NAME;
@@ -65,6 +75,13 @@ pub(crate) use places::FILE_NAME;
 /// open: a function of the world and the window's [`Ui`], added with
 /// [`App::add_debug_window`](crate::App::add_debug_window).
 pub type DebugWindow = fn(&World, &mut Ui<'_>);
+
+/// A command of the game's in the debug console: a function of the world,
+/// the arguments typed, checked against the command's usage, and where to
+/// print, added with
+/// [`App::add_console_command`](crate::App::add_console_command). An error
+/// it returns ([`ConsoleError::Failed`] with why) is printed in red.
+pub type ConsoleCommand = fn(&World, &Args<'_>, &mut ConsoleOut<'_>) -> Result<(), ConsoleError>;
 
 /// The stats overlay's key, title and first place.
 const STATS: (Key, &str, Rect) = (
@@ -87,9 +104,101 @@ const INSPECTOR: (Key, &str, Rect) = (
     Rect::new(Vec2::new(584.0, 8.0), Vec2::new(944.0, 508.0)),
 );
 
+/// The console's key, title and first place.
+const CONSOLE: (Key, &str, Rect) = (
+    Key::Grave,
+    "Console##nadir::console",
+    Rect::new(Vec2::new(8.0, 316.0), Vec2::new(944.0, 556.0)),
+);
+
+/// The debug drawing's key, title and first place.
+const DEBUG_DRAW: (Key, &str, Rect) = (
+    Key::F4,
+    "Debug draw##nadir::debug_draw",
+    Rect::new(Vec2::new(952.0, 8.0), Vec2::new(1092.0, 128.0)),
+);
+
+/// How far the time controls' label is from the screen's top-right
+/// corner, in the debug UI's units.
+const CORNER: f32 = 8.0;
+
 /// The source the inspector's values are read and written under, which
 /// its errors and warnings name.
 const INSPECTED: &str = "the inspector";
+
+/// The source the console's spawns are read under, which their errors
+/// name.
+const TYPED: &str = "the console";
+
+/// The time scales `timescale` takes: F7's range (roadmap M7.6).
+const TIME_SCALES: RangeInclusive<f32> = 0.25..=4.0;
+
+/// The engine's own commands in the console.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Builtin {
+    Schedule,
+    Spawn,
+    Tp,
+    Timescale,
+    Level,
+    Reload,
+    Profile,
+    Log,
+    Quit,
+}
+
+/// The engine's commands: each one's usage, help and command, in the order
+/// `help` lists them, after its own.
+const BUILTINS: [(&str, &str, Builtin); 9] = [
+    (
+        "schedule",
+        "lists the systems in the order they run",
+        Builtin::Schedule,
+    ),
+    (
+        "spawn <prefab> [x] [y]",
+        "spawns a prefab at (x, y), or where the camera looks",
+        Builtin::Spawn,
+    ),
+    ("tp <x> <y>", "moves the player to (x, y)", Builtin::Tp),
+    (
+        "timescale <scale>",
+        "runs the game's time at scale times real time, 0.25 to 4",
+        Builtin::Timescale,
+    ),
+    (
+        "level <name>",
+        "loads the level levels/<name>.klvl",
+        Builtin::Level,
+    ),
+    (
+        "reload",
+        "reads every loaded asset's file again",
+        Builtin::Reload,
+    ),
+    (
+        "profile dump [path]",
+        "writes the profiler's trace to path, or beside the log",
+        Builtin::Profile,
+    ),
+    (
+        "log level <target> <error|warn|info|debug|trace>",
+        "sets how much a module, and those in it, logs",
+        Builtin::Log,
+    ),
+    (
+        "quit",
+        "ends the game, as closing its window does",
+        Builtin::Quit,
+    ),
+];
+
+/// A command of the console: the engine's or the game's.
+#[derive(Clone, Copy)]
+enum Command {
+    Engine(Builtin),
+    Game(ConsoleCommand),
+}
 
 /// The folder of the logs folder the inspector's prefabs are written to.
 const PREFABS: &str = "prefabs";
@@ -122,6 +231,10 @@ enum Content {
     Profiler,
     /// The engine's inspector.
     Inspector,
+    /// The engine's console.
+    Console,
+    /// The engine's debug drawing: the overlays it ticks.
+    DebugDraw,
 }
 
 /// A window of the debug UI: the engine's or a game's.
@@ -228,8 +341,22 @@ pub(crate) struct DebugTools {
     /// The entity list and the components of the entity it shows.
     inspector: Inspector,
     /// The white texel, loaded with the UI's font, which the inspector's
-    /// outline is drawn with.
+    /// outline and the debug drawing are drawn with; and the font.
     white: Option<Handle<Texture>>,
+    font: Option<Handle<Font>>,
+    /// The console, and how many of the log's records it has read.
+    console: Console<Command>,
+    log_read: u64,
+    /// The game's time, as the time controls and `timescale` leave it, and
+    /// the corner label's text, written each frame it shows.
+    time: time::Time,
+    label: String,
+    /// The overlays the debug drawing ticks.
+    overlays: draw::Overlays,
+    /// The level `level` asked for, which the app loads after the frame.
+    level: Option<String>,
+    /// Whether `quit` asked [`App::run`](crate::App::run) to end.
+    quit: bool,
 }
 
 impl DebugTools {
@@ -237,11 +364,19 @@ impl DebugTools {
         let engine = |(toggle, title, first): (Key, &'static str, Rect), content| {
             Window::closed(toggle, title, first, content)
         };
+        let mut console = Console::new();
+        for (usage, help, builtin) in BUILTINS {
+            console
+                .register(usage, help, Command::Engine(builtin))
+                .expect("the engine's usages start with names");
+        }
         Self {
             windows: vec![
                 engine(STATS, Content::Stats),
                 engine(INSPECTOR, Content::Inspector),
                 engine(PROFILER, Content::Profiler),
+                engine(CONSOLE, Content::Console),
+                engine(DEBUG_DRAW, Content::DebugDraw),
             ],
             events: UiEvents::new(),
             input: DebugInput::new(),
@@ -262,6 +397,14 @@ impl DebugTools {
             logs: None,
             inspector: Inspector::new(),
             white: None,
+            font: None,
+            console,
+            log_read: 0,
+            time: time::Time::new(),
+            label: String::new(),
+            overlays: draw::Overlays::new(),
+            level: None,
+            quit: false,
         }
     }
 
@@ -269,6 +412,42 @@ impl DebugTools {
     pub(crate) fn add(&mut self, toggle: Key, title: &'static str, first: Rect, add: DebugWindow) {
         self.windows
             .push(Window::closed(toggle, title, first, Content::Game(add)));
+    }
+
+    /// Adds a game's command to the console, under `usage`, whose first
+    /// word is its name, with `help`; or, if the usage starts with no name,
+    /// logs why not.
+    pub(crate) fn add_command(&mut self, usage: &str, help: &str, command: ConsoleCommand) {
+        if let Err(cause) = self.console.register(usage, help, Command::Game(command)) {
+            error!("the console command is not added: {cause}");
+        }
+    }
+
+    /// The time the game's clock is given for a frame `elapsed` long, as
+    /// the time controls and `timescale` leave it: none while paused but a
+    /// tick for each step asked for since, otherwise `elapsed` at the
+    /// scale.
+    pub(crate) fn game_time(&mut self, elapsed: Duration) -> Duration {
+        self.time.game_time(elapsed)
+    }
+
+    /// The level `level` asked for in the frame, once.
+    pub(crate) fn take_level(&mut self) -> Option<String> {
+        self.level.take()
+    }
+
+    /// Says in the console why the level `name` that `level` asked for did
+    /// not load; the log says when one did.
+    pub(crate) fn level_loaded(&mut self, name: &str, result: Result<(), LevelError>) {
+        if let Err(cause) = result {
+            self.console
+                .print_error(format_args!("the level `{name}` is not loaded: {cause}"));
+        }
+    }
+
+    /// Whether `quit` asked the game to end.
+    pub(crate) fn quit(&self) -> bool {
+        self.quit
     }
 
     /// Writes the profiler's traces into `folder`, and the inspector's
@@ -349,9 +528,16 @@ impl DebugTools {
     /// holds the left button from a press on one of its windows, and, while
     /// nobody holds it, if the pointer is over a window the debug UI drew
     /// in the last frame; a press of the left button decides who holds it,
-    /// until its release or a loss of the focus.
+    /// until its release or a loss of the focus. The time controls take
+    /// their keys here, before the frame's clock, so that they act in the
+    /// frame they were pressed in.
     pub(crate) fn handle(&mut self, input: &mut Input, event: &Event) {
         match *event {
+            Event::Key {
+                key,
+                pressed,
+                repeat,
+            } => self.time.key(key, pressed, repeat),
             Event::MouseButton {
                 button,
                 pressed: true,
@@ -366,8 +552,11 @@ impl DebugTools {
             Event::MouseButton {
                 button: MouseButton::Left,
                 pressed: false,
+            } => self.left = None,
+            Event::Focused(false) => {
+                self.left = None;
+                self.time.focus_lost();
             }
-            | Event::Focused(false) => self.left = None,
             Event::MouseWheel(_) => {
                 let mouse = self.left.unwrap_or_else(|| self.is_over(input.pointer()));
                 self.hold_mouse(input, mouse);
@@ -376,6 +565,13 @@ impl DebugTools {
             _ => {}
         }
         self.events.handle(event);
+    }
+
+    /// Whether a window of the engine's whose content is `which` is open.
+    fn is_open(&self, which: impl Fn(Content) -> bool) -> bool {
+        self.windows
+            .iter()
+            .any(|window| window.open && which(window.content))
     }
 
     /// Whether `at` is over a window drawn in the last frame.
@@ -402,8 +598,19 @@ impl DebugTools {
     /// draws the open ones into the frame's UI, after the game's, and
     /// writes the places if they changed. With the inspector open, it
     /// outlines the entity it shows in the frame's sprites, drawn `alpha`
-    /// of the way from the last tick's place to this one's.
-    pub(crate) fn frame(&mut self, world: &World, virtual_resolution: UVec2, alpha: f32) {
+    /// of the way from the last tick's place to this one's. With the
+    /// console open, it gives it the log's records since it last read
+    /// them, and runs the commands typed, which reach `schedule`. With the
+    /// debug drawing open, it draws the overlays ticked into the frame's
+    /// sprites and texts, as the inspector's outline is; and while the
+    /// game's time is not real, a label at the top-right says so.
+    pub(crate) fn frame(
+        &mut self,
+        world: &World,
+        schedule: &Schedule,
+        virtual_resolution: UVec2,
+        alpha: f32,
+    ) {
         for event in self.events.events() {
             if let UiEvent::Key {
                 key,
@@ -418,12 +625,14 @@ impl DebugTools {
                 }
             }
         }
-        if self.ui.is_none() && !self.failed && self.windows.iter().any(|window| window.open) {
+        let wanted = self.windows.iter().any(|window| window.open) || !self.time.is_real();
+        if self.ui.is_none() && !self.failed && wanted {
             match make_ui(world) {
-                Ok((mut ui, white)) => {
+                Ok((mut ui, font, white)) => {
                     restore(&mut ui, &mut self.places);
                     self.saved = ui.places_revision();
                     self.ui = Some(ui);
+                    self.font = Some(font);
                     self.white = Some(white);
                 }
                 Err(cause) => {
@@ -432,8 +641,15 @@ impl DebugTools {
                 }
             }
         }
-        feed(&mut self.input, self.events.events());
+        let windows = &self.windows;
+        feed(&mut self.input, self.events.events(), |key| {
+            windows.iter().any(|window| window.toggle == key)
+        });
         self.events.clear();
+        if self.is_open(|content| matches!(content, Content::Console)) {
+            let console = &mut self.console;
+            self.log_read = log::since(self.log_read, |record| console.log_record(record));
+        }
         let Some(ui) = &mut self.ui else {
             // Nothing takes the events: keep only where they leave the
             // pointer and what they leave held.
@@ -442,6 +658,24 @@ impl DebugTools {
         };
         ui.style_mut().scale = UiScale::Free(self.scale);
         let output = world.resource::<WindowSize>().0;
+        // The time controls' label goes first, so that a window over the
+        // corner is drawn in front of it.
+        if !self.time.is_real()
+            && let (Some(white), Some(font)) = (self.white, self.font)
+        {
+            self.label.clear();
+            // Writing to a `String` cannot fail.
+            let _ = write!(self.label, "{}", self.time);
+            let style = *ui.style();
+            let size = UiSpace::new(style.scale, virtual_resolution, output).size;
+            corner(
+                &mut world.resource_mut::<RenderFrame>().ui,
+                &self.label,
+                (font, white),
+                &style,
+                size,
+            );
+        }
         let mut frame = ui.frame(&mut self.input, virtual_resolution, output);
         for window in self.windows.iter().filter(|window| window.open) {
             let (title, first) = (window.title, window.first);
@@ -453,7 +687,8 @@ impl DebugTools {
                 }
                 Content::Profiler => frame.window(title, first, |ui| {
                     if self.profiler.show(ui).write_trace {
-                        write_trace(&mut self.profiler, self.logs.as_deref());
+                        // The note and the log say how it went.
+                        let _ = write_trace(&mut self.profiler, self.logs.as_deref(), None);
                     }
                 }),
                 Content::Inspector => frame.window(title, first, |ui| {
@@ -464,9 +699,31 @@ impl DebugTools {
                         save_prefab(world, &mut self.inspector, self.logs.as_deref());
                     }
                 }),
+                Content::Console => frame.window(title, first, |ui| {
+                    let mut reach = Reach {
+                        world,
+                        schedule,
+                        profiler: &mut self.profiler,
+                        logs: self.logs.as_deref(),
+                        time: &mut self.time,
+                        level: &mut self.level,
+                        quit: &mut self.quit,
+                    };
+                    self.console
+                        .show(ui, |command, args, out| run(&mut reach, command, args, out));
+                }),
+                Content::DebugDraw => frame.window(title, first, |ui| self.overlays.show(ui)),
             };
         }
         frame.finish(&mut world.resource_mut::<RenderFrame>().ui);
+        let drawing = self
+            .windows
+            .iter()
+            .any(|window| window.open && matches!(window.content, Content::DebugDraw));
+        if drawing && let (Some(white), Some(font)) = (self.white, self.font) {
+            self.overlays
+                .draw(world, white, font, virtual_resolution, alpha);
+        }
         let inspecting = self
             .windows
             .iter()
@@ -619,33 +876,238 @@ fn outline(sprites: &mut Vec<SpriteDraw>, white: Handle<Texture>, rect: Rect) {
     }
 }
 
-/// Writes the profiler's trace into `folder`, as `trace-<UTC time>.json`,
-/// and says where in its note and the log; or why not.
-fn write_trace(profiler: &mut Profiler, folder: Option<&Path>) {
-    let Some(folder) = folder else {
-        profiler.set_note("Traces are written only by App::run.");
-        return;
+/// Writes the profiler's trace to `path`, its folder made if need be, or
+/// with none into `folder`, as `trace-<UTC time>.json`, and says where in
+/// its note and the log, and returns it; or why not, which it returns too.
+fn write_trace(
+    profiler: &mut Profiler,
+    folder: Option<&Path>,
+    path: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let path = match (path, folder) {
+        (Some(path), _) => path.to_path_buf(),
+        (None, Some(folder)) => folder.join(format!("trace-{}.json", DateTime::now().file_stamp())),
+        (None, None) => {
+            let note = "Traces are written only by App::run.";
+            profiler.set_note(note);
+            return Err(note.to_string());
+        }
     };
-    let path = folder.join(format!("trace-{}.json", DateTime::now().file_stamp()));
-    let written = fs::create_dir_all(folder).and_then(|()| fs::write(&path, profiler.trace_json()));
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    let written = parent
+        .map_or(Ok(()), fs::create_dir_all)
+        .and_then(|()| fs::write(&path, profiler.trace_json()));
     match written {
         Ok(()) => {
             info!("the profiler's trace is in {}", path.display());
             profiler.set_note(format_args!("Wrote {}", path.display()));
+            Ok(path)
         }
         Err(cause) => {
             warn!(
                 "the profiler's trace is not written: {} cannot be: {cause}",
                 path.display()
             );
-            profiler.set_note(format_args!("Not written: {cause}"));
+            let note = format!("Not written: {cause}");
+            profiler.set_note(&note);
+            Err(note)
         }
     }
 }
 
+/// What the engine's console commands reach beside the world.
+struct Reach<'a> {
+    world: &'a World,
+    schedule: &'a Schedule,
+    profiler: &'a mut Profiler,
+    logs: Option<&'a Path>,
+    time: &'a mut time::Time,
+    level: &'a mut Option<String>,
+    quit: &'a mut bool,
+}
+
+/// Runs a command of the console, its arguments checked against its usage.
+fn run(
+    reach: &mut Reach<'_>,
+    command: Command,
+    args: &Args<'_>,
+    out: &mut ConsoleOut<'_>,
+) -> Result<(), ConsoleError> {
+    let world = reach.world;
+    let builtin = match command {
+        Command::Game(command) => return command(world, args, out),
+        Command::Engine(builtin) => builtin,
+    };
+    match builtin {
+        Builtin::Schedule => {
+            for system in reach.schedule.describe() {
+                out.print(system);
+            }
+        }
+        Builtin::Spawn => spawn(world, args, out)?,
+        Builtin::Tp => teleport(world, args, out)?,
+        Builtin::Timescale => {
+            let scale = args.f32(0)?;
+            if !TIME_SCALES.contains(&scale) {
+                return Err(ConsoleError::InvalidArgument {
+                    usage: args.usage().to_string(),
+                    argument: "<scale>".to_string(),
+                    found: args.str(0)?.to_string(),
+                    expected: "from 0.25 to 4".to_string(),
+                });
+            }
+            reach.time.scale = scale;
+            out.print(reach.time.scale_note());
+        }
+        Builtin::Level => *reach.level = Some(args.str(0)?.to_string()),
+        Builtin::Reload => {
+            let reads = world.resource_mut::<AssetServer>().reload_all();
+            out.print(format_args!(
+                "reading {reads} assets' files again: each is swapped in once read"
+            ));
+        }
+        Builtin::Profile => {
+            let path = args.get(1).map(Path::new);
+            let path =
+                write_trace(reach.profiler, reach.logs, path).map_err(ConsoleError::Failed)?;
+            out.print(format_args!("Wrote {}", path.display()));
+        }
+        Builtin::Log => {
+            let target = args.str(1)?;
+            let level = match args.str(2)? {
+                "error" => Level::Error,
+                "warn" => Level::Warn,
+                "info" => Level::Info,
+                "debug" => Level::Debug,
+                "trace" => Level::Trace,
+                other => return Err(ConsoleError::Failed(format!("no log level `{other}`"))),
+            };
+            log::set_target_level(target, Some(level));
+            out.print(format_args!(
+                "`{target}` logs {level} and more severe records"
+            ));
+        }
+        Builtin::Quit => {
+            *reach.quit = true;
+            out.print("quitting");
+        }
+    }
+    Ok(())
+}
+
+/// `spawn <prefab> [x] [y]`: loads the prefab into the library, if it is
+/// not there, in the level's scope, and spawns it through the world's
+/// commands at (x, y), or where the camera looks.
+fn spawn(world: &World, args: &Args<'_>, out: &mut ConsoleOut<'_>) -> Result<(), ConsoleError> {
+    let name = args.str(0)?;
+    let at = match args.len() {
+        3 => Vec2::new(args.f32(1)?, args.f32(2)?),
+        1 => world.resource::<RenderFrame>().camera.position,
+        _ => {
+            return Err(ConsoleError::Failed(format!(
+                "[x] and [y] go together: {}",
+                args.usage()
+            )));
+        }
+    };
+    let failed =
+        |cause: PrefabError| ConsoleError::Failed(format!("`{name}` is not spawned: {cause}"));
+    let registry = world.resource::<TypeRegistry>();
+    world
+        .resource_mut::<PrefabLibrary>()
+        .load(
+            &mut world.resource_mut::<AssetServer>(),
+            &registry,
+            name,
+            Scope::Level,
+        )
+        .map_err(failed)?;
+    let library = world.resource::<PrefabLibrary>();
+    let mut commands = world.commands();
+    let entity = loading_context(world, TYPED, Scope::Level, |mut cx| {
+        library.spawn(name, &[], &registry, &mut commands, &mut cx)
+    })
+    .map_err(failed)?;
+    commands.insert(entity, Transform::at(at));
+    out.print(format_args!(
+        "spawned `{name}` as {}v{} at ({}, {}), from the next tick or frame",
+        entity.index(),
+        entity.generation(),
+        at.x,
+        at.y
+    ));
+    Ok(())
+}
+
+/// `tp <x> <y>`: moves each entity with [`Player`] and a [`Transform`] to
+/// (x, y), with no step between: its last place too.
+fn teleport(world: &World, args: &Args<'_>, out: &mut ConsoleOut<'_>) -> Result<(), ConsoleError> {
+    let at = Vec2::new(args.f32(0)?, args.f32(1)?);
+    let players = world.read::<Player>();
+    let mut transforms = world.write::<Transform>();
+    let mut previous = world.write::<PrevTransform>();
+    let mut moved = 0;
+    for (entity, _) in players.iter() {
+        if let Some(transform) = transforms.get_mut(entity) {
+            transform.position = at;
+            if let Some(previous) = previous.get_mut(entity) {
+                previous.0.position = at;
+            }
+            moved += 1;
+        }
+    }
+    if moved == 0 {
+        return Err(ConsoleError::Failed(
+            "nothing moved: no entity has `Player` and a `Transform`".to_string(),
+        ));
+    }
+    out.print(format_args!(
+        "moved {moved} player(s) to ({}, {})",
+        at.x, at.y
+    ));
+    Ok(())
+}
+
+/// Draws `text` on a panel at the top-right of a UI `size` units large, at
+/// `style`'s scale, in the debug UI's `font` and `white` texel: the time
+/// controls' label, pushed before the windows, which cover it. It puts the
+/// list's view back.
+fn corner(
+    list: &mut UiList,
+    text: &str,
+    (font, white): (Handle<Font>, Handle<Texture>),
+    style: &Style,
+    size: Vec2,
+) {
+    let pad = style.padding;
+    let width = text.chars().count() as f32 * font::ADVANCE as f32;
+    let max = Vec2::new(
+        size.x - CORNER,
+        CORNER + font::LINE_HEIGHT as f32 + 2.0 * pad,
+    );
+    let min = Vec2::new(max.x - width - 2.0 * pad, CORNER);
+    let before = list.view();
+    list.set_view(UiView::new(style.scale));
+    let mut panel = SpriteDraw::new(white, min, max - min);
+    panel.pivot = Vec2::ZERO;
+    panel.color = style.panel;
+    panel.layer = u8::MAX;
+    panel.sort = SortMode::Fixed(u32::MAX);
+    list.sprite(panel);
+    let mut draw = TextDraw::new(font, min + Vec2::splat(pad));
+    draw.layout.markup = false;
+    draw.color = style.text;
+    draw.layer = u8::MAX;
+    draw.sort = SortMode::Fixed(u32::MAX);
+    list.text(draw, text);
+    list.set_view(before);
+}
+
 /// The debug UI, in the engine's font, which it loads in the global scope,
-/// and the white texel it draws with.
-fn make_ui(world: &World) -> Result<(DebugUi, Handle<Texture>), AssetError> {
+/// the font, and the white texel it draws with.
+fn make_ui(world: &World) -> Result<(DebugUi, Handle<Font>, Handle<Texture>), AssetError> {
     let mut server = world.resource_mut::<AssetServer>();
     let font = Font::load_now_in(
         &mut server,
@@ -658,7 +1120,7 @@ fn make_ui(world: &World) -> Result<(DebugUi, Handle<Texture>), AssetError> {
         .get(font)
         .map(|loaded| FontMetrics::new(loaded.clone()))
         .ok_or_else(|| AssetError::Invalid("the engine's font is not loaded".to_string()))?;
-    Ok((DebugUi::new(font, metrics, white), white))
+    Ok((DebugUi::new(font, metrics, white), font, white))
 }
 
 /// Gives `ui` the places read from the file, by their names: each a
@@ -670,8 +1132,17 @@ fn restore(ui: &mut DebugUi, places: &mut Vec<places::Place>) {
     }
 }
 
-/// Feeds the debug UI's input with `events`, in their order.
-fn feed(input: &mut DebugInput, events: &[UiEvent]) {
+/// Feeds the debug UI's input with `events`, in their order, but the
+/// character a key that `toggles` a window types as it is pressed: each
+/// system sends a key's press before its text (X11's `XLookupString`, a
+/// `WM_CHAR` after its `WM_KEYDOWN`, `insertText:` after `keyDown:`), so
+/// that is the text after the press, before another key's. No debug field
+/// then takes the backtick that shows or hides the console.
+fn feed(input: &mut DebugInput, events: &[UiEvent], toggles: impl Fn(Key) -> bool) {
+    // The character a window's toggle types as it is pressed (the
+    // backtick's), which no debug field takes: the next text, unless
+    // another key is pressed first.
+    let mut toggled = false;
     for event in events {
         match *event {
             UiEvent::PointerMoved(position) => input.pointer_moved(position),
@@ -681,7 +1152,13 @@ fn feed(input: &mut DebugInput, events: &[UiEvent]) {
                 key,
                 pressed,
                 repeat,
-            } => input.key(key, pressed, repeat),
+            } => {
+                if pressed {
+                    toggled = toggles(key);
+                }
+                input.key(key, pressed, repeat);
+            }
+            UiEvent::Text(_) if toggled => toggled = false,
             UiEvent::Text(character) => input.text(character.encode_utf8(&mut [0; 4])),
             UiEvent::FocusLost => input.focus_lost(),
         }
@@ -1157,7 +1634,8 @@ mod tests {
                 }
             }
             world.resource_mut::<RenderFrame>().ui.clear();
-            self.tools.frame(world, UVec2::new(480, 270), 0.0);
+            let schedule = self.app.schedule();
+            self.tools.frame(world, schedule, UVec2::new(480, 270), 0.0);
         }
 
         fn place(&self) -> Rect {
@@ -1472,7 +1950,7 @@ mod tests {
         }
         let folder = env::temp_dir().join(format!("nadir-engine-traces-{}", process::id()));
         let _ = fs::remove_dir_all(&folder);
-        write_trace(&mut tools.profiler, Some(&folder));
+        write_trace(&mut tools.profiler, Some(&folder), None).expect("the trace is written");
         let files: Vec<PathBuf> = fs::read_dir(&folder)
             .expect("the folder was made")
             .map(|entry| entry.expect("an entry").path())
@@ -1664,5 +2142,720 @@ mod tests {
         app.debug_tools().inspector.select(Some(nowhere));
         app.update(TICK, &[]);
         assert_eq!(outline_of(&app), None);
+    }
+    /// What the game's `god` command flips.
+    #[derive(Default)]
+    struct God(bool);
+
+    fn god(world: &World, args: &Args<'_>, out: &mut ConsoleOut<'_>) -> Result<(), ConsoleError> {
+        let mut god = world.resource_mut::<God>();
+        god.0 = match args.get(0) {
+            Some("on") => true,
+            Some(_) => false,
+            None => !god.0,
+        };
+        out.print(format_args!("god {}", if god.0 { "on" } else { "off" }));
+        Ok(())
+    }
+
+    /// The backtick, as a window gives it: a key, and the text it types.
+    fn backtick() -> [Event; 3] {
+        [
+            key(Key::Grave, true),
+            Event::Text('`'),
+            key(Key::Grave, false),
+        ]
+    }
+
+    /// Types `line` in a frame and presses Enter, then runs a frame more,
+    /// for the commands queued to apply.
+    fn enter(app: &mut App, line: &str) {
+        let mut events: Vec<Event> = line.chars().map(Event::Text).collect();
+        events.extend(tap(Key::Enter));
+        app.update(TICK, &events);
+        app.update(TICK, &[]);
+    }
+
+    /// Whether `line` is a record of the log, which the tests running beside
+    /// this one may add at any time: `<time> <LEVEL> <target>: <message>`,
+    /// its time `2026-11-14T10:00:00.000Z`.
+    fn is_record(line: &str) -> bool {
+        line.len() > 25 && line.as_bytes()[10] == b'T' && line.as_bytes()[23] == b'Z'
+    }
+
+    /// The console's lines from the last `> line` echoed on, but the log's
+    /// records.
+    fn after(app: &mut App, line: &str) -> Vec<String> {
+        let lines: Vec<String> = app
+            .debug_tools()
+            .console
+            .lines()
+            .map(String::from)
+            .collect();
+        let echo = format!("> {line}");
+        let start = lines
+            .iter()
+            .rposition(|shown| *shown == echo)
+            .unwrap_or_else(|| panic!("`{echo}` is not in the console: {lines:?}"));
+        lines[start + 1..]
+            .iter()
+            .filter(|line| !is_record(line))
+            .cloned()
+            .collect()
+    }
+
+    /// A console app: the `god` command, a player at (1, 2), and the
+    /// prefab `rock` in the library.
+    fn console_app() -> (App, Entity) {
+        let mut app = app()
+            .insert_resource(God::default())
+            .add_console_command("god [on|off]", "makes the player invulnerable", god)
+            // Starts with no name: logged, not added.
+            .add_console_command("<god>", "nothing", god);
+        *app.world_mut().resource_mut::<WindowSize>() = WindowSize(UVec2::new(1280, 720));
+        let player = app
+            .world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::new(1.0, 2.0)))
+            .with(Player)
+            .id();
+        let rock = r#"{"name": "rock", "components": {"Velocity": [3, 4]}}"#;
+        let value = nadir_codec::json::parse(rock, nadir_codec::Limits::default()).expect("JSON");
+        let file = nadir_codec::prefab::read(&value).expect("a prefab");
+        app.world_mut()
+            .resource_mut::<PrefabLibrary>()
+            .insert("data/prefabs/rock.kbj", file);
+        (app, player)
+    }
+
+    #[test]
+    fn the_backtick_shows_the_console_whose_line_runs_the_engine_s_commands() {
+        use crate::Velocity;
+
+        let (mut app, player) = console_app();
+        app.update(TICK, &backtick());
+        assert!(texts(&app).iter().any(|text| text == "Console"));
+        assert_eq!(
+            app.debug_tools().console.line(),
+            "",
+            "the backtick is not typed"
+        );
+        // The game's keys are held back from the next frame on.
+        assert!(
+            app.debug_tools()
+                .ui
+                .as_ref()
+                .is_some_and(DebugUi::wants_keyboard)
+        );
+        app.update(TICK, &[]);
+        assert!(app.world().resource::<Input>().capture().keyboard);
+
+        enter(&mut app, "tp 10 -20");
+        let at = app
+            .world()
+            .read::<Transform>()
+            .get(player)
+            .map(|at| at.position);
+        assert_eq!(at, Some(Vec2::new(10.0, -20.0)));
+        assert_eq!(
+            after(&mut app, "tp 10 -20"),
+            ["moved 1 player(s) to (10, -20)"]
+        );
+
+        enter(&mut app, "spawn rock 5 6");
+        let rocks: Vec<(Vec2, Vec2)> = {
+            let world = app.world();
+            let velocities = world.read::<Velocity>();
+            let transforms = world.read::<Transform>();
+            velocities
+                .iter()
+                .filter_map(|(entity, velocity)| {
+                    Some((transforms.get(entity)?.position, velocity.0))
+                })
+                .collect()
+        };
+        // Spawned, then moved a tick at its velocity.
+        assert_eq!(rocks.len(), 1, "{rocks:?}");
+        assert_eq!(rocks[0].1, Vec2::new(3.0, 4.0));
+        assert!(
+            (rocks[0].0 - Vec2::new(5.0, 6.0)).length() < 0.2,
+            "{rocks:?}"
+        );
+        assert!(after(&mut app, "spawn rock 5 6")[0].starts_with("spawned `rock` as "));
+        // Both coordinates, or neither.
+        enter(&mut app, "spawn rock 5");
+        assert_eq!(
+            after(&mut app, "spawn rock 5"),
+            ["[x] and [y] go together: spawn <prefab> [x] [y]"]
+        );
+        enter(&mut app, "spawn boulder");
+        let refused = after(&mut app, "spawn boulder");
+        assert!(
+            refused[0].starts_with("`boulder` is not spawned: "),
+            "{refused:?}"
+        );
+
+        // Twice the time: two ticks a frame.
+        enter(&mut app, "timescale 2");
+        app.update(TICK, &[]);
+        assert_eq!(app.world().resource::<TickStats>().ticks, 2);
+        enter(&mut app, "timescale 9");
+        assert_eq!(
+            after(&mut app, "timescale 9"),
+            ["<scale>: `9` is not from 0.25 to 4: timescale <scale>"]
+        );
+        enter(&mut app, "timescale 1");
+        app.update(TICK, &[]);
+        assert_eq!(app.world().resource::<TickStats>().ticks, 1);
+
+        enter(&mut app, "schedule");
+        let systems = after(&mut app, "schedule");
+        assert!(
+            systems.iter().any(|line| line.ends_with("nadir::movement")),
+            "{systems:?}"
+        );
+        assert!(
+            systems.iter().any(|line| line.ends_with(" count")),
+            "{systems:?}"
+        );
+
+        enter(&mut app, "level nowhere");
+        let refused = after(&mut app, "level nowhere");
+        assert!(
+            refused
+                .iter()
+                .any(|line| line.starts_with("the level `nowhere` is not loaded: ")),
+            "{refused:?}"
+        );
+
+        enter(&mut app, "reload");
+        assert!(after(&mut app, "reload")[0].starts_with("reading "));
+
+        let folder = env::temp_dir().join(format!("nadir-engine-console-{}", process::id()));
+        let _ = fs::remove_dir_all(&folder);
+        let trace = folder.join("deep").join("t.json");
+        let line = format!("profile dump \"{}\"", trace.display());
+        enter(&mut app, &line);
+        assert_eq!(
+            after(&mut app, &line)[0],
+            format!("Wrote {}", trace.display())
+        );
+        assert!(
+            fs::read_to_string(&trace)
+                .expect("the trace")
+                .contains("traceEvents")
+        );
+        fs::remove_dir_all(&folder).expect("remove the folder");
+        // Without App::run, no folder for a trace without a path.
+        enter(&mut app, "profile dump");
+        assert_eq!(
+            after(&mut app, "profile dump"),
+            ["Traces are written only by App::run."]
+        );
+
+        let target = "nadir_engine::debug_ui::tests::console";
+        assert!(!log::enabled(Level::Debug, target));
+        enter(&mut app, &format!("log level {target} DEBUG"));
+        assert!(log::enabled(Level::Debug, target));
+        log::set_target_level(target, None);
+
+        // The game's command, with its own usage.
+        enter(&mut app, "god");
+        assert!(app.world().resource::<God>().0);
+        enter(&mut app, "god off");
+        assert!(!app.world().resource::<God>().0);
+        enter(&mut app, "god maybe");
+        assert_eq!(
+            after(&mut app, "god maybe"),
+            ["[on|off]: `maybe` is not one of on, off: god [on|off]"]
+        );
+
+        assert!(!app.debug_tools().quit());
+        enter(&mut app, "quit");
+        assert!(app.debug_tools().quit());
+    }
+
+    #[test]
+    fn the_console_shows_the_log_s_records_and_its_help_lists_every_command() {
+        let (mut app, _) = console_app();
+        warn!("a warning from before the console showed");
+        app.update(TICK, &backtick());
+        warn!("a warning while it shows");
+        app.update(TICK, &[]);
+        let lines: Vec<String> = app
+            .debug_tools()
+            .console
+            .lines()
+            .map(String::from)
+            .collect();
+        let before = lines
+            .iter()
+            .position(|line| line.ends_with("a warning from before the console showed"));
+        let while_shown = lines
+            .iter()
+            .position(|line| line.ends_with("a warning while it shows"));
+        assert!(before.is_some() && before < while_shown, "{lines:?}");
+        assert!(
+            lines.iter().any(|line| line.contains(" ERROR ")
+                && line.contains("the console command is not added: `<god>`")),
+            "{lines:?}"
+        );
+
+        enter(&mut app, "help");
+        let help = after(&mut app, "help");
+        let names: Vec<&str> = help
+            .iter()
+            .filter_map(|line| line.split_whitespace().next())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "help",
+                "schedule",
+                "spawn",
+                "tp",
+                "timescale",
+                "level",
+                "reload",
+                "profile",
+                "log",
+                "quit",
+                "god"
+            ]
+        );
+        // Tab completes from the engine's commands and the game's.
+        app.update(
+            TICK,
+            &[Event::Text('g'), key(Key::Tab, true), key(Key::Tab, false)],
+        );
+        assert_eq!(app.debug_tools().console.line(), "god ");
+        // Closed by the backtick, which it does not type.
+        app.update(TICK, &backtick());
+        assert_eq!(app.debug_tools().console.line(), "god ");
+        assert!(!texts(&app).iter().any(|text| text == "Console"));
+    }
+
+    #[test]
+    fn the_backtick_is_typed_into_no_debug_field_as_it_shows_or_hides_the_console() {
+        let (mut app, _) = console_app();
+        // The game's window, its field with the keyboard.
+        app.update(TICK, &tap(Key::F8));
+        app.update(TICK, &click(FIELD));
+        app.update(TICK, &[Event::Text('a')]);
+        assert_eq!(app.world().resource::<Notes>().text, "a");
+        // The backtick shows the console, which takes the keyboard.
+        app.update(TICK, &backtick());
+        app.update(TICK, &[Event::Text('b')]);
+        assert_eq!(app.world().resource::<Notes>().text, "a");
+        assert_eq!(app.debug_tools().console.line(), "b");
+        // Back in the game's field, the backtick hides the console.
+        app.update(TICK, &click(FIELD));
+        app.update(TICK, &backtick());
+        app.update(TICK, &[Event::Text('c')]);
+        assert_eq!(app.world().resource::<Notes>().text, "ac");
+        assert!(!texts(&app).iter().any(|text| text == "Console"));
+        // Text that comes after another key's press is typed: a key
+        // pressed after the toggle, or a dead key's accent with it.
+        app.update(TICK, &backtick());
+        app.update(TICK, &click(FIELD));
+        app.update(
+            TICK,
+            &[
+                key(Key::Grave, true),
+                key(Key::Grave, false),
+                key(Key::E, true),
+                Event::Text('e'),
+                key(Key::E, false),
+            ],
+        );
+        assert_eq!(app.world().resource::<Notes>().text, "ace");
+        assert!(!texts(&app).iter().any(|text| text == "Console"));
+    }
+
+    /// The frame's sprites of `color`: where each is, how large, and how
+    /// turned.
+    fn colored(app: &App, color: Color) -> Vec<(Vec2, Vec2, f32)> {
+        let frame = app.world().resource::<RenderFrame>();
+        frame
+            .sprites
+            .iter()
+            .filter(|sprite| sprite.color == color)
+            .map(|sprite| (sprite.position, sprite.size, sprite.rotation))
+            .collect()
+    }
+
+    /// The rect around unturned sprites with their pivots at their
+    /// top-left corners.
+    fn around(sprites: &[(Vec2, Vec2, f32)]) -> Option<Rect> {
+        let mut rects = sprites
+            .iter()
+            .map(|&(at, size, _)| Rect::new(at, at + size));
+        let first = rects.next()?;
+        Some(rects.fold(first, |all, rect| {
+            Rect::new(all.min.min(rect.min), all.max.max(rect.max))
+        }))
+    }
+
+    /// The tile layer a frame system of the test draws.
+    struct Chunked(Handle<nadir_render::TileLayer>);
+
+    fn draw_chunked(world: &World, _: &nadir_core::time::Frame) {
+        let tiles = world.resource::<Chunked>().0;
+        let mut frame = world.resource_mut::<RenderFrame>();
+        frame
+            .tile_layers
+            .push(nadir_render::TileLayerDraw::new(tiles));
+    }
+
+    #[test]
+    fn f4_draws_the_overlays_ticked_into_the_world_and_nothing_once_closed() {
+        use nadir_collision::{Shape, TileGrid};
+        use nadir_core::IVec2;
+        use nadir_render::{TileLayer, TileLayers, TileSet};
+
+        use crate::Collisions;
+
+        let mut app = app().add_frame_system(FrameStage::Extract, "chunked", draw_chunked);
+        *app.world_mut().resource_mut::<WindowSize>() = WindowSize(UVec2::new(1280, 720));
+        let world = app.world_mut();
+        world
+            .spawn()
+            .with(Transform::at(Vec2::new(40.0, 40.0)))
+            .with(Collider::solid(Shape::Aabb {
+                half: Vec2::new(5.0, 3.0),
+            }));
+        world
+            .spawn()
+            .with(Transform::at(Vec2::new(-100.0, 50.0)))
+            .with(Collider::trigger(Shape::Circle { radius: 8.0 }));
+        // Out of the view, (-240, -135) to (240, 135): not drawn.
+        world
+            .spawn()
+            .with(Transform::at(Vec2::new(1000.0, 0.0)))
+            .with(Collider::solid(Shape::Aabb {
+                half: Vec2::splat(4.0),
+            }));
+        let mut grid = TileGrid::new(4, 4, 16.0, Vec2::new(-64.0, -64.0));
+        grid.set_solid(IVec2::new(1, 2), true);
+        world.resource_mut::<Collisions>().set_grid(grid);
+        let tileset = TileSet {
+            texture: game_box(),
+            columns: 1,
+            rows: 1,
+        };
+        let layer = TileLayer::new(tileset, UVec2::new(40, 10), 16.0, Vec2::new(-200.0, -100.0));
+        let tiles = world.resource_mut::<TileLayers>().add(layer);
+        world.insert_resource(Chunked(tiles));
+
+        app.update(TICK, &[]);
+        assert!(colored(&app, draw::SOLID).is_empty(), "closed");
+        app.update(TICK, &tap(Key::F4));
+        app.update(TICK, &[]);
+        // The colliders, the triggers and the grid, at first: a box's edges
+        // inside it, a line wide; a circle's sides; a solid cell, filled.
+        let solid = colored(&app, draw::SOLID);
+        assert_eq!(solid.len(), 4, "the box out of view is not drawn");
+        let expected = Rect::new(Vec2::new(35.0, 37.0), Vec2::new(45.0, 43.0));
+        assert_eq!(around(&solid), Some(expected));
+        assert!(
+            solid
+                .iter()
+                .all(|&(_, size, _)| size.x == 1.0 || size.y == 1.0)
+        );
+        assert_eq!(colored(&app, draw::TRIGGER).len(), 24);
+        let grid = colored(&app, draw::GRID);
+        let cell = Rect::new(Vec2::new(-48.0, -32.0), Vec2::new(-32.0, -16.0));
+        assert_eq!(around(&grid), Some(cell));
+        assert_eq!(grid.len(), 1);
+        for color in [draw::HASH, draw::CHUNK, draw::CAMERA] {
+            assert!(colored(&app, color).is_empty());
+        }
+
+        // A click on the colliders' box, the first row's, unticks them.
+        app.update(TICK, &click(Vec2::new(960.0, 31.0)));
+        app.update(TICK, &[]);
+        assert!(colored(&app, draw::SOLID).is_empty());
+        assert_eq!(colored(&app, draw::TRIGGER).len(), 24);
+
+        let overlays = &mut app.debug_tools().overlays;
+        overlays.hash = true;
+        overlays.chunks = true;
+        overlays.camera = true;
+        app.update(TICK, &[]);
+        // The hash's cells of 64 that hold a collider in the view, and how
+        // many each holds.
+        let hash = colored(&app, draw::HASH);
+        assert_eq!(hash.len(), 8);
+        let counts: Vec<(Vec2, String)> = app
+            .world()
+            .resource::<RenderFrame>()
+            .texts
+            .iter()
+            .filter(|(draw, _)| draw.color == draw::HASH)
+            .map(|(draw, text)| (draw.position, text.to_string()))
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                (Vec2::new(-126.0, 2.0), "1".to_string()),
+                (Vec2::new(2.0, 2.0), "1".to_string())
+            ]
+        );
+        // The layer's first chunk of 32 tiles; the second is out of view.
+        let chunk = colored(&app, draw::CHUNK);
+        let expected = Rect::new(Vec2::new(-200.0, -100.0), Vec2::new(312.0, 60.0));
+        assert_eq!((chunk.len(), around(&chunk)), (4, Some(expected)));
+        // The camera's cross, two lines turned, and its view.
+        let camera = colored(&app, draw::CAMERA);
+        let (cross, view): (Vec<_>, Vec<_>) = camera
+            .iter()
+            .partition(|&&(_, size, _)| size == Vec2::new(12.0, 1.0));
+        assert_eq!(cross.len(), 2);
+        let expected = Rect::new(Vec2::new(-240.0, -135.0), Vec2::new(240.0, 135.0));
+        assert_eq!((view.len(), around(&view)), (4, Some(expected)));
+
+        // Closed, it draws nothing.
+        app.update(TICK, &tap(Key::F4));
+        for color in [
+            draw::TRIGGER,
+            draw::GRID,
+            draw::HASH,
+            draw::CHUNK,
+            draw::CAMERA,
+        ] {
+            assert!(colored(&app, color).is_empty());
+        }
+    }
+
+    #[test]
+    fn a_box_off_the_pixel_grid_is_a_closed_ring_on_it_and_a_thin_one_a_fill() {
+        use nadir_collision::Shape;
+
+        let mut app = app();
+        app.world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::new(40.2, 40.2)))
+            .with(Collider::solid(Shape::Aabb {
+                half: Vec2::new(5.74, 3.74),
+            }));
+        app.world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::new(-20.0, 0.0)))
+            .with(Collider::trigger(Shape::Aabb {
+                half: Vec2::new(0.4, 5.0),
+            }));
+        app.update(TICK, &tap(Key::F4));
+        app.update(TICK, &[]);
+        // Its corners on whole pixels, its four edges meeting and never
+        // overlapping: the renderer, which puts each sprite's corner on a
+        // whole pixel, draws them as they are.
+        let ring = colored(&app, draw::SOLID);
+        assert_eq!(ring.len(), 4);
+        let whole = |v: Vec2| v.x.fract() == 0.0 && v.y.fract() == 0.0;
+        assert!(ring.iter().all(|&(at, size, _)| whole(at) && whole(size)));
+        let expected = Rect::new(Vec2::new(34.0, 36.0), Vec2::new(46.0, 44.0));
+        assert_eq!(around(&ring), Some(expected));
+        let area: f32 = ring.iter().map(|&(_, size, _)| size.x * size.y).sum();
+        assert_eq!(area, 12.0 * 8.0 - 10.0 * 6.0);
+        // Too thin for two edges: one sprite, a pixel wide at least.
+        let thin = colored(&app, draw::TRIGGER);
+        let expected = Rect::new(Vec2::new(-20.0, -5.0), Vec2::new(-19.0, 5.0));
+        assert_eq!((thin.len(), around(&thin)), (1, Some(expected)));
+    }
+
+    #[test]
+    fn a_child_s_collider_is_drawn_where_its_root_is_drawn_with_its_offset() {
+        use nadir_collision::Shape;
+
+        use crate::{Parent, Velocity};
+
+        let mut app = app();
+        let root = app
+            .world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::ZERO))
+            .with(Velocity(Vec2::new(120.0, 0.0)))
+            .with(Sprite::new(game_box(), Vec2::new(8.0, 8.0)))
+            .id();
+        app.world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::ZERO))
+            .with(Parent {
+                entity: root,
+                offset: Vec2::new(20.0, 0.0),
+            })
+            .with(Collider::trigger(Shape::Circle { radius: 4.0 }));
+        app.update(TICK, &tap(Key::F4));
+        // Three frames a tick: the root is drawn between its last two
+        // ticks, and so is its child's collider.
+        for _ in 0..7 {
+            app.update(TICK / 3, &[]);
+            let drawn = app
+                .world()
+                .resource::<RenderFrame>()
+                .sprites
+                .iter()
+                .find(|sprite| sprite.texture == game_box())
+                .map(|sprite| sprite.position)
+                .expect("the root's sprite");
+            let sides = colored(&app, draw::TRIGGER);
+            assert_eq!(sides.len(), 24);
+            let center = sides.iter().fold(Vec2::ZERO, |sum, &(at, _, _)| sum + at) / 24.0;
+            let expected = drawn + Vec2::new(20.0, 0.0);
+            assert!(
+                (center - expected).length() < 1e-3,
+                "{center:?} {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn f5_pauses_f6_steps_and_f7_scales_the_game_s_time_saying_so_in_a_corner() {
+        let mut app = app();
+        let ticks = |app: &App| app.world().resource::<TickStats>().ticks;
+        let time = |app: &App| app.world().resource::<RenderFrame>().time;
+        let label = |app: &App| -> Vec<String> {
+            texts(app)
+                .into_iter()
+                .filter(|text| text.starts_with("paused") || text.starts_with("time x"))
+                .collect()
+        };
+        app.update(TICK, &[]);
+        app.update(TICK, &[]);
+        assert_eq!(ticks(&app), 1);
+        assert!(label(&app).is_empty());
+        // F5 pauses in the frame it is pressed: no tick, the frame's time
+        // held, which holds the tiles and the clips.
+        let held = time(&app);
+        app.update(TICK, &tap(Key::F5));
+        assert_eq!((ticks(&app), time(&app)), (0, held));
+        assert_eq!(label(&app), ["paused"]);
+        // Under the windows, which cover the corner if they reach it.
+        app.update(TICK, &tap(Key::F1));
+        let shown = texts(&app);
+        let at = |text: &str| {
+            shown
+                .iter()
+                .position(|shown| shown == text)
+                .unwrap_or_else(|| panic!("no {text:?} in {shown:?}"))
+        };
+        assert!(at("paused") < at("Stats"), "{shown:?}");
+        app.update(TICK, &tap(Key::F1));
+        app.update(TICK, &[]);
+        assert_eq!((ticks(&app), time(&app)), (0, held));
+        // F6 steps a tick, and a held F6's repeats step on.
+        app.update(TICK, &tap(Key::F6));
+        assert_eq!(ticks(&app), 1);
+        assert!(time(&app) > held);
+        let repeat = Event::Key {
+            key: Key::F6,
+            pressed: true,
+            repeat: true,
+        };
+        app.update(
+            TICK,
+            &[key(Key::F6, true), repeat, repeat, key(Key::F6, false)],
+        );
+        assert_eq!(ticks(&app), 3);
+        // F5 runs it again, and the label goes.
+        app.update(TICK, &tap(Key::F5));
+        assert_eq!(ticks(&app), 1);
+        assert!(label(&app).is_empty());
+        // F7 doubles it, and Shift+F7 halves it again.
+        app.update(TICK, &tap(Key::F7));
+        assert_eq!(ticks(&app), 2);
+        assert_eq!(label(&app), ["time x2"]);
+        app.update(
+            TICK,
+            &[
+                key(Key::LeftShift, true),
+                key(Key::F7, true),
+                key(Key::F7, false),
+                key(Key::LeftShift, false),
+            ],
+        );
+        assert_eq!(ticks(&app), 1);
+        assert!(label(&app).is_empty());
+        // The console's `timescale` sets the same scale.
+        app.debug_tools().time.scale = 0.5;
+        app.update(TICK, &[]);
+        assert_eq!(label(&app), ["time x0.5"]);
+    }
+
+    #[test]
+    fn a_step_takes_the_replay_s_next_tick() {
+        use crate::Replay;
+
+        // A recording of Jump held for 12 ticks.
+        let mut recorder = InputRecorder::<Act>::new().expect("a valid set");
+        let map = actions();
+        let mut input = Input::new();
+        let mut state = ActionState::new();
+        input.handle(&key(Key::Space, true));
+        for _ in 0..12 {
+            input.latch(&map, &mut state);
+            recorder.record(&state);
+        }
+        let bytes: &'static [u8] = Box::leak(recorder.into_bytes().into_boxed_slice());
+        let player = InputPlayer::<Act>::new(bytes).expect("a replay of Act");
+        let mut app = app().play_replay(player);
+        let played = |app: &App| match *app.world().resource::<Replay>() {
+            Replay::Playing { ticks } => ticks,
+            ref other => panic!("{other:?}"),
+        };
+        app.update(TICK, &[]);
+        app.update(TICK, &tap(Key::F5));
+        let at = played(&app);
+        let held = app.world().resource::<Seen>().jump_held;
+        for step in 1..=3 {
+            app.update(TICK, &tap(Key::F6));
+            app.update(TICK, &[]);
+            assert_eq!(played(&app), at + step);
+            assert_eq!(app.world().resource::<Seen>().jump_held, held + step as u32);
+        }
+    }
+
+    #[test]
+    fn a_steady_frame_of_every_overlay_and_the_label_allocates_nothing() {
+        use nadir_collision::Shape;
+
+        let mut app = app();
+        for at in [Vec2::new(40.0, 40.0), Vec2::new(-60.0, 10.0)] {
+            app.world_mut()
+                .spawn()
+                .with(Transform::at(at))
+                .with(crate::Velocity(Vec2::new(5.0, 0.0)))
+                .with(Collider::solid(Shape::Circle { radius: 6.0 }));
+        }
+        app.update(TICK, &tap(Key::F4));
+        let overlays = &mut app.debug_tools().overlays;
+        overlays.hash = true;
+        overlays.chunks = true;
+        overlays.camera = true;
+        app.update(TICK, &tap(Key::F7));
+        for _ in 0..10 {
+            app.update(TICK, &[]);
+        }
+        let start = nadir_platform::thread_alloc_counts();
+        for _ in 0..20 {
+            app.update(TICK, &[]);
+        }
+        let allocated = nadir_platform::thread_alloc_counts().since(start);
+        assert!(!colored(&app, draw::SOLID).is_empty());
+        assert!(texts(&app).iter().any(|text| text == "time x2"));
+        assert_eq!(allocated, nadir_platform::AllocCounts::default());
+    }
+
+    #[test]
+    fn the_time_scale_scales_each_frame_s_length() {
+        let mut tools = DebugTools::new();
+        assert_eq!(tools.game_time(TICK), TICK);
+        tools.time.scale = 0.5;
+        assert_eq!(
+            tools.game_time(Duration::from_millis(20)),
+            Duration::from_millis(10)
+        );
+        tools.time.scale = 4.0;
+        assert_eq!(tools.game_time(Duration::MAX), Duration::MAX);
     }
 }

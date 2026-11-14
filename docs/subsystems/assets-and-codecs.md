@@ -1045,6 +1045,7 @@ impl AssetServer {
     pub fn finish_completed_loads(&mut self, ctx: &mut FinalizeCtx<'_>); // main thread, once a frame; never waits
     pub fn finish_all_loads(&mut self, ctx: &mut FinalizeCtx<'_>);       // waits for every load: tools, tests, offscreen frames
     pub fn reload(&mut self, path: &str) -> usize;                 // M5.16: each type at the path; how many
+    pub fn reload_all(&mut self) -> usize;                         // M7.5: every asset's file, as reload; how many
     pub fn start_watcher(&mut self) -> std::io::Result<()>;        // M5.16: the thread nadir-assets-watch
     pub fn reload_changed(&mut self) -> usize;                     // M5.16: once a frame; allocates nothing when nothing changed
     pub fn drain_swapped<T: Asset>(&mut self) -> impl Iterator<Item = Handle<T>> + '_; // M5.16: the handles a reload swapped
@@ -1289,7 +1290,8 @@ facade (ADR-0043).
   reload that fails keeps the value it had. As built:
   - `AssetServer::reload(path)` queues a read of the file for each type
     with an asset at the path, and returns how many; a path that failed
-    its type's check has no file to read again.
+    its type's check has no file to read again. `reload_all` does so for
+    every asset (M7.5, the debug console's `reload`).
   - Each entry numbers its reads. A result older than one already back is
     dropped: up to four workers read at once, so two reloads can finish
     out of order, and the later read's value is the one that stays. A
