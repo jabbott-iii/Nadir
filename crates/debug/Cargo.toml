@@ -16,7 +16,11 @@ categories.workspace = true
 # (ADR-0059).
 nadir-codec.workspace = true
 nadir-core.workspace = true
+# The inspector lists the world's entities and edits their components
+# through the scene's reflection (ADR-0062).
+nadir-ecs.workspace = true
 nadir-render.workspace = true
+nadir-scene.workspace = true
 
 [lints]
 workspace = true

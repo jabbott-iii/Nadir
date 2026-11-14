@@ -28,6 +28,7 @@ type InsertFn =
     fn(&mut Commands<'_>, Entity, &Value, &mut ReflectContext<'_>) -> Result<(), ReflectError>;
 type LayeredFn = fn(&[Layer<'_>], &mut ReflectContext<'_>) -> Result<Box<dyn Any>, ReflectError>;
 type InsertAnyFn = fn(&mut Commands<'_>, Entity, Box<dyn Any>);
+type RemoveFn = fn(&mut Commands<'_>, Entity);
 
 /// One layer of a component's value: a value, and where it was read from,
 /// for messages. A prefab's are its base's, its own and a level's
@@ -56,6 +57,7 @@ pub struct Registration {
     insert: InsertFn,
     layered: LayeredFn,
     insert_any: InsertAnyFn,
+    remove: RemoveFn,
     inspect: InspectFn,
     inspect_mut: InspectMutFn,
     each: EachFn,
@@ -146,6 +148,14 @@ impl Registration {
         (self.insert_any)(commands, entity, value);
     }
 
+    /// Takes `entity`'s component of this type away through `commands`,
+    /// when they are applied, if it has one then: as
+    /// [`Commands::remove`] does, for a tool that knows the type by its
+    /// name, such as the inspector.
+    pub fn remove(&self, commands: &mut Commands<'_>, entity: Entity) {
+        (self.remove)(commands, entity);
+    }
+
     /// Calls `f` with `entity`'s component of this type, to read it.
     /// Returns whether it has one. The type's components stay borrowed
     /// while `f` runs.
@@ -214,6 +224,7 @@ impl TypeRegistry {
             insert: insert::<T>,
             layered: layered::<T>,
             insert_any: insert_any::<T>,
+            remove: remove::<T>,
             inspect: inspect::<T>,
             inspect_mut: inspect_mut::<T>,
             each: each::<T>,
@@ -388,6 +399,10 @@ fn insert_any<T: Component>(commands: &mut Commands<'_>, entity: Entity, value: 
         .downcast::<T>()
         .expect("the registration made this value, of its own type");
     commands.insert(entity, *value);
+}
+
+fn remove<T: Component>(commands: &mut Commands<'_>, entity: Entity) {
+    commands.remove::<T>(entity);
 }
 
 fn inspect<T: Component + Reflect>(

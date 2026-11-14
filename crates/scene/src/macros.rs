@@ -263,6 +263,10 @@ macro_rules! reflect_enum {
                 &[]
             }
 
+            fn variants(&self) -> &'static [&'static ::core::primitive::str] {
+                &[$(::core::stringify!($variant)),*]
+            }
+
             fn field(&self, _index: ::core::primitive::usize) -> ::core::option::Option<&dyn $crate::Reflect> {
                 ::core::option::Option::None
             }
@@ -350,6 +354,10 @@ macro_rules! reflect_newtype {
 
             fn fields(&self) -> &'static [$crate::FieldInfo] {
                 $crate::Reflect::fields(&self.0)
+            }
+
+            fn variants(&self) -> &'static [&'static ::core::primitive::str] {
+                $crate::Reflect::variants(&self.0)
             }
 
             fn field(&self, index: ::core::primitive::usize) -> ::core::option::Option<&dyn $crate::Reflect> {

@@ -183,6 +183,11 @@ fn enums_newtypes_and_tags_read_and_write_as_their_shapes_say() {
         (Facing::Up.kind(), Facing::Up.fields()),
         (ReflectKind::Enum, &[][..])
     );
+    // Its variants, in order, for an inspector to pick from; a newtype's
+    // are what it wraps', and other kinds have none.
+    assert_eq!(Facing::Up.variants(), ["Down", "Up", "Left", "Right"]);
+    assert!(SaveId(1).variants().is_empty() && Inner::default().variants().is_empty());
+    assert!(3_u8.variants().is_empty() && Enemy.variants().is_empty());
 
     // A newtype is its value, with its own name.
     assert_eq!(SaveId(41).to_value(&mut cx), Value::Int(41));
@@ -588,6 +593,15 @@ fn the_registry_makes_inserts_and_inspects_components_by_name() {
     );
     let nobody = world.spawn().id();
     assert!(!registration.inspect(&world, nobody, &mut |_| {}));
+
+    // Removed by name, when the commands are applied; one it does not have
+    // is nothing.
+    registration.remove(&mut world.commands(), entity);
+    registration.remove(&mut world.commands(), nobody);
+    assert!(registration.inspect(&world, entity, &mut |_| {}));
+    world.apply_commands();
+    assert!(!registration.inspect(&world, entity, &mut |_| {}));
+    assert!(world.is_alive(entity) && world.is_alive(nobody));
 }
 
 #[test]

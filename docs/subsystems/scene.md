@@ -37,6 +37,7 @@ pub trait Reflect: 'static {
     fn type_name(&self) -> &'static str;                   // "Health"
     fn kind(&self) -> ReflectKind;                         // Struct | Enum | Primitive | List | Option | Handle
     fn fields(&self) -> &'static [FieldInfo];              // name, type as written, doc comment as written
+    fn variants(&self) -> &'static [&'static str] { &[] }  // an enum's, by name (M7.4, ADR-0062)
     fn field(&self, index: usize) -> Option<&dyn Reflect>; // struct fields; list and option elements
     fn field_mut(&mut self, index: usize) -> Option<&mut dyn Reflect>;
     fn to_value(&self, cx: &mut ReflectContext<'_>) -> Value;  // nadir_codec::json::Value
@@ -106,7 +107,8 @@ pub trait FromValue: Reflect + Sized {
   - an insert-into-world function (`insert`, through `Commands`;
     `TypeRegistry::register_components` registers the types with a world)
   - inspector hooks (`inspect` and `inspect_mut`, which hold the type's
-    borrow while their callback runs)
+    borrow while their callback runs), and `remove`, which takes an
+    entity's component away through commands (M7.4, ADR-0062)
   - a walk of the type's components in storage order (`each`, M4.7), under
     `TypeRegistry::hash_world(world, cx)`: a 64-bit FNV-1a of every
     registered type's components, by entity, through `to_value`. Zeros of

@@ -30,10 +30,13 @@ Built:
 - a stats overlay of numbers the engine copies in, and a profiler of the
   last 300 frames: graphs of their processor time and of the GPU's time
   over their drawing, a frame's scopes as a tree, and a Chrome trace of
-  them all, with a track of the GPU's passes, which Perfetto UI opens.
+  them all, with a track of the GPU's passes, which Perfetto UI opens;
+- an inspector of a `nadir-ecs` world: its entities, a page at a time,
+  filtered by number and component; the components of the one clicked,
+  each field edited through `nadir-scene`'s reflection; components added
+  and removed by name, the entity despawned, or written as a prefab.
 
-Not yet: the inspector, the console and the debug-draw toggles (M7.4 to
-M7.6);
+Not yet: the console and the debug-draw toggles (M7.5 and M7.6);
 tooltips, a scroll area inside a window, copy and paste.
 
 ## Usage

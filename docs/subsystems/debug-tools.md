@@ -311,6 +311,87 @@ The renderer's timers (M7.11) feed the profiler in development builds
   a dot: `Ui::plot` draws a value with no finite one beside it as a dot,
   not only a plot's one value.
 
+### As built (M7.4): the inspector
+
+A window of the engine's, in the facade's debug UI, over a world's
+entities and the scene's reflection (ADR-0062).
+
+```rust
+// nadir-debug (depends on nadir-ecs and nadir-scene since M7.4):
+#[non_exhaustive] pub struct InspectorResponse { pub save_prefab: bool }
+pub struct Inspector;  // new, selected, select, prefab_name, set_note,
+                       // show(world, ui, cx) -> InspectorResponse,
+                       // prefab(world, leave_out, cx) -> Option<String>
+// nadir-ecs:   World::entities_into(&mut Vec<Entity>)
+// nadir-scene: Registration::remove(commands, entity); Reflect::variants() -> &[&str]
+```
+
+- **The list:** a "Filter" field; the count, `340 entities` or `12 of 340
+  entities`; then a page of 16 rows, each a button of the entity's
+  number (`3v1`, its slot and generation), marked `>` when selected, and
+  its registered components' names; `<`, `>` and `17-32 of 340` past one
+  page. Each word of the filter must match the entity's number, or the
+  name of a component it has, ignoring case. The entities come from
+  `World::entities_into`, so one with no reflected component is listed
+  too. A click selects; the selection takes effect in the frame clicked,
+  its mark in the next.
+- **The selected entity:** `Entity 3v1` and "Despawn"; the prefab's name
+  and "Save as prefab"; a combo of the types it lacks, the data to make
+  one from, and "Add"; the note;
+  then a node for each registered component it has, in the registry's
+  order, with its "Remove". A despawned one says `Entity 3v1 is gone:
+  click another.`
+- **Editors,** each through the component's `Reflect` impl: a struct's
+  fields are rows (a struct in one, a node of its own; a tag says it has
+  no fields); a list's elements rows under a node; an option its value,
+  or `none`; an enum a combo of its `variants`. The rest is edited as its
+  data, `to_value`: a boolean a checkbox; a float a drag, 0.1 a unit; a
+  whole number (a `u64` past an `i64` too, which data writes as digits), a
+  string or an asset's path a text field, applied on Enter or a press
+  elsewhere, dropped on Escape or when its field is not drawn in a frame
+  (the window closed or collapsed); a `Color` a color edit, as is a string
+  that writes one (`#rrggbb`, `#rrggbbaa`) among the members of a value
+  reflected whole (a `Sprite`'s `color`), whose types its data does not
+  say; one to four numbers a row, the label after the last (a position's
+  `[x, y]`), in a scope of its own; an object's members rows under a node,
+  and a component's own (a `Sprite`'s) inline.
+  A change is applied at once through `apply_value`: a member alone, in
+  an object, which the facade's `Sprite` and `Collider` apply by member;
+  a list whole. A value refused is not set, and the note says why:
+  ``Not set: the inspector: at `Health.max`: 300 does not fit in a `u8` ``.
+- **Structure** goes through the world's commands, so it shows after the
+  next tick or frame: "Despawn"; "Add", a component made from the JSONC in
+  the field beside it, `{}` at first, which a struct of defaults reads
+  (`0` for a `SaveId`, `[0, 0]` for a `Velocity`, `"Down"` for a `Facing`,
+  `{"texture": "atlas/sprites_0.qoi"}` for a `Sprite`; data the type
+  refuses, or text that is not JSON, says why in the note and adds
+  nothing); "Remove". A refusal, of an edit or of an "Add", is logged too
+  (`warn!`), whole: the window cuts a long note at its edge.
+- **Save as prefab:** with a name the prefab reader and the cook take,
+  lowercase letters, digits and `_` (`nadir_codec::prefab::is_name`, 64
+  bytes at most), `InspectorResponse::save_prefab`; `prefab` is
+  the text: ``// The prefab `goblin`, saved by the inspector from entity
+  3v1.``, then `{"name": ..., "components": {...}}`, pretty, each
+  registered component the entity has but those `leave_out` names, as
+  `to_value` writes it.
+- **The facade** shows it on F2, `nadir::inspector`, first at (584, 8) to
+  (944, 508), with `loading_context` in `Scope::Level` as its context.
+  While it is open, the selected entity is outlined in the world, a unit
+  outside it, in amber, in front of every sprite: its sprite as drawn
+  (between the last two ticks, by its parent's chain, mirrored about its
+  pivot, unrotated), else its collider's bounds, else a box 8 units wide at
+  its place; nothing for an entity with no `Transform`. "Save as prefab"
+  writes `prefabs/<name>.jsonc` in the logs folder `App::run` names,
+  beside `nadir.log` and the traces, without `Transform` and `SaveId`,
+  and says where in the note and the log; a name whose file in a game's
+  assets, `data/prefabs/<name>.jsonc`, is no asset path (a Windows
+  device's, `nul`) is not written, and the note says why.
+- **Allocation:** a frame of the list alone allocates nothing once its
+  buffers have grown; a component open builds its value each frame, and
+  the facade's context its resource list, while the window is open.
+- **Not built:** picking an entity in the world, setting an option that is
+  `None`, a list's length or a `null`, scrolling the list past a page.
+
 ## Tools
 
 | Tool | Toggle | Function |
@@ -367,7 +448,10 @@ Games register their own commands with `console.register(name, help, fn)`.
   - slider clamping
   - text input editing
 - **Inspector:** round-trip editing a component through `Reflect` changes
-  the world value.
+  the world value. As built (M7.4): nadir-debug's
+  `editing_a_component_through_reflect_changes_the_world_value` edits a
+  number, a float, an enum, a checkbox, a pair, a color, a nested field
+  and a string through the window and reads the world's value back.
 - **Trace export:** output parses with our JSON parser; event count and
   nesting are correct.
 - **Golden:** a fixed debug window layout, so we notice visual regressions

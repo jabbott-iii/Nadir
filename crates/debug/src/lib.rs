@@ -13,9 +13,10 @@
 // limitations under the License.
 
 //! Developer tools for the Nadir engine: an immediate-mode debug UI, a
-//! stats overlay ([`Stats`]) and a profiler with Chrome trace export
-//! ([`Profiler`]), and, to come, an inspector, a console and debug-draw
-//! toggles (roadmap M7.4 to M7.6). They are for development builds only: a
+//! stats overlay ([`Stats`]), a profiler with Chrome trace export
+//! ([`Profiler`]) and an inspector of the world's entities ([`Inspector`]),
+//! and, to come, a console and debug-draw toggles (roadmap M7.5 and M7.6).
+//! They are for development builds only: a
 //! game depends on this crate behind its `dev` feature, and
 //! `cargo xtask release-no-dev` checks that a release does not.
 //!
@@ -54,7 +55,12 @@
 //! [`Profiler::set_gpu`]): [`Profiler::show`] draws their processor and GPU
 //! times as graphs and the scopes of the frame clicked as a tree, and
 //! [`Profiler::trace_json`] writes them as Chrome trace event JSON, with a
-//! track of the GPU's passes, which Perfetto UI opens.
+//! track of the GPU's passes, which Perfetto UI opens. An [`Inspector`]
+//! lists a `nadir-ecs` world's entities and edits the components of the one
+//! clicked, by the types of the world's `nadir-scene` `TypeRegistry`,
+//! through their reflection: [`Inspector::show`] fills its window, and
+//! [`Inspector::prefab`] writes the entity as a prefab when its
+//! [`InspectorResponse`] asks.
 //!
 //! ```
 //! use nadir_core::{GenIndex, Handle, Key, MouseButton, Rect, UVec2, Vec2};
@@ -108,6 +114,7 @@ struct ReadmeDoctests;
 mod edit;
 mod id;
 mod input;
+mod inspector;
 mod metrics;
 mod profiler;
 mod stats;
@@ -118,6 +125,7 @@ mod ui;
 mod widgets;
 
 pub use input::DebugInput;
+pub use inspector::{Inspector, InspectorResponse};
 pub use metrics::{FontMetrics, TextMetrics};
 pub use profiler::{
     FrameTiming, GpuTiming, PROFILER_FRAMES, PROFILER_RECORDS, ProfiledFrame, Profiler,

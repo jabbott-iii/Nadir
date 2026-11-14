@@ -67,7 +67,9 @@ version = "0.3.0"
 dependencies = [
  "nadir-codec",
  "nadir-core",
+ "nadir-ecs",
  "nadir-render",
+ "nadir-scene",
 ]
 
 [[package]]

@@ -236,6 +236,21 @@ impl World {
         self.entities.borrow().len()
     }
 
+    /// Empties `out`, then puts every entity alive in it, by slot number:
+    /// for a tool that lists them, such as the inspector. `out` keeps its
+    /// allocation, so a list made each frame allocates nothing once it has
+    /// grown; and nothing stays borrowed, so commands may spawn while the
+    /// list is walked.
+    pub fn entities_into(&self, out: &mut Vec<Entity>) {
+        out.clear();
+        out.extend(
+            self.entities
+                .borrow()
+                .iter()
+                .map(|(id, ())| Entity::new(id)),
+        );
+    }
+
     /// Spawns an entity with no components, to add them to.
     pub fn spawn(&mut self) -> EntityMut<'_> {
         let entity = Entity::new(self.entities.get_mut().insert(()));

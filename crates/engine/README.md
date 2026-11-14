@@ -59,8 +59,8 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
-- the inspector, the console, debug drawing and time control (M7.4 to
-  M7.6), gamepads (M8);
+- the console, debug drawing and time control (M7.5 and M7.6), gamepads
+  (M8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 

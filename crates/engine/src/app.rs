@@ -903,11 +903,13 @@ impl App {
     ///   debug field has. One key may toggle several windows.
     /// - `window` gets the world to read, or to change through its
     ///   resources and storages, as a frame system does.
-    /// - The engine has two windows of its own, hidden at start: the stats
-    ///   overlay on F1, named `nadir::stats`, and the profiler on F3,
-    ///   `nadir::profiler`, which writes its traces beside the log file
-    ///   (`docs/subsystems/debug-tools.md`). A game's window on one of
-    ///   those keys shows and hides with it.
+    /// - The engine has three windows of its own, hidden at start: the
+    ///   stats overlay on F1, named `nadir::stats`; the inspector on F2,
+    ///   `nadir::inspector`, which outlines the entity it shows and writes
+    ///   its prefabs into the folder `prefabs` beside the log file; and the
+    ///   profiler on F3, `nadir::profiler`, which writes its traces beside
+    ///   the log file (`docs/subsystems/debug-tools.md`). A game's window
+    ///   on one of those keys shows and hides with it.
     ///
     /// Only [`App::run`] reads and writes `debug_ui.jsonc`:
     /// [`App::update`] and [`App::offscreen`] start each window at `first`.
@@ -933,6 +935,12 @@ impl App {
     /// registering components that are not reflected.
     pub fn world_mut(&mut self) -> &mut World {
         &mut self.world
+    }
+
+    /// The debug UI's state, for the tests beside it.
+    #[cfg(all(test, feature = "dev"))]
+    pub(crate) fn debug_tools(&mut self) -> &mut crate::debug_ui::DebugTools {
+        &mut self.debug
     }
 
     /// The systems, in stages: [`Schedule::describe`] lists them in the
@@ -1045,7 +1053,7 @@ impl App {
         {
             profile_scope!("nadir::debug_ui");
             self.debug
-                .frame(&self.world, self.config.virtual_resolution);
+                .frame(&self.world, self.config.virtual_resolution, frame.alpha);
         }
         #[cfg(feature = "dev")]
         self.debug.add_work(started.elapsed());
@@ -1097,7 +1105,10 @@ impl App {
                 self.debug.write_traces_in(dirs.logs);
             }
             Err(error) => {
-                warn!("the debug UI's windows are not kept, nor the profiler's traces: {error}");
+                warn!(
+                    "the debug UI's windows are not kept, nor the profiler's traces and the \
+                     inspector's prefabs: {error}"
+                );
             }
         }
         let title = self.config.title.clone();

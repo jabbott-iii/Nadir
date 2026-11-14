@@ -208,8 +208,9 @@ pub(crate) fn extract_sprites(world: &World, frame: &Frame) {
 /// The entity that `child` goes with, the first up its chain of parents
 /// that has none, and the sum of the offsets on the way. `None`, after a
 /// warning the first time, if the chain is longer than [`MOST_PARENTS`]
-/// or loops.
-fn root(parents: &SparseSet<Parent>, child: Entity) -> Option<(Entity, Vec2)> {
+/// or loops. The inspector's outline, under `dev`, places a parented
+/// sprite by it, as this does.
+pub(crate) fn root(parents: &SparseSet<Parent>, child: Entity) -> Option<(Entity, Vec2)> {
     let mut at = child;
     let mut offset = Vec2::ZERO;
     for _ in 0..=MOST_PARENTS {

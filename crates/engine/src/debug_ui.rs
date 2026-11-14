@@ -20,7 +20,10 @@
 //! kept in `debug_ui.jsonc`. The engine's own windows are the stats
 //! overlay on F1 and the profiler on F3, which writes its traces to the
 //! logs folder (roadmap M7.3, ADR-0059), and shows the GPU's time over each
-//! frame drawn, from the renderer's timers (roadmap M7.12, ADR-0061).
+//! frame drawn, from the renderer's timers (roadmap M7.12, ADR-0061); and
+//! the inspector on F2, which outlines the entity it shows in the world and
+//! writes its prefabs to the logs folder's `prefabs` (roadmap M7.4,
+//! ADR-0062).
 
 mod font;
 #[cfg(test)]
@@ -32,19 +35,29 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
 
-use nadir_assets::{AssetError, AssetPath, AssetServer, FinalizeCtx, LooseSource, Scope, Source};
+use nadir_assets::{
+    AssetError, AssetPath, AssetServer, FinalizeCtx, Handle, LooseSource, Scope, Source,
+};
 use nadir_audio::Audio;
 use nadir_core::civil::DateTime;
 use nadir_core::log::{error, info, warn};
 use nadir_core::profile::ScopeRecord;
-use nadir_core::{Key, MouseButton, Rect, UVec2, Vec2};
-use nadir_debug::{DebugInput, DebugUi, FontMetrics, FrameTiming, GpuTiming, Profiler, Stats, Ui};
-use nadir_ecs::World;
+use nadir_core::{Color, Key, MouseButton, Rect, UVec2, Vec2};
+use nadir_debug::{
+    DebugInput, DebugUi, FontMetrics, FrameTiming, GpuTiming, Inspector, Profiler, Stats, Ui,
+};
+use nadir_ecs::{Entity, World};
 use nadir_input::{Capture, Input, UiEvent, UiEvents};
 use nadir_platform::Event;
-use nadir_render::{Font, FrameStats, GpuTimes, RenderFrame, Texture, UiScale};
+use nadir_render::{
+    Font, FrameStats, GpuTimes, RenderFrame, SortMode, SpriteDraw, Texture, UiScale,
+};
+use nadir_scene::FromValue;
 
-use crate::{FrameAllocs, TickStats, WindowSize};
+use crate::{
+    Collider, FrameAllocs, Parent, PrevTransform, SaveId, Sprite, TickStats, Transform, WindowSize,
+    loading_context, reflect_context,
+};
 
 pub(crate) use places::FILE_NAME;
 
@@ -67,6 +80,31 @@ const PROFILER: (Key, &str, Rect) = (
     Rect::new(Vec2::new(216.0, 8.0), Vec2::new(576.0, 308.0)),
 );
 
+/// The inspector's key, title and first place.
+const INSPECTOR: (Key, &str, Rect) = (
+    Key::F2,
+    "Inspector##nadir::inspector",
+    Rect::new(Vec2::new(584.0, 8.0), Vec2::new(944.0, 508.0)),
+);
+
+/// The source the inspector's values are read and written under, which
+/// its errors and warnings name.
+const INSPECTED: &str = "the inspector";
+
+/// The folder of the logs folder the inspector's prefabs are written to.
+const PREFABS: &str = "prefabs";
+
+/// The components a prefab the inspector saves leaves out: a spawn places
+/// the entity, and gives it its own save number.
+const NOT_IN_PREFABS: [&str; 2] = [Transform::TYPE_NAME, SaveId::TYPE_NAME];
+
+/// The color of the outline around the entity the inspector shows.
+const OUTLINE: Color = Color::rgb(255, 200, 0);
+
+/// Half the side of the box outlined around an entity with a place but no
+/// sprite or collider, in world units.
+const MARK: f32 = 4.0;
+
 /// The last renders whose frames are kept, to give each the GPU's time
 /// over it when that is read back: twice the renderer's four renders in
 /// flight. A time read back 8 renders or more after its render is
@@ -82,6 +120,8 @@ enum Content {
     Stats,
     /// The engine's profiler.
     Profiler,
+    /// The engine's inspector.
+    Inspector,
 }
 
 /// A window of the debug UI: the engine's or a game's.
@@ -181,9 +221,15 @@ pub(crate) struct DebugTools {
     /// number modulo that, the frame each drew and when it started.
     renders: u64,
     drawn: [Option<(u64, Instant)>; RENDERS],
-    /// The folder the profiler's traces go to, which
-    /// [`App::run`](crate::App::run) names.
-    traces: Option<PathBuf>,
+    /// The logs folder, which [`App::run`](crate::App::run) names: the
+    /// profiler's traces go into it, and the inspector's prefabs into its
+    /// [`PREFABS`].
+    logs: Option<PathBuf>,
+    /// The entity list and the components of the entity it shows.
+    inspector: Inspector,
+    /// The white texel, loaded with the UI's font, which the inspector's
+    /// outline is drawn with.
+    white: Option<Handle<Texture>>,
 }
 
 impl DebugTools {
@@ -194,6 +240,7 @@ impl DebugTools {
         Self {
             windows: vec![
                 engine(STATS, Content::Stats),
+                engine(INSPECTOR, Content::Inspector),
                 engine(PROFILER, Content::Profiler),
             ],
             events: UiEvents::new(),
@@ -212,7 +259,9 @@ impl DebugTools {
             last_work: Duration::ZERO,
             renders: 0,
             drawn: [None; RENDERS],
-            traces: None,
+            logs: None,
+            inspector: Inspector::new(),
+            white: None,
         }
     }
 
@@ -222,9 +271,10 @@ impl DebugTools {
             .push(Window::closed(toggle, title, first, Content::Game(add)));
     }
 
-    /// Writes the profiler's traces into `folder`.
+    /// Writes the profiler's traces into `folder`, and the inspector's
+    /// prefabs into its folder [`PREFABS`].
     pub(crate) fn write_traces_in(&mut self, folder: PathBuf) {
-        self.traces = Some(folder);
+        self.logs = Some(folder);
     }
 
     /// As a frame starts, at `now`: ends the frame before, if there was
@@ -350,8 +400,10 @@ impl DebugTools {
 
     /// After the frame stages: toggles the windows whose keys were pressed,
     /// draws the open ones into the frame's UI, after the game's, and
-    /// writes the places if they changed.
-    pub(crate) fn frame(&mut self, world: &World, virtual_resolution: UVec2) {
+    /// writes the places if they changed. With the inspector open, it
+    /// outlines the entity it shows in the frame's sprites, drawn `alpha`
+    /// of the way from the last tick's place to this one's.
+    pub(crate) fn frame(&mut self, world: &World, virtual_resolution: UVec2, alpha: f32) {
         for event in self.events.events() {
             if let UiEvent::Key {
                 key,
@@ -368,10 +420,11 @@ impl DebugTools {
         }
         if self.ui.is_none() && !self.failed && self.windows.iter().any(|window| window.open) {
             match make_ui(world) {
-                Ok(mut ui) => {
+                Ok((mut ui, white)) => {
                     restore(&mut ui, &mut self.places);
                     self.saved = ui.places_revision();
                     self.ui = Some(ui);
+                    self.white = Some(white);
                 }
                 Err(cause) => {
                     error!("the debug UI cannot be shown: its font did not load: {cause}");
@@ -400,12 +453,34 @@ impl DebugTools {
                 }
                 Content::Profiler => frame.window(title, first, |ui| {
                     if self.profiler.show(ui).write_trace {
-                        write_trace(&mut self.profiler, self.traces.as_deref());
+                        write_trace(&mut self.profiler, self.logs.as_deref());
+                    }
+                }),
+                Content::Inspector => frame.window(title, first, |ui| {
+                    let response = loading_context(world, INSPECTED, Scope::Level, |mut cx| {
+                        self.inspector.show(world, ui, &mut cx)
+                    });
+                    if response.save_prefab {
+                        save_prefab(world, &mut self.inspector, self.logs.as_deref());
                     }
                 }),
             };
         }
         frame.finish(&mut world.resource_mut::<RenderFrame>().ui);
+        let inspecting = self
+            .windows
+            .iter()
+            .any(|window| window.open && matches!(window.content, Content::Inspector));
+        if inspecting
+            && let (Some(entity), Some(white)) = (self.inspector.selected(), self.white)
+            && let Some(rect) = outlined(world, entity, alpha)
+        {
+            outline(
+                &mut world.resource_mut::<RenderFrame>().sprites,
+                white,
+                rect,
+            );
+        }
         if let Some(path) = &self.file
             && ui.places_revision() != self.saved
         {
@@ -438,6 +513,112 @@ fn stats(world: &World, profiler: &Profiler, work: Duration) -> Stats {
     stats
 }
 
+/// Writes the prefab the inspector made of the entity it shows into
+/// `folder`'s [`PREFABS`], as `<name>.jsonc`, and says where in its note
+/// and the log; or why not. It leaves out [`NOT_IN_PREFABS`]. A name whose
+/// file in a game's assets, `data/prefabs/<name>.jsonc`, is no asset path,
+/// such as a Windows device's (`nul`), is not written.
+fn save_prefab(world: &World, inspector: &mut Inspector, folder: Option<&Path>) {
+    let Some(folder) = folder else {
+        inspector.set_note("Prefabs are written only by App::run.");
+        return;
+    };
+    let asset = format!("data/prefabs/{}.jsonc", inspector.prefab_name());
+    if let Err(cause) = AssetPath::new(&asset) {
+        warn!("the inspector's prefab is not written: {asset}: {cause}");
+        inspector.set_note(format_args!("Not written: {asset}: {cause}"));
+        return;
+    }
+    let text = reflect_context(world, INSPECTED, |mut cx| {
+        inspector.prefab(world, &NOT_IN_PREFABS, &mut cx)
+    });
+    let Some(text) = text else {
+        return;
+    };
+    let folder = folder.join(PREFABS);
+    let path = folder.join(format!("{}.jsonc", inspector.prefab_name()));
+    match fs::create_dir_all(&folder).and_then(|()| fs::write(&path, text)) {
+        Ok(()) => {
+            info!("the inspector saved the prefab {}", path.display());
+            inspector.set_note(format_args!("Wrote {}", path.display()));
+        }
+        Err(cause) => {
+            warn!(
+                "the inspector's prefab is not written: {} cannot be: {cause}",
+                path.display()
+            );
+            inspector.set_note(format_args!("Not written: {cause}"));
+        }
+    }
+}
+
+/// What the inspector outlines of `entity`, in the world: its sprite,
+/// unrotated, where it is drawn, `alpha` of the way from the last tick's
+/// place, by its parent's if it has one, as `nadir::extract_sprites` draws
+/// it; or its collider's bounds; or a box of [`MARK`] around its place.
+/// `None` for an entity with no place.
+fn outlined(world: &World, entity: Entity, alpha: f32) -> Option<Rect> {
+    let transforms = world.read::<Transform>();
+    let previous = world.read::<PrevTransform>();
+    let parents = world.read::<Parent>();
+    let drawn_at = |entity| {
+        let current = transforms.get(entity)?.position;
+        Some(
+            previous
+                .get(entity)
+                .map_or(current, |previous| previous.0.position.lerp(current, alpha)),
+        )
+    };
+    if let Some(sprite) = world.read::<Sprite>().get(entity) {
+        let parented = if parents.contains(entity) {
+            crate::glue::root(&parents, entity)
+                .and_then(|(root, offset)| Some(drawn_at(root)? + offset))
+        } else {
+            None
+        };
+        if let Some(position) = parented.or_else(|| drawn_at(entity)) {
+            // Mirrored about its pivot, as it is drawn.
+            let mut pivot = sprite.pivot;
+            if sprite.flip.x {
+                pivot.x = 1.0 - pivot.x;
+            }
+            if sprite.flip.y {
+                pivot.y = 1.0 - pivot.y;
+            }
+            let min = position - pivot * sprite.size;
+            return Some(Rect::new(min, min + sprite.size));
+        }
+    }
+    let position = drawn_at(entity)?;
+    if let Some(collider) = world.read::<Collider>().get(entity) {
+        return Some(collider.0.bounds(position));
+    }
+    Some(Rect::new(
+        position - Vec2::splat(MARK),
+        position + Vec2::splat(MARK),
+    ))
+}
+
+/// Pushes a line a world unit wide around `rect`, outside it, in front of
+/// every sprite: four of the white texel, in [`OUTLINE`].
+fn outline(sprites: &mut Vec<SpriteDraw>, white: Handle<Texture>, rect: Rect) {
+    let (min, max) = (rect.min.min(rect.max), rect.min.max(rect.max));
+    let edges = [
+        Rect::new(min - Vec2::ONE, Vec2::new(max.x + 1.0, min.y)),
+        Rect::new(Vec2::new(min.x - 1.0, max.y), max + Vec2::ONE),
+        Rect::new(Vec2::new(min.x - 1.0, min.y), Vec2::new(min.x, max.y)),
+        Rect::new(Vec2::new(max.x, min.y), Vec2::new(max.x + 1.0, max.y)),
+    ];
+    for edge in edges {
+        let mut draw = SpriteDraw::new(white, edge.min, edge.max - edge.min);
+        draw.pivot = Vec2::ZERO;
+        draw.color = OUTLINE;
+        draw.layer = u8::MAX;
+        draw.sort = SortMode::Fixed(u32::MAX);
+        sprites.push(draw);
+    }
+}
+
 /// Writes the profiler's trace into `folder`, as `trace-<UTC time>.json`,
 /// and says where in its note and the log; or why not.
 fn write_trace(profiler: &mut Profiler, folder: Option<&Path>) {
@@ -462,8 +643,9 @@ fn write_trace(profiler: &mut Profiler, folder: Option<&Path>) {
     }
 }
 
-/// The debug UI, in the engine's font, which it loads in the global scope.
-fn make_ui(world: &World) -> Result<DebugUi, AssetError> {
+/// The debug UI, in the engine's font, which it loads in the global scope,
+/// and the white texel it draws with.
+fn make_ui(world: &World) -> Result<(DebugUi, Handle<Texture>), AssetError> {
     let mut server = world.resource_mut::<AssetServer>();
     let font = Font::load_now_in(
         &mut server,
@@ -476,7 +658,7 @@ fn make_ui(world: &World) -> Result<DebugUi, AssetError> {
         .get(font)
         .map(|loaded| FontMetrics::new(loaded.clone()))
         .ok_or_else(|| AssetError::Invalid("the engine's font is not loaded".to_string()))?;
-    Ok(DebugUi::new(font, metrics, white))
+    Ok((DebugUi::new(font, metrics, white), white))
 }
 
 /// Gives `ui` the places read from the file, by their names: each a
@@ -975,7 +1157,7 @@ mod tests {
                 }
             }
             world.resource_mut::<RenderFrame>().ui.clear();
-            self.tools.frame(world, UVec2::new(480, 270));
+            self.tools.frame(world, UVec2::new(480, 270), 0.0);
         }
 
         fn place(&self) -> Rect {
@@ -1321,5 +1503,166 @@ mod tests {
         // scopes collected as it ended, in the order they started.
         assert_eq!(names, ["frame", "outer", "inner"].repeat(3));
         fs::remove_dir_all(&folder).expect("remove the folder");
+    }
+
+    /// The outline's sprites the frame holds, as one rect around them all.
+    fn outline_of(app: &App) -> Option<Rect> {
+        let frame = app.world().resource::<RenderFrame>();
+        let edges: Vec<Rect> = frame
+            .sprites
+            .iter()
+            .filter(|sprite| sprite.color == OUTLINE)
+            .map(|sprite| Rect::new(sprite.position, sprite.position + sprite.size))
+            .collect();
+        if edges.is_empty() {
+            return None;
+        }
+        assert_eq!(edges.len(), 4, "four edges: {edges:?}");
+        let min = edges
+            .iter()
+            .fold(Vec2::splat(f32::MAX), |at, edge| at.min(edge.min));
+        let max = edges
+            .iter()
+            .fold(Vec2::splat(f32::MIN), |at, edge| at.max(edge.max));
+        Some(Rect::new(min, max))
+    }
+
+    #[test]
+    fn f2_inspects_an_entity_outlines_it_edits_it_and_saves_it_as_a_prefab() {
+        use nadir_codec::json::{self, Value};
+
+        use crate::{Player, Velocity};
+
+        let mut app = app();
+        // Wide enough for the inspector's first place.
+        let screen = UVec2::new(1280, 720);
+        *app.world_mut().resource_mut::<WindowSize>() = WindowSize(screen);
+        let hero = app
+            .world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::new(100.0, 50.0)))
+            .with(Velocity(Vec2::ZERO))
+            .with(Player)
+            .with(SaveId(7))
+            .with(Sprite::new(game_box(), Vec2::new(16.0, 24.0)))
+            .id();
+        let folder = env::temp_dir().join(format!("nadir-engine-prefabs-{}", process::id()));
+        let _ = fs::remove_dir_all(&folder);
+        app.debug_tools().write_traces_in(folder.clone());
+
+        app.update(TICK, &tap(Key::F2));
+        assert!(texts(&app).iter().any(|text| text == "1 entities"));
+        let row = "  0v1 Transform Velocity Player SaveId Sprite";
+        let at = text_at(&app, row).expect("the hero's row");
+        app.update(TICK, &click(at + Vec2::new(1.0, 2.0)));
+        assert_eq!(app.debug_tools().inspector.selected(), Some(hero));
+
+        // Outlined in the world, a unit outside its sprite, whose feet are
+        // at its place.
+        app.update(TICK, &[]);
+        let expected = Rect::new(Vec2::new(91.0, 25.0), Vec2::new(109.0, 51.0));
+        assert_eq!(outline_of(&app), Some(expected));
+
+        // Its place, dragged in the window through the engine's context: 100
+        // units right is 10 world units.
+        let at = text_at(&app, "Transform").expect("its node");
+        app.update(TICK, &click(at + Vec2::new(1.0, 2.0)));
+        app.update(TICK, &[]);
+        let position = text_at(&app, "position").expect("its position");
+        let x = position + Vec2::new(-126.0, 2.0);
+        let press = Event::MouseButton {
+            button: MouseButton::Left,
+            pressed: true,
+        };
+        let release = Event::MouseButton {
+            button: MouseButton::Left,
+            pressed: false,
+        };
+        app.update(TICK, &[Event::MouseMoved(x), press]);
+        app.update(TICK, &[Event::MouseMoved(x + Vec2::new(100.0, 0.0))]);
+        app.update(TICK, &[release]);
+        let moved = app
+            .world()
+            .read::<Transform>()
+            .get(hero)
+            .map(|at| at.position);
+        assert_eq!(moved, Some(Vec2::new(110.0, 50.0)));
+
+        // Saved as a prefab named in its field, the button's text 48 after
+        // the field's middle: without its place or its save number.
+        let button = text_at(&app, "Save as prefab").expect("the button");
+        let typed = |text: &str| -> Vec<Event> {
+            let mut events = vec![key(Key::LeftControl, true)];
+            events.extend(tap(Key::A));
+            events.push(key(Key::LeftControl, false));
+            events.extend(text.chars().map(Event::Text));
+            events
+        };
+        // A Windows device's name is no file: not written.
+        app.update(TICK, &click(button + Vec2::new(-48.0, 2.0)));
+        app.update(TICK, &typed("nul"));
+        app.update(TICK, &click(button + Vec2::new(1.0, 2.0)));
+        app.update(TICK, &[]);
+        assert!(
+            shows_starting(&app, "Not written: data/prefabs/nul.jsonc: "),
+            "{:?}",
+            texts(&app)
+        );
+        assert!(!folder.join(PREFABS).join("nul.jsonc").exists());
+        app.update(TICK, &click(button + Vec2::new(-48.0, 2.0)));
+        app.update(TICK, &typed("hero"));
+        app.update(TICK, &click(button + Vec2::new(1.0, 2.0)));
+        app.update(TICK, &[]);
+        let path = folder.join(PREFABS).join("hero.jsonc");
+        let text = fs::read_to_string(&path).expect("the prefab was written");
+        assert!(texts(&app).contains(&format!("Wrote {}", path.display())));
+        let prefab = json::parse(&text, nadir_codec::Limits::default()).expect("JSONC");
+        assert_eq!(prefab.get("name").and_then(Value::as_str), Some("hero"));
+        let names: Vec<&str> = prefab
+            .get("components")
+            .and_then(Value::as_object)
+            .expect("components")
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(names, ["Velocity", "Player", "Sprite"]);
+
+        // Closed, the inspector outlines nothing.
+        app.update(TICK, &tap(Key::F2));
+        assert_eq!(outline_of(&app), None);
+        fs::remove_dir_all(&folder).expect("remove the folder");
+    }
+
+    #[test]
+    fn an_entity_with_no_sprite_is_outlined_by_its_collider_or_a_box_at_its_place() {
+        use nadir_collision::Shape;
+
+        let mut app = app();
+        let crate_box = app
+            .world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::new(40.0, 40.0)))
+            .with(Collider::solid(Shape::Aabb {
+                half: Vec2::new(5.0, 3.0),
+            }))
+            .id();
+        let marker = app
+            .world_mut()
+            .spawn()
+            .with(Transform::at(Vec2::new(-10.0, 0.0)))
+            .id();
+        let nowhere = app.world_mut().spawn().id();
+        app.update(TICK, &tap(Key::F2));
+        app.debug_tools().inspector.select(Some(crate_box));
+        app.update(TICK, &[]);
+        let expected = Rect::new(Vec2::new(34.0, 36.0), Vec2::new(46.0, 44.0));
+        assert_eq!(outline_of(&app), Some(expected));
+        app.debug_tools().inspector.select(Some(marker));
+        app.update(TICK, &[]);
+        let expected = Rect::new(Vec2::new(-15.0, -5.0), Vec2::new(-5.0, 5.0));
+        assert_eq!(outline_of(&app), Some(expected));
+        app.debug_tools().inspector.select(Some(nowhere));
+        app.update(TICK, &[]);
+        assert_eq!(outline_of(&app), None);
     }
 }

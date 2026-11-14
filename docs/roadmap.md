@@ -5298,7 +5298,7 @@ by the batched sprite renderer.
     strong for a frame placed after the frame before; made exact, at the
     user's request, on 2026-11-14 (ADR-0061's status).
 
-- [ ] **M7.4 — inspector**
+- [x] **M7.4 — inspector**
   - Note (from M4.2): `Registration::inspect` and `inspect_mut` hold the
     type's borrow while their callback runs: edit through `inspect_mut`
     alone. There is no remove hook yet, and `World` cannot list entities:
@@ -5326,6 +5326,79 @@ by the batched sprite renderer.
     add/remove; despawn; save as prefab.
   - Accept: the reflect round-trip edit test passes.
   - Verify: `cargo test -p nadir-debug`
+  - Built on 2026-11-14 (ADR-0062; the user chose the listing in
+    nadir-ecs, four crates, the prefabs beside the log, and what they
+    leave out; the rest Proposed):
+    - nadir-ecs: `World::entities_into(&mut Vec<Entity>)`, every entity
+      alive by slot, the buffer kept, nothing left borrowed.
+    - nadir-scene: `Registration::remove`; `Reflect::variants`, `&[]` by
+      default, an enum's names from `reflect_enum!`, a newtype's
+      forwarded.
+    - nadir-debug, now over nadir-ecs and nadir-scene: `Inspector` and
+      `InspectorResponse { save_prefab }`. The filter (each word an
+      entity's number, `3v1`, or a component's name, ignoring case),
+      pages of 16 rows; the selected entity's "Despawn", "Save as
+      prefab", "Add" (from the JSONC typed beside it, `{}` at first) and
+      each node's "Remove", through commands; fields edited as
+      `docs/subsystems/debug-tools.md` ("As built (M7.4)") lists, each
+      change applied at once with `apply_value`, a member alone or a list
+      whole, one refused not set and named in the note and the log.
+    - nadir_engine, with `dev`: F2, `nadir::inspector`, at (584, 8) to
+      (944, 508), its context `loading_context` in `Scope::Level`; the
+      selected entity outlined in amber in the world (its sprite as
+      drawn, else its collider, else a box 8 wide at its place);
+      `prefabs/<name>.jsonc` in the logs folder, without `Transform` and
+      `SaveId`.
+  - Tests: `cargo test -p nadir-debug` (86 and 2 doc tests, 15 new: the
+    round trip, `editing_a_component_through_reflect_changes_the_world_value`,
+    which edits a whole number, a float, an enum, a checkbox, a pair, a
+    color, a nested field and a string through the window and reads the
+    value back; the list's filter and pages; add (a type refusing `{}`,
+    then from typed data; a newtype from `7`; text that is not JSON),
+    remove and despawn through commands; a value refused, a text that is
+    no number, Escape and a press elsewhere; a value reflected whole
+    edited by its parts, each applied alone; the prefab's name and text;
+    a world with no registry; each row of numbers its own field's; an
+    edit dropped when its window is not drawn; a `u64` past an `i64`
+    typed back; a newtype of a `String` as text; and 4 of the helpers);
+    `cargo test -p nadir-ecs` (20 and 6 doc tests, 1 new);
+    `cargo test -p nadir-scene` (18, 1, 9 and 7 doc tests, two extended:
+    the variants and the remove); `cargo test -p nadir_engine --features
+    dev` (169, 2 new: F2, a row clicked, the outline, a position dragged
+    through the engine's context, `nul` refused as a prefab's name, and
+    `prefabs/hero.jsonc` written without `Transform` and `SaveId`; an
+    outline from a collider, a mark, or nothing) and without `dev` (123).
+    Mutants caught: applying no edit fails the round trip; and each of
+    the review's four fixes in nadir-debug, undone, fails its test. Run
+    with Mesa forced and `NADIR_EXPECT_GL_RENDERER=llvmpipe`.
+  - Linux check of `cargo dev`, on 2026-11-14, in this XWayland session,
+    driven as M7.12's was (`XSendEvent`, the config and data folders in a
+    scratch folder, `NADIR_ALSA_DEVICE=null`, Mesa forced), at the user's
+    request: F2 showed 60 entities by pages of 16; "player" filtered them
+    to 1; the person, clicked, was outlined in amber; its position dragged
+    from 240 to 250, Facing set to Left from the combo (the prefab then
+    held `flip.x: true`), the color's red slid to 0 (the person cyan), 300
+    typed as the sprite's `u8` layer refused with its note, Escape dropping
+    a typed 7 and Enter applying a 2; the collider's `shape.Aabb.half`
+    dragged from 5 to 15 inside the value reflected whole; Facing removed;
+    0v1 despawned (59 entities, its note); the last page `49-59 of 59`;
+    `hero.jsonc` and `hero2.jsonc` written beside the log, without
+    `Transform` and `SaveId`. It found "Add" failing for every newtype and
+    enum (`SaveId`: expected an integer, found an object): "Add" now makes
+    the component from JSONC typed beside the combo, and a rebuilt run
+    added `[20, 0]` as a rock's `Velocity`, which slid right, outlined. The
+    log held no warning but llvmpipe's first timer (ADR-0060).
+  - Review: a workflow of three checks and a skeptic for each finding,
+    on 2026-11-14. The prefabs saved in the check, cooked with a scratch
+    copy of `assets/` and spawned through the facade's `PrefabLibrary`,
+    read back every value. Of 12 findings, 6 were upheld and fixed, each
+    with a test (ADR-0062's consequences list them: shared IDs in rows of
+    numbers, an edit kept across a closed window, `-` in a prefab's name,
+    a large `u64`, a newtype of a `String` that writes a color, a Windows
+    device's name); 6 were judged the debug UI's design (a note kept until
+    the next, across selections and edits; the data field kept after an
+    "Add"; rows moving down when the first note appears; a long row cut
+    at the window's edge; a pair's label left of a single control's).
 
 - [ ] **M7.5 — console**
   - Note (from M4.1): `Schedule::describe()` lists the systems in run
@@ -5378,6 +5451,10 @@ by the batched sprite renderer.
     tool's window can still push to the frame's sprites and texts before
     it is drawn; F4 to F7 reach it as keys while no debug field has the
     keyboard.
+  - Note (from M7.4, ADR-0062): the inspector's outline (`outline` in
+    `crates/engine/src/debug_ui.rs`) is four sprites of the debug UI's
+    white texel in layer 255 at `SortMode::Fixed(u32::MAX)`, pushed after
+    the windows: F4's overlays can draw the same way.
   - Do: the F4 overlays and the F5–F7 time controls.
   - Accept: manual check on the sandbox.
   - Verify: `cargo dev` (manual); `cargo xtask release-no-dev`
@@ -5544,6 +5621,10 @@ by the batched sprite renderer.
     `Entity` is reflected. A hash compared across a save and a load needs
     entity numbers that do not depend on slots (first seen, say): today it
     hashes each entity's index and generation (ADR-0025).
+  - Note (from M7.4, ADR-0062): the inspector's "Save as prefab" leaves
+    out `Transform` and `SaveId` by name (`NOT_IN_PREFABS` in
+    `crates/engine/src/debug_ui.rs`); with a `saved` flag, a prefab may
+    want only the saved components.
   - Depends: M4.2, M9.1
   - Do: the `.ksav` format; atomic write with `.bak`; CRC; migration
     scaffolding with a v1 fixture; fuzz target.

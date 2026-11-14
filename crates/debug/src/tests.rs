@@ -29,6 +29,8 @@ use nadir_render::{SortMode, UiList, UiScale, UiView};
 use crate::metrics::tests::Fixed;
 use crate::{DebugInput, DebugUi, Frame, Plot, Response, Ui};
 
+mod inspector;
+
 const SIZE: UVec2 = UVec2::new(400, 300);
 const WINDOW: Rect = Rect::new(Vec2::new(0.0, 0.0), Vec2::new(200.0, 150.0));
 

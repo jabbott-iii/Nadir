@@ -37,7 +37,8 @@
 //! - **The traits.** [`Reflect`] walks a value: its
 //!   [`type_name`](Reflect::type_name), [`kind`](Reflect::kind)
 //!   ([`ReflectKind`]), [`fields`](Reflect::fields) ([`FieldInfo`]: name,
-//!   type and doc comment), [`field`](Reflect::field) and
+//!   type and doc comment), an enum's [`variants`](Reflect::variants)
+//!   (M7.4), [`field`](Reflect::field) and
 //!   [`field_mut`](Reflect::field_mut), and turns it into a [`Value`]
 //!   ([`Reflect::to_value`]) and back ([`Reflect::apply_value`]).
 //!   [`FromValue`] makes a new value from data.
@@ -68,7 +69,8 @@
 //!   world) and [`TypeRegistry::hash_world`]. Each type's
 //!   [`Registration`] makes it from data ([`Registration::from_value`]),
 //!   gives it to an entity through commands ([`Registration::insert`]),
-//!   reads or changes an entity's ([`Registration::inspect`],
+//!   takes it away ([`Registration::remove`], M7.4), reads or changes an
+//!   entity's ([`Registration::inspect`],
 //!   [`Registration::inspect_mut`]), and walks every one in a world
 //!   ([`Registration::each`]). [`Registration::insert_layers`] makes one
 //!   value of several [`Layer`]s, a prefab's base's, its own and an

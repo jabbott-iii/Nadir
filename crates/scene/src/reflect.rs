@@ -45,6 +45,13 @@ pub trait Reflect: 'static {
     /// The fields of a struct, in order; none for other kinds.
     fn fields(&self) -> &'static [FieldInfo];
 
+    /// The variants of an enum, by name, in order, as data writes them:
+    /// what an inspector offers to pick from. None for other kinds, and by
+    /// default: [`reflect_enum!`](crate::reflect_enum) gives its enum's.
+    fn variants(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Field `index` of a struct, or element `index` of a list or an
     /// option.
     fn field(&self, index: usize) -> Option<&dyn Reflect>;

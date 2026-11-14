@@ -685,6 +685,31 @@ fn a_command_for_an_unregistered_type_panics_at_once() {
 }
 
 #[test]
+fn the_entities_alive_are_listed_by_slot_into_a_buffer_kept() {
+    let mut world = world();
+    let one = world.spawn().with(A(1)).id();
+    let two = world.spawn().id();
+    let three = world.spawn().with(B(3)).id();
+    world.despawn(two);
+    // The slot freed is reused, by a new generation.
+    let four = world.spawn().id();
+    assert_eq!(four.index(), two.index());
+    let mut out = Vec::with_capacity(8);
+    world.entities_into(&mut out);
+    assert_eq!(out, [one, four, three]);
+    // Commands may spawn while the list is walked: nothing stays borrowed.
+    let mut commands = world.commands();
+    let spawned = out.iter().map(|_| commands.spawn().id()).last();
+    let capacity = out.capacity();
+    world.entities_into(&mut out);
+    assert_eq!(out.len(), 6);
+    assert_eq!(out.last().copied(), spawned);
+    assert_eq!(out.capacity(), capacity, "the buffer is reused");
+    world.entities_into(&mut out);
+    assert_eq!(out.len(), world.entity_count());
+}
+
+#[test]
 fn despawning_twice_does_nothing_the_second_time() {
     let mut world = world();
     let entity = world.spawn().with(A(1)).with(B(2)).id();

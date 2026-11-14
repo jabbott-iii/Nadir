@@ -161,6 +161,11 @@ impl<'a> Ui<'a> {
         self.y
     }
 
+    /// The number of the frame being filled: one more each frame.
+    pub(crate) fn frame_number(&self) -> u64 {
+        self.core.frames
+    }
+
     /// Fills `add` with the widgets of `key`'s scope: for the same texts
     /// in a loop, say, `ui.with_id(index, |ui| ...)`.
     pub fn with_id(&mut self, key: impl Hash, add: impl FnOnce(&mut Ui<'_>)) {

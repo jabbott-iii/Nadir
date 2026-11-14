@@ -95,7 +95,9 @@ impl World {
   the game's `World` (ADR-0022).
 - The world also has `is_registered`, `contains_resource` and
   `entity_count`; `spawn()` returns an `EntityMut` with `with(component)`
-  and `id()`.
+  and `id()`. `entities_into(&mut Vec<Entity>)` (M7.4, ADR-0062) empties
+  the buffer and puts every entity alive in it, by slot number, keeping its
+  allocation and holding no borrow after: the inspector's list.
 - **Runtime borrow checking:** storages and resources sit behind `RefCell`.
   A conflicting borrow in the same system panics, and the message includes
   the component type name and the current system name, which the schedule

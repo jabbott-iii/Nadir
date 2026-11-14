@@ -67,6 +67,10 @@
 //! game's settings folder (on Linux `~/.config/Sandbox`). F1 and F3 show
 //! the engine's stats overlay and profiler, whose "Write trace" writes a
 //! Chrome trace beside the log file (on Linux `~/.local/share/Sandbox`).
+//! F2 shows the inspector: the entities, filtered by number or component;
+//! the components of the one clicked, which it outlines in the field, to
+//! edit, add or remove; and "Save as prefab", which writes
+//! `prefabs/<name>.jsonc` beside the log file.
 //!
 //! With `dev`, the game also reloads what changes while it runs
 //! (ADR-0043). Run `cargo xtask cook --watch` beside it, and an edit to

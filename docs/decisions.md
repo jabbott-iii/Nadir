@@ -5534,3 +5534,154 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   times a third pass; or a GPU capture (RenderDoc, Instruments) shows a
   frame's passes starting more than a frame later than the trace places
   them.
+
+## ADR-0062 — M7.4: the inspector in nadir-debug, over nadir-ecs and nadir-scene; `World::entities_into`, `Registration::remove` and `Reflect::variants`; edits as values through `apply_value`; prefabs written beside the log
+
+- **Status:** Accepted in part: on 2026-11-14 the user chose a listing of
+  every entity alive in nadir-ecs (four crates: ecs, scene, debug and the
+  facade), the prefabs written into a `prefabs` folder beside the log
+  file, and a saved prefab leaving out `Transform` and `SaveId`; the rest
+  is Proposed
+- **Date:** 2026-11-14
+- **Context:**
+  - M7.4 asks for the entity list with a filter, component editors via
+    `Reflect`, adding and removing a component, despawning, and "save as
+    prefab", which writes JSONC (`docs/subsystems/debug-tools.md`); its
+    test, a component edited through `Reflect` changing the world's
+    value.
+  - `World` could not list its entities, and a `Registration` could not
+    remove its type's component (M4.2's note). `Reflect` has no way to a
+    value's concrete type, and no list of an enum's variants but in the
+    error `UnknownVariant`.
+  - The facade reflects `Sprite`, `Collider` and `Animator` by hand as
+    one value each (`ReflectKind::Primitive`), whose data is an object;
+    `Sprite` and `Collider` apply only the members a value names.
+  - A debug window runs after the frame stages with `&World`; commands it
+    queues apply after the next tick or frame (ADR-0058). The running game
+    knows its cooked folder (`Config::assets`), not the source `assets/`.
+- **Decision:**
+  - **nadir-ecs:** `World::entities_into(&mut Vec<Entity>)` empties the
+    buffer and puts every entity alive in it, by slot number, keeping its
+    allocation: nothing stays borrowed, so commands may spawn while the
+    list is walked.
+  - **nadir-scene** (additions only): `Registration::remove(commands,
+    entity)`, as `Commands::remove` of the type; `Reflect::variants()`, a
+    provided method, `&[]` by default, which `reflect_enum!` gives its
+    enum's names and `reflect_newtype!` forwards.
+  - **nadir-debug** depends on nadir-ecs and nadir-scene, as the matrix
+    allows. `Inspector` (`new`, `selected`, `select`, `prefab_name`,
+    `set_note`, `show(world, ui, cx) -> InspectorResponse`, `prefab(world,
+    leave_out, cx) -> Option<String>`) and `InspectorResponse {
+    save_prefab }`, `#[non_exhaustive]`:
+    - **the list:** the filter, a field; its words each match an entity's
+      number (`3v1`) or a component's name it has, ignoring case; a page
+      of 16 rows, each a button of the number and the component names,
+      `<` and `>` past 16;
+    - **editing,** each value through its `Reflect` impl: a struct's
+      fields are rows, a struct in one a node, a list's elements rows under
+      a node, an option its value or `none`, an enum a combo of its
+      `variants`, and anything else is edited as its data
+      (`to_value`): a boolean a checkbox, a float a drag (0.1 a unit), a
+      whole number (a `u64` past an `i64`, written as digits, too), a
+      string or an asset path a text field applied on Enter or a press
+      elsewhere and dropped on Escape or when its field was not drawn in
+      the frame before (the UI's frames counted), a `Color` a color edit,
+      as is a string that writes one (`#rrggbb`, `#rrggbbaa`) among the
+      members of a value reflected whole, whose types its data does not
+      say (by its type's name otherwise: a newtype of a `String` is text),
+      a list of one to four numbers a row in a scope of its label's, an
+      object's members rows under a node, a value's own members inline. A
+      change is applied at once with `apply_value`: of a member, as an
+      object naming it alone; of a list's element, as the whole list. One
+      refused is
+      not set, and the note says why, naming the component and the
+      field (the context's path), as the log does with `warn!`: a window
+      cuts a long note at its edge;
+    - **structure** through the world's commands: "Despawn"; "Add" of a
+      type the entity lacks, made from the JSONC typed in a field beside
+      its combo, `{}` at first (an empty object, which a struct of defaults
+      reads; `0` for a number's newtype, `[0, 0]` for a position's,
+      `"Down"` for an enum, `{"texture": ...}` for a sprite); each node's
+      "Remove";
+    - **save as prefab:** a name the prefab reader takes
+      (`nadir_codec::prefab::is_name`: lowercase letters, digits and `_`),
+      at most 64 bytes, then `InspectorResponse::save_prefab`; the
+      caller writes `prefab`'s text: a comment line, then `{"name",
+      "components"}` of each registered component the entity has, in the
+      registry's order, but those `leave_out` names.
+  - **The facade,** under `dev`: the inspector on F2, `nadir::inspector`,
+    first at (584, 8) to (944, 508). Its context is `loading_context` in
+    `Scope::Level`, so a path typed for a handle loads in the level's
+    scope. With it open, the selected entity is outlined, a world unit
+    outside it, in front of every sprite (layer 255, `Fixed(u32::MAX)`),
+    in amber, with the UI's white texel: its sprite as drawn (its place
+    `alpha` of the way from the last tick's, a parent's chain as
+    `extract_sprites` follows it, mirrored about its pivot, unrotated), or
+    its collider's bounds, or a box 8 units wide at its place. "Save as prefab"
+    writes `<name>.jsonc` into `prefabs` in the logs folder `App::run`
+    names, leaving out `Transform` and `SaveId`, and says where in the note
+    and the log; elsewhere, that prefabs are written only by `App::run`.
+    A name whose file in a game's assets, `data/prefabs/<name>.jsonc`, is
+    no asset path (`AssetPath::new`: a Windows device's, as `nul`) is not
+    written, and the note says why.
+- **Consequences:**
+  - Every entity is listed, with or without a reflected component, and
+    can be despawned; one with none shows no components.
+  - A component open in the window builds its value every frame, which
+    allocates, and so do the context's resources (`with_resource`) while
+    the inspector is open: the stats overlay's allocations count them. A
+    frame of the list alone grows nothing once its buffers have grown.
+  - A component reflected whole is edited by its data's shape: a
+    `Sprite`'s `texture` is a text field of its path, its `sort` the
+    text `YSort`. Members the engine rewrites each frame (an animated
+    sprite's texture and region) are rewritten after an edit.
+  - An option that is `None`, a list's length, and a value the data
+    writes as `null` cannot be changed in the window; a float shows three
+    decimals and is dragged as an `f32`.
+  - A saved prefab goes beside the log, not into the game's assets: it is
+    copied into `assets/data/prefabs/` by hand, and a name already there
+    is written over.
+  - A component whose `to_value` warns (a handle the server does not
+    know, a clip with no name) warns each frame its node is open.
+  - "Add" needs the type's data shape for anything but a struct of
+    defaults: the note says what the type expected (``expected an
+    integer, found an object``). Added on 2026-11-14, after the check in
+    `cargo dev` found "Add" from an empty object failing for every
+    newtype and enum (`SaveId`, `Velocity`, `Facing`).
+  - A review of the code and of the check's captures the same day found,
+    all fixed with a test each: the rows of numbers of one scope sharing
+    their unlabeled widgets, so a drag of a sprite's `pivot.x` moved its
+    `size.x`; an edit kept while its window was closed, then written over
+    a value the game had changed; `-` allowed in a prefab's name, which
+    the prefab reader refuses; a `u64` past an `i64` that could not be
+    typed back to a small number; a newtype of a `String` that wrote a
+    color edited as a color; a Windows device's name written as a prefab.
+- **Alternatives considered:**
+  - Listing only the entities with a reflected component, from the
+    registry's walks (three crates): an entity of the game's unregistered
+    types alone could not be found or despawned.
+  - `World::entities() -> impl Iterator`: it would hold the arena borrowed
+    while the inspector queues commands, and `Commands::spawn` would panic.
+  - `Reflect: Any`, to edit an `f32` or a `Vec2` in place with no value
+    built: the values reflected whole (`Sprite`, `Collider`) need the data
+    path anyway, and one path is less code.
+  - The enum's variants from the error of applying an empty name: it
+    leans on how a type fails, which a type written by hand need not share.
+  - A drag for whole numbers: there is no integer drag past `i32`
+    (M7.2), and a typed number is exact.
+  - "Add" from a default value of each type (a `FromValue::empty`, zero
+    for numbers, the first variant for an enum): a change to nadir-scene's
+    trait, its macros and its built-in impls, and still no way to add a
+    `Sprite`, `Collider` or `Animator`, which need data; typed data covers
+    every type.
+  - Writing the prefab into the source `assets/data/prefabs/`, where the
+    cook and the hot reload would take it: the game knows only its cooked
+    folder, and it could write over a prefab in the repository (the user's
+    choice).
+  - Keeping `Transform` and `SaveId` in a prefab: a spawn places the entity,
+    and a save number shared by every spawn would break saves (M9.4).
+- **Revisit when:** M9.4 adds the `saved` flag (a prefab may want only
+  saved components); the debug UI gets rows called back only in view (the
+  list could scroll instead of paging); a game needs to set an option, a
+  list's length or a `null`; or the inspector's allocations get in the
+  way of reading the stats overlay.

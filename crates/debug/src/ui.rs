@@ -282,6 +282,9 @@ pub struct DebugUi {
     wants_mouse: bool,
     wants_keyboard: bool,
     revision: u64,
+    /// The frames begun so far: the inspector's edits know by it whether
+    /// their field was drawn in the frame before.
+    pub(crate) frames: u64,
     // This frame.
     pub(crate) space: UiSpace,
     pub(crate) input: Taken,
@@ -323,6 +326,7 @@ impl DebugUi {
             drawn_any: false,
             wants_mouse: false,
             wants_keyboard: false,
+            frames: 0,
             revision: 0,
             space: UiSpace::new(UiScale::Free(1.0), UVec2::ONE, UVec2::ZERO),
             input: Taken::default(),
@@ -435,6 +439,7 @@ impl DebugUi {
         output_size: UVec2,
     ) -> Frame<'_> {
         input.take(&mut self.input);
+        self.frames += 1;
         let space = UiSpace::new(self.style.scale, virtual_resolution, output_size);
         self.space = space;
         self.pointer = space.to_ui(self.input.pointer);
