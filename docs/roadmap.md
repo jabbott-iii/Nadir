@@ -4909,7 +4909,7 @@ by the batched sprite renderer.
     they are done, Windows's and macOS's typed text is compiled and
     linted only.
 
-- [ ] **M7.10 — facade: the debug UI in the game**
+- [x] **M7.10 — facade: the debug UI in the game**
   - Added on 2026-11-10 (ADR-0056): M7.2 builds the debug UI in
     nadir-debug alone, which may depend on neither nadir-platform nor
     nadir-codec.
@@ -4967,6 +4967,66 @@ by the batched sprite renderer.
     its place across runs.
   - Verify: `cargo test -p nadir_engine`; `cargo xtask golden`; `cargo dev`
     (manual)
+  - Built on 2026-11-13 (ADR-0058, with the user's choices: a game API and
+    the sandbox's own window, a key for each window, a pixel font in the
+    facade's source, the window's scale factor rounded to a whole number,
+    and one task across four packages):
+    - nadir_engine, with `dev`: `App::add_debug_window(toggle, title, first,
+      window)`, a `DebugWindow` (`fn(&World, &mut Ui)`), each shown and
+      hidden by its own key, filled after the frame stages into
+      `RenderFrame::ui`, after the game's UI; `nadir::debug`, nadir-debug
+      re-exported; the resource `WindowSize`, set by `App::run` and
+      `Offscreen::frame`. The debug UI is made the first time a window
+      opens, in the engine's 5 × 7 ASCII pixel font, whose cooked files
+      and a white texel the asset server's source (`EngineFiles`) makes in
+      memory at `nadir/debug/`, with nadir-codec, now an optional
+      dependency beside nadir-debug. Its scale is `Free` of the window's
+      scale factor, whole, at least 1. Its input comes through a
+      `UiEvents`, in order. The keys are held back from the game while a
+      debug field has them; the mouse is decided at each press and turn
+      of the wheel, by who holds the left button and else by
+      `DebugUi::is_over`, never by where the pointer rests. `App::run`
+      reads `debug_ui.jsonc` (version 1) in the user config folder and
+      writes it, synced and renamed, each time the places change.
+    - nadir-debug: `DebugUi::is_over`; for crates.io: a description,
+      `LICENSE`, `NOTICE`, a README whose example `lib.rs` tests, and an
+      entry in `[workspace.dependencies]`.
+    - sandbox, with `dev`: a window on F8, a note to type, what the last
+      frame drew, and every entity's place, a list that scrolls.
+    - xtask: `golden` runs the facade's scene (`cargo test -p nadir_engine
+      --features dev --lib -- golden::`); the crates test lists nadir-debug.
+  - Tests: `cargo test -p nadir_engine` (123 unit tests and the doc tests,
+    without `dev`) and `cargo test -p nadir_engine --features dev` (162 and
+    the doc tests, 19 of them the debug UI's: the window on its key after
+    the game's UI; what the game's actions miss of a click, a wheel and
+    typing, a press in the frame the pointer arrives or leaves, a release
+    and a press in one frame, a button the game holds as the pointer
+    passes a window, a second button while the window holds the left,
+    opening over a held button; a replay through a field's keyboard; a
+    steady frame allocating nothing; the places written on a move and read
+    back, an explicit ID with `##`, the file's reader on damaged files;
+    the scale; the engine's files and font); `cargo test -p nadir-debug`
+    (55 and 2 doc tests). `cargo xtask golden`: 16 scenes, `debug_window`
+    new, blessed after a look, on llvmpipe. `cargo xtask ci`.
+  - Linux check of `cargo dev`, on 2026-11-13, in this XWayland session,
+    with the config and data folders pointed at a scratch folder: events
+    sent to the window by a script through the X server (`XSendEvent`),
+    not by a person, and the window captured. F8 showed the window; a
+    click on its field and `hello` and Backspace left `hell` in it, and
+    the field's keys and the wheel left the world outside the window
+    unchanged; the wheel scrolled the list; its title bar dragged it to
+    (316, 216); its box collapsed it; `debug_ui.jsonc` held the place,
+    collapsed; after a restart, F8 showed it there, collapsed, and its box
+    opened it. The reports said 0 allocations a second with the window
+    open, after about 3,600 in the second it first opened.
+  - Review: two reviewers, one of the wiring and one of the rest, found
+    four ways the mouse went to the wrong side (a release and a press in
+    one frame judged by the old holder; a button the game held released
+    as the pointer passed a window; a second button outside while the
+    window held the left; opening over a held button), a place lost for
+    an ID with `##`, no sync before the rename, and docs that overstated
+    the golden or kept 14 crates: all fixed, each fix's test failing on
+    the old code.
 
 - [ ] **M7.3 — stats overlay and profiler**
   - Note (from M2.3): `Caps` has no timer-query field yet. It is
@@ -4990,6 +5050,16 @@ by the batched sprite renderer.
     world's counts; the draws onto the window are the blit and
     `ui_batches`.
   - Depends: M7.2, M7.10, M0.4
+  - Note (from M7.10, ADR-0058): the facade's debug UI is
+    `crates/engine/src/debug_ui.rs`: `DebugTools` fills its open windows
+    after the frame stages, each a `DebugWindow`, `fn(&World, &mut Ui)`,
+    shown by its own key (`App::add_debug_window` for a game's). The
+    engine's tools can be windows there on their spec keys, reading
+    `TickStats`, `FrameStats` and `FrameAllocs` from the world. Its font is
+    the engine's 5 × 7 ASCII pixel font, 6 pixels a character and 10 a
+    line. A steady frame with a window open allocates nothing
+    (`a_steady_frame_of_an_open_debug_window_allocates_nothing`); opening
+    the debug UI the first time allocates. F8 is the sandbox's window.
   - Note (from M7.2): `Ui::plot(text, values, Plot { range, height,
     selected })` gives the value under the pointer and the one clicked;
     `label_colored` colors a line; a scope tree's nodes keep their state
@@ -5013,6 +5083,9 @@ by the batched sprite renderer.
     spawns, values) are not input, so a replay does not hold them: a world
     edited by hand replays differently.
   - Depends: M7.2, M7.10, M4.2
+  - Note (from M7.10, ADR-0058): a debug window runs after the frame
+    stages and their commands, with `&World`: commands it queues apply
+    after the next tick or the next frame's stages.
   - Note (from M7.2): a component's fields go under its own `tree_node`
     (a scope of their own); `slider_i32` covers `i32`, but no drag of a
     wider integer (`u64`, `i64`) is built yet, nor a tooltip for a field's
@@ -5030,6 +5103,9 @@ by the batched sprite renderer.
   - Note (from M4.4): `App::schedule()` gives the schedule. The engine's
     own systems are named `nadir::snapshot`, `nadir::movement`, and so on.
   - Depends: M7.2, M7.10
+  - Note (from M7.10, ADR-0058): a window's toggle key works while a text
+    field has the keyboard, and the field sees it too: on the backtick, the
+    console's own field would take a typed `` ` `` as it closes or opens.
   - Note (from M7.2): the command line is a `text_input`: `submitted` on
     Enter, which keeps the keyboard; `Ui::key_pressed` for Up, Down and
     Tab, which the field leaves to its caller; `Ui::focus_next` to give it
@@ -5057,6 +5133,10 @@ by the batched sprite renderer.
     replay's next tick (`App::play_replay`); a run of `run_fixed` alone
     would skip it.
   - Depends: M7.2, M7.10, M4.3
+  - Note (from M7.10, ADR-0058): debug windows run after `Extract`, so a
+    tool's window can still push to the frame's sprites and texts before
+    it is drawn; F4 to F7 reach it as keys while no debug field has the
+    keyboard.
   - Do: the F4 overlays and the F5–F7 time controls.
   - Accept: manual check on the sandbox.
   - Verify: `cargo dev` (manual); `cargo xtask release-no-dev`
@@ -5162,6 +5242,11 @@ by the batched sprite renderer.
     pushed. `UiSpace::new` maps `Input::pointer` to UI units with no GPU,
     given the window's size, which the facade does not publish yet.
     `UiList`, `UiView`, `UiScale` and `UiSpace` are `nadir::render::*`.
+  - Note (from M7.10, ADR-0058): `WindowSize`, the window's size, is a
+    resource of `dev` only: menus need it in every build. With `dev`, the
+    debug UI sets `Input::set_capture` while it has the pointer or the
+    keyboard, replacing a game's own, and lets go after: a game UI that
+    captures must combine the two.
   - Note (from M3.1): `ActionMap::conflict` returns the first other slot
     whose binding shares a key or button. A swap is an `unbind` and a
     `bind`. `begin_capture` is this task's.
@@ -5184,6 +5269,10 @@ by the batched sprite renderer.
     `UiScale::Free(s)` in physical output pixels, held to 1/8 to 64; a
     default from the window's scale factor (`Platform::scale_factor`) keeps
     the UI its size on a display that doubles its pixels.
+  - Note (from M7.10, ADR-0058): until then the debug UI's free scale is
+    the window's scale factor rounded to a whole number
+    (`debug_ui.rs`, `whole_scale`), for its pixel font; the setting
+    replaces it.
   - Note (from M3.1): bindings are saved by action name
     (`ActionSet::from_name`). `Key` and `MouseButton` have no names to
     read back yet, beyond their `Debug` text.

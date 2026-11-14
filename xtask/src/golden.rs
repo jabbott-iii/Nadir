@@ -69,7 +69,8 @@ const TOLERANCE: u8 = 2;
 const OUTLIER_SHARE: usize = 1000;
 
 /// The commands that draw the scenes: each crate's GL test binary, whose
-/// `golden` module holds its scenes (ADR-0017).
+/// `golden` module holds its scenes (ADR-0017), and the facade's unit
+/// tests behind `dev`, where the debug UI is (ADR-0058).
 const SCENES: &[&[&str]] = &[
     &[
         "test",
@@ -90,6 +91,18 @@ const SCENES: &[&[&str]] = &[
         "headless-test",
         "--test",
         "headless",
+        "--",
+        "golden::",
+    ],
+    // The debug UI's scene, in the facade's unit tests behind `dev`, which
+    // holds the debug UI (M7.10).
+    &[
+        "test",
+        "--package",
+        "nadir_engine",
+        "--features",
+        "dev",
+        "--lib",
         "--",
         "golden::",
     ],

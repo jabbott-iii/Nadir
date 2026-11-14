@@ -29,7 +29,7 @@
 //! `RenderFrame::ui`, after the game's UI and in front of it.
 //!
 //! - **Input:** the engine feeds a [`DebugInput`] with the window's events
-//!   (roadmap M7.10); a test feeds it its own. A frame takes at most one
+//!   (nadir_engine's `dev`); a test feeds it its own. A frame takes at most one
 //!   press and one release of the left button, so that a click is judged
 //!   where it was pressed and where it was released.
 //! - **Identity:** a widget is the hash of its scope's identity and its
@@ -38,7 +38,8 @@
 //!   button went down on is active until it goes up, and a click is a
 //!   release over the widget that was pressed.
 //! - **Capture:** [`DebugUi::wants_mouse`] and [`DebugUi::wants_keyboard`]
-//!   tell the game to leave the mouse or the keys alone.
+//!   tell the game to leave the mouse or the keys alone, and
+//!   [`DebugUi::is_over`] whether a point is over a window.
 //! - **Places:** each window's place is kept as data
 //!   ([`DebugUi::places`], [`DebugUi::set_place`]); the engine saves it.
 //! - **Text:** measured by [`TextMetrics`]: [`FontMetrics`] for a `Font`.
@@ -86,6 +87,11 @@
 //! assert!(!ui.wants_keyboard());
 //! # let _ = Key::Enter;
 //! ```
+
+// The README's examples are compiled as doc tests too.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 mod edit;
 mod id;

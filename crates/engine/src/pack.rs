@@ -28,9 +28,13 @@ use nadir_core::log::{error, info};
 /// every load then fails with the error that opening it gave, rather than
 /// reading loose files that may not be its cook's. Without `read_pack`, as
 /// with `dev`, whose hot reload watches them (`App::run`), it reads the
-/// loose files.
+/// loose files, and with `dev` the engine's files of the debug UI too.
 pub(crate) fn asset_server(assets: &Path, on_failure: OnFailure, read_pack: bool) -> AssetServer {
     if !read_pack {
+        // With `dev`, the engine's own files of the debug UI too (ADR-0058).
+        #[cfg(feature = "dev")]
+        return AssetServer::with_source(crate::debug_ui::EngineFiles::new(assets), on_failure);
+        #[cfg(not(feature = "dev"))]
         return AssetServer::new(assets, on_failure);
     }
     let path = assets.join(PackSource::FILE_NAME);

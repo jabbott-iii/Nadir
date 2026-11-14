@@ -904,6 +904,34 @@ fn the_mouse_is_the_ui_s_over_its_windows_unless_the_game_pressed_first() {
 }
 
 #[test]
+fn a_point_is_over_the_windows_the_last_frame_drew() {
+    let mut harness = Harness::new();
+    // Before any frame, nothing is drawn.
+    assert!(!harness.ui.is_over(Vec2::new(50.0, 50.0)));
+    harness.move_to(Vec2::new(300.0, 250.0));
+    harness.show(|_| {});
+    // The pointer ended outside, but a point over the window is over it.
+    assert!(!harness.ui.wants_mouse());
+    assert!(harness.ui.is_over(Vec2::new(50.0, 50.0)));
+    assert!(!harness.ui.is_over(Vec2::new(300.0, 250.0)));
+    // At twice the scale, the window covers twice the output's pixels.
+    harness.ui.style_mut().scale = UiScale::Free(2.0);
+    harness.show(|_| {});
+    assert!(harness.ui.is_over(Vec2::new(390.0, 290.0)));
+    harness.ui.style_mut().scale = UiScale::Free(1.0);
+    harness.show(|_| {});
+    // Collapsed, only its title bar.
+    harness.click(Vec2::new(4.0, 6.0));
+    harness.show(|_| {});
+    harness.show(|_| {});
+    assert!(harness.ui.is_over(Vec2::new(50.0, 6.0)));
+    assert!(!harness.ui.is_over(Vec2::new(50.0, 50.0)));
+    // A window not drawn in the last frame is not hit.
+    harness.frame(|_| {});
+    assert!(!harness.ui.is_over(Vec2::new(50.0, 6.0)));
+}
+
+#[test]
 fn a_frame_pushes_its_windows_in_front_of_the_game_s_ui() {
     let mut harness = Harness::new();
     // The game's UI, at the top layer and depth, pushed first.

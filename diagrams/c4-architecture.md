@@ -146,11 +146,11 @@ flowchart LR
 ## 3. Components of the game executable
 
 The crates of the game executable by layer, with an arrow for each entry
-in a crate's `[dependencies]` table. The debug crate has no code and no
-dependencies yet. The dotted arrow is an edge still to come: the
-sandbox's to debug, behind `dev` (the matrix's row for the sandbox). The
-edges the matrix allows out of debug (core, ecs, scene, render, input) are
-not drawn.
+in a crate's `[dependencies]` table. The facade's arrows to debug and to
+codec are behind its `dev` feature (M7.10, ADR-0058): the sandbox reaches
+the debug UI through the facade's `nadir::debug`. The edges the matrix
+allows out of debug but it does not take (ecs, scene, input) are not
+drawn.
 
 ```mermaid
 flowchart TB
@@ -161,7 +161,7 @@ flowchart TB
         n_engine["nadir_engine, nadir in code<br/>App and the main loop, Config, the engine's components and systems, load_level, re-exports"]
     end
     subgraph L4["Layer 4: tooling inside the engine"]
-        n_debug["nadir-debug<br/>planned M7: debug UI, inspector, console, profiler"]
+        n_debug["nadir-debug<br/>the debug UI: windows, widgets, capture, places. Planned M7: inspector, console, profiler"]
     end
     subgraph L3["Layer 3: composed subsystems"]
         n_render["nadir-render<br/>sprite batching, y-sort, tilemap chunks, camera, texture and atlas assets"]
@@ -218,14 +218,16 @@ flowchart TB
     n_platform --> n_core
     n_platform --> n_sys
     n_codec --> n_core
-    n_sandbox -.->|"planned, dev only"| n_debug
+    n_engine -->|"dev"| n_debug
+    n_engine -->|"dev"| n_codec
+    n_debug --> n_core
+    n_debug --> n_render
 
     classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
     classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
     classDef planned fill:#ffffff,stroke:#888888,stroke-dasharray: 5 5,color:#555555
     class n_sandbox container
-    class n_engine,n_render,n_scene,n_audio,n_gfx,n_ecs,n_assets,n_input,n_collision,n_platform,n_codec,n_core,n_sys component
-    class n_debug planned
+    class n_engine,n_render,n_scene,n_audio,n_gfx,n_ecs,n_assets,n_input,n_collision,n_platform,n_codec,n_core,n_sys,n_debug component
 ```
 
 - The game reaches the subsystems through the facade, which re-exports
@@ -349,8 +351,8 @@ that no other crate allows it.
 | `nadir-render` | `crates/render` | 3, composed subsystems | deny | assets, codec, core, gfx |
 | `nadir-scene` | `crates/scene` | 3, composed subsystems | deny | assets, codec, core, ecs |
 | `nadir-audio` | `crates/audio` | 3, composed subsystems | deny | assets, codec, core |
-| `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | core, render (the debug UI's core, M7.2; the tools are planned) |
-| `nadir_engine` (`nadir` in code) | `crates/engine` | 5, facade | deny | assets, audio, collision, core, ecs, gfx, input, platform, render, scene |
+| `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | core, render (the debug UI, M7.2, shown in the game by M7.10; the tools are planned) |
+| `nadir_engine` (`nadir` in code) | `crates/engine` | 5, facade | deny | assets, audio, collision, core, ecs, gfx, input, platform, render, scene; with `dev`, codec and debug (ADR-0058) |
 | `nadir-cook` | `tools/cook` | 6, applications | deny | assets, codec with `png`, core |
 | `xtask` | `xtask` | 6, applications | deny | codec with `png`, core |
 | `sandbox` | `games/sandbox` | 6, applications | deny | `nadir_engine` |

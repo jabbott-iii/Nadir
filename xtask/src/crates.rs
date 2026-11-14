@@ -238,15 +238,15 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let report = run(&root).expect("cargo metadata runs");
         assert_eq!(report.violations, Vec::<String>::new());
-        // Every crate the facade needs, with the cook and nadir-audio, which
-        // goes before the facade uses it (ADR-0048); not the demo, the
-        // tools, the benchmarks, nor the crates with no code yet.
+        // Every crate the facade needs, nadir-debug among them since the
+        // facade's `dev` uses it (M7.10), with the cook; not the demo, the
+        // tools, nor the benchmarks.
         assert_eq!(
             report.notes,
             [format!(
                 "crates for crates.io, at {}: nadir-assets, nadir-audio, nadir-codec, \
-                 nadir-collision, nadir-cook, nadir-core, nadir-ecs, nadir-gfx, nadir-input, \
-                 nadir-platform, nadir-render, nadir-scene, nadir-sys, nadir_engine",
+                 nadir-collision, nadir-cook, nadir-core, nadir-debug, nadir-ecs, nadir-gfx, \
+                 nadir-input, nadir-platform, nadir-render, nadir-scene, nadir-sys, nadir_engine",
                 env!("CARGO_PKG_VERSION")
             )]
         );

@@ -3,8 +3,13 @@ name = "nadir-debug"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-# Not on crates.io until the facade uses it (ADR-0036, ADR-0056).
-publish = false
+description = "Developer tools for the Nadir engine: an immediate-mode debug UI drawn with the engine's own renderer."
+authors.workspace = true
+readme = "README.md"
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 nadir-core.workspace = true

@@ -366,6 +366,19 @@ impl DebugUi {
         self.wants_mouse
     }
 
+    /// Whether `at`, in the output's pixels as `nadir_input::Input::pointer`
+    /// gives them, is over a window or an open combo's list drawn in the
+    /// last frame, by the space that frame was laid out in.
+    ///
+    /// [`DebugUi::wants_mouse`] is where the pointer was when the last frame
+    /// ended. This is for an engine that feeds the game's input an event at
+    /// a time and decides at each press, or each turn of the wheel, whether
+    /// the game sees it: then a press in the frame the pointer comes over a
+    /// window is the UI's, and one in the frame it leaves the game's.
+    pub fn is_over(&self, at: Vec2) -> bool {
+        self.layer_at(self.space.to_ui(at)).is_some()
+    }
+
     /// Whether a text field drawn in the last frame has the keyboard: the
     /// game should then leave the keys alone.
     pub fn wants_keyboard(&self) -> bool {

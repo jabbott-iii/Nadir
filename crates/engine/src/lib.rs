@@ -41,8 +41,9 @@
 //! runs, but its window stays empty until roadmap tasks M2.6 and M2.7, and
 //! it plays no sound until M6.4 and M6.5. Text is drawn in the world
 //! (`nadir::render::Font`, `RenderFrame::texts`), and on the window with
-//! the UI's sprites (`RenderFrame::ui`); gamepads, saves and the debug
-//! tools are not built yet. The
+//! the UI's sprites (`RenderFrame::ui`); development builds show a debug
+//! UI of the game's own windows; gamepads, saves and the other debug tools
+//! are not built yet. The
 //! [README](https://github.com/jabbott-iii/Nadir/blob/main/crates/engine/README.md)
 //! is a guide to how the parts fit together, with a game that walks a hero
 //! about a tile map.
@@ -241,6 +242,43 @@
 //! [`App::offscreen`] and [`App::update`] never reload, so recordings stay
 //! the same, and builds without `dev` hold none of the reload.
 //!
+//! # The debug UI
+//!
+//! With the `dev` feature, a game adds windows of its own to a debug UI
+//! with `App::add_debug_window`, each shown and hidden by a key, and fills
+//! them each frame with the widgets of `nadir::debug`, the `nadir-debug`
+//! crate: labels, buttons, checkboxes, sliders, text fields, lists, trees,
+//! plots. They are drawn over the game's UI in the engine's own pixel
+//! font; they drag, collapse, resize and scroll; while one has the
+//! pointer, or one of their text fields the keys, the game's actions do not
+//! see them; and [`App::run`] keeps their places in `debug_ui.jsonc` in the
+//! game's settings folder. The resource `WindowSize` is the window's size.
+//!
+//! ```
+//! # #[cfg(feature = "dev")]
+//! # {
+//! use nadir::prelude::*;
+//!
+//! /// A note the developer types in.
+//! #[derive(Default)]
+//! struct Note(String);
+//!
+//! let app = App::new(Config::default())
+//!     .insert_resource(Note::default())
+//!     .add_debug_window(
+//!         Key::F8,
+//!         "Notes",
+//!         Rect::new(Vec2::new(16.0, 16.0), Vec2::new(216.0, 116.0)),
+//!         |world, ui| {
+//!             ui.text_input("Note", &mut world.resource_mut::<Note>().0);
+//!             let ticks = world.resource::<TickStats>().ticks;
+//!             ui.label(format_args!("{ticks} ticks this frame"));
+//!         },
+//!     );
+//! # let _ = app;
+//! # }
+//! ```
+//!
 //! # Replays and determinism
 //!
 //! [`App::play_replay`] plays a recording of the game's actions, made with
@@ -416,7 +454,9 @@
 //!   `thread_alloc_counts` and `process_alloc_counts` give the counts so
 //!   far, as `AllocCounts`. No other crate in the program may then declare
 //!   a `#[global_allocator]`. [`App::run`] reloads what changes while it
-//!   runs ("Hot reload", above). Turn it on from a feature of the game,
+//!   runs ("Hot reload", above), and the game's debug windows show ("The
+//!   debug UI", above), with `nadir::debug`, `App::add_debug_window`,
+//!   `DebugWindow` and `WindowSize`. Turn it on from a feature of the game,
 //!   never from a normal dependency, so that release builds leave it out.
 
 // The README's examples are compiled as doc tests too.
@@ -428,6 +468,8 @@ mod animation;
 mod app;
 mod collisions;
 mod components;
+#[cfg(feature = "dev")]
+mod debug_ui;
 mod error;
 #[cfg(feature = "dev")]
 mod frame_allocs;
@@ -442,8 +484,12 @@ mod reflected;
 mod replay;
 mod sound;
 mod tick_stats;
+#[cfg(feature = "dev")]
+mod window_size;
 
 pub use nadir_core::{cli, log};
+#[cfg(feature = "dev")]
+pub use nadir_debug as debug;
 pub use nadir_platform::Event;
 #[cfg(feature = "dev")]
 pub use nadir_platform::{AllocCounts, process_alloc_counts, thread_alloc_counts};
@@ -461,6 +507,8 @@ pub use components::{
     AudioEmitter, AudioListener, Collider, Facing, MusicArea, Parent, Player, PrevTransform,
     SaveId, Sprite, Transform, Velocity,
 };
+#[cfg(feature = "dev")]
+pub use debug_ui::DebugWindow;
 pub use error::Error;
 #[cfg(feature = "dev")]
 pub use frame_allocs::FrameAllocs;
@@ -469,6 +517,8 @@ pub use reflected::{CollisionLayers, loading_context, reflect_context};
 pub use replay::{Replay, world_hash};
 pub use sound::AudioState;
 pub use tick_stats::TickStats;
+#[cfg(feature = "dev")]
+pub use window_size::WindowSize;
 
 /// What most games use, for one `use nadir::prelude::*`.
 pub mod prelude {

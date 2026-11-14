@@ -12,7 +12,7 @@ below is our own code (dependency policy items 26–28).
 | Layout tests | `nadir-sys` tests | `cargo test` on each OS | FFI struct size/alignment/offset mismatches |
 | Property tests | `nadir-core::testing::check` | `cargo test` | Edge cases: collision never leaves overlap, codecs round-trip, sort keys monotonic |
 | Integration tests | `crates/*/tests/` | `cargo test` | Cross-module behavior (asset load → GPU upload with the headless device) |
-| Golden-image tests | `xtask golden`; scenes in the GL test binaries, references in `tests/golden/` | Linux CI (llvmpipe); Windows and macOS locally before release | Rendering regressions, backend divergence |
+| Golden-image tests | `xtask golden`; scenes in the GL test binaries and the facade's unit tests, references in `tests/golden/` | Linux CI (llvmpipe); Windows and macOS locally before release | Rendering regressions, backend divergence |
 | Determinism tests | `crates/engine/tests/determinism.rs` | `cargo test` | Replays producing different world state |
 | Fuzz smoke | `xtask fuzz-smoke` | CI (time-boxed) | Panics, hangs, huge allocations in parsers |
 | Soak tests | `xtask soak --audio` (M6.7; manual or nightly) | Real hardware | Audio underruns and late callbacks, the mix's time, memory growth, sounds the mixer never hands back |
@@ -71,7 +71,8 @@ pub fn check_sized<T: std::fmt::Debug>(
 ### Golden-image tests
 
 - A scene is a test in the OpenGL test binary of the crate that draws it
-  (ADR-0017). It draws into an offscreen render target of fixed size, e.g.
+  (ADR-0017), or, for the facade's, in its unit tests behind `dev`, where
+  the debug UI is (ADR-0058). It draws into an offscreen render target of fixed size, e.g.
   320×180, and checks a few of its pixels.
   - The `gfx` scenes, from M2.4, draw through the `gfx` API, in
     `crates/gfx/tests/headless/golden.rs`: clear, textured quad (nearest,
@@ -106,6 +107,16 @@ pub fn check_sized<T: std::fmt::Debug>(
 
     Each sprite is drawn at a whole number of pixels per texel, with its
     corner on a whole pixel, so that every GPU draws it alike.
+  - The facade's scene, from M7.10, draws through `App::offscreen` in its
+    unit tests behind `dev`, in `crates/engine/src/debug_ui/golden.rs`:
+    `debug_window`, two debug windows at a free scale of 1 in the engine's
+    font over a game's UI box: `Tools`, behind, with a label, a checkbox,
+    two sliders, a text field, two buttons in a row, a separator, a combo
+    and a tree node, too tall for it, so that it shows a scrollbar; and
+    `Stats`, collapsed, in front (ADR-0058). It has no plot, whose lines
+    are rotated sprites.
+    `cargo xtask golden` runs `cargo test -p nadir_engine --features dev
+    --lib -- golden::` for it, after the gfx and render scenes.
   - A scene is defined with the `scene!` macro, which names it after its
     test, and saves its pixels before its own checks can fail it.
 - Readback uses `glReadPixels` or Metal `getBytes`, flipped to a top-left

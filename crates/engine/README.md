@@ -45,6 +45,9 @@ Built:
 - hot reload in development builds: textures, atlases and their clips,
   prefabs, the current level and shaders, reloaded while the game runs,
   behind the handles it holds;
+- a debug UI in development builds: windows the game adds, each shown by a
+  key of its own, with widgets from `nadir::debug`, drawn over the game in
+  the engine's own pixel font, and keeping their places across runs;
 - a world hash, to check that a replay gives the same simulation.
 
 Not built yet:
@@ -52,7 +55,7 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
-- the debug tools (M7), gamepads (M8);
+- the debug tools beyond the debug UI (M7.3 to M7.6), gamepads (M8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 

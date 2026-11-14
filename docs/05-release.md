@@ -142,7 +142,7 @@ crates. Nothing else is signed or notarized until M11.2.
 | The GitHub release `v<version>` | `nadir-<version>-<target>.tar.gz` (Linux, macOS) or `.zip` (Windows) for each of the six targets, `{x86_64,aarch64}-{unknown-linux-gnu,pc-windows-msvc,apple-darwin}`. Each holds `nadir-cook`, the sandbox with its cooked atlases, sounds, prefabs and levels in one pack, `assets/game.kpak` (ADR-0041), `README.txt`, `LICENSE` and `NOTICE` (ADR-0037). On Windows and macOS the sandbox runs in an empty window until the engine draws there (M2.6, M2.7), and without sound until it has audio output there (M6.4, M6.5), which their READMEs say |
 | The same release | `nadir-cook_<version>_<arch>.deb` and `nadir-sandbox_<version>_<arch>.deb` for `amd64` and `arm64` (the file named for the release's version, as GitHub turns Debian's `~` into `.` in an asset's name); the apt repository's `Packages`, `Packages.gz`, `Release`, `InRelease`, `Release.gpg` and `nadir-archive-keyring.gpg`; and `SHA256SUMS` of every file |
 | ghcr.io | `ghcr.io/jabbott-iii/nadir-cook:<version>`, and `:latest` unless the version is a pre-release, for `linux/amd64` and `linux/arm64`: the cook linked statically, `FROM scratch` (`tools/cook/Dockerfile`) |
-| crates.io | 14 crates at `<version>`: `nadir_engine`, the facade (`nadir` in code; ADR-0039); `nadir-cook`; and `nadir-core`, `-sys`, `-platform`, `-gfx`, `-codec`, `-ecs`, `-input`, `-render`, `-assets`, `-audio` (from the release after 0.3.0, ADR-0050), `-collision` and `-scene`, each with copies of `LICENSE` and `NOTICE` (ADR-0037). The sandbox, `xtask`, `nadir-bench` and `nadir-debug` have `publish = false` |
+| crates.io | 15 crates at `<version>`: `nadir_engine`, the facade (`nadir` in code; ADR-0039); `nadir-cook`; and `nadir-core`, `-sys`, `-platform`, `-gfx`, `-codec`, `-ecs`, `-input`, `-render`, `-assets`, `-audio` (from the release after 0.3.0, ADR-0050), `-collision`, `-scene` and `-debug` (from the release after 0.3.0, ADR-0058), each with copies of `LICENSE` and `NOTICE` (ADR-0037). The sandbox, `xtask` and `nadir-bench` have `publish = false` |
 
 A version with a `-`, such as `0.2.0-rc.1`, is a pre-release: GitHub does
 not mark it latest, so apt stays on the last full release, and the image
@@ -315,9 +315,10 @@ The repository holds no secret, and the workflow names only these:
    with `publish-new` and `publish-update`, and the crates limited to
    `nadir-*` and `nadir_engine` (the pattern `nadir-*` may not match the
    underscore of `nadir_engine`, so it has a line of its own; ADR-0039). Store it as `CARGO_REGISTRY_TOKEN` in
-   `crates-io`. Once all 14 crates exist on crates.io, nadir-audio, new
-   in the release after 0.3.0, among them, crates.io's trusted publishing
-   can replace it (ADR-0036, ADR-0050): until then the token needs
+   `crates-io`. Once all 15 crates exist on crates.io, nadir-audio and
+   nadir-debug, new in the release after 0.3.0, among them, crates.io's
+   trusted publishing can replace it (ADR-0036, ADR-0050, ADR-0058):
+   until then the token needs
    `publish-new`, as trusted publishing cannot make a crate.
 5. **The image:** after the first release, make the package `nadir-cook`
    public (the account's Packages → `nadir-cook` → Package settings →

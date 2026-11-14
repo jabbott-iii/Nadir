@@ -49,7 +49,8 @@ pub struct DebugInput;   // pointer_moved, button, wheel, key(key, pressed, repe
 pub trait TextMetrics { fn line_height(&self) -> f32; fn caret_x(&self, text: &str, byte: usize) -> f32; }
 pub struct FontMetrics;  // FontMetrics::new(font: Font): TextMetrics of a copy of the font
 pub struct DebugUi;      // new(font, metrics, white), set_font, style, style_mut, frame,
-                         // wants_mouse, wants_keyboard, places, set_place, places_revision
+                         // wants_mouse, is_over (M7.10), wants_keyboard, places,
+                         // set_place, places_revision
 pub struct Frame<'a>;    // window(title, first: Rect, add) -> bool, finish(&mut UiList)
 pub struct Ui<'a>;       // with_id, horizontal, key_pressed, focus_next, label, label_colored,
                          // button, checkbox, slider_f32, slider_i32, drag_f32, text_input,
@@ -123,6 +124,56 @@ pub struct WindowPlace<'a> { title, rect, collapsed }; pub struct Style { scale,
   when in view, tooltips, window options (no title bar, a close box),
   wider integers, copy and paste. They are additive, for the tools that
   need them (M7.3 to M7.5). The golden of a debug window is M7.10's.
+
+### As built (M7.10): the debug UI in the game
+
+The facade shows the debug UI in development builds (feature `dev`;
+ADR-0058), and re-exports this crate as `nadir::debug`.
+
+```rust
+// nadir_engine, with `dev`:
+pub type DebugWindow = fn(&World, &mut nadir::debug::Ui<'_>);
+impl App { pub fn add_debug_window(self, toggle: Key, title: &'static str, first: Rect,
+                                   window: DebugWindow) -> Self; }
+pub struct WindowSize(pub UVec2);   // a resource: the window's inside, physical pixels
+```
+
+- **Windows:** a game adds its own, each shown and hidden by a key of its
+  own (a press, not a repeat, whether a field has the keyboard or not),
+  hidden at start; they are filled in the order added, after the frame
+  stages, inside `App::update`, so over the game's UI. The sandbox's is on
+  F8 (`cargo dev`): a note to type, what the last frame drew, every
+  entity's place. The tools below will be windows of the engine's, on
+  their keys.
+- **The UI** is made the first time a window is open, in the engine's
+  font, and then runs every frame; before that its input is fed and
+  cleared. It reads the window's events from a `nadir_input::UiEvents`,
+  in order, cleared every frame.
+- **The font:** a 5 × 7 pixel font of printable ASCII, monospaced, 6
+  pixels a character and 10 a line, in the facade's source. With `dev` the
+  asset server's source makes its cooked files, and a white texel, in
+  memory, at `nadir/debug/` (`font.font.kbj`, `font.kbj`, `font_0.qoi`,
+  `white.qoi`), before the game's loose files. Other characters draw a
+  box.
+- **Scale:** `UiScale::Free` of the window's scale factor, rounded to a
+  whole number and at least 1, until the settings file's UI scale (M9.3).
+- **Capture:** the keys at each frame's start, from the UI's last
+  `wants_keyboard`. The mouse at each press of a button and each turn of
+  the wheel, before it reaches `Input`: the UI's while it holds the left
+  button from a press on a window, the game's while the game holds it,
+  and otherwise the UI's if the pointer `is_over` a window drawn in the
+  frame before; a press of the left button decides who holds it, until
+  its release or a loss of the focus. Never by where the pointer rests,
+  so a button the game holds stays the game's as the pointer passes a
+  window. The facade sets `Input::set_capture` only when that changes. A
+  replay plays on.
+- **Places:** `App::run` alone reads `debug_ui.jsonc` in the user config
+  directory before the loop, and writes it, through a temporary file,
+  each time `places_revision` changes: version 1, a comment line, then
+  `{ "version": 1, "windows": [ { "name", "x", "y", "w", "h",
+  "collapsed" } ] }`. A file that cannot be read is a warning; a window
+  not whole in it is left out; other members are ignored.
+- **The golden:** `debug_window`, the facade's (`docs/04-quality.md`).
 
 ## Tools
 

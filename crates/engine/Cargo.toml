@@ -25,6 +25,10 @@ nadir-assets.workspace = true
 nadir-audio.workspace = true
 nadir-collision.workspace = true
 nadir-core.workspace = true
+# The debug UI, and the files of its font, which are made as the cook
+# would write them: development builds only (`dev`, ADR-0058).
+nadir-codec = { workspace = true, optional = true }
+nadir-debug = { workspace = true, optional = true }
 nadir-ecs.workspace = true
 nadir-gfx.workspace = true
 nadir-input.workspace = true
@@ -40,9 +44,10 @@ nadir-codec.workspace = true
 
 [features]
 # Development builds: a failed asset shows its placeholder rather than
-# nothing, and the allocation counter counts each frame's allocations
-# (`FrameAllocs`). `cargo dev` turns it on through the sandbox.
-dev = ["nadir-platform/dev"]
+# nothing, the allocation counter counts each frame's allocations
+# (`FrameAllocs`), what changes is reloaded, and the debug UI shows the
+# game's debug windows. `cargo dev` turns it on through the sandbox.
+dev = ["nadir-platform/dev", "dep:nadir-codec", "dep:nadir-debug"]
 
 [lints]
 workspace = true

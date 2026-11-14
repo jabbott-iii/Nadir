@@ -60,7 +60,13 @@
 //! ticks and the world's hash after them (`replay.rs`); a recording whose
 //! file failed logs how many ticks reached it.
 //!
-//! With `dev` (`cargo dev`), the game reloads what changes while it runs
+//! With `dev` (`cargo dev`), F8 shows and hides a debug window: a note to
+//! type, what the last frame drew, and where each entity is, in a list
+//! that scrolls. It drags by its title bar, collapses, resizes from its
+//! corner, and keeps its place across runs, in `debug_ui.jsonc` in the
+//! game's settings folder (on Linux `~/.config/Sandbox`).
+//!
+//! With `dev`, the game also reloads what changes while it runs
 //! (ADR-0043). Run `cargo xtask cook --watch` beside it, and an edit to
 //! `assets/` shows in the window within a second: a sprite's pixels, the
 //! person's clips in `assets/sprites/person.json`, a prop's prefab in
@@ -508,7 +514,10 @@ fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
         .add_fixed_system(FixedStage::Cleanup, "footsteps", footsteps)
         .add_frame_system(FrameStage::Ui, "report", report);
     #[cfg(feature = "dev")]
-    let app = app.insert_resource(AllocTally::default());
+    let app = app
+        .insert_resource(AllocTally::default())
+        .insert_resource(DebugNote::default())
+        .add_debug_window(Key::F8, "Sandbox", DEBUG_WINDOW, debug_window);
     let app = match scene {
         Scene::Field => field(app, &sprites)?,
         Scene::StressSprites => stress::add(app, &sprites),
@@ -726,6 +735,40 @@ fn draw_tiles(world: &World, _frame: &Frame) {
     let mut out = world.resource_mut::<RenderFrame>();
     out.clear = ground.outside;
     out.tile_layers.push(TileLayerDraw::new(ground.tiles));
+}
+
+/// Where the sandbox's debug window shows the first time, in the debug
+/// UI's units (feature `dev`).
+#[cfg(feature = "dev")]
+const DEBUG_WINDOW: Rect = Rect::new(Vec2::new(16.0, 16.0), Vec2::new(256.0, 196.0));
+
+/// A note typed into the sandbox's debug window (feature `dev`).
+#[cfg(feature = "dev")]
+#[derive(Default)]
+struct DebugNote(String);
+
+/// The sandbox's debug window, which F8 shows and hides (feature `dev`): a
+/// note to type, what the last frame drew, and where each entity is, a
+/// list that scrolls.
+#[cfg(feature = "dev")]
+fn debug_window(world: &World, ui: &mut nadir::debug::Ui<'_>) {
+    ui.text_input("Note", &mut world.resource_mut::<DebugNote>().0);
+    let stats = *world.resource::<FrameStats>();
+    ui.label(format_args!(
+        "drawn: {} sprites, {} tiles",
+        stats.sprites, stats.tiles
+    ));
+    ui.separator();
+    let players = world.read::<Player>();
+    for (entity, transform) in world.read::<Transform>().iter() {
+        let who = if players.get(entity).is_some() {
+            "player"
+        } else {
+            "entity"
+        };
+        let at = transform.position;
+        ui.label(format_args!("{who} {entity:?}: ({:.0}, {:.0})", at.x, at.y));
+    }
 }
 
 /// How often the frames allocated since the last report (feature `dev`).

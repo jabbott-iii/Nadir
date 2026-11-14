@@ -253,9 +253,9 @@
     {
       "name": "Developer tools",
       "area": "Tools",
-      "summary": "An immediate-mode debug UI of our own is built: windows that drag, collapse, resize and scroll, with buttons, checkboxes, sliders, text fields, lists, trees, line graphs and color editors, each answering what was done to it, and a click judged where it was pressed and where it was released at any frame rate. The window reports what is typed, composed characters included, with key repeats, in order with the mouse, and the game's actions can be held off the keyboard or the mouse while a UI has it. The debug UI will appear in the game and carry a stats overlay, a profiler that exports traces, an entity inspector, a console, debug drawing and time controls, all left out of release builds.",
+      "summary": "Development builds show a debug UI of our own over the game: windows the game adds, each shown by a key of its own, that drag, collapse, resize and scroll, with buttons, checkboxes, sliders, text fields, lists, trees, line graphs and color editors, drawn in the engine's own pixel font, and keeping their places across runs. A click is judged where it was pressed and where it was released at any frame rate, typing reaches it with key repeats and composed characters, and while it has the mouse or a text field the game's actions do not see them. The debug UI will carry a stats overlay, a profiler that exports traces, an entity inspector, a console, debug drawing and time controls, all left out of release builds.",
       "tasks": ["M7.2", "M7.9", "M7.10", "M7.3", "M7.4", "M7.5", "M7.6"],
-      "ticked": ["M7.2", "M7.9"]
+      "ticked": ["M7.2", "M7.9", "M7.10"]
     },
     {
       "name": "Gamepads",

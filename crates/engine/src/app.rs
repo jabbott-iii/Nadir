@@ -388,6 +388,10 @@ impl EngineCore {
     /// came before it. Draws it on `window`'s surface, if there is one.
     fn frame(&mut self, events: &[Event], window: Option<(GpuSurface<'_>, UVec2)>) {
         let elapsed = self.stopwatch.lap();
+        #[cfg(feature = "dev")]
+        if let Some((_, size)) = window {
+            *self.app.world.resource_mut::<crate::WindowSize>() = crate::WindowSize(size);
+        }
         self.app.update(elapsed, events);
         if let (Some(graphics), Some((surface, size))) = (&mut self.graphics, window) {
             let drawn = graphics.draw(&self.app.world, surface, size);
@@ -480,7 +484,8 @@ impl EngineCore {
 ///   `nadir::sound` plays
 /// - with [`App::play_replay`], [`Replay`], how far the replay got
 /// - the events [`TriggerEnter`], [`TriggerExit`] and [`AnimationFinished`]
-/// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
+/// - with the `dev` feature, `FrameAllocs`, what the last frame allocated,
+///   and `WindowSize`, the size of the window the frame is drawn at
 ///
 /// ```no_run
 /// use nadir::prelude::*;
@@ -524,6 +529,9 @@ pub struct App {
     /// [`App::run`] hands it to the audio output, [`App::take_mixer`] takes
     /// it, or [`App::update`] drops it.
     mixer: Option<Mixer>,
+    /// The debug UI and the game's debug windows.
+    #[cfg(feature = "dev")]
+    debug: crate::debug_ui::DebugTools,
 }
 
 impl App {
@@ -591,6 +599,8 @@ impl App {
         world.insert_resource(crate::FrameAllocs::default());
         #[cfg(feature = "dev")]
         world.insert_resource(crate::hot_reload::Reloads::default());
+        #[cfg(feature = "dev")]
+        world.insert_resource(crate::WindowSize::default());
         world.add_event::<TriggerEnter>();
         world.add_event::<TriggerExit>();
         world.add_event::<AnimationFinished>();
@@ -648,6 +658,8 @@ impl App {
             #[cfg(feature = "dev")]
             shader_dir: PathBuf::from(nadir_render::SHADER_DIR),
             mixer: Some(mixer),
+            #[cfg(feature = "dev")]
+            debug: crate::debug_ui::DebugTools::new(),
         }
     }
 
@@ -833,6 +845,47 @@ impl App {
         self
     }
 
+    /// Adds a window to the debug UI, in development builds (feature
+    /// `dev`): `toggle` shows and hides it, and it starts hidden. While it
+    /// shows, `window` fills it with widgets each frame, after the frame
+    /// stages, through the [`Ui`](nadir_debug::Ui) of
+    /// [`nadir::debug`](crate::debug).
+    ///
+    /// - It shows at `first`, in the debug UI's units, the first time;
+    ///   [`App::run`] keeps its place, its size and whether it is collapsed
+    ///   from then on, across runs, in `debug_ui.jsonc` in the game's
+    ///   settings folder, by its name: its title, or the explicit ID after
+    ///   `##` in `"Title##id"`.
+    /// - It is drawn after the game's UI, over it, in the engine's own
+    ///   font, at the window's scale factor rounded to a whole number
+    ///   (until the settings file's UI scale, roadmap M9.3).
+    /// - While the pointer is over a debug window, or a debug widget is held,
+    ///   the game's actions do not see the mouse's buttons or the wheel;
+    ///   while one of its text fields has the keyboard, they do not see the
+    ///   keys (`Input::set_capture`, which the debug UI then sets; a replay
+    ///   still plays). A press goes where the pointer was when it went
+    ///   down, by the windows drawn in the frame before.
+    /// - `toggle` works whenever it is pressed, a text field's keyboard or
+    ///   not, and the game's actions see it too, as they see any key no
+    ///   debug field has. One key may toggle several windows.
+    /// - `window` gets the world to read, or to change through its
+    ///   resources and storages, as a frame system does.
+    ///
+    /// Only [`App::run`] reads and writes `debug_ui.jsonc`:
+    /// [`App::update`] and [`App::offscreen`] start each window at `first`.
+    #[cfg(feature = "dev")]
+    #[must_use]
+    pub fn add_debug_window(
+        mut self,
+        toggle: nadir_core::Key,
+        title: &'static str,
+        first: nadir_core::Rect,
+        window: crate::DebugWindow,
+    ) -> Self {
+        self.debug.add(toggle, title, first, window);
+        self
+    }
+
     /// The world, to read it.
     pub fn world(&self) -> &World {
         &self.world
@@ -853,14 +906,18 @@ impl App {
     /// Runs one frame that comes `elapsed` after the last, with the events
     /// that came before it, without drawing it:
     ///
-    /// 1. feeds the events to [`Input`];
+    /// 1. feeds the events to [`Input`], holding back from the game's
+    ///    actions, with the `dev` feature, what the debug UI has;
     /// 2. runs the ticks that are due: for each, latches the actions, or
     ///    takes them from the replay that [`App::play_replay`] plays, and
     ///    runs the tick stages, which apply their commands;
     /// 3. sets [`TickStats`];
     /// 4. empties the [`RenderFrame`], sets its `time` to how long the
     ///    simulation has run, and runs the frame stages;
-    /// 5. collects the profile scopes the systems recorded, with the
+    /// 5. with the `dev` feature, fills the open debug windows into the
+    ///    `RenderFrame`'s UI, after the game's
+    ///    ([`App::add_debug_window`]);
+    /// 6. collects the profile scopes the systems recorded, with the
     ///    `profile` feature of `nadir-core`, so that they do not pile up.
     ///
     /// [`App::run`] calls it once a frame, then draws the `RenderFrame`.
@@ -881,7 +938,11 @@ impl App {
         self.mixer = None;
         {
             let mut input = self.world.resource_mut::<Input>();
+            #[cfg(feature = "dev")]
+            self.debug.start_frame(&mut input);
             for event in events {
+                #[cfg(feature = "dev")]
+                self.debug.handle(&mut input, event);
                 input.handle(event);
             }
         }
@@ -919,6 +980,9 @@ impl App {
             out.time = simulated_time(&self.clock);
         }
         self.schedule.run_frame(&mut self.world, &frame);
+        #[cfg(feature = "dev")]
+        self.debug
+            .frame(&self.world, self.config.virtual_resolution);
         profile::take_frame(&mut self.profile);
         // Records came back, so the feature is on. The recorder gets this
         // buffer back next frame: make it big enough that a frame of many
@@ -952,7 +1016,10 @@ impl App {
     ///
     /// With the `dev` feature, it reloads what changes while it runs: the
     /// loaded assets' files and render's shaders, after each drawn frame
-    /// (the crate's docs, "Hot reload").
+    /// (the crate's docs, "Hot reload"); and it keeps the debug windows'
+    /// places in `debug_ui.jsonc` in the game's settings folder, on Linux
+    /// `~/.config/<game>`, reading them before the loop and writing them
+    /// as they change ([`App::add_debug_window`]).
     ///
     /// # Errors
     ///
@@ -961,6 +1028,13 @@ impl App {
     /// shows it to the player with [`show_error_dialog`].
     pub fn run(mut self) -> Result<(), Error> {
         log_file::start(&self.config.studio, &self.config.game);
+        #[cfg(feature = "dev")]
+        match nadir_platform::user_dirs(&self.config.studio, &self.config.game) {
+            Ok(dirs) => self
+                .debug
+                .keep_places_in(dirs.config.join(crate::debug_ui::FILE_NAME)),
+            Err(error) => warn!("the debug UI's windows are not kept: {error}"),
+        }
         let title = self.config.title.clone();
         let mut platform =
             Platform::new(&self.config.window()).map_err(|error| fatal(&title, error.into()))?;
@@ -1127,6 +1201,10 @@ impl Offscreen {
     ///
     /// [`Error::Render`] if the frame cannot be drawn or read back.
     pub fn frame(&mut self, elapsed: Duration, events: &[Event]) -> Result<Vec<u8>, Error> {
+        #[cfg(feature = "dev")]
+        {
+            *self.app.world.resource_mut::<crate::WindowSize>() = crate::WindowSize(self.size);
+        }
         self.app.update(elapsed, events);
         self.graphics
             .draw_offscreen(&self.app.world, self.target, self.size)

@@ -32,7 +32,7 @@ gamepads, saves and pathfinding are not built yet (see
 `docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
 output on Linux (M6.3), its assets (M6.9), and the game's sound (M6.6);
 bitmap text in the world is (M7.1), the UI pass (M7.8), and the debug
-UI's core (M7.2), which nothing draws yet.
+UI (M7.2), which the facade's `dev` shows (M7.10).
 The members only the `dev` feature compiles, the facade's hot reload's
 (roadmap M5.8), are marked `dev`. One member that exists in the code for
 planned work, `ShaderSource::msl`, carries a note.

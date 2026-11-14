@@ -2519,7 +2519,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0036 — Releases from a tag: six targets on GitHub Releases, a signed apt repository beside them, the cook's image on ghcr.io, and the crates on crates.io with the facade as NadirGE
 
-- **Status:** Accepted; ADR-0037 adds `NOTICE` beside `LICENSE` in its archives and image, beside the `copyright` file in its `.deb`s, and both to its crates; the facade's package name NadirGE is superseded by ADR-0039 (`nadir_engine`); that its archives and the sandbox's `.deb` hold the cooked atlases, and that dist checks them byte for byte, is superseded by ADR-0041: they hold the pack, `assets/game.kpak`, alone, which dist checks against the laid-out cook's; nadir-audio goes to crates.io from the release after 0.3.0, before the facade uses it (ADR-0048, ADR-0050), so 14 crates, and the token stays until it exists there
+- **Status:** Accepted; ADR-0037 adds `NOTICE` beside `LICENSE` in its archives and image, beside the `copyright` file in its `.deb`s, and both to its crates; the facade's package name NadirGE is superseded by ADR-0039 (`nadir_engine`); that its archives and the sandbox's `.deb` hold the cooked atlases, and that dist checks them byte for byte, is superseded by ADR-0041: they hold the pack, `assets/game.kpak`, alone, which dist checks against the laid-out cook's; nadir-audio goes to crates.io from the release after 0.3.0, before the facade uses it (ADR-0048, ADR-0050), so 14 crates, and the token stays until it exists there; nadir-debug goes too once the facade's `dev` uses it (M7.10, ADR-0058), so 15
 - **Date:** 2026-11-01
 - **Context:**
   - The user asked for a release pipeline that a pushed version tag
@@ -3076,7 +3076,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0039 — The facade's package is `nadir_engine`; each crate for crates.io has a README of its own, whose examples are tested; the crates go to 0.1.1
 
-- **Status:** Accepted; its version, 0.1.1, is superseded by ADR-0040 (0.2.0); nadir-audio, added for crates.io in M6.9, has a README in its shape (ADR-0050)
+- **Status:** Accepted; its version, 0.1.1, is superseded by ADR-0040 (0.2.0); nadir-audio, added for crates.io in M6.9, has a README in its shape (ADR-0050), and so has nadir-debug, added in M7.10 (ADR-0058)
 - **Date:** 2026-11-01
 - **Context:**
   - Release v0.1.0 (ADR-0036) put twelve of the thirteen crates on
@@ -4844,7 +4844,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 ## ADR-0056 — M7.2 split in three: the debug UI core (M7.2: nadir-debug), typed text and capture (M7.9: sys, platform, input), and the debug UI in the game (M7.10: the facade)
 
 - **Status:** Accepted: the user chose the split, and window positions kept
-  as data in nadir-debug with the file in the facade, on 2026-11-10
+  as data in nadir-debug with the file in the facade, on 2026-11-10; M7.10
+  adds `DebugUi::is_over` to nadir-debug, for a capture decided at each
+  press (ADR-0058)
 - **Date:** 2026-11-10
 - **Context:**
   - M7.2 asks for IDs, hot and active state, layout, windows (drag,
@@ -5020,3 +5022,169 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   composed (preedit), or on macOS from an input method at all; or the
   input method server's restart must bring typing back without a restart
   of the game.
+
+## ADR-0058 — M7.10: the debug UI in the game: windows a game adds on keys of their own, the engine's pixel font made in memory, capture decided at each press, `debug_ui.jsonc`, `WindowSize`, and nadir-debug for crates.io
+
+- **Status:** Accepted: the user chose a game API with the sandbox's own
+  window, a toggle key for each window, a pixel font in the facade's
+  source, and the window's scale factor rounded to a whole number, and to
+  do it as one task across four packages, on 2026-11-13; the rest follows
+  the roadmap's notes from M7.2 and M7.9
+- **Date:** 2026-11-13
+- **Context:**
+  - M7.10 (ADR-0056) asks, under `dev`, for the window's size as a
+    resource; the debug UI fed from the window's events, drawn after the
+    game's UI at the settings' free scale in a font of the engine's;
+    gameplay actions held off while it wants the pointer or the keyboard;
+    its windows' places in `debug_ui.jsonc` in the user config directory;
+    and the spec's golden of a fixed debug window layout. Its manual check
+    is a debug window in `cargo dev` that drags, collapses, scrolls, takes
+    typed text and keeps its place across runs.
+  - No tool exists to show until M7.3. The spec gives each tool a key
+    (F1 to F7, the backtick) and no key for the UI as a whole.
+  - The repository has no font, and the asset server reads only from its
+    source: a texture or a font cannot be made from bytes in code.
+    `DebugUi::new` takes a font, its metrics, and a texture of white
+    texels.
+  - There is no settings file until M9.3, whose note asks for a default
+    UI scale from the window's scale factor. A pixel font at a scale that
+    is not whole draws its texels at uneven widths (ADR-0055).
+  - `DebugUi::wants_mouse` is the last frame's: a press in the frame the
+    pointer comes over a window would reach the game (M7.9's note).
+  - `Capture` is one value, which a game's own UI may set too (ADR-0057).
+  - nadir-debug has `publish = false` until the facade uses it
+    (ADR-0036, ADR-0056); then `cargo xtask crates` asks for its
+    metadata, `LICENSE` and `NOTICE`, and a README (ADR-0039).
+  - `App::update` runs in tests, headless runs and recordings, which
+    must not write to the player's folders.
+- **Decision:**
+  - **Windows:** with `dev`, `App::add_debug_window(toggle, title, first,
+    window)`, `window` a `DebugWindow`, `fn(&World, &mut nadir::debug::Ui)`;
+    the facade re-exports nadir-debug as `nadir::debug`. A window starts
+    hidden; a press of its key that is not a repeat shows or hides it, a
+    text field's keyboard or not, and the game's actions see the key as any
+    other. The open windows are filled in the order added, after the frame
+    stages, inside `App::update`, so after the game's UI. The sandbox adds
+    one on F8, under its `dev`: a note to type, what the last frame drew,
+    and every entity's place.
+  - **The UI:** made the first time a window is open, then given every
+    frame, open windows or none, so that a field or a held widget whose
+    window closes lets go. Before it is made, its input is fed and cleared
+    each frame (`DebugInput::clear`). The window's events reach it through
+    a `UiEvents` of the facade's, in order, cleared every frame.
+  - **The font:** a 5 × 7 pixel font of printable ASCII, drawn as rows of
+    `#` in the facade's source, monospaced (6 pixels a character, 10 a
+    line). With `dev`, the asset server's source is `EngineFiles`: four
+    files, the font file, its atlas, the atlas's page and a 1 × 1 white
+    texture, at `nadir/debug/font.font.kbj`, `font.kbj`, `font_0.qoi` and
+    `white.qoi`, made in memory as the cook would write them, with
+    nadir-codec, the first time one is read, and never changed; any other
+    path is the game's loose files, and a game file at one of those four
+    paths is hidden. They load in `Scope::Global`. A character the font
+    lacks draws a box. nadir-codec becomes an optional normal dependency of
+    the facade, with nadir-debug, both turned on by `dev`; the dependency
+    matrix allows both.
+  - **Scale:** `UiScale::Free` of the window's scale factor rounded to the
+    nearest whole number, and at least 1, from `Event::ScaleFactorChanged`,
+    until M9.3's setting; 1 in `App::offscreen`.
+  - **Capture:** the keys at the start of each frame, from the debug UI's
+    last `wants_keyboard`. The mouse as each event reaches `Input`, before
+    a press of a mouse button or a turn of the wheel: the UI's while it
+    holds the left button from a press on one of its windows, the game's
+    while the game holds it from a press elsewhere, and, while nobody holds
+    it, the UI's if `DebugUi::is_over(Input::pointer())`, new in
+    nadir-debug, finds a window or an open list drawn in the last frame
+    there. A press of the left button decides who holds it, until its
+    release or a loss of the focus; the facade keeps that itself, from the
+    events, so that a release and a press in one frame each go where they
+    happened. Where the pointer rests decides nothing, so a button the game
+    holds stays the game's as the pointer passes a window. The facade calls
+    `Input::set_capture` only when what it holds back changes: it touches
+    the capture while the debug UI wants something, and once more to let
+    go. A replay still plays, as its ticks come from the replay.
+  - **Places:** only `App::run` keeps them, in
+    `<config>/debug_ui.jsonc` (`user_dirs`), read before the loop and
+    given to the UI when it is made, and written whole, through a
+    `.tmp` file beside it and a rename, each time `places_revision`
+    changes, synced before the rename. The file is JSONC, version 1: `{ "version": 1, "windows": [ {
+    "name", "x", "y", "w", "h", "collapsed" } ] }`, a window named by its
+    explicit ID or its title, in the debug UI's units, after a comment
+    line. Read leniently: not there is no places; larger than 1 MiB, not
+    UTF-8 or JSONC, not an object, or of another version is a warning and
+    no places; a window without a name, finite numbers or its collapse is
+    left out with a warning; members it does not know are ignored.
+  - **`WindowSize`:** a resource of `dev`, the size of the inside of the
+    window in physical pixels, set before each frame by `App::run` and by
+    `Offscreen::frame`; `App::update` alone leaves it, zero until set.
+  - **The golden:** `debug_window`, in the facade's unit tests behind
+    `dev` (`debug_ui::golden`), drawn by `App::offscreen` at 320 × 180
+    over a game UI box: `Tools`, most kinds of widget (not the plot, whose
+    lines are rotated sprites, nor the drag, the colored label or the
+    color edit), taller than it so that it scrolls, and `Stats` collapsed
+    in front. It departs from ADR-0017's scenes in GL test binaries: the
+    debug UI is only in the facade's `dev`, whose unit tests hold it. `cargo xtask golden` runs it as its third command.
+  - **crates.io:** nadir-debug leaves `publish = false`, with its own
+    description, the workspace's other metadata, copies of `LICENSE` and
+    `NOTICE`, and a README in ADR-0039's shape whose example `src/lib.rs`
+    tests; `[workspace.dependencies]` gets it; xtask's crates test lists
+    it.
+  - **Four packages:** the facade, nadir-debug (`is_over` and its
+    metadata), the sandbox (its window) and xtask (the golden's command
+    and the crates test), past CLAUDE.md's three, as the user chose.
+- **Consequences:**
+  - A game builds its debug windows from `nadir::debug`, as M7.3 to M7.6
+    will build the engine's tools, each on its spec key; F8 is the
+    sandbox's.
+  - Opening the debug UI the first time allocates once (the font's files,
+    its loads, the UI's buffers: about 3,600 allocations in `cargo dev`);
+    a steady frame with a window open allocates nothing (a facade test,
+    and `cargo dev`'s reports).
+  - A game that sets `Input::set_capture` itself has it replaced while
+    the debug UI wants the pointer or the keyboard, and released to
+    nothing after, in development builds only. M9.2's game UI must combine
+    the two.
+  - A capture set at a frame's start from the last frame lags a frame for
+    keys: a key typed in the frame a field is clicked reaches the game for
+    a tick. A press is decided by the windows drawn in the frame before it,
+    as nadir-debug decides a press it takes a frame late by those of the
+    frame before that: they differ only for a window that moved between
+    the two. While the debug UI holds the left button, a button the game
+    held is released for it, as `Capture` holds the whole mouse.
+  - A window's place is restored by its name after a `##`
+    (`set_place("##a##b")`), so that an explicit ID with `##` in it keeps
+    its place.
+  - The debug UI's text is ASCII; other characters draw a box, though a
+    text field holds them.
+  - `debug_ui.jsonc` is read by a reader of the facade's, which has unit
+    tests of hand-made files but no fuzz target: xtask, which runs them,
+    may not depend on the facade. It reads only a file the engine writes,
+    in development builds.
+  - `WindowSize` is a `dev` resource; M9.2's game UI will want it in every
+    build.
+  - The crates go to crates.io as 15, from the next release.
+- **Alternatives considered:**
+  - A window of the engine's own, with no game API (the user chose the
+    game's API); one key for the whole debug UI, or none (the user chose a
+    key a window).
+  - A font cooked from a BMFont in an engine assets folder: cook and xtask
+    changes, and a game from crates.io would cook the engine's assets too
+    (the user chose the font in source). The cooked files checked in as
+    bytes: not reviewable. An asset server API to add assets made in
+    code: a change to nadir-assets for one font.
+  - `Free(scale_factor)` unrounded, or twice it (the user chose whole).
+  - The capture of the last frame only, as `wants_mouse` gives it: the
+    press in the frame the pointer arrives reaches the game for a tick, and
+    a button the game holds is released as the pointer passes a window.
+  - A hit test in nadir-debug that also asks who held the button at the
+    end of the last frame: a release and a press in one frame would go by
+    the old holder (a review found one click going to both, and one lost).
+  - The facade setting the capture every frame, `NONE` while hidden: a
+    game's own capture lost in every development build.
+  - `debug_ui.jsonc` written by every `App::update` and `App::offscreen`:
+    tests and recordings would write to the player's folders.
+  - The places as an object keyed by name: a duplicated key is a parse
+    error that loses the file.
+  - `WindowSize` in every build: the task asks for it under `dev`.
+- **Revisit when:** M9.2's game UI sets the capture or needs the window's
+  size outside `dev`; M9.3's settings give the UI scale; a tool needs text
+  beyond ASCII; or a fuzz harness can run the facade's readers.

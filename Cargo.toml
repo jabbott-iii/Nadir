@@ -54,6 +54,7 @@ nadir-audio = { path = "crates/audio", version = "0.3.0" }
 nadir-codec = { path = "crates/codec", version = "0.3.0" }
 nadir-collision = { path = "crates/collision", version = "0.3.0" }
 nadir-core = { path = "crates/core", version = "0.3.0" }
+nadir-debug = { path = "crates/debug", version = "0.3.0" }
 nadir-ecs = { path = "crates/ecs", version = "0.3.0" }
 nadir-gfx = { path = "crates/gfx", version = "0.3.0" }
 nadir-input = { path = "crates/input", version = "0.3.0" }

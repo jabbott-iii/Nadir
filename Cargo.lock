@@ -134,6 +134,7 @@ dependencies = [
  "nadir-codec",
  "nadir-collision",
  "nadir-core",
+ "nadir-debug",
  "nadir-ecs",
  "nadir-gfx",
  "nadir-input",
