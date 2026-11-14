@@ -5605,6 +5605,57 @@ by the batched sprite renderer.
 ## M8 — Gamepads
 
 - [ ] **M8.1 — Linux: evdev + inotify hotplug**
+  - ⏳ needs hardware: a real Xbox pad on Linux (`xpad`), USB, while `cargo
+    run -p nadir-platform --example events` runs: A at the bottom, X on the
+    left and Y on top as `GamepadButton`s of those names, the sticks with
+    up and left negative, the triggers 0 to 1, the d-pad, Back, Start and
+    Guide; then unplugged (its held buttons let go, then
+    `GamepadDisconnected`) and plugged in again without a restart (a new
+    id). For M8's exit criteria, a DualSense and a Switch Pro Controller
+    the same way: their face buttons by place (✕ and Nintendo B are `A`),
+    the Switch's ZL and ZR as triggers of 0 or 1.
+  - Note: written and checked on Linux (x86_64, COSMIC with XWayland) on
+    2026-11-14 (ADR-0065, accepted the same day):
+    - nadir-core: `GamepadButton` (15, by place, Xbox names) and
+      `GamepadAxis` (6).
+    - nadir-sys: the evdev structs, codes and requests, and `ioctl`,
+      `inotify_init1`, `inotify_add_watch`, `inotify_event`, `timeval`,
+      the flags, `ENODEV` and `_IOC_*`, each value and layout compared with
+      the headers through gcc 13.3 static assertions on x86_64. The layout
+      assertions also compiled for aarch64 Linux (`cargo clippy --target
+      aarch64-unknown-linux-gnu`); not run there.
+    - nadir-platform: `GamepadId`, `GamepadState`, the four events,
+      `poll_gamepads` and `gamepad_state`, `linux/evdev.rs`; a stand-in
+      that reports no pads on Windows and macOS, which compiled and passed
+      clippy for both architectures of each, not run there.
+  - Note: with no pad at hand, virtual pads made through `/dev/uinput` (a
+    C program in the session's scratch folder) stood in, the events
+    example running: a pad there before it started was reported first,
+    with its held B and its stick; one plugged in 2 s later was seen
+    without a restart, its 0x133 read as X (vendor 045e, by label), its
+    hat, trigger and stick right, and unplugged while holding Y it let Y
+    go before `GamepadDisconnected`; a Sony one (054c) on the same node
+    got a new id, its 0x133 read as Y and 0x134 as X, its stick of 0 to
+    255 up at -1. 3000 reports at once overflowed the kernel's buffer:
+    `SYN_DROPPED` came, the state was read again, and the pad ended with
+    A held and its stick at 12345 / 32767. udev gave each virtual pad's
+    node to the user (`uaccess`), as it does a real pad's. The permission
+    hint was not seen: it needs a gamepad whose node the user cannot
+    open.
+  - Note: a review the same day (ADR-0065) found a resync after
+    `SYN_DROPPED` that applied the rest of its read over the state, which
+    `EVIOCGKEY` had made stale: on a virtual pad, 130 overflows each with A
+    tapped inside left A held at 25 markers; after the fix, which drops what
+    was read and drains the device first, at none (in both runs nearly
+    every overflow lost most of its records, so the trials did overflow).
+    It found an Xbox pad over Bluetooth's right stick (`ABS_Z`/`ABS_RZ`) read
+    as its triggers: now read by what the pad has, and a virtual pad of that
+    layout (045e:0b13, Bluetooth, 0 to 65535, `ABS_BRAKE`/`ABS_GAS` 0 to
+    1023) gave its right stick, both triggers and no trigger at rest above 0.
+    And it found a stick of two values that never reached 1: its property
+    test, which failed with `NADIR_SEED` 81, 694 and 1271, passes with them.
+  - Note: the facade does not call `poll_gamepads` yet, and `nadir-input`
+    ignores the pads' events: both are M8.4's (its note).
   - Depends: M3.1, M1.2
   - Do: the evdev declarations (`/add-ffi-binding`); device detection via
     `EVIOCGBIT`; axis ranges via `EVIOCGABS`; non-blocking reads; `inotify`
@@ -5633,6 +5684,25 @@ by the batched sprite renderer.
     (manual)
 
 - [ ] **M8.4 — input: pad bindings, deadzones, active device, prompt data**
+  - Note (from M8.1, ADR-0065):
+    - The facade's loop must call `Platform::poll_gamepads` beside
+      `pump_events` (`docs/01-architecture.md`), or no pad is heard.
+    - A pad's events add up to its state: it connects at rest, what is held
+      then follows as events, and it goes back to rest by events before
+      `GamepadDisconnected`. `GamepadId::from_raw` makes ids for tests.
+    - Pads are read whether or not the window has the focus. SDL holds them
+      at rest in the background by default: decide here, beside
+      `Focused(false)`'s releases.
+    - `A` is the bottom face button on every pad. The prompt table maps
+      places to each family's labels, but the platform gives only the pad's
+      name (`GamepadState::name`) yet: a family, or the vendor and product
+      ids it comes from on Linux, needs adding to `GamepadState`.
+    - Under Steam Input, a PlayStation or Switch pad comes twice: its own
+      node and Steam's virtual Xbox pad. Steam lists the ids to skip, as
+      `0xVVVV/0xPPPP` pairs, in `SDL_GAMECONTROLLER_IGNORE_DEVICES` (and
+      `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT`), which SDL games read:
+      the platform's Linux backend should skip them, before a game ships on
+      Steam.
   - Note (from M4.7): a pad's analog values go into replays as the keys'
     do. If the recorder moves to a version 2, bless the determinism test's
     fixtures again: its live run compares its recording with `replay.nrpl`

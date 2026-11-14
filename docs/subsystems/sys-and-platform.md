@@ -124,7 +124,21 @@ pub enum Event {
     GamepadConnected(GamepadId),
     GamepadDisconnected(GamepadId),
     GamepadButton { id: GamepadId, button: GamepadButton, pressed: bool },
-    GamepadAxis { id: GamepadId, axis: GamepadAxis, value: f32 },   // -1..1 raw, no deadzone
+    GamepadAxis { id: GamepadId, axis: GamepadAxis, value: f32 },   // sticks -1..1 (+Y down), triggers 0..1; raw, no deadzone
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GamepadId(/* from 1, never given twice */);
+impl GamepadId {
+    pub const fn from_raw(raw: u32) -> Self;   // for tests and replays
+    pub const fn raw(self) -> u32;
+}
+
+pub struct GamepadState { /* … */ }
+impl GamepadState {
+    pub fn name(&self) -> &str;
+    pub fn pressed(&self, button: GamepadButton) -> bool;
+    pub fn axis(&self, axis: GamepadAxis) -> f32;
 }
 
 #[non_exhaustive]
@@ -254,6 +268,66 @@ pub fn create_headless_gl() -> Result<HeadlessGl, PlatformError>;               
 - macOS: a key press's `characters`, without Apple's function-key
   characters (U+F700 to U+F7FF). No input method yet (backlog).
 
+### Gamepads (M8.1, ADR-0065)
+
+- `poll_gamepads` appends the pads' events since the last call, without
+  waiting, apart from `pump_events`; the game calls both each frame. Its
+  first call reports the pads already plugged in.
+- **The events add up to the state.** A pad connects at rest, and what is
+  held on it then follows as events. A pad unplugged is put back at rest by
+  events of their own (each held button let go, each axis back at 0) before
+  `GamepadDisconnected`. `gamepad_state` gives the state the events so far
+  leave, while the pad is plugged in.
+- **Ids** count from 1 in the order pads connect and are never given twice
+  by one `Platform`: a pad plugged in again is a new pad.
+- **Values:** a button by its place on the pad (core's `GamepadButton`,
+  Xbox names); a stick's axis from -1 to 1 with +Y down, linear on each
+  side of the middle of the driver's range (rounded up), so that both ends
+  are exact, and the rest too in a range of three values or more; a
+  trigger from 0 to 1, or 0 or 1 if the pad's trigger is only a button;
+  the d-pad as four buttons. No dead zone: that
+  is `nadir-input`'s (M8.4).
+- Pads are read whether or not the window has the focus. Whether a game
+  hears them in the background is the input layer's call (M8.4).
+- Windows (M8.2) and macOS (M8.3) report no pads yet: the backend is a
+  stand-in, `no_gamepads`.
+- **Linux** (`linux/evdev.rs`), following `docs/03-platforms.md`:
+  - A device is a pad if it has `EV_KEY`, `EV_ABS` and `BTN_SOUTH`.
+  - The face buttons are read by place (`BTN_NORTH` is the top one) for
+    Sony's and Nintendo's vendor ids, whose drivers follow the kernel's
+    documentation, and by Xbox label (`BTN_X`, the same code, is X, on the
+    left) for every other pad, as `xpad` and an Xbox pad over Bluetooth
+    report them. SDL decides the same way for Sony's id; Nintendo's is
+    added because `hid-nintendo` reports by place too.
+  - The axes' roles come from what the pad has: the right stick on
+    `ABS_RX`/`ABS_RY` and analog triggers on `ABS_Z`/`ABS_RZ` (`xpad`,
+    `hid-playstation`, `hid-nintendo`); or, on a pad with no `ABS_RX` and
+    `ABS_RY`, the right stick on `ABS_Z`/`ABS_RZ` and analog triggers on
+    `ABS_BRAKE` (left) and `ABS_GAS` (right), as an Xbox pad over
+    Bluetooth through `hid-generic` or `hid-microsoft` has them.
+  - `BTN_TL2` and `BTN_TR2` drive the triggers only on a pad with no analog
+    trigger there. The d-pad is `ABS_HAT0X`/`ABS_HAT0Y` or `BTN_DPAD_*`.
+  - Records are read without waiting into a buffer on the stack, and
+    applied as they come. At the `SYN_REPORT` that ends a report after
+    `SYN_DROPPED`, the rest of that read and everything the device still
+    has queued is dropped, as libevdev does, and the state is read again
+    with `EVIOCGABS` and `EVIOCGKEY`, the changes reported. Every record
+    dropped is older than that state; and `EVIOCGKEY` takes the queued key
+    records out of the kernel's queue, so one applied after it could leave
+    a button stuck. A read that fails with `ENODEV` is the pad unplugged;
+    any other failure is logged, and the pad taken as unplugged.
+  - `inotify` on `/dev/input`, `IN_CREATE` and `IN_ATTRIB`: a node not open
+    yet is tried on either, so a node that udev opens to the user after
+    making it is opened then. `IN_Q_OVERFLOW` rescans the folder;
+    `IN_IGNORED`, or a failed read, stops the watch, with a warning.
+  - A gamepad that the first poll cannot open for want of permission, by
+    what sysfs (`/sys/class/input/eventN/device/capabilities`), which
+    everyone can read, says of it, is logged with a hint about the seat's
+    `uaccess` udev rules and the `input` group.
+  - Each `ioctl` request is checked to read exactly the size of the value
+    it fills, from the size its number carries, before it is sent.
+  - Polling allocates nothing while no pad is plugged in or unplugged.
+
 ### Allocation counter (feature `dev`)
 
 The counter wraps `std::alloc::System` with a `#[global_allocator]`. It keeps
@@ -277,6 +351,9 @@ it requires `unsafe impl GlobalAlloc`.
   user's own (ADR-0057; they came before it until M7.9).
 - `Key` values are physical. Text comes only through `Event::Text`, after
   the key press that typed it.
+- A gamepad's events, from its `GamepadConnected` to its
+  `GamepadDisconnected`, start and end at rest, and give its state at every
+  point: no button is down and no axis off 0 at either end.
 - Mouse coordinates are in physical pixels with a top-left origin on every
   OS.
 - `GpuSurface` stays valid for the lifetime of `Platform`. Window recreation
@@ -348,3 +425,18 @@ it requires `unsafe impl GlobalAlloc`.
     a device past the sound server, for unplugging and replugging it.
 - **The window's context:** an ignored test, run with `--ignored` on an X11
   or XWayland session, opens a window three times.
+- **Gamepads** (M8.1): the state's changes and rest as events; on Linux,
+  the code → button and axis table for both readings of the face buttons,
+  every button and axis reached on each of four layouts (`xpad`, Switch
+  Pro, an Xbox pad over Bluetooth, a DirectInput pad), the trigger
+  buttons, the hat, the axes' roles; the axes' normalization (the ends and
+  the rest of the xpad, DualSense and Switch ranges, a range of two values,
+  and property tests that a stick stays in -1..1 with exact ends and a
+  trigger in 0..1, both monotonic); the `SYN_DROPPED` decoder; records and
+  inotify events read from bytes; sysfs bitmaps; requests of the wrong size
+  refused; and a pad read through a socket pair standing in for its device:
+  its records, the records dropped after a lost report, its unplugging
+  and, with `dev`, no allocation. `nadir-sys` tests
+  `inotify` and `ioctl` on real files. A pad by hand: the events example
+  prints the pads' events, which `/dev/uinput` can stand in for when no pad
+  is at hand (roadmap M8.1).

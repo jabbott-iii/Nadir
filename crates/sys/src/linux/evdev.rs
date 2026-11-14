@@ -12,17 +12,62 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Linux input event codes: the kernel's numbers for keys.
+//! Linux input devices (evdev): the kernel's numbers for keys, a gamepad's
+//! buttons and axes, the records read from `/dev/input/event*`, and the
+//! `ioctl` requests that describe a device.
 //!
-//! Source: `<linux/input-event-codes.h>`. Each constant quotes its `#define`.
+//! Sources: `<linux/input-event-codes.h>` for the codes, `<linux/input.h>`
+//! for the structs and the requests, and `<asm-generic/ioctl.h>` for how a
+//! request is numbered, which x86_64 and aarch64 both use. Each item quotes
+//! its `#define` or its declaration.
 //!
-//! Only the codes that `nadir-platform` maps to a key are declared, in the
-//! header's order. The type is that of the `code` field of the kernel's
-//! `struct input_event`, `__u16`.
+//! Only the codes that `nadir-platform` maps to a key or reads from a
+//! gamepad are declared, in the header's order. A code's type is that of the
+//! `code` field of the kernel's `struct input_event`, `__u16`.
 //!
-//! These are also what an X server reports, shifted: on a server whose
-//! keyboard rules are `evdev`, which is every current Linux desktop and
+//! The key codes are also what an X server reports, shifted: on a server
+//! whose keyboard rules are `evdev`, which is every current Linux desktop and
 //! XWayland, an X keycode is one of these codes plus 8.
+//!
+//! The requests whose size is an argument of their macro (`EVIOCGBIT`,
+//! `EVIOCGKEY`, `EVIOCGNAME`) or whose number is (`EVIOCGABS`) are declared
+//! for the arguments that are used, each named after its macro and argument.
+//! `_IOC(dir, type, nr, size)` is `dir << 30 | size << 16 | type << 8 | nr`,
+//! with `_IOC_READ` 2.
+
+use core::ffi::c_ulong;
+use core::mem::offset_of;
+
+use super::libc::timeval;
+
+/// Event type: a marker between groups of events, such as the end of one
+/// report of the device's state.
+/// `linux/input-event-codes.h`: `#define EV_SYN 0x00`
+pub const EV_SYN: u16 = 0x00;
+
+/// Event type: a key or button went down (value 1), up (0), or repeated (2).
+/// `linux/input-event-codes.h`: `#define EV_KEY 0x01`
+pub const EV_KEY: u16 = 0x01;
+
+/// Event type: an absolute axis has a new value.
+/// `linux/input-event-codes.h`: `#define EV_ABS 0x03`
+pub const EV_ABS: u16 = 0x03;
+
+/// The number of event types: [`EVIOCGBIT_EV`] reports one bit for each.
+/// `linux/input-event-codes.h`: `#define EV_MAX 0x1f` and `#define EV_CNT
+/// (EV_MAX+1)`
+pub const EV_CNT: u16 = 0x20;
+
+/// An [`EV_SYN`] code: the end of a report. The events since the last one
+/// happened at once.
+/// `linux/input-event-codes.h`: `#define SYN_REPORT 0`
+pub const SYN_REPORT: u16 = 0;
+
+/// An [`EV_SYN`] code: the kernel's buffer of the device's events overflowed,
+/// and events were lost. The events up to the next [`SYN_REPORT`] are to be
+/// dropped, and the state read again with `ioctl`.
+/// `linux/input-event-codes.h`: `#define SYN_DROPPED 3`
+pub const SYN_DROPPED: u16 = 3;
 
 /// `linux/input-event-codes.h`: `#define KEY_ESC 1`
 pub const KEY_ESC: u16 = 1;
@@ -377,3 +422,315 @@ pub const KEY_F23: u16 = 193;
 
 /// `linux/input-event-codes.h`: `#define KEY_F24 194`
 pub const KEY_F24: u16 = 194;
+
+/// A gamepad's bottom face button, whatever its label (Xbox A, PlayStation
+/// ✕). Also `BTN_A`, and `BTN_GAMEPAD`, the first gamepad button.
+/// `linux/input-event-codes.h`: `#define BTN_SOUTH 0x130`
+pub const BTN_SOUTH: u16 = 0x130;
+
+/// A gamepad's right face button, whatever its label (Xbox B, PlayStation
+/// ○). Also `BTN_B`.
+/// `linux/input-event-codes.h`: `#define BTN_EAST 0x131`
+pub const BTN_EAST: u16 = 0x131;
+
+/// A gamepad's top face button (PlayStation △), by the kernel's
+/// documentation. The Xbox driver `xpad` reports the X button, on the left,
+/// as this code under its other name, [`BTN_X`].
+/// `linux/input-event-codes.h`: `#define BTN_NORTH 0x133`
+pub const BTN_NORTH: u16 = 0x133;
+
+/// The same code as [`BTN_NORTH`], by the name that drivers which report the
+/// buttons by their Xbox labels use for X.
+/// `linux/input-event-codes.h`: `#define BTN_X BTN_NORTH`
+pub const BTN_X: u16 = BTN_NORTH;
+
+/// A gamepad's left face button (PlayStation □), by the kernel's
+/// documentation. The Xbox driver `xpad` reports the Y button, on top, as
+/// this code under its other name, [`BTN_Y`].
+/// `linux/input-event-codes.h`: `#define BTN_WEST 0x134`
+pub const BTN_WEST: u16 = 0x134;
+
+/// The same code as [`BTN_WEST`], by the name that drivers which report the
+/// buttons by their Xbox labels use for Y.
+/// `linux/input-event-codes.h`: `#define BTN_Y BTN_WEST`
+pub const BTN_Y: u16 = BTN_WEST;
+
+/// The left shoulder button (LB, L1, L).
+/// `linux/input-event-codes.h`: `#define BTN_TL 0x136`
+pub const BTN_TL: u16 = 0x136;
+
+/// The right shoulder button (RB, R1, R).
+/// `linux/input-event-codes.h`: `#define BTN_TR 0x137`
+pub const BTN_TR: u16 = 0x137;
+
+/// The left trigger as a button (L2, ZL): a pad with an analog trigger may
+/// report both.
+/// `linux/input-event-codes.h`: `#define BTN_TL2 0x138`
+pub const BTN_TL2: u16 = 0x138;
+
+/// The right trigger as a button (R2, ZR).
+/// `linux/input-event-codes.h`: `#define BTN_TR2 0x139`
+pub const BTN_TR2: u16 = 0x139;
+
+/// The left middle button (Xbox View or Back, PlayStation Create, Nintendo
+/// −).
+/// `linux/input-event-codes.h`: `#define BTN_SELECT 0x13a`
+pub const BTN_SELECT: u16 = 0x13a;
+
+/// The right middle button (Xbox Menu or Start, PlayStation Options,
+/// Nintendo +).
+/// `linux/input-event-codes.h`: `#define BTN_START 0x13b`
+pub const BTN_START: u16 = 0x13b;
+
+/// The logo button (Xbox, PS, Home).
+/// `linux/input-event-codes.h`: `#define BTN_MODE 0x13c`
+pub const BTN_MODE: u16 = 0x13c;
+
+/// The left stick pressed in.
+/// `linux/input-event-codes.h`: `#define BTN_THUMBL 0x13d`
+pub const BTN_THUMBL: u16 = 0x13d;
+
+/// The right stick pressed in.
+/// `linux/input-event-codes.h`: `#define BTN_THUMBR 0x13e`
+pub const BTN_THUMBR: u16 = 0x13e;
+
+/// The d-pad's up, on a pad that reports the d-pad as buttons and not as
+/// [`ABS_HAT0X`] and [`ABS_HAT0Y`].
+/// `linux/input-event-codes.h`: `#define BTN_DPAD_UP 0x220`
+pub const BTN_DPAD_UP: u16 = 0x220;
+
+/// The d-pad's down.
+/// `linux/input-event-codes.h`: `#define BTN_DPAD_DOWN 0x221`
+pub const BTN_DPAD_DOWN: u16 = 0x221;
+
+/// The d-pad's left.
+/// `linux/input-event-codes.h`: `#define BTN_DPAD_LEFT 0x222`
+pub const BTN_DPAD_LEFT: u16 = 0x222;
+
+/// The d-pad's right.
+/// `linux/input-event-codes.h`: `#define BTN_DPAD_RIGHT 0x223`
+pub const BTN_DPAD_RIGHT: u16 = 0x223;
+
+/// The number of key and button codes: [`EVIOCGBIT_KEY`] and
+/// [`EVIOCGKEY_ALL`] report one bit for each.
+/// `linux/input-event-codes.h`: `#define KEY_MAX 0x2ff` and `#define KEY_CNT
+/// (KEY_MAX+1)`
+pub const KEY_CNT: u16 = 0x300;
+
+/// The left stick's horizontal axis. Negative is left.
+/// `linux/input-event-codes.h`: `#define ABS_X 0x00`
+pub const ABS_X: u16 = 0x00;
+
+/// The left stick's vertical axis. Negative is up.
+/// `linux/input-event-codes.h`: `#define ABS_Y 0x01`
+pub const ABS_Y: u16 = 0x01;
+
+/// The left analog trigger, on the gamepads of `xpad` and
+/// `hid-playstation`; the right stick's horizontal axis on an Xbox pad over
+/// Bluetooth (see [`ABS_GAS`]).
+/// `linux/input-event-codes.h`: `#define ABS_Z 0x02`
+pub const ABS_Z: u16 = 0x02;
+
+/// The right stick's horizontal axis.
+/// `linux/input-event-codes.h`: `#define ABS_RX 0x03`
+pub const ABS_RX: u16 = 0x03;
+
+/// The right stick's vertical axis.
+/// `linux/input-event-codes.h`: `#define ABS_RY 0x04`
+pub const ABS_RY: u16 = 0x04;
+
+/// The right analog trigger, on the gamepads of `xpad` and
+/// `hid-playstation`; the right stick's vertical axis on an Xbox pad over
+/// Bluetooth.
+/// `linux/input-event-codes.h`: `#define ABS_RZ 0x05`
+pub const ABS_RZ: u16 = 0x05;
+
+/// The right trigger of an Xbox pad over Bluetooth, through `hid-generic`
+/// or `hid-microsoft`, which put its right stick on [`ABS_Z`] and
+/// [`ABS_RZ`].
+/// `linux/input-event-codes.h`: `#define ABS_GAS 0x09`
+pub const ABS_GAS: u16 = 0x09;
+
+/// The left trigger of an Xbox pad over Bluetooth (see [`ABS_GAS`]).
+/// `linux/input-event-codes.h`: `#define ABS_BRAKE 0x0a`
+pub const ABS_BRAKE: u16 = 0x0a;
+
+/// The d-pad's horizontal axis, -1 to 1, on a pad that reports the d-pad
+/// as a hat.
+/// `linux/input-event-codes.h`: `#define ABS_HAT0X 0x10`
+pub const ABS_HAT0X: u16 = 0x10;
+
+/// The d-pad's vertical axis, -1 (up) to 1 (down).
+/// `linux/input-event-codes.h`: `#define ABS_HAT0Y 0x11`
+pub const ABS_HAT0Y: u16 = 0x11;
+
+/// The number of absolute axis codes: [`EVIOCGBIT_ABS`] reports one bit for
+/// each.
+/// `linux/input-event-codes.h`: `#define ABS_MAX 0x3f` and `#define ABS_CNT
+/// (ABS_MAX+1)`
+pub const ABS_CNT: u16 = 0x40;
+
+/// One event, as `read` gives them from an event device: a whole number of
+/// these, never part of one.
+/// `linux/input.h`:
+///
+/// ```c
+/// struct input_event {
+///     struct timeval time;   /* on 64-bit targets */
+///     __u16 type;
+///     __u16 code;
+///     __s32 value;
+/// };
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct input_event {
+    /// When the event happened, by the clock the device was set to
+    /// (`CLOCK_REALTIME` unless changed).
+    pub time: timeval,
+    /// The event type: [`EV_SYN`], [`EV_KEY`], [`EV_ABS`], ...
+    pub type_: u16,
+    /// The code within the type: a `KEY_*`, `BTN_*` or `ABS_*`.
+    pub code: u16,
+    /// For a key, 1 down, 0 up and 2 a repeat; for an axis, its value.
+    pub value: i32,
+}
+
+// Our targets are 64-bit, where the header uses `struct timeval`.
+const _: () = assert!(size_of::<input_event>() == 24);
+const _: () = assert!(align_of::<input_event>() == 8);
+const _: () = assert!(offset_of!(input_event, type_) == 16);
+const _: () = assert!(offset_of!(input_event, code) == 18);
+const _: () = assert!(offset_of!(input_event, value) == 20);
+
+/// Who made a device, as [`EVIOCGID`] gives it.
+/// `linux/input.h`:
+///
+/// ```c
+/// struct input_id {
+///     __u16 bustype;
+///     __u16 vendor;
+///     __u16 product;
+///     __u16 version;
+/// };
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct input_id {
+    /// The bus, a `BUS_*` number (USB, Bluetooth, ...).
+    pub bustype: u16,
+    /// The vendor's id: the USB vendor id for a USB or Bluetooth device.
+    pub vendor: u16,
+    /// The vendor's product id.
+    pub product: u16,
+    /// The product's version.
+    pub version: u16,
+}
+
+const _: () = assert!(size_of::<input_id>() == 8);
+const _: () = assert!(align_of::<input_id>() == 2);
+const _: () = assert!(offset_of!(input_id, vendor) == 2);
+const _: () = assert!(offset_of!(input_id, product) == 4);
+
+/// An absolute axis: its value and its range, as an `EVIOCGABS` request
+/// gives them.
+/// `linux/input.h`:
+///
+/// ```c
+/// struct input_absinfo {
+///     __s32 value;
+///     __s32 minimum;
+///     __s32 maximum;
+///     __s32 fuzz;
+///     __s32 flat;
+///     __s32 resolution;
+/// };
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct input_absinfo {
+    /// The axis's value now.
+    pub value: i32,
+    /// The smallest value the axis reports.
+    pub minimum: i32,
+    /// The largest value the axis reports.
+    pub maximum: i32,
+    /// The noise the driver filters out.
+    pub fuzz: i32,
+    /// The driver's suggested dead zone around the center.
+    pub flat: i32,
+    /// Units per millimeter, or per radian: often 0, unknown.
+    pub resolution: i32,
+}
+
+const _: () = assert!(size_of::<input_absinfo>() == 24);
+const _: () = assert!(align_of::<input_absinfo>() == 4);
+const _: () = assert!(offset_of!(input_absinfo, minimum) == 4);
+const _: () = assert!(offset_of!(input_absinfo, maximum) == 8);
+
+/// Reads the device's [`input_id`].
+/// `linux/input.h`: `#define EVIOCGID _IOR('E', 0x02, struct input_id)`
+pub const EVIOCGID: c_ulong = 0x8008_4502;
+
+/// Reads the device's name into a buffer of 256 bytes, with a NUL at the
+/// end; `ioctl` returns the bytes written, the NUL among them.
+/// `linux/input.h`: `#define EVIOCGNAME(len) _IOC(_IOC_READ, 'E', 0x06,
+/// len)`, with `len` 256.
+pub const EVIOCGNAME_256: c_ulong = 0x8100_4506;
+
+/// Reads the device's state of every key and button: [`KEY_CNT`] bits, one
+/// for each code, in [`KEY_CNT`]` / 8` bytes, bit `n % 8` of byte `n / 8`
+/// set while code `n` is down.
+/// `linux/input.h`: `#define EVIOCGKEY(len) _IOC(_IOC_READ, 'E', 0x18,
+/// len)`, with `len` `KEY_CNT / 8`.
+pub const EVIOCGKEY_ALL: c_ulong = 0x8060_4518;
+
+/// Reads which event types the device reports: [`EV_CNT`] bits in
+/// [`EV_CNT`]` / 8` bytes, bit `n % 8` of byte `n / 8` for type `n`.
+/// `linux/input.h`: `#define EVIOCGBIT(ev,len) _IOC(_IOC_READ, 'E', 0x20 +
+/// (ev), len)`, with `ev` 0 and `len` `EV_CNT / 8`.
+pub const EVIOCGBIT_EV: c_ulong = 0x8004_4520;
+
+/// Reads which key and button codes the device reports: [`KEY_CNT`] bits in
+/// [`KEY_CNT`]` / 8` bytes.
+/// `linux/input.h`: `EVIOCGBIT(ev,len)`, with `ev` [`EV_KEY`] and `len`
+/// `KEY_CNT / 8`.
+pub const EVIOCGBIT_KEY: c_ulong = 0x8060_4521;
+
+/// Reads which absolute axes the device reports: [`ABS_CNT`] bits in
+/// [`ABS_CNT`]` / 8` bytes.
+/// `linux/input.h`: `EVIOCGBIT(ev,len)`, with `ev` [`EV_ABS`] and `len`
+/// `ABS_CNT / 8`.
+pub const EVIOCGBIT_ABS: c_ulong = 0x8008_4523;
+
+/// Reads [`ABS_X`]'s [`input_absinfo`].
+/// `linux/input.h`: `#define EVIOCGABS(abs) _IOR('E', 0x40 + (abs), struct
+/// input_absinfo)`, with `abs` `ABS_X`.
+pub const EVIOCGABS_X: c_ulong = 0x8018_4540;
+
+/// Reads [`ABS_Y`]'s [`input_absinfo`]: `EVIOCGABS(ABS_Y)`.
+pub const EVIOCGABS_Y: c_ulong = 0x8018_4541;
+
+/// Reads [`ABS_Z`]'s [`input_absinfo`]: `EVIOCGABS(ABS_Z)`.
+pub const EVIOCGABS_Z: c_ulong = 0x8018_4542;
+
+/// Reads [`ABS_RX`]'s [`input_absinfo`]: `EVIOCGABS(ABS_RX)`.
+pub const EVIOCGABS_RX: c_ulong = 0x8018_4543;
+
+/// Reads [`ABS_RY`]'s [`input_absinfo`]: `EVIOCGABS(ABS_RY)`.
+pub const EVIOCGABS_RY: c_ulong = 0x8018_4544;
+
+/// Reads [`ABS_RZ`]'s [`input_absinfo`]: `EVIOCGABS(ABS_RZ)`.
+pub const EVIOCGABS_RZ: c_ulong = 0x8018_4545;
+
+/// Reads [`ABS_GAS`]'s [`input_absinfo`]: `EVIOCGABS(ABS_GAS)`.
+pub const EVIOCGABS_GAS: c_ulong = 0x8018_4549;
+
+/// Reads [`ABS_BRAKE`]'s [`input_absinfo`]: `EVIOCGABS(ABS_BRAKE)`.
+pub const EVIOCGABS_BRAKE: c_ulong = 0x8018_454a;
+
+/// Reads [`ABS_HAT0X`]'s [`input_absinfo`]: `EVIOCGABS(ABS_HAT0X)`.
+pub const EVIOCGABS_HAT0X: c_ulong = 0x8018_4550;
+
+/// Reads [`ABS_HAT0Y`]'s [`input_absinfo`]: `EVIOCGABS(ABS_HAT0Y)`.
+pub const EVIOCGABS_HAT0Y: c_ulong = 0x8018_4551;

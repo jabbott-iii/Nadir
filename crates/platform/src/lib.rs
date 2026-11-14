@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The OS layer of the Nadir engine: a window and its events, OpenGL
-//! contexts, audio output, the user's folders, an error dialog and a
+//! The OS layer of the Nadir engine: a window and its events, gamepads,
+//! OpenGL contexts, audio output, the user's folders, an error dialog and a
 //! precise sleep, with one safe API on Linux, Windows and macOS.
 //!
 //! # Where it fits
@@ -47,8 +47,8 @@
 //!
 //! # Events
 //!
-//! An [`Event`] is something that happened to the window or to the keyboard
-//! and mouse, in the order the system reported it:
+//! An [`Event`] is something that happened to the window, to the keyboard
+//! and mouse, or to a gamepad (below), in the order the system reported it:
 //!
 //! - One [`Event::ScaleFactorChanged`] comes before any other event. On
 //!   Windows and macOS another comes each time the scale factor changes.
@@ -66,6 +66,25 @@
 //! - Right after [`Event::Focused`]`(false)`, every key and button that is
 //!   down gets a release, so nothing stays held while the window cannot see
 //!   it go up.
+//!
+//! # Gamepads
+//!
+//! - [`Platform::poll_gamepads`] appends what the gamepads did since the
+//!   last call, without waiting: call it once a frame, beside
+//!   `pump_events`. Its first call reports the pads already plugged in.
+//! - A pad plugged in is [`Event::GamepadConnected`], at rest; what is held
+//!   on it follows as events. A pad unplugged is put back at rest by events,
+//!   then [`Event::GamepadDisconnected`]. So the events alone give each
+//!   pad's state, which [`Platform::gamepad_state`] also gives, as a
+//!   [`GamepadState`].
+//! - A [`GamepadId`] is never given twice: a pad plugged in again is a new
+//!   one.
+//! - [`Event::GamepadButton`] names a [`nadir_core::GamepadButton`] by its
+//!   place on the pad, with the Xbox pad's names: `A` is the bottom face
+//!   button on every pad. [`Event::GamepadAxis`] gives a stick's axis from
+//!   -1 to 1, with +Y down, and a trigger from 0 to 1, raw: dead zones are
+//!   the input layer's.
+//! - Pads are read whether or not the window has the focus.
 //!
 //! # Drawing
 //!
@@ -257,7 +276,11 @@
 //!   Typed text comes from the X input method that `XMODIFIERS` names, or
 //!   else Xlib's own, which composes from the locale's Compose file.
 //!   Audio goes to ALSA's `default` device, which PipeWire or PulseAudio
-//!   usually provides.
+//!   usually provides. Gamepads are the kernel's event devices in
+//!   `/dev/input`, which the desktop's udev rules open to the user at the
+//!   seat, watched with `inotify` for pads plugged in; the drivers `xpad`,
+//!   `hid-playstation` and `hid-nintendo` give the standard codes, and an
+//!   Xbox pad over Bluetooth its own axes, which are read too.
 //! - **Windows** 10 and later: a Win32 window, aware of each monitor's DPI,
 //!   with borderless fullscreen. It builds and passes its tests in CI, and
 //!   still awaits its checks by hand (roadmap task M1.5). It has no OpenGL
@@ -265,20 +288,21 @@
 //!   functions, whose swaps fail with [`PlatformError::Unsupported`], and
 //!   [`create_headless_gl`] returns that error. [`WindowConfig::vsync`] is
 //!   ignored there for now, and [`open_audio`] returns
-//!   [`PlatformError::Unsupported`] until M6.4.
+//!   [`PlatformError::Unsupported`] until M6.4. It reports no gamepads until
+//!   M8.2.
 //! - **macOS** 12 and later: an AppKit window, whose fullscreen is the
 //!   system's own, in a Space of its own. It builds and passes its tests in
 //!   CI, and still awaits its checks by hand (M1.6). It has no OpenGL context
 //!   yet (M2.7): the same stand-in as on Windows, and `vsync` is ignored.
-//!   Nor has it audio output yet (M6.5).
+//!   Nor has it audio output yet (M6.5), nor gamepads (M8.3).
 //! - On any other system, [`Platform::new`], [`user_dirs`],
 //!   [`create_headless_gl`] and [`open_audio`] return
 //!   [`PlatformError::Unsupported`].
 //!
-//! Not built yet on any system: gamepads (M8.1 to M8.3), Metal (M10.1),
-//! showing a text being composed, noticing that the window was minimized,
-//! holding the pointer inside the window, and native Wayland. macOS has no
-//! input method for typed text yet.
+//! Not built yet on any system: Metal (M10.1), showing a text being
+//! composed, noticing that the window was minimized, holding the pointer
+//! inside the window, and native Wayland. macOS has no input method for
+//! typed text yet.
 
 // One of the three crates allowed to contain `unsafe` (AGENTS.md, rule 3). The
 // workspace denies `unsafe_code` everywhere else.
@@ -295,6 +319,7 @@ mod audio;
 mod dialog;
 mod error;
 mod event;
+mod gamepad;
 mod gpu;
 mod paths;
 mod sleep;
@@ -307,6 +332,8 @@ mod linux;
 mod macos;
 #[cfg(not(target_os = "linux"))]
 mod no_audio;
+#[cfg(not(target_os = "linux"))]
+mod no_gamepads;
 #[cfg(not(target_os = "linux"))]
 mod no_gl;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -322,14 +349,19 @@ pub use audio::{AudioOutputConfig, AudioRender, AudioStream, open_audio};
 pub use dialog::show_error_dialog;
 pub use error::PlatformError;
 pub use event::Event;
+pub use gamepad::{GamepadId, GamepadState};
 pub use gpu::{GlContext, GlContextId, GpuSurface, HeadlessGl, create_headless_gl};
 pub use paths::{UserDirs, user_dirs};
 pub use sleep::precise_sleep;
 
 #[cfg(target_os = "linux")]
 use linux::Backend;
+#[cfg(target_os = "linux")]
+use linux::Gamepads;
 #[cfg(target_os = "macos")]
 use macos::Backend;
+#[cfg(not(target_os = "linux"))]
+use no_gamepads::Gamepads;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 use unsupported::Backend;
 #[cfg(target_os = "windows")]
@@ -374,6 +406,7 @@ pub struct ModalFrame {
 /// OpenGL context, so the thread cannot have another (see [`GlContext`]).
 pub struct Platform {
     backend: Backend,
+    gamepads: Gamepads,
 }
 
 impl Platform {
@@ -397,6 +430,7 @@ impl Platform {
     pub fn new(config: &WindowConfig) -> Result<Self, PlatformError> {
         Ok(Self {
             backend: Backend::new(config)?,
+            gamepads: Gamepads::new(),
         })
     }
 
@@ -404,6 +438,33 @@ impl Platform {
     /// not wait for any.
     pub fn pump_events(&mut self, out: &mut Vec<Event>) {
         self.backend.pump_events(out);
+    }
+
+    /// Appends what happened to the gamepads since the last call to `out`:
+    /// pads plugged in and unplugged, and their buttons and axes. Does not
+    /// wait for any. Call it once a frame, beside
+    /// [`Platform::pump_events`].
+    ///
+    /// The first call reports the pads that are already plugged in: each one
+    /// [`Event::GamepadConnected`], at rest, then what is held on it. A pad
+    /// unplugged is put back at rest by events of their own before its
+    /// [`Event::GamepadDisconnected`], so that the events alone always give
+    /// each pad's state. Pads are read whether or not the window has the
+    /// focus.
+    ///
+    /// Linux reads the kernel's event devices, and needs read access to the
+    /// gamepads' nodes in `/dev/input`, which the desktop's udev rules
+    /// normally give the user at the seat. Windows (roadmap task M8.2) and
+    /// macOS (M8.3) report no pads yet.
+    pub fn poll_gamepads(&mut self, out: &mut Vec<Event>) {
+        self.gamepads.poll(out);
+    }
+
+    /// What the pad's buttons and axes are, as the events reported so far
+    /// leave them, while it is plugged in. `None` for a pad that was
+    /// unplugged, or never reported.
+    pub fn gamepad_state(&self, id: GamepadId) -> Option<&GamepadState> {
+        self.gamepads.state(id)
     }
 
     /// The size of the inside of the window, in physical pixels.

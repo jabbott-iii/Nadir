@@ -32,7 +32,8 @@ What is built:
 - FNV-1a, CRC-32, and `FastHashMap` / `FastHashSet` with a hasher that has
   no random state;
 - `GenArena`, `GenIndex` and the typed `Handle<T>`;
-- `Key` (118 physical keys, numbered by USB HID usage) and `MouseButton`;
+- `Key` (118 physical keys, numbered by USB HID usage), `MouseButton`, and
+  a gamepad's `GamepadButton` and `GamepadAxis`;
 - `profile_scope!` timers, behind the `profile` feature;
 - `cli::Args`, a small argument parser;
 - `civil::DateTime`, UTC calendar time for log lines and file names;

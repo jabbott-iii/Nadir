@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Opens a window and prints every event it reports.
+//! Opens a window and prints every event it and the gamepads report.
 //!
 //! ```text
 //! cargo run -p nadir-platform --example events -- [options]
@@ -35,6 +35,9 @@
 //! While the system holds the event loop (on Windows, while the window is
 //! dragged or resized), it counts modal frames, and says how many ran once
 //! the loop is back.
+//!
+//! Gamepads are polled with the window's events: plugging one in or out, its
+//! buttons and its axes are printed too, and a pad's name when it connects.
 
 use std::cell::Cell;
 use std::error::Error;
@@ -106,10 +109,16 @@ fn run(mut args: Args, out: &mut dyn Write) -> Result<(), Box<dyn Error>> {
     let mut titles = 0;
     loop {
         platform.pump_events(&mut events);
+        platform.poll_gamepads(&mut events);
         for &event in &events {
             writeln!(out, "{:9.3}  {event:?}", start.elapsed().as_secs_f64())?;
             match event {
                 Event::CloseRequested => return Ok(()),
+                Event::GamepadConnected(id) => {
+                    if let Some(state) = platform.gamepad_state(id) {
+                        writeln!(out, "           gamepad {}: {:?}", id.raw(), state.name())?;
+                    }
+                }
                 Event::Key {
                     key,
                     pressed: true,

@@ -72,9 +72,9 @@
 //!   once its value is removed. [`Handle`] tags an index with the type it
 //!   refers to.
 //! - **Input names**, in [`keys`]: [`Key`], a physical key numbered by its
-//!   USB HID usage, and [`MouseButton`]. The platform layer turns OS events
-//!   into these. Names for gamepad buttons and axes are not here yet; they
-//!   come with gamepad support (roadmap M8).
+//!   USB HID usage, [`MouseButton`], and a gamepad's [`GamepadButton`]
+//!   (by place, with the Xbox pad's names) and [`GamepadAxis`]. The
+//!   platform layer turns OS events into these.
 //! - **Profiling**, in [`profile`]: [`profile_scope!`] times the rest of a
 //!   block, and [`profile::take_frame`] collects the calling thread's
 //!   [`profile::ScopeRecord`]s. Recording needs the `profile` feature.
@@ -295,7 +295,7 @@ pub use color::{Color, LinearColor};
 pub use error::CoreError;
 pub use handle::{GenArena, GenIndex, Handle};
 pub use hash::{FastHashMap, FastHashSet};
-pub use keys::{Key, MouseButton};
+pub use keys::{GamepadAxis, GamepadButton, Key, MouseButton};
 pub use math::{Affine2, IRect, IVec2, Mat3, Rect, UVec2, Vec2};
 pub use rng::Pcg32;
 pub use time::{FixedClock, Frame, Stopwatch, Tick};

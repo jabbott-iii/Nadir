@@ -26,8 +26,9 @@ Declared today:
   (`dynlib`).
 - Linux: the dynamic loader (`dlopen`, `dlsym`, `dlerror`), the character
   locale (`setlocale`), Xlib (`libX11.so.6`) with its input methods for
-  typed text, EGL (`libEGL.so.1`), ALSA's PCM output (`libasound.so.2`) and
-  the kernel's key codes.
+  typed text, EGL (`libEGL.so.1`), ALSA's PCM output (`libasound.so.2`),
+  and the kernel's input devices (evdev): the key codes, a gamepad's codes,
+  records and requests, with `ioctl` and `inotify`.
 - Windows: the Win32 types and functions of `kernel32`, `user32`, `gdi32`,
   `shell32` and `ole32` that a window, its messages, the user's folders and
   a message box need.
@@ -35,8 +36,8 @@ Declared today:
   of Foundation, AppKit and HIToolbox's key codes.
 
 Not declared yet: WGL and NSOpenGL (roadmap tasks M2.6 and M2.7), WASAPI
-and CoreAudio (M6.4 and M6.5), the gamepad APIs (M8.1 to M8.3), and Metal
-(M10.1).
+and CoreAudio (M6.4 and M6.5), the gamepad APIs of Windows and macOS
+(M8.2 and M8.3), and Metal (M10.1).
 
 ## Usage
 

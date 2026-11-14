@@ -13,10 +13,12 @@
 // limitations under the License.
 
 //! The Linux backend: X11 through Xlib, which is loaded when the window is
-//! opened. A Wayland session runs it through XWayland.
+//! opened. A Wayland session runs it through XWayland. Gamepads are the
+//! kernel's event devices.
 
 pub(crate) mod alsa;
 mod egl;
+mod evdev;
 mod keymap;
 mod library;
 mod x11;
@@ -24,5 +26,6 @@ mod xdg;
 mod xresources;
 
 pub(crate) use egl::Headless;
+pub(crate) use evdev::Gamepads;
 pub(crate) use x11::Backend;
 pub(crate) use xdg::user_dirs;

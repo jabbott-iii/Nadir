@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Physical input identifiers: keyboard keys and mouse buttons.
+//! Physical input identifiers: keyboard keys, mouse buttons, and a
+//! gamepad's buttons and axes.
 //!
 //! A [`Key`] names a place on the keyboard, not the character printed there.
 //! The key right of Tab is [`Key::Q`] on every layout, though an AZERTY
 //! keyboard prints `A` on it. So bindings such as WASD stay where the
 //! player's fingers are. Text that the player types is a separate thing, and
 //! comes from the platform as characters.
+//!
+//! A [`GamepadButton`] is a place on the pad too, named after the Xbox pad:
+//! [`GamepadButton::A`] is the bottom face button, which a PlayStation pad
+//! labels ✕ and a Nintendo one B.
 
 /// Declares [`Key`] and [`Key::ALL`] from one list, so that the two cannot
 /// disagree.
@@ -319,6 +324,123 @@ impl MouseButton {
     ];
 }
 
+/// A gamepad's button, by its place on a standard pad, named after the Xbox
+/// pad's.
+///
+/// The four face buttons are named by where they are, not by what is printed
+/// on them: [`A`](Self::A) is the bottom one, [`B`](Self::B) the right,
+/// [`X`](Self::X) the left and [`Y`](Self::Y) the top. A PlayStation pad's
+/// ✕ is `A`, and a Nintendo pad's B is `A` while its A is `B`. The triggers
+/// are not buttons but axes: [`GamepadAxis::LeftTrigger`] and
+/// [`GamepadAxis::RightTrigger`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GamepadButton {
+    /// The bottom face button: Xbox A, PlayStation ✕, Nintendo B.
+    A,
+    /// The right face button: Xbox B, PlayStation ○, Nintendo A.
+    B,
+    /// The left face button: Xbox X, PlayStation □, Nintendo Y.
+    X,
+    /// The top face button: Xbox Y, PlayStation △, Nintendo X.
+    Y,
+    /// The left shoulder button, above the left trigger: LB, L1, L.
+    LeftBumper,
+    /// The right shoulder button, above the right trigger: RB, R1, R.
+    RightBumper,
+    /// The left one of the two small buttons in the middle: Xbox View (Back
+    /// on the 360), PlayStation Create or Share, Nintendo −.
+    Back,
+    /// The right one of the two small buttons in the middle: Xbox Menu
+    /// (Start on the 360), PlayStation Options, Nintendo +.
+    Start,
+    /// The button with the maker's logo: Xbox, PS, Home. A system can keep
+    /// it for itself, and a game should not need it.
+    Guide,
+    /// Pressing the left stick in: LS, L3.
+    LeftStick,
+    /// Pressing the right stick in: RS, R3.
+    RightStick,
+    /// The d-pad's up.
+    DPadUp,
+    /// The d-pad's down.
+    DPadDown,
+    /// The d-pad's left.
+    DPadLeft,
+    /// The d-pad's right.
+    DPadRight,
+}
+
+impl GamepadButton {
+    /// Every button, in order.
+    pub const ALL: &'static [GamepadButton] = &[
+        GamepadButton::A,
+        GamepadButton::B,
+        GamepadButton::X,
+        GamepadButton::Y,
+        GamepadButton::LeftBumper,
+        GamepadButton::RightBumper,
+        GamepadButton::Back,
+        GamepadButton::Start,
+        GamepadButton::Guide,
+        GamepadButton::LeftStick,
+        GamepadButton::RightStick,
+        GamepadButton::DPadUp,
+        GamepadButton::DPadDown,
+        GamepadButton::DPadLeft,
+        GamepadButton::DPadRight,
+    ];
+
+    /// The button's place in [`GamepadButton::ALL`].
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// A gamepad's analog axis.
+///
+/// A stick's axes go from -1 to 1, 0 at rest, with +X to the right and +Y
+/// toward the player, which is down, as in the engine's world. A trigger goes
+/// from 0, released, to 1, pulled all the way; a pad whose triggers are only
+/// buttons gives 0 or 1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GamepadAxis {
+    /// The left stick, left (-1) to right (1).
+    LeftX,
+    /// The left stick, up (-1) to down (1).
+    LeftY,
+    /// The right stick, left (-1) to right (1).
+    RightX,
+    /// The right stick, up (-1) to down (1).
+    RightY,
+    /// The left trigger, 0 to 1: LT, L2, ZL.
+    LeftTrigger,
+    /// The right trigger, 0 to 1: RT, R2, ZR.
+    RightTrigger,
+}
+
+impl GamepadAxis {
+    /// Every axis, in order.
+    pub const ALL: &'static [GamepadAxis] = &[
+        GamepadAxis::LeftX,
+        GamepadAxis::LeftY,
+        GamepadAxis::RightX,
+        GamepadAxis::RightY,
+        GamepadAxis::LeftTrigger,
+        GamepadAxis::RightTrigger,
+    ];
+
+    /// The axis's place in [`GamepadAxis::ALL`].
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Whether this is a trigger, which goes from 0 to 1, and not a stick's
+    /// axis, which goes from -1 to 1.
+    pub const fn is_trigger(self) -> bool {
+        matches!(self, GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,5 +522,25 @@ mod tests {
         for pair in MouseButton::ALL.windows(2) {
             assert!(pair[0] < pair[1], "{pair:?}");
         }
+    }
+
+    #[test]
+    fn every_gamepad_button_and_axis_is_listed_once_at_its_index() {
+        assert_eq!(GamepadButton::ALL.len(), 15);
+        for (index, button) in GamepadButton::ALL.iter().enumerate() {
+            assert_eq!(button.index(), index, "{button:?}");
+        }
+        assert_eq!(GamepadAxis::ALL.len(), 6);
+        for (index, axis) in GamepadAxis::ALL.iter().enumerate() {
+            assert_eq!(axis.index(), index, "{axis:?}");
+        }
+        let triggers: Vec<_> = GamepadAxis::ALL
+            .iter()
+            .filter(|axis| axis.is_trigger())
+            .collect();
+        assert_eq!(
+            triggers,
+            [&GamepadAxis::LeftTrigger, &GamepadAxis::RightTrigger]
+        );
     }
 }

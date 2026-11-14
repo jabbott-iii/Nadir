@@ -5905,3 +5905,150 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** M9.5 adds pathfinding (its overlays); camera limits
   exist; sound should pause with the game; or a game needs debug drawing
   in a release build.
+
+## ADR-0065 — M8.1: gamepads on Linux read from evdev; `GamepadButton` by place with Xbox names in nadir-core; `GamepadId` never reused; events that add up to the state; face buttons by label for xpad, by place for Sony and Nintendo; `poll_gamepads` apart from `pump_events`, read regardless of focus
+
+- **Status:** Accepted: the user accepted it as written on 2026-11-14
+- **Date:** 2026-11-14
+- **Context:**
+  - M8.1 asks for Linux gamepads: the evdev declarations, detection with
+    `EVIOCGBIT`, ranges with `EVIOCGABS`, reads that do not wait, `inotify`
+    on `/dev/input` (`IN_CREATE` and `IN_ATTRIB`) and the `Gamepad*`
+    events. The platform spec already names `Event::GamepadConnected`,
+    `GamepadDisconnected`, `GamepadButton` and `GamepadAxis` ("-1..1 raw, no
+    deadzone"), `Platform::poll_gamepads` and `gamepad_state`, and core's
+    spec `GamepadButton` and `GamepadAxis` ("standard layout, Xbox
+    naming"), none of them built (M1.2's note left them for their first
+    user).
+  - The kernel's `Documentation/input/gamepad.rst` reports the face
+    buttons by place ("Regardless of the labels on the buttons"), and
+    `hid-playstation` (□ `BTN_WEST`, △ `BTN_NORTH`) and `hid-nintendo` (A
+    `BTN_EAST`, X `BTN_NORTH`) do. `xpad` reports `BTN_A`, `BTN_B`,
+    `BTN_X`, `BTN_Y` by the Xbox labels, and `BTN_X` is `BTN_NORTH`
+    (0x133): X, on the left, comes on the top button's code. An Xbox pad
+    over Bluetooth through `hid-generic` numbers its buttons the same way.
+    SDL reads 0x133 and 0x134 by place for Sony's vendor id and by label
+    otherwise. (Read from the drivers' sources on GitHub, 2026-11-14.)
+  - The Switch Pro Controller's ZL and ZR are buttons only (`BTN_TL2`,
+    `BTN_TR2`); `hid-playstation` reports L2 and R2 both as `ABS_Z`/`ABS_RZ`
+    and as buttons. An Xbox pad over Bluetooth, on `hid-generic` or
+    `hid-microsoft` (which remaps no axis), has no `ABS_RX`/`ABS_RY`: its
+    right stick is `ABS_Z`/`ABS_RZ` and its triggers `ABS_BRAKE` (left) and
+    `ABS_GAS` (right), as SDL's database maps it.
+  - On `EVIOCGKEY`, the kernel takes the key records still queued for the
+    reader out of its queue (`__evdev_flush_queue`); `EVIOCGABS` does not.
+    A reader's queue holds 128 records for a pad with eight axes, more than
+    one read of 64.
+  - Only `nadir-input` (M8.4) will read pads, with deadzones, bindings and
+    an active device. It latches every change in order (its spec,
+    "Edge latching"), and releases what is held on `Focused(false)`.
+- **Decision:**
+  - **nadir-core:** `GamepadButton` (15: `A`, `B`, `X`, `Y` as the bottom,
+    right, left and top face buttons; the bumpers; `Back`, `Start`,
+    `Guide`; the sticks' presses; the d-pad's four) and `GamepadAxis` (the
+    sticks' X and Y, the two triggers), each with `ALL` and `index`;
+    `GamepadAxis::is_trigger`.
+  - **nadir-platform:** `GamepadId` (from 1 in the order pads connect,
+    never given twice by one `Platform`; `from_raw`/`raw` for tests and
+    replays) and `GamepadState` (`name`, `pressed`, `axis`); the four
+    events; `Platform::poll_gamepads(out)`, apart from `pump_events`, and
+    `Platform::gamepad_state(id)`.
+  - **The events add up to the state:** a pad connects at rest, and what
+    is held on it follows as events; unplugged, it is put back at rest by
+    events before `GamepadDisconnected`. Only changes are reported.
+  - **Values:** a stick's axis -1 to 1, +Y down, linear on each side of the
+    middle of the driver's range rounded up (so -32768/0/32767 and
+    0/128/255 give exactly -1/0/1); a trigger 0 to 1; a trigger that is
+    only a button 0 or 1, used only where the pad has no analog trigger
+    there; the d-pad's hat as its four buttons. No dead zone.
+  - **Linux:** the face buttons by place for Sony's (0x054c) and
+    Nintendo's (0x057e) vendor ids, by label for every other; the axes'
+    roles by what the pad has (the right stick on `ABS_RX`/`ABS_RY` and
+    triggers on `ABS_Z`/`ABS_RZ`, or, without `ABS_RX` and `ABS_RY`, the
+    right stick on `ABS_Z`/`ABS_RZ` and triggers on `ABS_BRAKE`/`ABS_GAS`);
+    the first poll opens the pads already there, `inotify` the ones that
+    come, each node not open tried on `IN_CREATE` or `IN_ATTRIB`;
+    `SYN_DROPPED` drops to the next `SYN_REPORT`, then the rest of that read
+    and everything still queued, as libevdev does, and reads the state
+    again; `ENODEV` is a pad unplugged; a gamepad the first poll cannot
+    open, by sysfs, logs a hint about `uaccess` and the `input` group.
+  - **nadir-sys:** the evdev structs (`input_event`, `input_id`,
+    `input_absinfo`), codes and the requests used (`EVIOCGID`,
+    `EVIOCGNAME(256)`, `EVIOCGKEY(KEY_CNT / 8)`, three `EVIOCGBIT`s, ten
+    `EVIOCGABS`s) as constants; `ioctl`, `inotify_init1`,
+    `inotify_add_watch`, `inotify_event`, `timeval`, the flags, `ENODEV`
+    and `asm-generic/ioctl.h`'s direction and size fields. Files are
+    opened, read and closed through `std`.
+  - Pads are read whether or not the window has the focus. Windows and
+    macOS report none until M8.2 and M8.3.
+- **Consequences:**
+  - A reader can build each pad's state from the events alone, and an
+    unplugged pad leaves nothing held; `nadir-input` (M8.4) needs no
+    special case for a disconnect.
+  - A game whose loop does not call `poll_gamepads` hears no pad: the
+    facade must call it each frame beside `pump_events` (M8.4).
+  - `A` means the bottom button on every pad: a Nintendo pad's A is `B`
+    here, and a prompt table (M8.4) must map places to each family's
+    labels. A pad of another maker whose driver reports by place (an
+    8BitDo in a mode other than Switch or X-input, say) gets X and Y
+    swapped until its vendor id joins the two.
+  - After a `SYN_DROPPED`, the state read again is the device's at the
+    time of the read, and what happened during the overflow is lost: a tap
+    made then may never be reported. No key record older than that state
+    is applied after it; an axis record that comes between the drain and
+    that axis's `EVIOCGABS` can replay just after it, before newer ones,
+    which adds an edge but ends at the device's value.
+  - Under Steam Input, a PlayStation or Switch pad comes twice: its own
+    node, and the virtual Xbox pad Steam makes of it. Steam lists the ids
+    to skip in `SDL_GAMECONTROLLER_IGNORE_DEVICES`, which nothing reads
+    yet (M8.4's note).
+  - A pad of another layout than the four above (a DirectInput pad's
+    buttons on `hid-generic`, say, or `hid-steam`'s own pad, which a Steam
+    Deck or Steam Controller shows while Steam is not running, with its
+    left trackpad on `ABS_HAT0X`/`ABS_HAT0Y` and its triggers on
+    `ABS_HAT2X`/`ABS_HAT2Y`) is read with the standard codes, which may be
+    wrong for it: a mapping database is backlog.
+  - Checked with virtual pads through `/dev/uinput` on 2026-11-14 (see the
+    roadmap's M8.1); a real Xbox pad, DualSense and Switch Pro on Linux
+    are still to be checked by hand.
+  - A review the same day (four reviewers, a skeptic for each finding)
+    upheld six of ten distinct findings, all fixed but the Steam one,
+    which is recorded: a resync that applied the rest of its read after
+    `EVIOCGKEY`, leaving a button stuck in 25 of 130 trials on a virtual
+    pad (none since); an Xbox pad over Bluetooth's right stick read as its
+    triggers; a stick of two values that never reached 1, whose property
+    test failed for about 1 seed in 280 (500 cases, each of a chance of 1
+    in 139,999: 81, 694 and 1271 among the first 1300); Steam's
+    duplicates; and two docs (the platform spec's axis range, nadir-sys's
+    own). A second, smaller round on the fixes found three statements of
+    these docs to correct, and nothing in the code.
+- **Alternatives considered:**
+  - Gamepad events from `pump_events`: one call for both, but the spec
+    names `poll_gamepads`, and a tool may want a window's events without
+    opening the pads.
+  - The face buttons by place for every driver, as `gamepad.rst` asks: an
+    Xbox pad's X and Y would be swapped, `xpad` being the driver most
+    players' pads use.
+  - Deciding by the driver's name in sysfs (`xpad`, `playstation`,
+    `nintendo`): an Xbox pad over Bluetooth on `hid-generic` reports by
+    label too, which the vendor id covers and the driver's name does not.
+  - No events at connect or disconnect for what is held: a reader would
+    have to read `gamepad_state` at the right moment, which the events of
+    a whole poll come after.
+  - Holding pads at rest while the window lacks the focus, as SDL does by
+    default: a choice for the input layer, which already handles focus
+    loss for keys (M8.4).
+  - After a resync, applying the rest of the read, or only dropping the
+    rest of the read: older key records would be applied over the state,
+    or newer ones lost from the kernel's queue by `EVIOCGKEY` while older
+    axis records replay. Draining first leaves only records newer than the
+    drain.
+  - Fixed roles for `ABS_Z` and `ABS_RZ` (triggers): an Xbox pad over
+    Bluetooth would have no right stick and triggers half pulled at rest.
+  - libevdev or SDL: third-party code (ADR-0003, rule 1).
+- **Revisit when:** a pad tested on Linux reports its face buttons or its
+  axes otherwise than its vendor id and its axes here say; a game ships
+  on Steam (the ignore list); a game needs pads in the
+  background or held while unfocused; M8.2 or M8.3 cannot keep the events
+  adding up to the state; or a pad has buttons beyond the 15 (paddles, a
+  touchpad's click, Share) that a game binds.

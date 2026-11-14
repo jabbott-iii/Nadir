@@ -359,17 +359,52 @@ directly: no locks that can block, and no allocation.
       without `XInitThreads`: one window at a time has an input method.
 - **Mouse:** `ButtonPress` 4/5/6/7 are wheel events; motion from
   `MotionNotify`.
-- **Gamepads:** evdev, reading `/dev/input/event*` directly.
+- **Gamepads:** evdev, reading `/dev/input/event*` directly (M8.1,
+  ADR-0065).
   - Detect gamepads with `ioctl(EVIOCGBIT)`: they have `EV_ABS` and
     `BTN_SOUTH`/`BTN_GAMEPAD`.
   - Read axis ranges with `EVIOCGABS`.
-  - Read `struct input_event` records non-blocking.
+  - Read `struct input_event` records non-blocking. On `SYN_DROPPED`, drop
+    the records to the next `SYN_REPORT`, then everything read or still
+    queued (drain the device, as libevdev does), and read the state again
+    (`EVIOCGABS`, `EVIOCGKEY`). Every such record is older than the state,
+    and `EVIOCGKEY` flushes the queued key records from the kernel's queue:
+    one applied after it can leave a button stuck. `ENODEV` means
+    unplugged.
   - Hotplug: `inotify` on `/dev/input`. Watch `IN_CREATE` **and**
     `IN_ATTRIB`, because udev applies permissions after creating the node.
   - Modern kernel drivers (`xpad`, `hid-playstation`, `hid-nintendo`) report
-    standard gamepad codes, so the mapping table stays small.
+    standard gamepad codes, so the mapping table stays small, but for the
+    face buttons:
+    - The kernel's `gamepad.rst` reports them by place, and
+      `hid-playstation` and `hid-nintendo` do: `BTN_NORTH` (0x133) is the
+      top button, `BTN_WEST` (0x134) the left.
+    - `xpad`, and an Xbox pad over Bluetooth, report them by their Xbox
+      labels: X, on the left, as `BTN_X`, which is 0x133 too, and Y as
+      `BTN_Y`, 0x134.
+    - So read 0x133 and 0x134 by place for Sony's (0x054c) and Nintendo's
+      (0x057e) vendor ids, and by label for every other, as SDL does for
+      Sony's.
+  - Triggers are `ABS_Z`/`ABS_RZ` on `xpad` (0 to 255, or to 1023 on the
+    Xbox One) and `hid-playstation` (0 to 255, which also reports
+    `BTN_TL2`/`BTN_TR2`), and only `BTN_TL2`/`BTN_TR2` on the Switch Pro
+    Controller. The d-pad is a hat on all three (`xpad` gives
+    `BTN_DPAD_*` with `dpad_to_buttons`). Sticks: -32768 to 32767 (`xpad`), 0
+    to 255 at rest at 128 (`hid-playstation`), -32767 to 32767
+    (`hid-nintendo`), negative left and up, as `gamepad.rst` asks.
+  - An Xbox pad over Bluetooth, through `hid-generic` or `hid-microsoft`
+    (which remaps no axis), has no `ABS_RX`/`ABS_RY`: its right stick is
+    `ABS_Z`/`ABS_RZ` (0 to 65535) and its triggers `ABS_BRAKE` (left) and
+    `ABS_GAS` (right), as SDL's database maps it. Read a pad without
+    `ABS_RX` and `ABS_RY` that way.
+  - Steam Input reads a PlayStation or Switch pad itself and makes a
+    virtual Xbox pad of it, leaving the physical node open: a game is to
+    skip the vendor and product ids Steam lists in
+    `SDL_GAMECONTROLLER_IGNORE_DEVICES`. Not done yet (roadmap M8.4).
   - Device access normally relies on the desktop seat's `uaccess` udev
-    rules. If none are found, log a hint.
+    rules (`ID_INPUT_JOYSTICK` devices, in systemd's `70-uaccess.rules`).
+    If a gamepad the first poll finds, by sysfs, cannot be opened, log a
+    hint.
 
 ### GPU (EGL + OpenGL)
 

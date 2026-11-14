@@ -14,7 +14,7 @@ OS calls, no dependencies.
 | `rng` | `Pcg32` (seedable, `next_u32`, `next_f32`, `range`, `shuffle`, `choose`); per-system streams derived from a world seed |
 | `hash` | `fnv1a64`; `FxLikeHasher` with `FastHashMap` / `FastHashSet` aliases (deterministic, non-cryptographic); `crc32` (IEEE, table-driven), shared by `codec` (PNG chunks, pack integrity) and `cook` (the pack writer) |
 | `handle` | `GenIndex { index: u32, generation: NonZeroU32 }`, `GenArena<T>` (insert/remove/get/iter, free list), typed `Handle<T>` built on it |
-| `keys` | `Key` (physical keys, USB-HID-usage order), `MouseButton`, `GamepadButton`, `GamepadAxis` (standard layout, Xbox naming), `Modifiers`. Not built yet: the gamepad names (M8) and `Modifiers` |
+| `keys` | `Key` (physical keys, USB-HID-usage order), `MouseButton`, `GamepadButton`, `GamepadAxis` (standard layout, Xbox naming), `Modifiers`. Not built yet: `Modifiers` |
 | `profile` | `profile_scope!("name")`: compiles to nothing unless feature `profile` is on; when on, records begin/end with `Instant` into a thread-local buffer; `profile::take_frame(&mut out)` moves the calling thread's records into a reused `Vec` |
 | `testing` | Property-test harness (`check`, `check_sized`), `assert_approx!` (not built yet). The golden comparison lives in `xtask` (ADR-0017) |
 | `cli` | Minimal argument parser for `xtask`, `cook` and the game binary (`--flag`, `--key value`, positional) |
@@ -31,6 +31,10 @@ OS calls, no dependencies.
   `0x07`), so `Key::A as u8` is `0x04`. The enum has the keys of ANSI and ISO
   keyboards, including the keypad and F1 to F24. The keys that only Japanese
   and Korean keyboards have, and media keys, are not in it yet.
+- A `GamepadButton` names a place, not a label: `A` is the bottom face
+  button, `B` the right, `X` the left and `Y` the top, whatever the pad
+  prints on them (M8.1, ADR-0065). A stick's `GamepadAxis` goes from -1 to
+  1 with +Y toward the player (down), a trigger's from 0 to 1.
 - `Pcg32` output is identical across OSes for the same seed (unit-tested
   against fixed vectors).
 - `FastHashMap` iteration order depends only on insertion history, not on

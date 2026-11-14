@@ -49,10 +49,13 @@
 //! - `linux::libc`: the dynamic loader, `dlopen`, `dlsym` and `dlerror`.
 //!   There is no `dlclose`: a library stays loaded until the process exits,
 //!   so the function pointers of a table never dangle. `setlocale`, which
-//!   Xlib's input methods follow. Also the three error
-//!   numbers of ALSA's that the engine tells apart: `EAGAIN`, too little
-//!   room to write in a stream that does not block, `EPIPE`, an underrun,
-//!   and `ESTRPIPE`, a suspend.
+//!   Xlib's input methods follow. `ioctl`, with the fields of a request's
+//!   number (`_IOC_*`), and `inotify` (`inotify_init1`,
+//!   `inotify_add_watch`, `inotify_event` and its masks), which gamepads
+//!   need, with `O_NONBLOCK` and `timeval`. Also the error numbers the
+//!   engine tells apart: ALSA's `EAGAIN`, too little room to write in a
+//!   stream that does not block, `EPIPE`, an underrun, and `ESTRPIPE`, a
+//!   suspend; and `ENODEV`, an event device unplugged.
 //! - `linux::x11`: the Xlib types, constants and events the engine uses,
 //!   its input methods (`XIM`, `XIC`), which turn key presses into text, and
 //!   `Xlib`, the table of its functions in `libX11.so.6`. A function that C
@@ -64,9 +67,12 @@
 //! - `linux::alsa`: ALSA's PCM types and constants, and `Asound`, the
 //!   table of the functions in `libasound.so.2` that open a device and
 //!   play interleaved `f32` frames through it.
-//! - `linux::evdev`: the kernel's key codes. An X server whose keyboard
-//!   rules are `evdev`, as on every current Linux desktop, reports each one
-//!   plus 8.
+//! - `linux::evdev`: the kernel's input devices. Its key codes, which an X
+//!   server whose keyboard rules are `evdev`, as on every current Linux
+//!   desktop, reports plus 8; a gamepad's button and axis codes; the
+//!   records read from an event device (`input_event`), a device's id and
+//!   an axis's range (`input_id`, `input_absinfo`), and the `EVIOC*`
+//!   requests that read them, each for the arguments used.
 //!
 //! On Windows, the module `windows`: `windows::types` (handles, `RECT`,
 //! `GUID` and the like), and the functions and constants of `kernel32`,
@@ -85,8 +91,8 @@
 //! crate for Linux, Windows and macOS: choose the platform there to see one.
 //!
 //! Not declared yet: WGL and NSOpenGL (roadmap tasks M2.6 and M2.7), WASAPI
-//! and CoreAudio (M6.4 and M6.5), the gamepad APIs (evdev's, XInput and
-//! GameController, M8.1 to M8.3), and Metal (M10.1).
+//! and CoreAudio (M6.4 and M6.5), the gamepad APIs of Windows and macOS
+//! (XInput and GameController, M8.2 and M8.3), and Metal (M10.1).
 //!
 //! # Examples
 //!

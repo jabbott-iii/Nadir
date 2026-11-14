@@ -1,8 +1,8 @@
 # nadir-platform
 
-The OS layer of the Nadir engine: a window and its events, OpenGL contexts,
-audio output, the user's folders, an error dialog and a precise sleep, with
-one safe API on Linux, Windows and macOS.
+The OS layer of the Nadir engine: a window and its events, gamepads, OpenGL
+contexts, audio output, the user's folders, an error dialog and a precise
+sleep, with one safe API on Linux, Windows and macOS.
 
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine for
 top-down games on Windows, macOS and Linux, written in Rust with no
@@ -25,6 +25,10 @@ Built today:
   factors, focus, physical keys with repeats, typed text, mouse motion,
   buttons and the wheel. When the window loses the focus, every key and
   button still down gets a release right after.
+- On Linux, gamepads (`poll_gamepads`, `gamepad_state`), read from the
+  kernel's event devices: pads plugged in and unplugged while the game
+  runs, their buttons by their place on the pad, their sticks from -1 to 1
+  and their triggers from 0 to 1, with no dead zone.
 - Typed text (`Event::Text`), a character at a time after the key press
   that typed it, composed characters included: on Linux from an X input
   method, on Windows from `WM_CHAR`, on macOS from a key press's
@@ -41,7 +45,8 @@ Built today:
 - With the `dev` feature, an allocation counter.
 
 Not yet: OpenGL on Windows and macOS (roadmap tasks M2.6 and M2.7), audio
-output on Windows and macOS (M6.4 and M6.5), gamepads (M8.1 to M8.3), Metal
+output on Windows and macOS (M6.4 and M6.5), gamepads on Windows and macOS
+(M8.2 and M8.3), Metal
 (M10.1), showing a text being composed, an input method on macOS, noticing
 that the window was minimized, holding the pointer inside the window, and
 native Wayland.
@@ -55,13 +60,14 @@ nadir-core = "0.3"
 ```
 
 `nadir-core` has the `UVec2` of the window's size, the `Key` of a key
-event and the log. Open a window and run until it is closed:
+event, the `GamepadButton` of a pad's and the log. Open a window and run
+until it is closed, or Escape or a pad's Start is pressed:
 
 ```rust,no_run
 use std::time::{Duration, Instant};
 
 use nadir_core::log::info;
-use nadir_core::{Key, UVec2};
+use nadir_core::{GamepadButton, Key, UVec2};
 use nadir_platform::{Event, Platform, PlatformError, WindowConfig, precise_sleep};
 
 fn main() -> Result<(), PlatformError> {
@@ -78,10 +84,14 @@ fn main() -> Result<(), PlatformError> {
     loop {
         events.clear();
         platform.pump_events(&mut events);
+        platform.poll_gamepads(&mut events);
         for &event in &events {
             match event {
                 Event::CloseRequested => return Ok(()),
                 Event::Key { key: Key::Escape, pressed: true, .. } => return Ok(()),
+                Event::GamepadButton { button: GamepadButton::Start, pressed: true, .. } => {
+                    return Ok(());
+                }
                 Event::Resized(size) => info!("{}x{} physical pixels", size.x, size.y),
                 _ => {}
             }

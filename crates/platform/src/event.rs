@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The events a window reports.
+//! The events a window and the gamepads report.
 
-use nadir_core::{Key, MouseButton, UVec2, Vec2};
+use nadir_core::{GamepadAxis, GamepadButton, Key, MouseButton, UVec2, Vec2};
+
+use crate::GamepadId;
 
 /// Something that happened to the window or to an input device.
 ///
-/// Events arrive in the order the operating system reported them.
+/// Events arrive in the order the operating system reported them. The
+/// window's come from [`Platform::pump_events`](crate::Platform::pump_events),
+/// and the gamepads' from
+/// [`Platform::poll_gamepads`](crate::Platform::poll_gamepads).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
     /// The user asked to close the window. The window stays open: the game
@@ -77,4 +82,31 @@ pub enum Event {
     /// The wheel turned, in lines. Positive y is away from the user, and
     /// positive x is to the right.
     MouseWheel(Vec2),
+    /// A gamepad was plugged in, or was there when the window opened. It is
+    /// at rest: what is held on it then follows as button and axis events.
+    GamepadConnected(GamepadId),
+    /// A gamepad was unplugged. Before this, it was put back at rest, each
+    /// button held let go and each axis put back at 0 by events of their
+    /// own. Its id is never given again.
+    GamepadDisconnected(GamepadId),
+    /// A gamepad's button went down or up.
+    GamepadButton {
+        /// Which pad.
+        id: GamepadId,
+        /// Which button, by its place on the pad.
+        button: GamepadButton,
+        /// Down (`true`) or up (`false`).
+        pressed: bool,
+    },
+    /// A gamepad's axis has a new value.
+    GamepadAxis {
+        /// Which pad.
+        id: GamepadId,
+        /// Which axis.
+        axis: GamepadAxis,
+        /// -1 to 1 for a stick's axis, with +Y down, and 0 to 1 for a
+        /// trigger. Raw: no dead zone is taken off, so a stick at rest can
+        /// read a little off 0.
+        value: f32,
+    },
 }
