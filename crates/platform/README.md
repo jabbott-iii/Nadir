@@ -15,7 +15,7 @@ its events without the rest of the engine.
 
 ## Status
 
-Version 0.3: the API will change before 1.0.
+Version 0.4: the API will change before 1.0.
 
 Built today:
 
@@ -55,8 +55,8 @@ native Wayland.
 
 ```toml
 [dependencies]
-nadir-platform = "0.3"
-nadir-core = "0.3"
+nadir-platform = "0.4"
+nadir-core = "0.4"
 ```
 
 `nadir-core` has the `UVec2` of the window's size, the `Key` of a key

@@ -16,7 +16,7 @@ layers are the world resource `TileLayers`.
 
 ## Status
 
-Version 0.3: the API will change before 1.0.
+Version 0.4: the API will change before 1.0.
 
 Built:
 
@@ -56,10 +56,10 @@ Not yet:
 
 ```toml
 [dependencies]
-nadir-render = "0.3"
-nadir-gfx = "0.3"
-nadir-assets = "0.3"
-nadir-core = "0.3"
+nadir-render = "0.4"
+nadir-gfx = "0.4"
+nadir-assets = "0.4"
+nadir-core = "0.4"
 ```
 
 The renderer draws with a `nadir_gfx::Device`, finds textures in a

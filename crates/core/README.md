@@ -16,7 +16,7 @@ Depend on it directly for the rest, such as `FastHashMap`, `GenArena` or
 
 ## Status
 
-Version 0.3: the API will change before 1.0.
+Version 0.4: the API will change before 1.0.
 
 What is built:
 
@@ -41,19 +41,16 @@ What is built:
 
 Not yet:
 
-- names for gamepad buttons and axes, which come with gamepad support
-  (roadmap M8); media keys, and the keys that only Japanese and Korean
-  keyboards have;
+- media keys, and the keys that only Japanese and Korean keyboards have;
 - collecting profile records from other threads: the profiler
   (nadir-debug's, M7.3) shows the main thread's;
-- the debug console and crash reports, which are to read the log's ring
-  buffer (M7.5, M9.6).
+- crash reports, which are to read the log's ring buffer (M9.6).
 
 ## Usage
 
 ```toml
 [dependencies]
-nadir-core = "0.3"
+nadir-core = "0.4"
 ```
 
 Math, color and random numbers. World space is +X right and +Y down, in
@@ -115,7 +112,7 @@ assert_eq!(frame.alpha, 0.0);
 
   ```toml
   [dependencies]
-  nadir-core = { version = "0.3", features = ["profile"] }
+  nadir-core = { version = "0.4", features = ["profile"] }
   ```
 
 ## Documentation

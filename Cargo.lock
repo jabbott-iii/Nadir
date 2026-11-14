@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "nadir-assets"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-codec",
  "nadir-core",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "nadir-audio"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-assets",
  "nadir-codec",
@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "nadir-bench"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-audio",
  "nadir-codec",
@@ -36,21 +36,21 @@ dependencies = [
 
 [[package]]
 name = "nadir-codec"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-core",
 ]
 
 [[package]]
 name = "nadir-collision"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-core",
 ]
 
 [[package]]
 name = "nadir-cook"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-assets",
  "nadir-codec",
@@ -59,11 +59,11 @@ dependencies = [
 
 [[package]]
 name = "nadir-core"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "nadir-debug"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-codec",
  "nadir-core",
@@ -74,14 +74,14 @@ dependencies = [
 
 [[package]]
 name = "nadir-ecs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-core",
 ]
 
 [[package]]
 name = "nadir-gfx"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-core",
  "nadir-platform",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "nadir-input"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-core",
  "nadir-platform",
@@ -98,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "nadir-platform"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-core",
  "nadir-sys",
@@ -106,7 +106,7 @@ dependencies = [
 
 [[package]]
 name = "nadir-render"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-assets",
  "nadir-codec",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "nadir-scene"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-assets",
  "nadir-codec",
@@ -126,11 +126,11 @@ dependencies = [
 
 [[package]]
 name = "nadir-sys"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "nadir_engine"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-assets",
  "nadir-audio",
@@ -148,14 +148,14 @@ dependencies = [
 
 [[package]]
 name = "sandbox"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir_engine",
 ]
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nadir-codec",
  "nadir-core",

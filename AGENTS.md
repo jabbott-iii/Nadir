@@ -1,15 +1,15 @@
 # Nadir — 2D top-down game engine (Rust, desktop only)
 
-**Status:** in development, at version 0.3. `docs/roadmap.md` ticks each task
+**Status:** in development, at version 0.4. `docs/roadmap.md` ticks each task
 once it is done and verified. A task whose code is written but still needs a
 check on another OS stays unticked, with a `⏳ needs <OS>` note. The next task
 is the first unticked one whose dependencies are all ticked, skipping one
 whose remaining work needs an OS you cannot run. This document also describes
 what is not built yet, such as the Metal backend (and
 `cargo xtask golden --backend`), audio's devices on Windows and macOS
-(its mixer, its assets and its Linux output are built), and the debug tools,
-of which only the debug UI is built, which the game shows under `dev`
-(M7.2, M7.10, ADR-0058). Some of what it mentions may not exist yet, and some exists
+(its mixer, its assets and its Linux output are built), and gamepads on
+Windows and macOS (XInput, M8.2; GameController, M8.3; Linux's evdev is
+written, M8.1). Some of what it mentions may not exist yet, and some exists
 before its roadmap task is ticked: check before assuming.
 
 ## What we are building

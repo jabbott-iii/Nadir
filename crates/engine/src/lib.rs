@@ -36,14 +36,14 @@
 //! }
 //! ```
 //!
-//! This is version 0.3, and the API will change before 1.0. The engine
+//! This is version 0.4, and the API will change before 1.0. The engine
 //! draws and plays sound on Linux (X11, ALSA). On Windows and macOS a game
 //! runs, but its window stays empty until roadmap tasks M2.6 and M2.7, and
 //! it plays no sound until M6.4 and M6.5. Text is drawn in the world
 //! (`nadir::render::Font`, `RenderFrame::texts`), and on the window with
-//! the UI's sprites (`RenderFrame::ui`); development builds show a debug
-//! UI of the game's own windows; gamepads, saves and the other debug tools
-//! are not built yet. The
+//! the UI's sprites (`RenderFrame::ui`); development builds show a
+//! [debug UI](#the-debug-ui) of the game's own windows and the engine's
+//! debug tools; gamepads and saves are not built yet. The
 //! [README](https://github.com/jabbott-iii/Nadir/blob/main/crates/engine/README.md)
 //! is a guide to how the parts fit together, with a game that walks a hero
 //! about a tile map.

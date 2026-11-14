@@ -15,7 +15,7 @@ depend on the library to cook from a tool of your own.
 
 ## Status
 
-Version 0.3: the API will change before 1.0, and so may the formats it
+Version 0.4: the API will change before 1.0, and so may the formats it
 writes.
 
 The cook reads PNG images with their sidecars, Aseprite exports, BMFont
@@ -203,7 +203,7 @@ outputs' are lowercase.
 
 ```toml
 [dependencies]
-nadir-cook = "0.3"
+nadir-cook = "0.4"
 ```
 
 `nadir_cook::cook` does what the command does, and gives a report in

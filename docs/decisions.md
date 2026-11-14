@@ -3542,7 +3542,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0044 — The crates go to 0.3.0
 
-- **Status:** Accepted
+- **Status:** Accepted; its version, 0.3.0, is superseded by ADR-0066 (0.4.0)
 - **Date:** 2026-11-07
 - **Context:**
   - Release v0.2.0 (`c3e45ba`) is out: its tag is on `origin`, and on
@@ -3803,7 +3803,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 - **Status:** Proposed; its move of M6.3's acceptance to M6.6, and of
   M6.4's and M6.5's verification to the example, accepted by the user on
-  2026-11-08
+  2026-11-08; `PlatformError`'s break lands in 0.4.0, not 0.3.0, as M6.3
+  came after the `v0.3.0` tag (ADR-0066)
 - **Date:** 2026-11-08
 - **Context:**
   - `docs/subsystems/sys-and-platform.md` had `Platform::open_audio(&mut
@@ -6052,3 +6053,80 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   background or held while unfocused; M8.2 or M8.3 cannot keep the events
   adding up to the state; or a pad has buttons beyond the 15 (paddles, a
   touchpad's click, Share) that a game binds.
+
+## ADR-0066 — The crates go to 0.4.0
+
+- **Status:** Accepted
+- **Date:** 2026-11-14
+- **Context:**
+  - `v0.3.0` tags `33f37db`, the raise to 0.3.0 (ADR-0044). crates.io
+    takes a version only once, and the tag ruleset keeps a pushed tag
+    from being moved or deleted (ADR-0036).
+  - 25 commits have landed on `main` since: audio (M6.1 to M6.3, M6.6 to
+    M6.9), text and the UI pass (M7.1, M7.7, M7.8), the debug UI and its
+    tools (M7.2 to M7.6, M7.9 to M7.12), Linux gamepads (M8.1), and a
+    raise of CI's actions with its merge.
+  - Some of them break code built against 0.3.0, among them:
+    `PlatformError` becomes `#[non_exhaustive]` (ADR-0047, which expected
+    it in 0.3.0, but M6.3 came after the tag); a `Config` literal without
+    `..` no longer compiles (ADR-0051); `Event` gains `Event::Text`, and
+    is not `#[non_exhaustive]` (ADR-0057); and `ResourceId` and
+    `ResourceKind` become `#[non_exhaustive]` (ADR-0060). Cargo takes any
+    0.3.x as compatible with 0.3.0.
+  - nadir-audio (ADR-0050) and nadir-debug (ADR-0058) lost
+    `publish = false` after 0.3.0, so this release is the first to put
+    them on crates.io: 15 crates, 2 of them new, which the token's
+    `publish-new` must reach, and which crates.io takes at once, within
+    its 5 new crates (`docs/05-release.md`).
+  - `make release` refuses a `VERSION` other than `v` and HEAD's
+    `[workspace.package]` version, and one `origin` already has; the
+    workflow's gate refuses a tag other than that version. With the
+    workspace at 0.3.0, no tag gets through either.
+  - The user asked on 2026-11-14 for every crate at 0.4.0, to publish
+    them to crates.io.
+- **Decision:**
+  - **Every crate goes to 0.4.0**, `[workspace.package]`'s version and
+    each of the 14 in `[workspace.dependencies]`, with the 18 packages of
+    `Cargo.lock`, as `cargo xtask crates` checks. The next release is
+    `make release VERSION=v0.4.0`.
+  - The 15 crates' READMEs, the repository's README, `AGENTS.md`'s
+    status, the facade's crate docs, `docs/05-release.md` and the
+    `Makefile`'s examples name 0.4 (`nadir_engine = "0.4"`, `v0.4.0`),
+    and the cook's cache examples name nadir-cook 0.4.0.
+    `docs/05-release.md` names 0.4.0 where it said "the release after
+    0.3.0", for nadir-audio and nadir-debug.
+  - The roadmap's notes, the earlier ADRs and the diagrams' "as of
+    commit" lines keep the versions they name, and "the release after
+    0.3.0", as history: that release is this one. The debug UI's golden text and its font
+    test keep `Nadir 0.3`, a sample of glyphs, not the version, as
+    changing it changes the golden image.
+  - This supersedes only ADR-0044's version.
+- **Consequences:**
+  - Good: `v0.4.0` is a tag neither `origin` nor crates.io has, so
+    `make release` and the gate take it once CI passes on its commit;
+    code that asks for `0.3` takes none of the breaks above until it asks
+    for `0.4`; and nadir-audio and nadir-debug start on crates.io at the
+    others' version, which the facade requires (`^0.4.0`).
+  - Bad: a game on 0.3 edits its `Cargo.toml` to move, even where nothing
+    it uses changed; crates whose changes since 0.3.0 break nothing go to
+    0.4.0 too, as the workspace keeps one version (ADR-0036); the 0.3
+    line ends at 0.3.0; and nadir-audio and nadir-debug have no 0.1, 0.2
+    or 0.3 on crates.io.
+  - Follow-up, for a maintainer, before the tag: the crates.io token
+    keeps `publish-new`, and its `nadir-*` pattern reaches nadir-audio and
+    nadir-debug. crates.io must give both names to this account: if
+    another account has one, the crates job fails at that crate, after
+    cargo has published the crates it comes after.
+- **Alternatives considered:**
+  - 0.3.1: Cargo takes it as compatible with 0.3 and gives it to code that
+    asks for `0.3` at its next `cargo update`, breaks and all; and the
+    user asked for 0.4.0.
+  - Leaving the version at 0.3.0: `make release` and the gate refuse every
+    tag until it changes.
+  - Only the crates that changed at 0.4.0, or nadir-audio and nadir-debug
+    at a first version of their own: the workspace's one version
+    (ADR-0036) and `cargo xtask crates` require all of them to agree.
+- **Revisit when:**
+  - the crates reach 1.0, when a break needs a major version;
+  - the crates stop sharing one version;
+  - or crates.io refuses nadir-audio's or nadir-debug's name.

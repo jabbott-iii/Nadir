@@ -16,7 +16,7 @@ write OS code of your own on top of the same declarations.
 
 ## Status
 
-Version 0.3: the API will change before 1.0. Only what the engine calls is
+Version 0.4: the API will change before 1.0. Only what the engine calls is
 declared, so each module is far from a full binding of its API.
 
 Declared today:
@@ -43,7 +43,7 @@ and CoreAudio (M6.4 and M6.5), the gamepad APIs of Windows and macOS
 
 ```toml
 [dependencies]
-nadir-sys = "0.3"
+nadir-sys = "0.4"
 ```
 
 GL functions are never linked. A program looks each one up through the

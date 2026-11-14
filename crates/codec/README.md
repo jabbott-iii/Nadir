@@ -14,7 +14,7 @@ depend on it directly to read or write these formats on their own.
 
 ## Status
 
-Version 0.3: the API will change before 1.0.
+Version 0.4: the API will change before 1.0.
 
 Formats made for the game, which reads them at run time:
 
@@ -73,7 +73,7 @@ allocate nothing, take no `Limits`; its `decode` does.
 
 ```toml
 [dependencies]
-nadir-codec = "0.3"
+nadir-codec = "0.4"
 ```
 
 Read JSONC text, then store the same value as KBJ and read it back:

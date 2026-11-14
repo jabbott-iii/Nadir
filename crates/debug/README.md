@@ -15,7 +15,7 @@ it on its own. It is for development builds: keep it out of releases.
 
 ## Status
 
-Version 0.3: the API will change before 1.0.
+Version 0.4: the API will change before 1.0.
 
 Built:
 
@@ -48,10 +48,10 @@ under its `dev` feature (ADR-0064).
 
 ```toml
 [dependencies]
-nadir-debug = "0.3"
+nadir-debug = "0.4"
 # For `Handle`, `Rect`, `Vec2` and the mouse, and for the UI list it draws into.
-nadir-core = "0.3"
-nadir-render = "0.3"
+nadir-core = "0.4"
+nadir-render = "0.4"
 ```
 
 Each frame, the UI takes the frame's events, code fills its windows with

@@ -14,7 +14,7 @@ nothing else.
 
 ## Status
 
-Version 0.3: the API will change before 1.0.
+Version 0.4: the API will change before 1.0.
 
 Built:
 
@@ -51,8 +51,11 @@ Built:
   the engine's own, a stats overlay on F1 and a profiler on F3, whose
   graphs of the last 300 frames' processor and GPU times show a frame's
   scopes as a tree, and which writes them as a Chrome trace for Perfetto
-  UI; a console on the backtick, over the log, with history, Tab
-  completion, the engine's commands and the game's; debug drawing on F4
+  UI; an inspector on F2, of the world's entities and their components,
+  each field edited through reflection, components added and removed, an
+  entity despawned or written as a prefab; a console on the backtick,
+  over the log, with history, Tab completion, the engine's commands and
+  the game's; debug drawing on F4
   (colliders, triggers, the collision grid, the spatial hash, tile chunks,
   the camera); and time controls, F5 to pause, F6 to step a tick, F7 to
   scale the game's time;
@@ -84,7 +87,7 @@ Not built yet:
 
 ```toml
 [dependencies]
-nadir_engine = "0.3"
+nadir_engine = "0.4"
 ```
 
 The package is `nadir_engine`, since `nadir` was taken on crates.io, and its
@@ -643,7 +646,9 @@ window after it (M7.8). The engine has no asset type for the other data files ye
     itself, such as an atlas's regions, does not change.
     `App::offscreen` never reloads.
   - The debug UI shows the windows of `App::add_debug_window` and the
-    engine's: the stats overlay on F1 and the profiler on F3. nadir-core's
+    engine's: the stats overlay on F1, the inspector on F2, the profiler
+    on F3, the debug drawing on F4 and the console on the backtick, with
+    F5 to F7 for the game's time. nadir-core's
     `profile` feature is on, so each system and the engine's steps record
     their scopes, which the profiler keeps for the last 300 frames, with
     the GPU's time over each frame's drawing, which the renderer times in
@@ -655,7 +660,7 @@ out:
 
 ```toml
 [dependencies]
-nadir_engine = "0.3"
+nadir_engine = "0.4"
 
 [features]
 dev = ["nadir_engine/dev"]

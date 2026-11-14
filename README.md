@@ -14,7 +14,7 @@ today and has a Linux download of the sandbox game.
 
 ## Status
 
-Nadir is early (version 0.3), and its APIs will change. It is built one task
+Nadir is early (version 0.4), and its APIs will change. It is built one task
 of the [roadmap](https://github.com/jabbott-iii/Nadir/blob/main/docs/roadmap.md)
 at a time, alongside the game in `games/sandbox`, which pulls each feature in.
 
@@ -33,7 +33,11 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   - an offline cook that packs PNG images, Aseprite exports and bitmap fonts
     into atlases, and turns LDtk levels into level files, which the game
     loads whole, with their prefabs; and puts all it cooks in one pack
-    file, `game.kpak`, which release builds read.
+    file, `game.kpak`, which release builds read;
+  - debug tools in development builds (the `dev` feature): a debug UI of
+    the game's own windows, and the engine's stats overlay (F1),
+    inspector (F2), profiler with a Chrome trace (F3), debug drawing (F4),
+    console (the backtick) and time controls (F5 to F7).
 - **On Windows and macOS,** everything builds and passes the tests, but the
   window stays empty until the OpenGL contexts land (roadmap tasks M2.6 and
   M2.7).
@@ -44,8 +48,7 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   The cook turns WAVs into the game's sound files and QOA, resampled to
   48 kHz, which the asset server loads. Windows and macOS have no audio
   output yet (roadmap M6.4, M6.5), so there the game is silent.
-- **Not built yet:** the debug tools beyond the debug UI that development
-  builds show, gamepads, saves and the Metal backend.
+- **Not built yet:** gamepads, saves and the Metal backend.
 
 ## Build and run
 
@@ -194,7 +197,7 @@ releases"; ADR-0036). Each one has:
 
   ```toml
   [dependencies]
-  nadir_engine = "0.3"
+  nadir_engine = "0.4"
   ```
 
   ```rust

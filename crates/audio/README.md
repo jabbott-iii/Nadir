@@ -13,7 +13,7 @@ plays a game's sound through it from roadmap task M6.6.
 
 ## Status
 
-Version 0.3: the API will change before 1.0.
+Version 0.4: the API will change before 1.0.
 
 Built:
 
@@ -45,12 +45,12 @@ Built:
 
 ```toml
 [dependencies]
-nadir-audio = "0.3"
-nadir-assets = "0.3"
-nadir-core = "0.3"
+nadir-audio = "0.4"
+nadir-assets = "0.4"
+nadir-core = "0.4"
 # For the examples: files written as the cook writes them, and the output.
-nadir-codec = "0.3"
-nadir-platform = "0.3"
+nadir-codec = "0.4"
+nadir-platform = "0.4"
 ```
 
 `nadir-assets` loads the sounds; `nadir-core` has the `Vec2` of a position.
