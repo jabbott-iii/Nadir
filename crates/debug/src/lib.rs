@@ -49,10 +49,12 @@
 //! Each fills a window it is given. [`Stats::show`] shows the last frame's
 //! numbers, which the engine copies in. A [`Profiler`] keeps the last
 //! [`PROFILER_FRAMES`] frames, each with the scopes
-//! `nadir_core::profile::take_frame` collected: [`Profiler::show`] draws
-//! their processor times as a graph and the scopes of the frame clicked as
-//! a tree, and [`Profiler::trace_json`] writes them as Chrome trace event
-//! JSON, which Perfetto UI opens.
+//! `nadir_core::profile::take_frame` collected, and the GPU's time over
+//! its drawing once the engine reads it back ([`GpuTiming`],
+//! [`Profiler::set_gpu`]): [`Profiler::show`] draws their processor and GPU
+//! times as graphs and the scopes of the frame clicked as a tree, and
+//! [`Profiler::trace_json`] writes them as Chrome trace event JSON, with a
+//! track of the GPU's passes, which Perfetto UI opens.
 //!
 //! ```
 //! use nadir_core::{GenIndex, Handle, Key, MouseButton, Rect, UVec2, Vec2};
@@ -118,7 +120,8 @@ mod widgets;
 pub use input::DebugInput;
 pub use metrics::{FontMetrics, TextMetrics};
 pub use profiler::{
-    FrameTiming, PROFILER_FRAMES, PROFILER_RECORDS, ProfiledFrame, Profiler, ProfilerResponse,
+    FrameTiming, GpuTiming, PROFILER_FRAMES, PROFILER_RECORDS, ProfiledFrame, Profiler,
+    ProfilerResponse,
 };
 pub use stats::Stats;
 pub use style::Style;

@@ -1230,6 +1230,33 @@ fn a_plot_draws_only_finite_shapes_and_marks_its_last_value_inside() {
 }
 
 #[test]
+fn a_value_between_gaps_is_a_dot() {
+    let mut harness = Harness::new();
+    let drawn = |harness: &mut Harness, values: [f32; 5]| {
+        harness.show(|ui| {
+            ui.plot("G", values, Plot::new(0.0..=1.0));
+        });
+        sprites(harness)
+    };
+    let gaps = drawn(&mut harness, [f32::NAN; 5]);
+    // The second value alone, and the last after a gap: a dot each, 1 × 1.
+    let lone = drawn(&mut harness, [f32::NAN, 0.5, f32::NAN, f32::NAN, 1.0]);
+    let dots: Vec<_> = lone
+        .iter()
+        .filter(|(_, size, _)| *size == Vec2::ONE)
+        .collect();
+    assert_eq!(lone.len(), gaps.len() + 2, "{lone:?}");
+    assert_eq!(dots.len(), 2, "{dots:?}");
+    // Two values side by side are a line, not dots.
+    let pair = drawn(&mut harness, [f32::NAN, 0.5, 0.5, f32::NAN, f32::NAN]);
+    assert!(pair.len() > gaps.len());
+    assert!(
+        !pair.iter().any(|(_, size, _)| *size == Vec2::ONE),
+        "{pair:?}"
+    );
+}
+
+#[test]
 fn a_field_scrolls_to_its_caret_and_back_when_its_text_shrinks() {
     let mut field = Field::new("abcdefghijklmnopqrstuvwxyz");
     field.focus();
@@ -1645,6 +1672,49 @@ fn the_profilers_graph_says_a_frame_and_a_click_shows_its_scopes_as_a_tree() {
     profiler.select(Some(99));
     harness.profiler(&mut profiler);
     assert!(harness.shows("Frame 99 is gone: click another."));
+}
+
+#[test]
+fn the_profiler_shows_a_frame_s_gpu_time_beside_its_cpu_time() {
+    use std::time::{Duration, Instant};
+
+    let mut harness = Harness::new();
+    let mut profiler = profiler();
+    let us = Duration::from_micros(1);
+    // Frames 1 and 2 drawn, and read back; frame 0 not.
+    let gpu = crate::GpuTiming::new(Instant::now(), 140 * us, 290 * us);
+    assert!(profiler.set_gpu(1, gpu));
+    assert!(profiler.set_gpu(2, crate::GpuTiming::new(Instant::now(), 1_500 * us, us)));
+    harness.profiler(&mut profiler);
+    // The GPU's graph under the processor's: the same values' middle, as
+    // far below its label as the processor's is below its own.
+    let label = |harness: &Harness, text: &str| harness.text_at(text).expect(text);
+    let (cpu, gpu_label) = (label(&harness, "CPU ms"), label(&harness, "GPU ms"));
+    assert!(gpu_label.y > cpu.y + 60.0, "{cpu:?} {gpu_label:?}");
+    let middle = 58.0 + gpu_label.y - cpu.y;
+
+    // The frame under the pointer, then the one clicked, on the GPU's.
+    harness.move_to(Vec2::new(230.0, middle));
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("frame 2: 3.00 ms CPU, 1.50 ms GPU, 16.00 ms long"));
+    harness.move_to(Vec2::new(4.0, middle));
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("frame 0: 3.00 ms CPU, 16.00 ms long"));
+    harness.click(Vec2::new(118.0, middle));
+    harness.profiler(&mut profiler);
+    assert_eq!(profiler.selected(), Some(1));
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("frame 1: 4 scopes, 3.000 ms CPU"));
+    assert!(harness.shows("GPU 0.430 ms: world 0.140, output 0.290"));
+    // Below it, the tree.
+    let tick = label(&harness, "nadir::tick 0.500 ms");
+    assert!(tick.y > label(&harness, "GPU 0.430 ms: world 0.140, output 0.290").y);
+
+    profiler.select(Some(0));
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("frame 0: 4 scopes, 3.000 ms CPU"));
+    assert!(harness.shows("no GPU time"));
+    assert!(harness.shows("nadir::tick 0.500 ms"));
 }
 
 #[test]

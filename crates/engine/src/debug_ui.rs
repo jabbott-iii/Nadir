@@ -19,7 +19,8 @@
 //! off while it has the pointer or the keyboard; and its windows' places,
 //! kept in `debug_ui.jsonc`. The engine's own windows are the stats
 //! overlay on F1 and the profiler on F3, which writes its traces to the
-//! logs folder (roadmap M7.3, ADR-0059).
+//! logs folder (roadmap M7.3, ADR-0059), and shows the GPU's time over each
+//! frame drawn, from the renderer's timers (roadmap M7.12, ADR-0061).
 
 mod font;
 #[cfg(test)]
@@ -37,11 +38,11 @@ use nadir_core::civil::DateTime;
 use nadir_core::log::{error, info, warn};
 use nadir_core::profile::ScopeRecord;
 use nadir_core::{Key, MouseButton, Rect, UVec2, Vec2};
-use nadir_debug::{DebugInput, DebugUi, FontMetrics, FrameTiming, Profiler, Stats, Ui};
+use nadir_debug::{DebugInput, DebugUi, FontMetrics, FrameTiming, GpuTiming, Profiler, Stats, Ui};
 use nadir_ecs::World;
 use nadir_input::{Capture, Input, UiEvent, UiEvents};
 use nadir_platform::Event;
-use nadir_render::{Font, FrameStats, RenderFrame, Texture, UiScale};
+use nadir_render::{Font, FrameStats, GpuTimes, RenderFrame, Texture, UiScale};
 
 use crate::{FrameAllocs, TickStats, WindowSize};
 
@@ -65,6 +66,12 @@ const PROFILER: (Key, &str, Rect) = (
     "Profiler##nadir::profiler",
     Rect::new(Vec2::new(216.0, 8.0), Vec2::new(576.0, 308.0)),
 );
+
+/// The last renders whose frames are kept, to give each the GPU's time
+/// over it when that is read back: twice the renderer's four renders in
+/// flight. A time read back 8 renders or more after its render is
+/// dropped.
+const RENDERS: usize = 8;
 
 /// What fills a window.
 #[derive(Clone, Copy)]
@@ -170,6 +177,10 @@ pub(crate) struct DebugTools {
     frame_start: Option<Instant>,
     work: Duration,
     last_work: Duration,
+    /// The renders so far, and for the last [`RENDERS`] of them, by their
+    /// number modulo that, the frame each drew and when it started.
+    renders: u64,
+    drawn: [Option<(u64, Instant)>; RENDERS],
     /// The folder the profiler's traces go to, which
     /// [`App::run`](crate::App::run) names.
     traces: Option<PathBuf>,
@@ -199,6 +210,8 @@ impl DebugTools {
             frame_start: None,
             work: Duration::ZERO,
             last_work: Duration::ZERO,
+            renders: 0,
+            drawn: [None; RENDERS],
             traces: None,
         }
     }
@@ -231,6 +244,31 @@ impl DebugTools {
     /// Counts `work` more of the processor's time on the frame being run.
     pub(crate) fn add_work(&mut self, work: Duration) {
         self.work += work;
+    }
+
+    /// After the frame being run was drawn, its drawing started at
+    /// `submitted`: gives the profiler `times`, the GPU's times that this
+    /// render read back ([`Renderer::gpu_times`](nadir_render::Renderer::gpu_times)),
+    /// each for the frame it was timed in. Each says how many renders
+    /// before this one it was, and a frame not drawn (a modal one) is no
+    /// render: so the frames of the last renders are kept by render. Call
+    /// it after each render of a renderer that times every render, and
+    /// after no other.
+    pub(crate) fn rendered(&mut self, submitted: Instant, times: &[GpuTimes]) {
+        let render = self.renders;
+        self.renders += 1;
+        let slot = |render: u64| (render % RENDERS as u64) as usize;
+        self.drawn[slot(render)] = Some((self.profiler.next_index(), submitted));
+        for time in times {
+            let ago = u64::from(time.renders_ago);
+            if ago == 0 || ago >= RENDERS as u64 || ago > render {
+                continue;
+            }
+            if let Some((frame, submitted)) = self.drawn[slot(render - ago)] {
+                let gpu = GpuTiming::new(submitted, time.world, time.output);
+                self.profiler.set_gpu(frame, gpu);
+            }
+        }
     }
 
     /// Keeps the windows' places in the file at `path`: reads them now, and
@@ -1172,6 +1210,67 @@ mod tests {
         assert!(shows_starting(&app, "nadir::tick "), "{:?}", texts(&app));
         assert!(shows_starting(&app, "entities 0"), "{:?}", texts(&app));
         assert_eq!(allocated, nadir_platform::AllocCounts::default());
+    }
+
+    /// The GPU's times over a render `renders_ago` renders back.
+    fn gpu_times(renders_ago: u32, world_us: u64, output_us: u64) -> GpuTimes {
+        let mut times = GpuTimes::default();
+        times.renders_ago = renders_ago;
+        times.world = Duration::from_micros(world_us);
+        times.output = Duration::from_micros(output_us);
+        times
+    }
+
+    #[test]
+    fn each_gpu_time_read_back_goes_to_the_frame_its_render_drew() {
+        let mut tools = DebugTools::new();
+        let base = Instant::now();
+        let at = |frame: u32| base + frame * TICK;
+        let drawn = |frame: u32| at(frame) + Duration::from_micros(500);
+        // Each frame starts, then is drawn, but frame 2 (a modal one): so
+        // render 2 is frame 3's, and so on. Frame 4 reads back render 1,
+        // two renders back, frame 1's (two frames back is frame 2); frame 6
+        // render 2, three back; frame 11, the eleventh render, render 3,
+        // seven back, and one nine back, past what is kept: render 1, whose
+        // slot now holds render 9, frame 10's. (Eight back would be the
+        // slot of the render being drawn, whose frame is not held yet.)
+        let mut read: [&[GpuTimes]; 12] = [&[]; 12];
+        let (first, second, behind) = (
+            [gpu_times(2, 100, 200)],
+            [gpu_times(2, 300, 400)],
+            [gpu_times(3, 500, 600)],
+        );
+        let late = [gpu_times(9, 1, 1), gpu_times(7, 700, 800)];
+        read[3] = &first;
+        read[4] = &second;
+        read[6] = &behind;
+        read[11] = &late;
+        for (frame, times) in (0..).zip(read) {
+            tools.start_profile(at(frame), &[]);
+            if frame != 2 {
+                tools.rendered(drawn(frame), times);
+            }
+        }
+        tools.start_profile(at(12), &[]);
+        let held: Vec<(u64, Option<GpuTiming>)> = tools
+            .profiler
+            .frames()
+            .map(|frame| (frame.index, frame.gpu))
+            .collect();
+        let gpu = |frame: u32, world: u64, output: u64| {
+            Some(GpuTiming::new(
+                drawn(frame),
+                Duration::from_micros(world),
+                Duration::from_micros(output),
+            ))
+        };
+        let mut expected: Vec<(u64, Option<GpuTiming>)> =
+            (0..12).map(|index| (index, None)).collect();
+        expected[0].1 = gpu(0, 100, 200);
+        expected[1].1 = gpu(1, 300, 400);
+        expected[3].1 = gpu(3, 500, 600);
+        expected[4].1 = gpu(4, 700, 800);
+        assert_eq!(held, expected);
     }
 
     #[test]

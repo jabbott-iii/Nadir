@@ -426,11 +426,16 @@ impl EngineCore {
                     &mut graphics.device,
                 );
             }
-            // The processor's work on the frame, the wait to show it aside.
+            // The processor's work on the frame, the wait to show it aside;
+            // and the GPU's times this render read back, for the frames
+            // they were timed in. A frame that fails to draw ends the loop.
             #[cfg(feature = "dev")]
             if let Ok(present) = drawn {
                 let work = drawing.elapsed().saturating_sub(present);
                 self.app.debug.add_work(work);
+                self.app
+                    .debug
+                    .rendered(drawing, graphics.renderer.gpu_times());
             }
             if let Err(error) = drawn {
                 self.error.get_or_insert(error);
@@ -1072,7 +1077,10 @@ impl App {
     /// (the crate's docs, "Hot reload"); and it keeps the debug windows'
     /// places in `debug_ui.jsonc` in the game's settings folder, on Linux
     /// `~/.config/<game>`, reading them before the loop and writing them
-    /// as they change ([`App::add_debug_window`]).
+    /// as they change ([`App::add_debug_window`]). The renderer times its
+    /// passes on the GPU, where the device has timer queries, and the
+    /// profiler shows each frame's GPU time once it is read back, two
+    /// renders later or more.
     ///
     /// # Errors
     ///
@@ -1159,6 +1167,13 @@ impl App {
         let reload = graphics
             .is_some()
             .then(|| crate::hot_reload::HotReload::start(&self.world, &self.shader_dir));
+        // The profiler shows the GPU's time over each frame's passes, read
+        // back two frames later: every render is timed, from the first.
+        #[cfg(feature = "dev")]
+        let graphics = graphics.map(|mut graphics| {
+            graphics.renderer.set_gpu_timing(true);
+            graphics
+        });
         let mut limiter = FrameLimiter::new(self.config.frame_rate_limit, Instant::now());
         let core = Rc::new(RefCell::new(EngineCore {
             app: self,
@@ -3582,6 +3597,236 @@ mod tests {
                 };
                 assert_eq!(seen[WARM_UP].1, all, "drawn before the counting starts");
                 assert_eq!(seen[WARM_UP + COUNTED - 1].1, all);
+            }
+        }
+    }
+
+    /// The profiler shows each drawn frame's GPU time (roadmap M7.12): the
+    /// main loop times every render, and gives each time read back to the
+    /// frame it was timed in.
+    #[cfg(feature = "dev")]
+    mod gpu_profile {
+        use std::path::PathBuf;
+        use std::{env, fs, process};
+
+        use nadir_codec::Limits;
+        use nadir_codec::json::{self, Value};
+        use nadir_core::MouseButton;
+        use nadir_platform::HeadlessGl;
+        use nadir_render::UiDraw;
+
+        use super::*;
+
+        /// The frame whose click writes the trace.
+        const FRAMES: u32 = 40;
+        const SIZE: UVec2 = UVec2::new(640, 360);
+
+        fn tap(key: Key) -> [Event; 2] {
+            [true, false].map(|pressed| Event::Key {
+                key,
+                pressed,
+                repeat: false,
+            })
+        }
+
+        /// Where the profiler's "Write trace" button is: found by a frame
+        /// of an app like the test's, with the profiler open.
+        fn write_trace_button() -> Vec2 {
+            let mut app = App::new(Config::default());
+            *app.world_mut().resource_mut::<crate::WindowSize>() = crate::WindowSize(SIZE);
+            app.update(Duration::ZERO, &tap(Key::F3));
+            let frame = app.world().resource::<RenderFrame>();
+            let at = frame.ui.iter().find_map(|(draw, _)| match draw {
+                UiDraw::Text(draw, "Write trace") => Some(draw.position),
+                _ => None,
+            });
+            at.expect("the button") + Vec2::new(2.0, 2.0)
+        }
+
+        /// The window: an offscreen context. It opens the profiler, clicks
+        /// "Write trace" in frame `FRAMES`, and closes.
+        struct Profiling {
+            gl: HeadlessGl,
+            pumps: u32,
+            button: Vec2,
+        }
+
+        impl EventSource for Profiling {
+            fn pump_events(&mut self, out: &mut Vec<Event>) {
+                self.pumps += 1;
+                if self.pumps == 1 {
+                    out.extend(tap(Key::F3));
+                } else if self.pumps == FRAMES {
+                    out.push(Event::MouseMoved(self.button));
+                    out.extend([true, false].map(|pressed| Event::MouseButton {
+                        button: MouseButton::Left,
+                        pressed,
+                    }));
+                } else if self.pumps > FRAMES {
+                    out.push(Event::CloseRequested);
+                }
+            }
+
+            fn set_modal_frame_callback(&mut self, _callback: Box<dyn FnMut(ModalFrame)>) {}
+
+            fn gpu_surface(&self) -> Option<GpuSurface<'_>> {
+                Some(GpuSurface::Gl(&self.gl))
+            }
+
+            fn window_size(&self) -> UVec2 {
+                SIZE
+            }
+        }
+
+        /// A complete event of the trace: its track, name, start and end,
+        /// and its frame's number, for a frame.
+        #[derive(Debug)]
+        struct Span {
+            tid: i64,
+            name: String,
+            start: i64,
+            end: i64,
+            index: Option<i64>,
+        }
+
+        fn spans(text: &str) -> (Vec<(i64, String)>, Vec<Span>) {
+            let value = json::parse(text, Limits::default()).expect("the trace parses");
+            let events = value
+                .get("traceEvents")
+                .and_then(Value::as_array)
+                .expect("its events");
+            let (mut threads, mut spans) = (Vec::new(), Vec::new());
+            for event in events {
+                let int = |key: &str| event.get(key).and_then(Value::as_i64);
+                let text =
+                    |value: Option<&Value>| value.and_then(Value::as_str).map(str::to_string);
+                let args = event.get("args");
+                let tid = int("tid").expect("a track");
+                match text(event.get("ph")).as_deref() {
+                    Some("M") => {
+                        let name = text(args.and_then(|args| args.get("name")));
+                        threads.push((tid, name.expect("a thread's name")));
+                    }
+                    Some("X") => {
+                        let start = int("ts").expect("a start");
+                        spans.push(Span {
+                            tid,
+                            name: text(event.get("name")).expect("a name"),
+                            start,
+                            end: start + int("dur").expect("a length"),
+                            index: args
+                                .and_then(|args| args.get("index"))
+                                .and_then(Value::as_i64),
+                        });
+                    }
+                    other => panic!("an event of phase {other:?}"),
+                }
+            }
+            (threads, spans)
+        }
+
+        #[test]
+        fn the_loop_times_each_render_for_the_profiler_and_its_trace_has_a_gpu_track() {
+            let expected = env::var("NADIR_EXPECT_GL_RENDERER").unwrap_or_default();
+            let Some(gl) = super::steady_frames::headless(&expected) else {
+                return;
+            };
+            let button = write_trace_button();
+            let mut window = Profiling {
+                gl,
+                pumps: 0,
+                button,
+            };
+            let mut device = Device::new(GpuSurface::Gl(&window.gl)).expect("a device");
+            let renderer = device.caps().renderer.clone();
+            assert!(renderer.contains(&expected), "{renderer} is not {expected}");
+            if !device.caps().timer_queries {
+                assert!(expected.is_empty(), "`{renderer}` has no timer queries");
+                return;
+            }
+            let config = RenderConfig {
+                virtual_resolution: Config::default().virtual_resolution,
+            };
+            let renderer = Renderer::new(&mut device, &config).expect("a renderer");
+            let folder = env::temp_dir().join(format!("nadir-engine-gpu-trace-{}", process::id()));
+            let _ = fs::remove_dir_all(&folder);
+            let mut app = App::new(Config::default());
+            app.debug.write_traces_in(folder.clone());
+            app.run_loop(&mut window, Some(Graphics { renderer, device }))
+                .expect("the frames draw");
+            let files: Vec<PathBuf> = fs::read_dir(&folder)
+                .expect("the trace's folder")
+                .map(|entry| entry.expect("an entry").path())
+                .collect();
+            let [file] = &files[..] else {
+                panic!("one trace: {files:?}");
+            };
+            let text = fs::read_to_string(file).expect("the trace");
+            fs::remove_dir_all(&folder).expect("remove the folder");
+
+            let (threads, spans) = spans(&text);
+            assert_eq!(threads, [(1, "main".to_string()), (2, "gpu".to_string())]);
+            let frames: Vec<&Span> = spans
+                .iter()
+                .filter(|span| span.tid == 1 && span.name == "frame")
+                .collect();
+            // Frames 0 to 38 were pushed when frame 39 wrote the trace.
+            assert_eq!(frames.len(), FRAMES as usize - 1);
+            let gpu: Vec<&Span> = spans.iter().filter(|span| span.tid == 2).collect();
+            // Each timed frame, then its passes: every frame but the last
+            // few, whose times were not read back yet (two or three renders
+            // later, here), and on llvmpipe the first, which it times at
+            // hours. A render is untimed while the GPU is behind.
+            assert!(gpu.len().is_multiple_of(3), "{gpu:?}");
+            let untimed: Vec<i64> = frames
+                .iter()
+                .filter_map(|cpu| cpu.index)
+                .filter(|&index| !gpu.iter().any(|span| span.index == Some(index)))
+                .collect();
+            assert!(
+                untimed.len() <= FRAMES as usize / 4,
+                "frames without a GPU time: {untimed:?}"
+            );
+            let mut free = 0;
+            let mut last = None;
+            for passes in gpu.chunks(3) {
+                let [frame, world, output] = passes else {
+                    unreachable!()
+                };
+                let names = [&frame.name, &world.name, &output.name].map(String::as_str);
+                assert_eq!(names, ["frame", "world", "output"]);
+                // The passes fill the frame, one after the other, after the
+                // frame before on the GPU.
+                assert_eq!((world.start, world.end), (frame.start, output.start));
+                assert_eq!(output.end, frame.end);
+                assert!(frame.start >= free, "{frame:?} starts before {free}");
+                let index = frame.index.expect("a GPU frame's number");
+                assert!(last < Some(index), "frame {index} after {last:?}");
+                last = Some(index);
+                // Each frame's GPU time is its own, placed from when its
+                // drawing started: inside the frame on the processor, after
+                // its update, so its passes start no sooner; and where the
+                // frame before on the track had ended, then, before the
+                // renderer's own scope.
+                let cpu = frames
+                    .iter()
+                    .find(|cpu| cpu.index == Some(index))
+                    .expect("its frame on the processor");
+                let updated = spans
+                    .iter()
+                    .filter(|span| span.tid == 1 && span.name == "nadir::debug_ui")
+                    .find(|span| cpu.start <= span.start && span.end <= cpu.end)
+                    .expect("its debug UI's scope");
+                assert!(frame.start >= updated.end, "{frame:?} before {updated:?}");
+                if frame.start > free {
+                    let render = spans
+                        .iter()
+                        .filter(|span| span.tid == 1 && span.name == "nadir::render")
+                        .find(|span| cpu.start <= span.start && span.end <= cpu.end)
+                        .expect("its render's scope");
+                    assert!(frame.start <= render.start, "{frame:?} after {render:?}");
+                }
+                free = frame.end;
             }
         }
     }

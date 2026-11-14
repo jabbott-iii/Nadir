@@ -28,11 +28,12 @@ Built:
   held, and the keyboard while a text field has it;
 - each window's place, given and taken as data for saving;
 - a stats overlay of numbers the engine copies in, and a profiler of the
-  last 300 frames: a graph of their processor time, a frame's scopes as a
-  tree, and a Chrome trace of them all, which Perfetto UI opens.
+  last 300 frames: graphs of their processor time and of the GPU's time
+  over their drawing, a frame's scopes as a tree, and a Chrome trace of
+  them all, with a track of the GPU's passes, which Perfetto UI opens.
 
-Not yet: the GPU's timings in the profiler (roadmap M7.11), the
-inspector, the console and the debug-draw toggles (M7.4 to M7.6);
+Not yet: the inspector, the console and the debug-draw toggles (M7.4 to
+M7.6);
 tooltips, a scroll area inside a window, copy and paste.
 
 ## Usage

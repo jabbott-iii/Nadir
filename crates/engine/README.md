@@ -49,8 +49,9 @@ Built:
   key of its own, with widgets from `nadir::debug`, drawn over the game in
   the engine's own pixel font, and keeping their places across runs; and
   the engine's own, a stats overlay on F1 and a profiler on F3, whose
-  graph of the last 300 frames shows a frame's scopes as a tree, and which
-  writes them as a Chrome trace for Perfetto UI;
+  graphs of the last 300 frames' processor and GPU times show a frame's
+  scopes as a tree, and which writes them as a Chrome trace for Perfetto
+  UI;
 - a world hash, to check that a replay gives the same simulation.
 
 Not built yet:
@@ -59,7 +60,7 @@ Not built yet:
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
 - the inspector, the console, debug drawing and time control (M7.4 to
-  M7.6), the GPU's timings in the profiler (M7.11), gamepads (M8);
+  M7.6), gamepads (M8);
 - game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
 - the Metal backend for macOS (M10).
 
@@ -641,8 +642,9 @@ window after it (M7.8). The engine has no asset type for the other data files ye
   - The debug UI shows the windows of `App::add_debug_window` and the
     engine's: the stats overlay on F1 and the profiler on F3. nadir-core's
     `profile` feature is on, so each system and the engine's steps record
-    their scopes, which the profiler keeps for the last 300 frames; its
-    "Write trace" button writes them, from `App::run`, to
+    their scopes, which the profiler keeps for the last 300 frames, with
+    the GPU's time over each frame's drawing, which the renderer times in
+    `App::run`; its "Write trace" button writes them, from `App::run`, to
     `trace-<time>.json` beside the log file.
 
 Turn it on from your game's own feature, so that a release build leaves it

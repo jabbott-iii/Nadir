@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The profiler: the last frames' timings and scopes in a ring, their
-//! graph and a frame's scope tree in a window, and the Chrome trace of
-//! them (`debug-tools.md`, "Profiler").
+//! The profiler: the last frames' timings and scopes in a ring, with the
+//! GPU's time over each frame's drawing once it is read back; their graphs
+//! and a frame's scope tree in a window; and the Chrome trace of them
+//! (`debug-tools.md`, "Profiler").
 
 use std::collections::VecDeque;
 use std::fmt::{self, Write as _};
@@ -48,6 +49,9 @@ const GRAPH_HEIGHT: f32 = 60.0;
 const PID: i64 = 1;
 const TID: i64 = 1;
 
+/// The trace's track of the GPU's passes.
+const GPU_TID: i64 = 2;
+
 /// When a frame started, and how long it took.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,6 +77,40 @@ impl FrameTiming {
     }
 }
 
+/// The GPU's time over a frame's drawing: each of the renderer's passes,
+/// as its timers measured them, read back frames later
+/// ([`Profiler::set_gpu`]).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GpuTiming {
+    /// When the processor started the drawing: the GPU started timing its
+    /// passes later, no sooner than the renderer began timing the world
+    /// pass. The timers measure how long, not when, so the trace places
+    /// the passes from here.
+    pub submitted: Instant,
+    /// The world pass: the world drawn into the virtual image.
+    pub world: Duration,
+    /// The output pass: the virtual image onto the window, then the UI.
+    pub output: Duration,
+}
+
+impl GpuTiming {
+    /// A drawing started at `submitted`, whose passes took the GPU `world`
+    /// and `output`.
+    pub fn new(submitted: Instant, world: Duration, output: Duration) -> Self {
+        Self {
+            submitted,
+            world,
+            output,
+        }
+    }
+
+    /// The passes' times together.
+    pub fn total(&self) -> Duration {
+        self.world + self.output
+    }
+}
+
 /// A frame the profiler holds.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
@@ -81,6 +119,9 @@ pub struct ProfiledFrame<'a> {
     pub index: u64,
     /// When it started and how long it took.
     pub timing: FrameTiming,
+    /// The GPU's time over its drawing, once read back: `None` until then,
+    /// and for a frame not drawn or not timed.
+    pub gpu: Option<GpuTiming>,
     /// Its scopes, in the order they ended, so that a parent follows its
     /// children.
     pub records: &'a [ScopeRecord],
@@ -103,6 +144,7 @@ pub struct ProfilerResponse {
 struct Slot {
     index: u64,
     timing: FrameTiming,
+    gpu: Option<GpuTiming>,
     first: usize,
     len: usize,
     dropped: usize,
@@ -115,15 +157,17 @@ impl Slot {
 }
 
 /// The last [`PROFILER_FRAMES`] frames' timings and scopes, which
-/// [`Profiler::show`] draws as a graph of each frame's processor time and,
-/// for the frame clicked, its scopes as a tree, and [`Profiler::trace_json`]
-/// writes as a Chrome trace.
+/// [`Profiler::show`] draws as graphs of each frame's processor time and
+/// GPU time and, for the frame clicked, its scopes as a tree, and
+/// [`Profiler::trace_json`] writes as a Chrome trace.
 ///
 /// The engine pushes each frame with the scopes that
-/// `nadir_core::profile::take_frame` collected. The records of all the
-/// frames share one pool of [`PROFILER_RECORDS`], made at the first push:
-/// a push after that allocates nothing. While paused, it keeps what it
-/// holds, and counts the frames and their rate on.
+/// `nadir_core::profile::take_frame` collected, and gives a frame it held
+/// the GPU's time over its drawing when that is read back, frames later
+/// ([`Profiler::set_gpu`]). The records of all the frames share one pool
+/// of [`PROFILER_RECORDS`], made at the first push: a push after that
+/// allocates nothing. While paused, it keeps what it holds, and counts the
+/// frames and their rate on.
 pub struct Profiler {
     slots: VecDeque<Slot>,
     /// The frames' records, each frame's in one run: empty until the first
@@ -211,10 +255,32 @@ impl Profiler {
         self.slots.push_back(Slot {
             index,
             timing,
+            gpu: None,
             first,
             len,
             dropped: records.len() - len,
         });
+    }
+
+    /// The number the next frame pushed gets: the frames pushed so far,
+    /// paused or not. While a frame runs, before it is pushed, its own.
+    pub fn next_index(&self) -> u64 {
+        self.next
+    }
+
+    /// Gives the frame numbered `index` the GPU's time over its drawing,
+    /// which the GPU's timers give frames after the frame is pushed.
+    /// Returns whether it holds that frame: a frame dropped, or pushed
+    /// while paused, keeps nothing.
+    pub fn set_gpu(&mut self, index: u64, timing: GpuTiming) -> bool {
+        // The frame is one of the last few: look from the newest.
+        match self.slots.iter_mut().rev().find(|slot| slot.index == index) {
+            Some(slot) => {
+                slot.gpu = Some(timing);
+                true
+            }
+            None => false,
+        }
     }
 
     /// How many frames it holds.
@@ -277,10 +343,11 @@ impl Profiler {
     }
 
     /// Fills a window: a checkbox that pauses it, a "Write trace" button,
-    /// the note, a graph of each frame's processor time from 0 to 33 ms
-    /// (the oldest on the left), which says the frame under the pointer
-    /// and selects the one clicked, and the selected frame's scopes as a
-    /// tree, each with how long it took.
+    /// the note, graphs of each frame's processor time and of its GPU time
+    /// on one scale, 0 to 33 ms (the oldest on the left, a frame with no
+    /// GPU time a gap), which say the frame under the pointer and select
+    /// the one clicked, and the selected frame's GPU passes, and its scopes
+    /// as a tree, each with how long it took.
     pub fn show(&mut self, ui: &mut Ui<'_>) -> ProfilerResponse {
         let mut response = ProfilerResponse::default();
         ui.horizontal(|ui| {
@@ -299,17 +366,34 @@ impl Profiler {
             selected,
         };
         let values = self.slots.iter().map(|slot| millis(slot.timing.work));
-        let graph = ui.plot("CPU ms##graph", values, plot);
-        if let Some(slot) = graph.clicked.and_then(|at| self.slots.get(at)) {
+        let cpu = ui.plot("CPU ms##graph", values, plot.clone());
+        // A NaN is a gap: a frame whose GPU time is not known.
+        let values = self
+            .slots
+            .iter()
+            .map(|slot| slot.gpu.map_or(f32::NAN, |gpu| millis(gpu.total())));
+        let gpu = ui.plot("GPU ms##gpu", values, plot);
+        let clicked = cpu.clicked.or(gpu.clicked);
+        if let Some(slot) = clicked.and_then(|at| self.slots.get(at)) {
             self.selected = Some(slot.index);
         }
-        match graph.hovered.and_then(|at| self.slots.get(at)) {
-            Some(slot) => ui.label(format_args!(
-                "frame {}: {:.2} ms CPU, {:.2} ms long",
-                slot.index,
-                millis(slot.timing.work),
-                millis(slot.timing.length)
-            )),
+        let hovered = cpu.hovered.or(gpu.hovered);
+        match hovered.and_then(|at| self.slots.get(at)) {
+            Some(slot) => match slot.gpu {
+                Some(gpu) => ui.label(format_args!(
+                    "frame {}: {:.2} ms CPU, {:.2} ms GPU, {:.2} ms long",
+                    slot.index,
+                    millis(slot.timing.work),
+                    millis(gpu.total()),
+                    millis(slot.timing.length)
+                )),
+                None => ui.label(format_args!(
+                    "frame {}: {:.2} ms CPU, {:.2} ms long",
+                    slot.index,
+                    millis(slot.timing.work),
+                    millis(slot.timing.length)
+                )),
+            },
             None => ui.label(format_args!(
                 "{} frames, {:.0} a second",
                 self.slots.len(),
@@ -334,6 +418,15 @@ impl Profiler {
         if slot.dropped > 0 {
             ui.label(format_args!("{} more scopes not kept", slot.dropped));
         }
+        match slot.gpu {
+            Some(gpu) => ui.label(format_args!(
+                "GPU {:.3} ms: world {:.3}, output {:.3}",
+                millis(gpu.total()),
+                millis(gpu.world),
+                millis(gpu.output)
+            )),
+            None => ui.label("no GPU time"),
+        }
         start_order(&self.records[slot.range()], &mut self.keys, &mut self.order);
         tree(ui, &self.order);
         response
@@ -341,10 +434,25 @@ impl Profiler {
 
     /// The frames it holds as Chrome trace event JSON, which Perfetto UI
     /// and `chrome://tracing` open: `{"traceEvents": [...]}`, a name for
-    /// the thread, then for each frame a complete event (`"ph": "X"`)
-    /// named `frame`, with its number and processor time as arguments,
-    /// and one for each of its scopes, in the order they started, a parent
-    /// before its children.
+    /// the thread, `main`, then for each frame a complete event
+    /// (`"ph": "X"`) named `frame`, with its number and processor time as
+    /// arguments, and one for each of its scopes, in the order they
+    /// started, a parent before its children.
+    ///
+    /// When a frame it holds has its GPU time, a second track, named
+    /// `gpu`, holds for each such frame an event `frame`, with its number
+    /// and GPU time as arguments, over its passes, `world` then `output`.
+    /// The GPU's timers measure how long, not when: each frame's passes
+    /// are placed one after the other from when its drawing started, or
+    /// from the end of the frame before on the track if that is later, as
+    /// a GPU does one frame's work after another's. So their lengths are
+    /// the GPU's, and where they start an estimate. Taking the timers'
+    /// times as exact, a frame's start is never before its drawing
+    /// started, nor after the GPU started its world pass's timer; a frame
+    /// placed from its drawing's start is early by at least the time until
+    /// the renderer began timing its world pass, and one placed after the
+    /// frame before by at least as much as that one, less up to a
+    /// microsecond for the rounding below.
     ///
     /// Times are whole microseconds from the oldest frame's start, each
     /// start and end rounded down, so that, for a reader that converts
@@ -362,18 +470,15 @@ impl Profiler {
             let ts = since(start);
             (ts, since(start + duration) - ts)
         };
-        let mut events = Vec::with_capacity(1 + self.slots.len() + self.records_held());
+        let timed = self.slots.iter().filter(|slot| slot.gpu.is_some()).count();
+        let mut events = Vec::with_capacity(2 + self.slots.len() + self.records_held() + 3 * timed);
         let (mut keys, mut ordered) = (Vec::new(), Vec::new());
-        events.push(object(vec![
-            ("name", Value::String("thread_name".to_string())),
-            ("ph", Value::String("M".to_string())),
-            ("pid", Value::Int(PID)),
-            ("tid", Value::Int(TID)),
-            (
-                "args",
-                object(vec![("name", Value::String("main".to_string()))]),
-            ),
-        ]));
+        events.push(thread_name(TID, "main"));
+        if timed > 0 {
+            events.push(thread_name(GPU_TID, "gpu"));
+        }
+        // When the GPU is done with the frames placed so far.
+        let mut gpu_free: Option<Instant> = None;
         for frame in self.frames() {
             let index = i64::try_from(frame.index).unwrap_or(i64::MAX);
             let cpu_ms = micros(frame.timing.work) as f64 / 1000.0;
@@ -382,12 +487,30 @@ impl Profiler {
                 ("cpu_ms", Value::Float(cpu_ms)),
             ]);
             let (ts, dur) = span(frame.timing.start, frame.timing.length);
-            events.push(complete("frame", ts, dur, Some(args)));
+            events.push(complete(TID, "frame", ts, dur, Some(args)));
             start_order(frame.records, &mut keys, &mut ordered);
             for record in &ordered {
                 let (ts, dur) = span(record.start, record.duration);
-                events.push(complete(record.name, ts, dur, None));
+                events.push(complete(TID, record.name, ts, dur, None));
             }
+            let Some(gpu) = frame.gpu else {
+                continue;
+            };
+            let start = gpu_free.map_or(gpu.submitted, |free| free.max(gpu.submitted));
+            let between = start + gpu.world;
+            let end = between + gpu.output;
+            gpu_free = Some(end);
+            let gpu_ms = micros(gpu.total()) as f64 / 1000.0;
+            let args = object(vec![
+                ("index", Value::Int(index)),
+                ("gpu_ms", Value::Float(gpu_ms)),
+            ]);
+            // The output pass starts where the world pass ends, each
+            // instant rounded alike, so that they meet inside the frame.
+            let (start, between, end) = (since(start), since(between), since(end));
+            events.push(complete(GPU_TID, "frame", start, end - start, Some(args)));
+            events.push(complete(GPU_TID, "world", start, between - start, None));
+            events.push(complete(GPU_TID, "output", between, end - between, None));
         }
         json::to_string_compact(&object(vec![("traceEvents", Value::Array(events))]))
     }
@@ -404,6 +527,7 @@ impl Profiler {
         ProfiledFrame {
             index: slot.index,
             timing: slot.timing,
+            gpu: slot.gpu,
             records: &self.records[slot.range()],
             dropped: slot.dropped,
         }
@@ -492,15 +616,29 @@ fn object(members: Vec<(&str, Value)>) -> Value {
     )
 }
 
-/// A complete event (`"ph": "X"`) on the main thread.
-fn complete(name: &str, ts: i64, dur: i64, args: Option<Value>) -> Value {
+/// The metadata event (`"ph": "M"`) that names the track `tid`.
+fn thread_name(tid: i64, name: &str) -> Value {
+    object(vec![
+        ("name", Value::String("thread_name".to_string())),
+        ("ph", Value::String("M".to_string())),
+        ("pid", Value::Int(PID)),
+        ("tid", Value::Int(tid)),
+        (
+            "args",
+            object(vec![("name", Value::String(name.to_string()))]),
+        ),
+    ])
+}
+
+/// A complete event (`"ph": "X"`) on the track `tid`.
+fn complete(tid: i64, name: &str, ts: i64, dur: i64, args: Option<Value>) -> Value {
     let mut members = vec![
         ("name", Value::String(name.to_string())),
         ("ph", Value::String("X".to_string())),
         ("ts", Value::Int(ts)),
         ("dur", Value::Int(dur)),
         ("pid", Value::Int(PID)),
-        ("tid", Value::Int(TID)),
+        ("tid", Value::Int(tid)),
     ];
     if let Some(args) = args {
         members.push(("args", args));
@@ -700,9 +838,45 @@ mod tests {
         assert_eq!(profiler.len(), PROFILER_FRAMES);
     }
 
-    /// An event of the parsed trace: its name, and when it starts and ends.
+    #[test]
+    fn a_frame_held_takes_its_gpu_time_and_one_not_held_does_not() {
+        let mut profiler = Profiler::new();
+        let start = Instant::now();
+        let gpu = GpuTiming::new(start + MS, 140 * US, 290 * US);
+        assert_eq!(gpu.total(), 430 * US);
+        assert_eq!(profiler.next_index(), 0);
+        // Not pushed yet: the frame being run.
+        assert!(!profiler.set_gpu(0, gpu));
+        for _ in 0..3 {
+            profiler.push(timing(start), &frame_records(start));
+        }
+        assert_eq!(profiler.next_index(), 3);
+        assert!(profiler.set_gpu(1, gpu));
+        let held: Vec<Option<GpuTiming>> = profiler.frames().map(|frame| frame.gpu).collect();
+        assert_eq!(held, [None, Some(gpu), None]);
+        // A frame pushed while paused is not held, nor one dropped.
+        profiler.set_paused(true);
+        profiler.push(timing(start), &frame_records(start));
+        assert_eq!(profiler.next_index(), 4);
+        assert!(!profiler.set_gpu(3, gpu));
+        profiler.set_paused(false);
+        for _ in 0..PROFILER_FRAMES {
+            profiler.push(timing(start), &frame_records(start));
+        }
+        assert!(!profiler.set_gpu(1, gpu));
+        assert!(profiler.frames().all(|frame| frame.gpu.is_none()));
+        // Given again, the later time stands.
+        let later = GpuTiming::new(start, MS, MS);
+        assert!(profiler.set_gpu(100, gpu));
+        assert!(profiler.set_gpu(100, later));
+        assert_eq!(profiler.frame(100).and_then(|frame| frame.gpu), Some(later));
+    }
+
+    /// An event of the parsed trace: its track, its name, and when it
+    /// starts and ends.
     #[derive(Debug)]
     struct Event {
+        tid: i64,
         name: String,
         start: i64,
         end: i64,
@@ -719,11 +893,13 @@ mod tests {
         for event in &list {
             let field = |key: &str| event.get(key).expect(key);
             assert_eq!(field("pid").as_i64(), Some(PID));
-            assert_eq!(field("tid").as_i64(), Some(TID));
+            let tid = field("tid").as_i64().expect("a track");
+            assert!(tid == TID || tid == GPU_TID, "{event:?}");
             if field("ph").as_str() == Some("X") {
                 let start = field("ts").as_i64().expect("ts is a whole number");
                 let dur = field("dur").as_i64().expect("dur is a whole number");
                 complete.push(Event {
+                    tid,
                     name: field("name").as_str().expect("a name").to_string(),
                     start,
                     end: start + dur,
@@ -779,6 +955,8 @@ mod tests {
             Some("main")
         );
         assert_eq!(complete.len(), 3 + 3 * 4);
+        // No frame has a GPU time: no GPU track.
+        assert!(complete.iter().all(|event| event.tid == TID));
         // Each frame, then its scopes in the order they started.
         let first = &complete[..5];
         let names: Vec<&str> = first.iter().map(|event| event.name.as_str()).collect();
@@ -819,6 +997,93 @@ mod tests {
                 .collect();
             assert_eq!(chunk, expected, "frame {index}");
         }
+    }
+
+    #[test]
+    fn the_gpu_track_places_each_frame_s_passes_after_its_submission_and_the_frame_before() {
+        let mut profiler = Profiler::new();
+        let base = Instant::now();
+        for index in 0..4 {
+            let start = base + index * 16 * MS;
+            profiler.push(timing(start), &frame_records(start));
+        }
+        // Frame 0 drawn 600 µs in, 1 ms on the GPU; frame 1 with no time;
+        // frame 2's 20 ms on the GPU past frame 3's submission, which then
+        // waits for it.
+        let at = |frame: u32, micros: u32| base + frame * 16 * MS + micros * US;
+        profiler.set_gpu(0, GpuTiming::new(at(0, 600), 300 * US, 700 * US));
+        profiler.set_gpu(2, GpuTiming::new(at(2, 600), 15 * MS, 5 * MS));
+        profiler.set_gpu(3, GpuTiming::new(at(3, 600), 100 * US, 200 * US));
+        let (all, complete) = events(&profiler.trace_json());
+        let Value::Array(all) = all else {
+            unreachable!()
+        };
+        let arg =
+            |event: &Value, key: &str| event.get("args").and_then(|args| args.get(key)).cloned();
+        let names: Vec<(Option<i64>, Option<Value>)> = all
+            .iter()
+            .filter(|event| event.get("ph").and_then(Value::as_str) == Some("M"))
+            .map(|event| (event.get("tid").and_then(Value::as_i64), arg(event, "name")))
+            .collect();
+        let name = |text: &str| Some(Value::String(text.to_string()));
+        assert_eq!(
+            names,
+            [(Some(TID), name("main")), (Some(GPU_TID), name("gpu"))]
+        );
+
+        let gpu: Vec<(&str, i64, i64)> = complete
+            .iter()
+            .filter(|event| event.tid == GPU_TID)
+            .map(|event| (event.name.as_str(), event.start, event.end))
+            .collect();
+        assert_eq!(
+            gpu,
+            [
+                ("frame", 600, 1_600),
+                ("world", 600, 900),
+                ("output", 900, 1_600),
+                ("frame", 32_600, 52_600),
+                ("world", 32_600, 47_600),
+                ("output", 47_600, 52_600),
+                // Submitted at 48,600: after frame 2's passes, at 52,600.
+                ("frame", 52_600, 52_900),
+                ("world", 52_600, 52_700),
+                ("output", 52_700, 52_900),
+            ]
+        );
+        let frames: Vec<(Option<i64>, Option<f64>)> = all
+            .iter()
+            .filter(|event| {
+                event.get("tid").and_then(Value::as_i64) == Some(GPU_TID)
+                    && event.get("name").and_then(Value::as_str) == Some("frame")
+            })
+            .map(|event| {
+                let index = arg(event, "index").and_then(|value| value.as_i64());
+                (index, arg(event, "gpu_ms").and_then(|value| value.as_f64()))
+            })
+            .collect();
+        assert_eq!(
+            frames,
+            [
+                (Some(0), Some(1.0)),
+                (Some(2), Some(20.0)),
+                (Some(3), Some(0.3))
+            ]
+        );
+
+        // Each track nests on its own: the processor's as before, and the
+        // GPU's frames each over its two passes.
+        let (cpu, gpu): (Vec<Event>, Vec<Event>) =
+            complete.into_iter().partition(|event| event.tid == TID);
+        assert_eq!(cpu.len(), 4 + 4 * 4);
+        depths(&cpu);
+        let nested: Vec<(String, usize)> = depths(&gpu);
+        let expected = [("frame", 0), ("world", 1), ("output", 1)].repeat(3);
+        let nested: Vec<(&str, usize)> = nested
+            .iter()
+            .map(|(name, depth)| (name.as_str(), *depth))
+            .collect();
+        assert_eq!(nested, expected);
     }
 
     #[test]

@@ -178,8 +178,8 @@ pub struct WindowSize(pub UVec2);   // a resource: the window's inside, physical
 ### As built (M7.3): the stats overlay and the profiler
 
 Two windows of the engine's, in the facade's debug UI (ADR-0059). The GL
-timer queries are M7.11's, built (ADR-0060), and the profiler's GPU time
-M7.12's.
+timer queries are M7.11's (ADR-0060), and the profiler's GPU time
+M7.12's (ADR-0061, below).
 
 ```rust
 // nadir-debug:
@@ -258,6 +258,59 @@ pub struct Profiler;   // new, push(timing, records), len, is_empty, frames, fra
   the note says traces are written only by `App::run`. The console's
   `profile dump [path]` is M7.5's.
 
+### As built (M7.12): the GPU's time in the profiler
+
+The renderer's timers (M7.11) feed the profiler in development builds
+(ADR-0061).
+
+```rust
+// nadir-debug:
+#[non_exhaustive] pub struct GpuTiming { pub submitted: Instant, pub world: Duration,
+                                         pub output: Duration }   // new, total
+// ProfiledFrame gains `pub gpu: Option<GpuTiming>`; Profiler gains
+// next_index() -> u64 and set_gpu(index, GpuTiming) -> bool.
+```
+
+- **Timing:** the main loop of `App::run` turns the renderer's timing on
+  under `dev`, before its first frame, on a device with timer queries;
+  `App::offscreen` does not time.
+- **Frames:** after each frame drawn, the facade gives the times that
+  render read back (`Renderer::gpu_times`) to the frames they were timed
+  in. It keeps the frame number (`Profiler::next_index` while the frame
+  runs) and the drawing's start of the last 8 renders, by render, as a
+  frame not drawn (a modal one) is no render: a time `renders_ago`
+  renders back goes to that render's frame, with `Profiler::set_gpu`, and
+  one 8 or more back is dropped. The profiler keeps it only for a frame
+  it holds. The newest two or three frames wait for theirs; on llvmpipe
+  the first has none (ADR-0060).
+- **The window:** under the processor's graph, a graph of each frame's
+  GPU time, both passes, on the same scale, 0 to 33 ms, and with the same
+  frame marked; a frame without one is a gap. Either graph says the frame
+  under the pointer, `frame 1157: 6.28 ms CPU, 4.49 ms GPU, 16.67 ms long`
+  (without the GPU's part when it has none), and selects the one clicked.
+  Under the selected frame's line, `GPU 4.366 ms: world 2.157, output
+  2.209`, or `no GPU time`, then its tree.
+- **The trace:** when a frame held has a GPU time, a second track, `tid`
+  2, named `gpu`: for each frame with a time, an event `frame` (`args`:
+  `index`, `gpu_ms`) over its passes, `world` then `output`. The timers
+  give lengths, not when: a frame's passes start at the later of when its
+  drawing started on the processor and when the frame before on the track
+  ended, one after the other, as a GPU does one frame's work after
+  another's. Their lengths are measured, their starts an estimate.
+  Taking the timers' times as exact, a frame's start is never before its
+  drawing started, nor after the GPU started its world pass's timer; a
+  frame placed from its drawing's start is early by at least the time
+  until the renderer began timing its world pass (in `cargo dev` on
+  2026-11-14 the drawing started 10 to 72 µs before the `nadir::render`
+  scope, and the passes are issued inside it), and one placed after the
+  frame before by at least as much as that one, less up to a microsecond
+  for the rounding (ADR-0061). Rounded down to microseconds as the rest
+  is, the passes meet inside their frame and the track's frames never
+  cross.
+- **The graph's dots:** a frame with a GPU time between two without is
+  a dot: `Ui::plot` draws a value with no finite one beside it as a dot,
+  not only a plot's one value.
+
 ## Tools
 
 | Tool | Toggle | Function |
@@ -302,8 +355,9 @@ Games register their own commands with `console.register(name, help, fn)`.
   3.3) around each pass, read back two frames later so we never stall.
   Metal: the command buffer's `GPUStartTime`/`GPUEndTime`. The timers are
   built (M7.11, ADR-0060): nadir-render's `Renderer::gpu_times`, each
-  render's two passes read back two renders later. Showing them in the
-  profiler, and a GPU track in the trace, is roadmap M7.12.
+  render's two passes read back two renders later. The profiler shows
+  them beside the processor's time, and the trace has a GPU track (M7.12,
+  ADR-0061, "As built (M7.12)" above).
 
 ## Tests
 

@@ -654,8 +654,9 @@ impl<'a> Ui<'a> {
 
     /// A line graph of `values`, from the left edge to the right, each
     /// value `i` of `n` at `i / (n − 1)` of the width, as `plot` says;
-    /// values that are not finite break the line. It says which value is
-    /// under the pointer, and which was clicked.
+    /// values that are not finite break the line, and a value with no
+    /// finite one beside it is a dot. It says which value is under the
+    /// pointer, and which was clicked.
     pub fn plot(
         &mut self,
         text: impl fmt::Display,
@@ -719,7 +720,14 @@ impl<'a> Ui<'a> {
                     (Some(from), Some(to)) => {
                         self.core.line(self.layer, clip, from, to, style.accent);
                     }
-                    (None, Some(at)) if count == 1 => {
+                    // A value alone, between gaps or at an end: a dot.
+                    (None, Some(at))
+                        if !self
+                            .core
+                            .values
+                            .get(index + 1)
+                            .is_some_and(|next| next.is_finite()) =>
+                    {
                         let dot = Rect::from_min_size(at - Vec2::splat(0.5), Vec2::ONE);
                         self.core.rect(self.layer, clip, dot, style.accent);
                     }

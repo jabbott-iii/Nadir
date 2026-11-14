@@ -680,6 +680,11 @@ As built (M7.11, ADR-0060), for the profiler (M7.12):
   started and before the result came. llvmpipe (Mesa 26.1) times a
   context's first drawing at hours.
 - `FrameStats` is unchanged: it says what this frame drew.
+- The facade turns the timing on in `App::run`'s loop under `dev`, and
+  gives the profiler each time read back, for the frame of the render
+  `renders_ago` back (M7.12, ADR-0061). On a headless context the
+  results of this session's drivers came in pairs, two and three renders
+  back.
 
 ## Tests
 

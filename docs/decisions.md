@@ -5304,7 +5304,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 - **Status:** Accepted: the user chose, on 2026-11-14, to split M7.11 in
   two, the timers (sys, gfx, render) and showing them (nadir-debug, the
-  facade); the rest follows the spec and the roadmap's notes
+  facade); the rest follows the spec and the roadmap's notes; ADR-0061
+  shows the times in the profiler (M7.12)
 - **Date:** 2026-11-14
 - **Context:**
   - M7.11, split from M7.3 (ADR-0059), asks for the GL query
@@ -5420,3 +5421,116 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   `GPUStartTime` and `GPUEndTime`, which time the frame alone); a new pass
   in the renderer (debug draw, post) wants a timer of its own; or a Mesa
   release times a context's first drawing right.
+
+## ADR-0061 — M7.12: the profiler's GPU time and the trace's GPU track; timing on in the main loop under `dev`, each time given to its frame by counting renders, a second graph on the processor's scale, and the passes placed one after another from the drawing's start
+
+- **Status:** Accepted: the user accepted, on 2026-11-14, the choices
+  as recorded: the GPU graph on the processor's scale, times given to
+  their frames by counting renders, the passes placed from the
+  drawing's start, no timing in `App::offscreen`, and `Ui::plot`
+  drawing a value with no finite one beside it as a dot; the same day,
+  at the user's request, the bounds on how early the GPU track's starts
+  are were made exact: from the world pass's timer, for a frame placed
+  after the frame before too, and less the trace's rounding
+- **Date:** 2026-11-14
+- **Context:**
+  - M7.11 built the timers (ADR-0060): `Renderer::set_gpu_timing`, and
+    `Renderer::gpu_times`, each `GpuTimes` read back two renders or more
+    after its render, saying how many (`renders_ago`). M7.12 asks for the
+    profiler's GPU time beside the processor's, the renderer's timing on
+    under `dev`, and a GPU track in the trace.
+  - The facade pushes a frame to the profiler as the next starts
+    (ADR-0059), so a GPU time comes after its frame was pushed. A frame
+    not drawn (a modal one, on Windows and macOS) is no render: renders
+    and frames are counted apart.
+  - `GL_TIME_ELAPSED` gives how long, not when the GPU did the work.
+  - The profiler's window is 360 × 300 units at first; its graph is 60
+    high, 0 to 33 ms, with the selected frame's tree under it.
+  - Seen in this session: on a headless context (NVIDIA 595.104.02 and
+    llvmpipe), under the 60 Hz limiter, the results came in pairs: every
+    other render read back the two before it, three and two renders back,
+    and the next none. In a window (llvmpipe, Intel UHD), two back.
+- **Decision:**
+  - **nadir-debug** (additions only):
+    - `GpuTiming { submitted, world, output }`, `#[non_exhaustive]`, with
+      `new` and `total`: when the processor started the frame's drawing,
+      and the two passes' times;
+    - `ProfiledFrame::gpu: Option<GpuTiming>`, a field more of a
+      `#[non_exhaustive]` struct;
+    - `Profiler::next_index`: the number the frame being run will get;
+    - `Profiler::set_gpu(index, timing) -> bool`: for a frame it holds,
+      and `false` for one dropped, pushed while paused, or not pushed.
+  - **The window:** a second graph, "GPU ms", under the processor's, on
+    the same scale (0 to 33 ms) and with the same frame selected; a frame
+    without a GPU time is a gap. Hovering either says the frame, with its
+    GPU time when it has one; clicking either selects. Under the selected
+    frame's line: `GPU t ms: world w, output o`, or `no GPU time`; then
+    the tree.
+  - **The trace:** when a frame held has a GPU time, a second track,
+    `tid` 2, named `gpu` by a `thread_name` event; for each frame with a
+    time, an event `frame` (`args`: `index`, `gpu_ms`) over its passes,
+    `world` then `output`. A frame's passes start at the later of when its
+    drawing started and when the frame before on the track ended: a GPU
+    doing one frame's work after another's. The lengths are measured; the
+    starts an estimate. Taking the timers' times as exact, a frame's
+    start is never before its drawing started, nor after the GPU started
+    its world pass's timer: a frame placed from its drawing's start is
+    early by at least the time until the renderer began timing its world
+    pass, and one placed after the frame before by at least as much as
+    that one, less up to a microsecond for the rounding. Instants are
+    rounded down to microseconds as the rest of the trace is, so the
+    passes meet and the track's frames never cross.
+  - **`Ui::plot`** draws a value with no finite one beside it as a dot,
+    not only a plot's one value: a frame with a GPU time between two
+    without one would otherwise not show.
+  - **The facade:** the main loop (`App::run`) turns the renderer's timing
+    on under `dev` before its first frame. After each frame drawn,
+    `DebugTools::rendered(submitted, gpu_times)` keeps, for the last 8
+    renders by render number modulo 8, the frame each drew and when its
+    drawing started, and gives each time read back to the frame its
+    `renders_ago` points at; a time 8 or more renders back is dropped. A
+    frame that fails to draw ends the loop, so the renderer's count and
+    the facade's stay in step. `App::offscreen` does not time.
+- **Consequences:**
+  - `cargo dev` times every render (ADR-0060's four timer calls) and
+    allocates nothing more once the ring is made: the facade's
+    steady-frame test, through the main loop, passes with timing on.
+  - The newest two or three frames have no GPU time yet; on llvmpipe, nor
+    has the first (ADR-0060).
+  - On the processor's scale, a GPU time under a millisecond is a line on
+    the graph's floor: the numbers are in the labels, and the graph shows
+    how far under the frame's budget the GPU is.
+  - The GPU track's starts are an estimate, and early: a frame placed
+    from its drawing's start begins before the renderer issued its passes
+    (in `cargo dev`, the drawing started 10 to 72 µs before the
+    `nadir::render` scope, which issues them), one placed after the frame
+    before is early by at least as much as that one (less the rounding),
+    and a driver that starts a frame's passes after the next frame's
+    drawing begins shows them sooner still; a GPU-bound game shows the
+    queue growing.
+  - The profiler's tree starts lower, by the second graph and the GPU's
+    line: its window scrolls sooner.
+  - `App::offscreen`'s recordings have no GPU times.
+- **Alternatives considered:**
+  - Both times in one graph: `Ui::plot` draws one series, and a second is
+    a change to the widget this does not need.
+  - The GPU graph on a scale of its own (the largest time held): a line
+    that fills its graph, but not to be compared with the processor's by
+    eye, and a scale that changes as the frames go by.
+  - Counting frames, not renders: after a modal frame, each time would go
+    to the frame after its own.
+  - Placing the passes after the frame's `nadir::render` scope: the
+    profiler would look a scope up by the facade's name, and
+    `App::offscreen` draws with none. From the frame's start: sooner
+    still, by the frame's update. `glQueryCounter` with `GL_TIMESTAMP` would
+    place them exactly: bindings and a device API more, in nadir-sys and
+    nadir-gfx, three crates past this task's two.
+  - Timing in `App::offscreen` too: recordings want no GPU times, and on
+    llvmpipe each would log ADR-0060's warning.
+  - Timing only while the profiler is open: its GPU graph would start
+    empty each time it opens.
+- **Revisit when:** M10.2's Metal backend gives its times (the facade
+  counts one `gpu_times` read a render, by `renders_ago`); the renderer
+  times a third pass; or a GPU capture (RenderDoc, Instruments) shows a
+  frame's passes starting more than a frame later than the trace places
+  them.

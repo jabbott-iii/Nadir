@@ -5190,7 +5190,7 @@ by the batched sprite renderer.
     without `--features headless-test` skips the GPU tests, and a missing
     note that a timer of the caller's around `render` fails it.
 
-- [ ] **M7.12 — debug and facade: GPU timings in the profiler**
+- [x] **M7.12 — debug and facade: GPU timings in the profiler**
   - Split from M7.11 on 2026-11-14 (ADR-0060), the user's choice.
   - Note (from M7.3, ADR-0059): the profiler is nadir-debug's `Profiler`,
     which the facade's `DebugTools` (`crates/engine/src/debug_ui.rs`)
@@ -5225,6 +5225,78 @@ by the batched sprite renderer.
   - Accept: manual: the profiler shows the GPU's time in `cargo dev`.
   - Verify: `cargo test -p nadir-debug`; `cargo test -p nadir_engine
     --features dev`; `cargo dev` (manual)
+  - Built on 2026-11-14 (ADR-0061, accepted by the user as recorded):
+    - nadir-debug: `GpuTiming { submitted, world, output }`;
+      `ProfiledFrame::gpu`; `Profiler::next_index` and `set_gpu`, for a
+      frame held. The window's second graph, "GPU ms", under the
+      processor's, on its scale (0 to 33 ms), a gap for a frame without
+      one; the hovered frame's GPU time; the selected frame's
+      `GPU t ms: world w, output o`, or `no GPU time`. The trace's track
+      `gpu` (`tid` 2): each frame's event over `world` then `output`,
+      from the later of the drawing's start and the frame before's end.
+      `Ui::plot` draws a value with no finite one beside it as a dot.
+    - nadir_engine, with `dev`: the main loop turns the renderer's timing
+      on; after each frame drawn, `DebugTools::rendered` gives each time
+      read back to the frame of the render `renders_ago` back, from the
+      last 8 renders. `App::offscreen` does not time.
+  - Finding: on a headless context, under the 60 Hz limiter, NVIDIA
+    595.104.02 gave the results in pairs, logged render by render: every
+    other render read back the two before it, three and two back, the
+    next none. llvmpipe (Mesa 26.1.6) left the same last frames untimed.
+    In a window, only the last two frames were untimed, as two back
+    gives.
+  - Linux check of `cargo dev`, on 2026-11-14, in this XWayland session,
+    driven as M7.3's was (`XSendEvent`, the config and data folders in a
+    scratch folder, `NADIR_ALSA_DEVICE=null`), on two GPUs:
+    - llvmpipe (Mesa forced): F3 showed the two graphs; the pointer on
+      the GPU's said `frame 1157: 6.28 ms CPU, 4.49 ms GPU, 16.67 ms
+      long`; a click on it selected frame 1144, `GPU 4.366 ms: world
+      2.157, output 2.209`, over its tree. "Write trace" wrote 518 KB:
+      tracks `main` and `gpu`, 300 frames and 298 GPU frames (the last two
+      not read back yet), the GPU's frames at depth 0 over 596 passes,
+      none crossing; GPU median 3.52 ms (1.65 to 7.19; world 1.52, output
+      2.13) against 5.17 ms of CPU. The first drawing's 46,018 s dropped,
+      with the warning.
+    - Intel UHD Graphics (TGL GT1, Mesa 26.1.6), the window's own GPU
+      when Mesa is not forced: `frame 575: 3.23 ms CPU, 0.29 ms GPU,
+      16.64 ms long`; frame 1221 `GPU 0.820 ms: world 0.158, output
+      0.662`. Its trace: 298 of 300 frames timed, GPU median 0.83 ms
+      (0.22 to 0.93; world 0.15, output 0.67) against 2.95 ms of CPU; no
+      warning.
+  - Tests: `cargo test -p nadir-debug` (71 and 2 doc tests, 4 new: a
+    frame held takes its GPU time and one dropped, paused or not pushed
+    does not; the GPU track's passes after their submission and the frame
+    before, nesting apart from the processor's; the window's GPU graph,
+    its hover, a click on it and the selected frame's GPU line; a plot's
+    value between gaps a dot);
+    `cargo test -p nadir_engine --features dev` (167, 2 new: each time to
+    the frame its render drew, past a modal frame, and one nine renders
+    back dropped; and through the main loop on a headless context, F3,
+    "Write trace", a GPU track whose frames each start after their own
+    frame's update and, where the frame before on the track had ended, no
+    later than its `nadir::render` scope) and without `dev` (123).
+    Mutants that each test catches: the frame recorded one too early or
+    too late (both), the too-old guard removed (the first), the drawing's
+    start taken after the drawing (the second). The main loop's
+    steady-frame test, which counts no allocation, now runs with timing
+    on. Run with Mesa forced and `NADIR_EXPECT_GL_RENDERER=llvmpipe`, and
+    on NVIDIA.
+  - Review: one reviewer and a review workflow (four finders, each
+    finding put to three skeptics, 8 of 11 kept) found, all fixed: the
+    test's too-old case at eight renders back, which lands on the frame
+    being drawn and so passed without the guard; docs saying the GPU
+    track never starts a pass before the GPU could have, where a frame
+    placed from its drawing's start begins before the renderer issues its
+    passes (10 to 72 µs before `nadir::render` in `cargo dev`); no test
+    pinning the drawing's start; a lone GPU time between gaps drawn as
+    nothing; the demo page calling the stacked graphs "side by side"; and
+    two doc slips (two frames later, later than 8). Kept as they are: no
+    allocation test with the profiler open while GPU times arrive (the
+    reviewers measured none in a scratch copy), and the window test not
+    checking the GPU graph's lines. A check of the commit message then
+    found the docs' bounds on how early the track starts a frame too
+    strong for a frame placed after the frame before; made exact, at the
+    user's request, on 2026-11-14 (ADR-0061's status).
 
 - [ ] **M7.4 — inspector**
   - Note (from M4.2): `Registration::inspect` and `inspect_mut` hold the
@@ -5538,6 +5610,13 @@ by the batched sprite renderer.
     blend table in `gfx.md` gives the factors to bake. The device keeps no
     borrow of its layer (ADR-0016).
   - Depends: M10.1, M2.3
+  - Note (from M7.12, ADR-0061): with `dev`, the main loop times every
+    render (`Renderer::set_gpu_timing`), and the facade gives each
+    `GpuTimes` read back to the frame of the render `renders_ago` back,
+    keeping the last 8 renders. Metal's timers (`create_timer`,
+    `begin_timer`, `end_timer`, `timer_result`, which never waits) keep
+    that meaning, or the profiler's GPU graph and the trace's `gpu` track
+    show other frames' times.
   - Do: resources, pipelines (blend baked in), passes,
     `setVertexBytes`/`setFragmentBytes` uniforms, triple-buffered dynamic
     buffers, readback.
