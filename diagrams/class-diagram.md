@@ -27,12 +27,13 @@ shows only a few of its fields and methods: the ones the design rests on.
   error type of a `Result` are left out.
 
 Nothing here is planned work: the diagrams show only what is built. The
-Metal backend, audio's output on Windows and macOS, the debug tools,
-gamepads, saves and pathfinding are not built yet (see
-`docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
-output on Linux (M6.3), its assets (M6.9), and the game's sound (M6.6);
-bitmap text in the world is (M7.1), the UI pass (M7.8), and the debug
-UI (M7.2), which the facade's `dev` shows (M7.10).
+Metal backend, audio's output on Windows and macOS, the inspector, the
+console and the other debug tools, gamepads, saves and pathfinding are
+not built yet (see `docs/roadmap.md`), so they do not appear; audio's
+mixer is (M6.2), its output on Linux (M6.3), its assets (M6.9), and the
+game's sound (M6.6); bitmap text in the world is (M7.1), the UI pass
+(M7.8), the debug UI (M7.2), which the facade's `dev` shows (M7.10), and
+its stats overlay and profiler (M7.3).
 The members only the `dev` feature compiles, the facade's hot reload's
 (roadmap M5.8), are marked `dev`. One member that exists in the code for
 planned work, `ShaderSource::msl`, carries a note.
@@ -1605,6 +1606,67 @@ classDiagram
     Frame ..> UiList : finish
     Ui ..> Response
     DebugUi ..> WindowPlace : places
+```
+
+## debug: the stats overlay and the profiler
+
+Each fills a window of the debug UI. The facade copies the frame's numbers
+into a `Stats`, and pushes each frame, with the scopes core's
+`profile::take_frame` collected, into its `Profiler`, whose records share
+one pool.
+
+```mermaid
+classDiagram
+    direction LR
+    class Stats {
+        +frame_rate f32
+        +frame_time Duration
+        +tick_time Duration
+        +ticks u32
+        +draw_calls u32
+        +sprites u32
+        +entities usize
+        +allocations u64
+        +allocated_bytes u64
+        +voices u32
+        +underruns u64
+        +show(ui)
+    }
+    class Profiler {
+        -slots VecDeque
+        -records Vec~ScopeRecord~
+        +new()$ Profiler
+        +push(timing, records)
+        +frames() Iterator~ProfiledFrame~
+        +frame(index) Option~ProfiledFrame~
+        +frame_rate() f32
+        +set_paused(paused)
+        +select(index)
+        +set_note(note)
+        +show(ui) ProfilerResponse
+        +trace_json() String
+    }
+    class FrameTiming {
+        +start Instant
+        +length Duration
+        +work Duration
+    }
+    class ProfiledFrame {
+        +index u64
+        +timing FrameTiming
+        +records ScopeRecord[]
+        +dropped usize
+    }
+    class ProfilerResponse {
+        +write_trace bool
+    }
+    class ScopeRecord["core::profile::ScopeRecord"]
+    Profiler ..> FrameTiming : push
+    Profiler ..> ProfiledFrame : frames
+    Profiler o-- ScopeRecord
+    Profiler ..> ProfilerResponse : show
+    Stats ..> Ui : show
+    Profiler ..> Ui : show
 ```
 
 ## gfx: the device and its backend

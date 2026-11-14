@@ -5188,3 +5188,114 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** M9.2's game UI sets the capture or needs the window's
   size outside `dev`; M9.3's settings give the UI scale; a tool needs text
   beyond ASCII; or a fuzz harness can run the facade's readers.
+
+## ADR-0059 — M7.3: the stats overlay and the profiler in nadir-debug, frames collected as the next starts, nadir-debug → nadir-codec for the trace, `dev` turns on `profile`, and the GPU timings split to M7.11
+
+- **Status:** Accepted: the user chose, on 2026-11-13, to split the GL
+  timer queries off into a new task (M7.11), to let nadir-debug depend on
+  nadir-codec for the trace, and to have the facade's `dev` turn on
+  nadir-core's `profile`; the rest follows the spec and the roadmap's
+  notes
+- **Date:** 2026-11-13
+- **Context:**
+  - M7.3 asks for the overlay, the profiler's ring, graph and scope tree,
+    a Chrome trace export, and GL timer queries. The timer queries need
+    GL bindings in nadir-sys, a query API and a `Caps` flag in nadir-gfx
+    and queries around render's passes: with the tools in nadir-debug and
+    the facade, five crates, past CLAUDE.md's three.
+  - The spec writes the trace "with our own JSON writer" and tests that it
+    parses with our parser, in nadir-debug: both are nadir-codec's, which
+    the dependency matrix did not let nadir-debug depend on.
+  - Nothing turned on nadir-core's `profile`: `profile_scope!`, which the
+    schedule puts around each system, recorded nothing in `cargo dev`.
+  - The facade collected the scopes at the end of `App::update`, before
+    the frame is drawn: a frame's drawing landed in the next frame's
+    records.
+  - nadir-debug may not depend on the facade's `FrameAllocs`, nor on
+    nadir-platform (M3.5's note): the overlay takes plain numbers.
+  - A swap with vsync may wait for the display: a frame's time through
+    the present is about 16.7 ms on such drivers whatever the work.
+- **Decision:**
+  - **Split:** M7.3 is the overlay, the profiler and the trace, in
+    nadir-debug and the facade; the GL timer queries, and the GPU row in
+    the profiler, are M7.11 (sys, gfx, render, the facade), after M7.3.
+  - **The matrix:** nadir-debug may depend on nadir-codec (layer 1, below
+    it): `Profiler::trace_json` builds a `json::Value` and writes it with
+    `json::to_string_compact`, and its tests parse it with `json::parse`.
+  - **`dev` turns on `nadir-core/profile`**, from the facade's
+    `[features]`: every development build records each system's scope and
+    the engine's (`nadir::tick`, `nadir::frame_stages`, `nadir::debug_ui`,
+    and in `App::run` `nadir::render`, `nadir::present`,
+    `nadir::finish_loads`). Release builds record none.
+  - **Frames:** `App::update` collects the scopes as it starts, so that a
+    frame is one update and its drawing; with `dev` it pushes the last
+    frame to the profiler with when it started, its length (to this
+    frame's start) and the processor's work on it: the update, and in
+    `App::run` the drawing and the hot reload, less the present.
+  - **The ring:** `Profiler` keeps the last 300 frames, their records in
+    one pool of 32,768 made at its first push, each frame's in one run of
+    it; a frame that does not fit before the end starts at the start,
+    dropping the oldest frames in its way. Pausing keeps the frames; the
+    frame rate, over the last 60 frames, counts on.
+  - **The graph** shows each frame's processor time, 0 to 33 ms, rather
+    than its length, which the limiter and vsync hold at the frame's
+    interval.
+  - **The tree** orders a frame's scopes from the order they ended and
+    their depths: each scope's descendants are the run of deeper ones just
+    before it. Sorting by start time put a scope under the wrong parent
+    when two started on one tick of the clock, as the review found: rare
+    on Linux, common at Windows' 100 ns.
+  - **The windows:** the facade's own, hidden at start, before the
+    game's: `Stats##nadir::stats` on F1 and `Profiler##nadir::profiler`
+    on F3, each an ordinary debug window that drags and keeps its place.
+  - **The trace** is Chrome trace event JSON: a `thread_name` event, then
+    for each frame a complete event `frame` (`args`: `index`, `cpu_ms`)
+    and its scopes', in the order they started, on `pid` 1 and `tid` 1, in
+    whole microseconds from the oldest frame's start, each start and end
+    rounded down. A first trace of the sandbox in fractional microseconds
+    had 26 pairs of frames whose `ts + dur`, added in floating point, came
+    out past the next frame's `ts`: a reader that rounds or truncates each
+    to nanoseconds could nest one frame in the other. Rounding every
+    instant down keeps nesting and order exact. "Write trace" writes it, from `App::run`, to
+    `trace-<UTC time>.json` in the logs folder, beside `nadir.log`.
+- **Consequences:**
+  - `App::update` collects the scopes at its start rather than its end, in
+    every build: a frame's records are those since the last frame
+    started.
+  - Development builds time two `Instant`s a system and a tick, and keep
+    a pool of about 1.8 MB from their first frame.
+  - Until the ring is full (300 frames), the profiler's graph grows the
+    UI's buffers as it draws more lines; after that a frame of the open
+    tools allocates nothing (a facade test).
+  - The overlay counts draw calls as the world's and the UI's instanced
+    draws, not the blit onto the window.
+  - The overlay is a window that takes the mouse over it: a window with
+    no title bar that lets the pointer through is still not built.
+  - A game window on F1 or F3 shows with the engine's.
+  - Traces from two writes in one second overwrite each other.
+  - The trace's resolution is a microsecond, as the profiler's tree shows
+    (0.001 ms): a scope shorter than that may be an instant, beside its
+    parent if it falls on the parent's end.
+  - nadir-debug from crates.io depends on nadir-codec.
+- **Alternatives considered:**
+  - All of M7.3 in one task across five crates (the user chose to split).
+  - The facade turning the profiler's events into JSON and writing them,
+    nadir-debug untouched: the parse test outside `cargo test -p
+    nadir-debug` (the user chose the matrix edge). A JSON writer of
+    nadir-debug's own: a second writer to keep.
+  - A `profile` feature of its own on the facade and the sandbox (the
+    user chose `dev`).
+  - Collecting at the end of `App::update`, as before: a frame's drawing
+    in the next frame's tree.
+  - A fixed run of records for each of the 300 frames: a frame of many
+    ticks, the one worth reading, cut short.
+  - The frame's length in the graph: flat at the frame's interval under
+    the limiter and vsync.
+  - Fractional microseconds in the trace: nanoseconds kept, but frames
+    that meet may overlap by one in a reader's arithmetic.
+  - An overlay window with no chrome that takes no input: an addition to
+    `Frame` the overlay does not need.
+- **Revisit when:** M7.11 adds the GPU's timings; M7.5's console adds
+  `profile dump [path]`; the scopes of other threads (the asset workers,
+  the audio thread) are wanted; or the overlay should let the pointer
+  through.

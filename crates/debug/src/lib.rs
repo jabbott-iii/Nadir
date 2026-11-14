@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Developer tools for the Nadir engine: an immediate-mode debug UI, and,
-//! to come, a stats overlay, a profiler with trace export, an inspector, a
-//! console and debug-draw toggles (roadmap M7.3 to M7.6). They are for
-//! development builds only: a game depends on this crate behind its `dev`
-//! feature, and `cargo xtask release-no-dev` checks that a release does
-//! not.
+//! Developer tools for the Nadir engine: an immediate-mode debug UI, a
+//! stats overlay ([`Stats`]) and a profiler with Chrome trace export
+//! ([`Profiler`]), and, to come, an inspector, a console and debug-draw
+//! toggles (roadmap M7.4 to M7.6). They are for development builds only: a
+//! game depends on this crate behind its `dev` feature, and
+//! `cargo xtask release-no-dev` checks that a release does not.
 //!
 //! # The debug UI
 //!
@@ -43,6 +43,16 @@
 //! - **Places:** each window's place is kept as data
 //!   ([`DebugUi::places`], [`DebugUi::set_place`]); the engine saves it.
 //! - **Text:** measured by [`TextMetrics`]: [`FontMetrics`] for a `Font`.
+//!
+//! # The tools
+//!
+//! Each fills a window it is given. [`Stats::show`] shows the last frame's
+//! numbers, which the engine copies in. A [`Profiler`] keeps the last
+//! [`PROFILER_FRAMES`] frames, each with the scopes
+//! `nadir_core::profile::take_frame` collected: [`Profiler::show`] draws
+//! their processor times as a graph and the scopes of the frame clicked as
+//! a tree, and [`Profiler::trace_json`] writes them as Chrome trace event
+//! JSON, which Perfetto UI opens.
 //!
 //! ```
 //! use nadir_core::{GenIndex, Handle, Key, MouseButton, Rect, UVec2, Vec2};
@@ -97,6 +107,8 @@ mod edit;
 mod id;
 mod input;
 mod metrics;
+mod profiler;
+mod stats;
 mod style;
 #[cfg(test)]
 mod tests;
@@ -105,6 +117,10 @@ mod widgets;
 
 pub use input::DebugInput;
 pub use metrics::{FontMetrics, TextMetrics};
+pub use profiler::{
+    FrameTiming, PROFILER_FRAMES, PROFILER_RECORDS, ProfiledFrame, Profiler, ProfilerResponse,
+};
+pub use stats::Stats;
 pub use style::Style;
 pub use ui::{DebugUi, Frame, WindowPlace};
 pub use widgets::{Plot, PlotResponse, Response, Ui};

@@ -252,8 +252,8 @@
 //! - Profile scopes are recorded per thread. [`profile::take_frame`]
 //!   collects only the calling thread's, and each thread keeps at most
 //!   [`profile::MAX_RECORDS_PER_THREAD`] between calls. Collecting from
-//!   other threads, and the profiler that shows the records, are roadmap
-//!   M7.3.
+//!   other threads is not built: the profiler (nadir-debug's, roadmap
+//!   M7.3) shows the main thread's.
 //! - [`GenArena`] reuses freed slots before it grows, so a steady pattern
 //!   of inserts and removes does not allocate.
 //! - [`Handle`] is `Copy`, and `Send + Sync` whatever it refers to.

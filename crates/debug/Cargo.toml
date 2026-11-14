@@ -12,6 +12,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+# The profiler's Chrome trace is written with our own JSON writer
+# (ADR-0059).
+nadir-codec.workspace = true
 nadir-core.workspace = true
 nadir-render.workspace = true
 

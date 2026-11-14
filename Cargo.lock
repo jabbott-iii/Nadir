@@ -65,6 +65,7 @@ version = "0.3.0"
 name = "nadir-debug"
 version = "0.3.0"
 dependencies = [
+ "nadir-codec",
  "nadir-core",
  "nadir-render",
 ]

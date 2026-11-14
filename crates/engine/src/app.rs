@@ -26,6 +26,7 @@ use nadir_audio::{AudioConfig, Bus, Mixer};
 use nadir_core::UVec2;
 use nadir_core::log::{debug, error, info, warn};
 use nadir_core::profile::{self, ScopeRecord};
+use nadir_core::profile_scope;
 use nadir_core::time::{FixedClock, Stopwatch};
 use nadir_ecs::{Component, FixedStage, FixedSystem, FrameStage, FrameSystem, Schedule, World};
 use nadir_gfx::{Device, PassTarget, RenderTargetId, TextureFormat};
@@ -310,12 +311,30 @@ struct Graphics {
 impl Graphics {
     /// Draws the frame the frame systems made, shows it, and then makes the
     /// assets the workers have decoded, within the asset server's budget.
-    fn draw(&mut self, world: &World, surface: GpuSurface<'_>, size: UVec2) -> Result<(), Error> {
+    /// Returns how long showing it took: the swap, which may wait for the
+    /// display.
+    fn draw(
+        &mut self,
+        world: &World,
+        surface: GpuSurface<'_>,
+        size: UVec2,
+    ) -> Result<Duration, Error> {
         self.device.begin_frame(surface)?;
-        self.render(world, PassTarget::Surface, size)?;
-        self.device.end_frame(surface)?;
-        self.finish_loads(world, false);
-        Ok(())
+        {
+            profile_scope!("nadir::render");
+            self.render(world, PassTarget::Surface, size)?;
+        }
+        let shown = Instant::now();
+        {
+            profile_scope!("nadir::present");
+            self.device.end_frame(surface)?;
+        }
+        let present = shown.elapsed();
+        {
+            profile_scope!("nadir::finish_loads");
+            self.finish_loads(world, false);
+        }
+        Ok(present)
     }
 
     /// Draws the frame the frame systems made into `target`, of `size`, on
@@ -394,6 +413,8 @@ impl EngineCore {
         }
         self.app.update(elapsed, events);
         if let (Some(graphics), Some((surface, size))) = (&mut self.graphics, window) {
+            #[cfg(feature = "dev")]
+            let drawing = Instant::now();
             let drawn = graphics.draw(&self.app.world, surface, size);
             #[cfg(feature = "dev")]
             if drawn.is_ok()
@@ -404,6 +425,12 @@ impl EngineCore {
                     &mut graphics.renderer,
                     &mut graphics.device,
                 );
+            }
+            // The processor's work on the frame, the wait to show it aside.
+            #[cfg(feature = "dev")]
+            if let Ok(present) = drawn {
+                let work = drawing.elapsed().saturating_sub(present);
+                self.app.debug.add_work(work);
             }
             if let Err(error) = drawn {
                 self.error.get_or_insert(error);
@@ -518,8 +545,9 @@ pub struct App {
     actions: Actions,
     clock: FixedClock,
     /// The last frame's profile scopes (the `profile` feature of
-    /// `nadir-core`), drained each frame so that the recorder keeps its
-    /// buffer. Nothing reads them until the profiler (roadmap M7.3).
+    /// `nadir-core`, which `dev` turns on), collected as each frame starts
+    /// so that the recorder keeps its buffer, and with `dev` given to the
+    /// profiler.
     profile: Vec<ScopeRecord>,
     /// The folder of the shader files the hot reload watches: render's
     /// `shaders/`, or a test's.
@@ -870,6 +898,11 @@ impl App {
     ///   debug field has. One key may toggle several windows.
     /// - `window` gets the world to read, or to change through its
     ///   resources and storages, as a frame system does.
+    /// - The engine has two windows of its own, hidden at start: the stats
+    ///   overlay on F1, named `nadir::stats`, and the profiler on F3,
+    ///   `nadir::profiler`, which writes its traces beside the log file
+    ///   (`docs/subsystems/debug-tools.md`). A game's window on one of
+    ///   those keys shows and hides with it.
     ///
     /// Only [`App::run`] reads and writes `debug_ui.jsonc`:
     /// [`App::update`] and [`App::offscreen`] start each window at `first`.
@@ -906,19 +939,26 @@ impl App {
     /// Runs one frame that comes `elapsed` after the last, with the events
     /// that came before it, without drawing it:
     ///
-    /// 1. feeds the events to [`Input`], holding back from the game's
+    /// 1. collects the profile scopes recorded since the last frame
+    ///    started, with the `profile` feature of `nadir-core`, so that they
+    ///    do not pile up; with the `dev` feature, which turns it on, it
+    ///    gives them to the profiler with the last frame's timing;
+    /// 2. feeds the events to [`Input`], holding back from the game's
     ///    actions, with the `dev` feature, what the debug UI has;
-    /// 2. runs the ticks that are due: for each, latches the actions, or
+    /// 3. runs the ticks that are due: for each, latches the actions, or
     ///    takes them from the replay that [`App::play_replay`] plays, and
     ///    runs the tick stages, which apply their commands;
-    /// 3. sets [`TickStats`];
-    /// 4. empties the [`RenderFrame`], sets its `time` to how long the
+    /// 4. sets [`TickStats`];
+    /// 5. empties the [`RenderFrame`], sets its `time` to how long the
     ///    simulation has run, and runs the frame stages;
-    /// 5. with the `dev` feature, fills the open debug windows into the
+    /// 6. with the `dev` feature, fills the open debug windows into the
     ///    `RenderFrame`'s UI, after the game's
-    ///    ([`App::add_debug_window`]);
-    /// 6. collects the profile scopes the systems recorded, with the
-    ///    `profile` feature of `nadir-core`, so that they do not pile up.
+    ///    ([`App::add_debug_window`]).
+    ///
+    /// The engine's scopes are `nadir::tick` (each tick),
+    /// `nadir::frame_stages` and `nadir::debug_ui`, beside each system's
+    /// (`docs/subsystems/ecs.md`); [`App::run`] adds `nadir::render`,
+    /// `nadir::present` and `nadir::finish_loads` for the drawing.
     ///
     /// [`App::run`] calls it once a frame, then draws the `RenderFrame`.
     /// Tests, benchmarks and headless runs call it themselves. A frame of
@@ -934,6 +974,18 @@ impl App {
     /// [`App::offscreen`] are silent, and [`App::run`] after it opens no
     /// audio output.
     pub fn update(&mut self, elapsed: Duration, events: &[Event]) {
+        #[cfg(feature = "dev")]
+        let started = Instant::now();
+        profile::take_frame(&mut self.profile);
+        // Records came back, so the feature is on. The recorder gets this
+        // buffer back next frame: make it big enough that a frame of many
+        // ticks does not grow it.
+        if !self.profile.is_empty() {
+            let more = PROFILE_RECORDS.saturating_sub(self.profile.len());
+            self.profile.reserve(more);
+        }
+        #[cfg(feature = "dev")]
+        self.debug.start_profile(started, &self.profile);
         // Nothing renders it here: dropped, it leaves no queue to fill.
         self.mixer = None;
         {
@@ -949,6 +1001,7 @@ impl App {
         let frame = self.clock.begin_frame(elapsed);
         let mut stats = TickStats::default();
         while let Some(tick) = self.clock.consume_tick() {
+            profile_scope!("nadir::tick");
             let start = Instant::now();
             let replayed = {
                 let mut input = self.world.resource_mut::<Input>();
@@ -979,18 +1032,18 @@ impl App {
             out.clear();
             out.time = simulated_time(&self.clock);
         }
-        self.schedule.run_frame(&mut self.world, &frame);
-        #[cfg(feature = "dev")]
-        self.debug
-            .frame(&self.world, self.config.virtual_resolution);
-        profile::take_frame(&mut self.profile);
-        // Records came back, so the feature is on. The recorder gets this
-        // buffer back next frame: make it big enough that a frame of many
-        // ticks does not grow it.
-        if !self.profile.is_empty() {
-            let more = PROFILE_RECORDS.saturating_sub(self.profile.len());
-            self.profile.reserve(more);
+        {
+            profile_scope!("nadir::frame_stages");
+            self.schedule.run_frame(&mut self.world, &frame);
         }
+        #[cfg(feature = "dev")]
+        {
+            profile_scope!("nadir::debug_ui");
+            self.debug
+                .frame(&self.world, self.config.virtual_resolution);
+        }
+        #[cfg(feature = "dev")]
+        self.debug.add_work(started.elapsed());
     }
 
     /// Opens the log file and the window, and runs the main loop until the
@@ -1030,10 +1083,14 @@ impl App {
         log_file::start(&self.config.studio, &self.config.game);
         #[cfg(feature = "dev")]
         match nadir_platform::user_dirs(&self.config.studio, &self.config.game) {
-            Ok(dirs) => self
-                .debug
-                .keep_places_in(dirs.config.join(crate::debug_ui::FILE_NAME)),
-            Err(error) => warn!("the debug UI's windows are not kept: {error}"),
+            Ok(dirs) => {
+                self.debug
+                    .keep_places_in(dirs.config.join(crate::debug_ui::FILE_NAME));
+                self.debug.write_traces_in(dirs.logs);
+            }
+            Err(error) => {
+                warn!("the debug UI's windows are not kept, nor the profiler's traces: {error}");
+            }
         }
         let title = self.config.title.clone();
         let mut platform =

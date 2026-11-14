@@ -31,7 +31,7 @@ Not yet:
 
 - the OpenGL contexts of Windows (roadmap M2.6) and macOS (M2.7);
 - the Metal backend (M10.2);
-- GPU timer queries (M7.3).
+- GPU timer queries (M7.11).
 
 ## Usage
 

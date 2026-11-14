@@ -1542,3 +1542,187 @@ fn two_color_edits_in_a_window_keep_their_sliders_apart() {
     draw(&mut harness, &mut colors);
     assert_eq!(colors, [Color::rgb(255, 0, 0), Color::BLACK]);
 }
+
+// -- the tools ---------------------------------------------------------------
+
+/// A window big enough for the profiler's graph and tree.
+const TOOL: Rect = Rect::new(Vec2::new(0.0, 0.0), Vec2::new(390.0, 290.0));
+
+/// A profiler of three frames of 16 ms, 3 ms of them work, each a tick of
+/// two systems then a draw.
+fn profiler() -> crate::Profiler {
+    use std::time::{Duration, Instant};
+
+    use nadir_core::profile::ScopeRecord;
+
+    let us = Duration::from_micros(1);
+    let record = |name, start, duration, depth| ScopeRecord {
+        name,
+        start,
+        duration,
+        depth,
+    };
+    let mut profiler = crate::Profiler::new();
+    let base = Instant::now();
+    for index in 0..3 {
+        let start = base + index * 16_000 * us;
+        let records = [
+            record("player_move", start + 10 * us, 100 * us, 1),
+            record("movement", start + 120 * us, 300 * us, 1),
+            record("nadir::tick", start + 5 * us, 500 * us, 0),
+            record("nadir::render", start + 600 * us, 2_000 * us, 0),
+        ];
+        let timing = crate::FrameTiming::new(start, 16_000 * us, 3_000 * us);
+        profiler.push(timing, &records);
+    }
+    profiler
+}
+
+impl Harness {
+    /// A frame of the profiler in the window `TOOL`: what it answered.
+    fn profiler(&mut self, profiler: &mut crate::Profiler) -> crate::ProfilerResponse {
+        let mut response = crate::ProfilerResponse::default();
+        self.frame(|frame| {
+            frame.window("Profiler", TOOL, |ui| response = profiler.show(ui));
+        });
+        response
+    }
+
+    /// Where the last frame drew `text`.
+    fn text_at(&self, text: &str) -> Option<Vec2> {
+        self.texts()
+            .into_iter()
+            .find(|(shown, _)| shown == text)
+            .map(|(_, at)| at)
+    }
+
+    fn shows(&self, text: &str) -> bool {
+        self.text_at(text).is_some()
+    }
+}
+
+#[test]
+fn the_profilers_graph_says_a_frame_and_a_click_shows_its_scopes_as_a_tree() {
+    let mut harness = Harness::new();
+    let mut profiler = profiler();
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("3 frames, 62 a second"));
+    assert!(harness.shows("Click a frame for its scopes."));
+
+    // The graph: from (2, 28) to (233.6, 88), three values, the middle one
+    // at x 117.8. The frame under the pointer, then the one clicked.
+    harness.move_to(Vec2::new(230.0, 58.0));
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("frame 2: 3.00 ms CPU, 16.00 ms long"));
+    harness.click(Vec2::new(118.0, 58.0));
+    harness.profiler(&mut profiler);
+    assert_eq!(profiler.selected(), Some(1));
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("frame 1: 4 scopes, 3.000 ms CPU"));
+    // Sorted by when they started: the tick, closed, then the draw.
+    assert!(harness.shows("nadir::tick 0.500 ms"));
+    assert!(harness.shows("  nadir::render 2.000 ms"));
+    assert!(!harness.shows("  player_move 0.100 ms"));
+
+    // Opened, it shows the systems inside it, in order, before the draw.
+    let tick = harness.text_at("nadir::tick 0.500 ms").expect("the tick");
+    harness.click(tick + Vec2::new(2.0, 2.0));
+    harness.profiler(&mut profiler);
+    harness.profiler(&mut profiler);
+    let y = |text: &str| harness.text_at(text).map(|at| at.y).expect(text);
+    assert!(y("nadir::tick 0.500 ms") < y("  player_move 0.100 ms"));
+    assert!(y("  player_move 0.100 ms") < y("  movement 0.300 ms"));
+    assert!(y("  movement 0.300 ms") < y("  nadir::render 2.000 ms"));
+    let x = |text: &str| harness.text_at(text).map(|at| at.x).expect(text);
+    assert!(x("  movement 0.300 ms") > x("  nadir::render 2.000 ms"));
+
+    // Another frame keeps the node open: the same place, the same name.
+    profiler.select(Some(2));
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("frame 2: 4 scopes, 3.000 ms CPU"));
+    assert!(harness.shows("  player_move 0.100 ms"));
+
+    profiler.select(Some(99));
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("Frame 99 is gone: click another."));
+}
+
+#[test]
+fn the_profiler_pauses_asks_for_a_trace_and_shows_its_note() {
+    let mut harness = Harness::new();
+    let mut profiler = profiler();
+    assert!(!harness.profiler(&mut profiler).write_trace);
+    // The checkbox's text, then the button beside it.
+    harness.click(Vec2::new(10.0, 20.0));
+    harness.profiler(&mut profiler);
+    assert!(profiler.paused());
+    let button = harness.text_at("Write trace").expect("the button");
+    harness.click(button + Vec2::new(2.0, 2.0));
+    assert!(harness.profiler(&mut profiler).write_trace);
+    assert!(!harness.profiler(&mut profiler).write_trace);
+
+    profiler.set_note(format_args!("wrote {}", "trace.json"));
+    harness.profiler(&mut profiler);
+    assert!(harness.shows("wrote trace.json"));
+    profiler.set_note("");
+    harness.profiler(&mut profiler);
+    assert!(!harness.shows("wrote trace.json"));
+}
+
+#[test]
+fn the_stats_overlay_shows_each_number_and_underruns_in_amber() {
+    use std::time::Duration;
+
+    let mut stats = crate::Stats {
+        frame_rate: 59.6,
+        frame_time: Duration::from_micros(2_340),
+        tick_time: Duration::from_micros(1_250),
+        ticks: 2,
+        draw_calls: 7,
+        sprites: 120,
+        entities: 42,
+        allocations: 3,
+        allocated_bytes: 96,
+        voices: 4,
+        underruns: 0,
+    };
+    let mut harness = Harness::new();
+    let tool = |harness: &mut Harness, stats: &crate::Stats| {
+        harness.frame(|frame| {
+            frame.window("Stats", TOOL, |ui| stats.show(ui));
+        });
+    };
+    tool(&mut harness, &stats);
+    let texts: Vec<String> = harness.texts().into_iter().map(|(text, _)| text).collect();
+    assert_eq!(
+        texts[2..],
+        [
+            "60 fps",
+            "frame 2.34 ms CPU",
+            "ticks 2 in 1.25 ms",
+            "draw calls 7",
+            "sprites 120",
+            "entities 42",
+            "allocs 3 (96 bytes)",
+            "voices 4",
+            "underruns 0",
+        ]
+    );
+    let color = |harness: &Harness| {
+        harness
+            .out
+            .iter()
+            .find_map(|(draw, _)| match draw {
+                nadir_render::UiDraw::Text(draw, text) if text.starts_with("underruns") => {
+                    Some(draw.color)
+                }
+                _ => None,
+            })
+            .expect("the underruns")
+    };
+    assert_eq!(color(&harness), crate::Style::default().text);
+    stats.underruns = 2;
+    tool(&mut harness, &stats);
+    assert!(harness.shows("underruns 2"));
+    assert_eq!(color(&harness), Color::rgb(255, 176, 64));
+}

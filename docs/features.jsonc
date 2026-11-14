@@ -253,9 +253,9 @@
     {
       "name": "Developer tools",
       "area": "Tools",
-      "summary": "Development builds show a debug UI of our own over the game: windows the game adds, each shown by a key of its own, that drag, collapse, resize and scroll, with buttons, checkboxes, sliders, text fields, lists, trees, line graphs and color editors, drawn in the engine's own pixel font, and keeping their places across runs. A click is judged where it was pressed and where it was released at any frame rate, typing reaches it with key repeats and composed characters, and while it has the mouse or a text field the game's actions do not see them. The debug UI will carry a stats overlay, a profiler that exports traces, an entity inspector, a console, debug drawing and time controls, all left out of release builds.",
-      "tasks": ["M7.2", "M7.9", "M7.10", "M7.3", "M7.4", "M7.5", "M7.6"],
-      "ticked": ["M7.2", "M7.9", "M7.10"]
+      "summary": "Development builds show a debug UI of our own over the game: windows the game adds, each shown by a key of its own, that drag, collapse, resize and scroll, with buttons, checkboxes, sliders, text fields, lists, trees, line graphs and color editors, drawn in the engine's own pixel font, and keeping their places across runs. A click is judged where it was pressed and where it was released at any frame rate, typing reaches it with key repeats and composed characters, and while it has the mouse or a text field the game's actions do not see them. The engine's own windows are a stats overlay of the frame rate, the frame's processor time, its ticks, draw calls, sprites, entities, allocations, voices and underruns, and a profiler of the last 300 frames: a graph of their processor time, the scopes of the frame clicked as a tree, from the engine's steps down to each system, and a Chrome trace of them all for Perfetto UI. The debug UI will carry the GPU's timings, an entity inspector, a console, debug drawing and time controls, all left out of release builds.",
+      "tasks": ["M7.2", "M7.9", "M7.10", "M7.3", "M7.11", "M7.4", "M7.5", "M7.6"],
+      "ticked": ["M7.2", "M7.9", "M7.10", "M7.3"]
     },
     {
       "name": "Gamepads",

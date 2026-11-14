@@ -26,11 +26,14 @@ Built:
 - identity by text, or by an explicit ID after `##`;
 - what the game should leave alone: the pointer over a window or a widget
   held, and the keyboard while a text field has it;
-- each window's place, given and taken as data for saving.
+- each window's place, given and taken as data for saving;
+- a stats overlay of numbers the engine copies in, and a profiler of the
+  last 300 frames: a graph of their processor time, a frame's scopes as a
+  tree, and a Chrome trace of them all, which Perfetto UI opens.
 
-Not yet: the stats overlay, the profiler, the inspector, the console and
-the debug-draw toggles (roadmap M7.3 to M7.6); tooltips, a scroll area
-inside a window, copy and paste.
+Not yet: the GPU's timings in the profiler (roadmap M7.11), the
+inspector, the console and the debug-draw toggles (M7.4 to M7.6);
+tooltips, a scroll area inside a window, copy and paste.
 
 ## Usage
 

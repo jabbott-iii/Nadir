@@ -64,7 +64,9 @@
 //! type, what the last frame drew, and where each entity is, in a list
 //! that scrolls. It drags by its title bar, collapses, resizes from its
 //! corner, and keeps its place across runs, in `debug_ui.jsonc` in the
-//! game's settings folder (on Linux `~/.config/Sandbox`).
+//! game's settings folder (on Linux `~/.config/Sandbox`). F1 and F3 show
+//! the engine's stats overlay and profiler, whose "Write trace" writes a
+//! Chrome trace beside the log file (on Linux `~/.local/share/Sandbox`).
 //!
 //! With `dev`, the game also reloads what changes while it runs
 //! (ADR-0043). Run `cargo xtask cook --watch` beside it, and an edit to

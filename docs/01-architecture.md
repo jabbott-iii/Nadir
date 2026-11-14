@@ -58,7 +58,7 @@ approves it.
 | `nadir-audio` | `core`, `platform`, `assets`, `codec` |
 | `nadir-collision` | `core` |
 | `nadir-scene` | `core`, `ecs`, `assets`, `codec` |
-| `nadir-debug` | `core`, `ecs`, `scene`, `render`, `input` |
+| `nadir-debug` | `core`, `codec`, `ecs`, `scene`, `render`, `input` |
 | `nadir_engine` (facade, `nadir` in code; ADR-0036, ADR-0039) | all crates above |
 | `nadir-cook` | `core`, `codec`, `assets`, `scene` |
 | `xtask` | `core`, `codec` |
@@ -406,7 +406,7 @@ OS events ─► platform::Event ─► input (device state, edge accumulation)
 
 | Feature | Crates | Enables |
 | :- | :- | :- |
-| `dev` | `nadir`, `platform`, `sandbox` | A failed asset shows its placeholder; the allocation counter is the global allocator, read through `FrameAllocs` (and `thread_alloc_counts`, `process_alloc_counts`); hot reload: `App::run` reloads the loose files and shaders that change (M5.8, ADR-0043); the debug UI: the windows a game adds with `App::add_debug_window`, each on a key of its own, drawn over the game's UI in the engine's font, holding the game's input back while they have the pointer or a field, their places kept in `debug_ui.jsonc` (M7.10, ADR-0058). Still to join it: the profiler, the console and the other tools (M7.3 to M7.6) |
+| `dev` | `nadir`, `platform`, `sandbox` | A failed asset shows its placeholder; the allocation counter is the global allocator, read through `FrameAllocs` (and `thread_alloc_counts`, `process_alloc_counts`); hot reload: `App::run` reloads the loose files and shaders that change (M5.8, ADR-0043); the debug UI: the windows a game adds with `App::add_debug_window`, each on a key of its own, drawn over the game's UI in the engine's font, holding the game's input back while they have the pointer or a field, their places kept in `debug_ui.jsonc` (M7.10, ADR-0058); the engine's own windows, the stats overlay on F1 and the profiler on F3, with nadir-core's `profile` feature on, so that each system's scope and the engine's are recorded, and its traces written beside the log file (M7.3, ADR-0059). Still to join it: the inspector, the console, debug drawing and time control (M7.4 to M7.6) |
 | (none) | — | Release behavior: a failed asset shows nothing, there is no allocation counter, and no debug code is compiled in. Assets load from the cook's pack, `game.kpak`, in `Config::assets`, or from its loose files where there is no pack (M5.7, ADR-0041); with `dev`, from the loose files |
 
 Run dev builds with `cargo dev` (the alias above). Release builds never

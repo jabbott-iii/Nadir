@@ -45,7 +45,7 @@ pub struct Device { backend: Backend /* GL now; an enum Gl | Metal from M10 */ }
 impl Device {
     pub fn new(surface: GpuSurface<'_>) -> Result<Self, GfxError>;   // keeps the context's id, not a borrow
     pub fn new_headless() -> Result<Self, GfxError>;     // owns an offscreen context: tests and tools (M3.2)
-    pub fn caps(&self) -> &Caps;                          // backend, vendor, renderer, version, max texture size (timer queries: M7.3)
+    pub fn caps(&self) -> &Caps;                          // backend, vendor, renderer, version, max texture size (timer queries: M7.11)
 
     pub fn create_texture(&mut self, desc: &TextureDesc, data: Option<&[u8]>) -> Result<TextureId, GfxError>;
     pub fn update_texture(&mut self, id: TextureId, region: IRect, data: &[u8]) -> Result<(), GfxError>;

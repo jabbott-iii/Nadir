@@ -46,8 +46,10 @@ nadir-codec.workspace = true
 # Development builds: a failed asset shows its placeholder rather than
 # nothing, the allocation counter counts each frame's allocations
 # (`FrameAllocs`), what changes is reloaded, and the debug UI shows the
-# game's debug windows. `cargo dev` turns it on through the sandbox.
-dev = ["nadir-platform/dev", "dep:nadir-codec", "dep:nadir-debug"]
+# game's debug windows and the engine's, the stats overlay and the
+# profiler, whose scopes nadir-core's `profile` records (ADR-0059).
+# `cargo dev` turns it on through the sandbox.
+dev = ["nadir-platform/dev", "nadir-core/profile", "dep:nadir-codec", "dep:nadir-debug"]
 
 [lints]
 workspace = true

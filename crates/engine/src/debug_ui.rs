@@ -17,27 +17,33 @@
 //! by its own key; nadir-debug's UI fed from the window's events, drawn
 //! after the game's UI in the engine's font, and holding the game's input
 //! off while it has the pointer or the keyboard; and its windows' places,
-//! kept in `debug_ui.jsonc`.
+//! kept in `debug_ui.jsonc`. The engine's own windows are the stats
+//! overlay on F1 and the profiler on F3, which writes its traces to the
+//! logs folder (roadmap M7.3, ADR-0059).
 
 mod font;
 #[cfg(test)]
 mod golden;
 mod places;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use nadir_assets::{AssetError, AssetPath, AssetServer, FinalizeCtx, LooseSource, Scope, Source};
-use nadir_core::log::{error, warn};
+use nadir_audio::Audio;
+use nadir_core::civil::DateTime;
+use nadir_core::log::{error, info, warn};
+use nadir_core::profile::ScopeRecord;
 use nadir_core::{Key, MouseButton, Rect, UVec2, Vec2};
-use nadir_debug::{DebugInput, DebugUi, FontMetrics, Ui};
+use nadir_debug::{DebugInput, DebugUi, FontMetrics, FrameTiming, Profiler, Stats, Ui};
 use nadir_ecs::World;
 use nadir_input::{Capture, Input, UiEvent, UiEvents};
 use nadir_platform::Event;
-use nadir_render::{Font, RenderFrame, Texture, UiScale};
+use nadir_render::{Font, FrameStats, RenderFrame, Texture, UiScale};
 
-use crate::WindowSize;
+use crate::{FrameAllocs, TickStats, WindowSize};
 
 pub(crate) use places::FILE_NAME;
 
@@ -46,13 +52,50 @@ pub(crate) use places::FILE_NAME;
 /// [`App::add_debug_window`](crate::App::add_debug_window).
 pub type DebugWindow = fn(&World, &mut Ui<'_>);
 
-/// A window a game added.
+/// The stats overlay's key, title and first place.
+const STATS: (Key, &str, Rect) = (
+    Key::F1,
+    "Stats##nadir::stats",
+    Rect::new(Vec2::new(8.0, 8.0), Vec2::new(208.0, 172.0)),
+);
+
+/// The profiler's key, title and first place.
+const PROFILER: (Key, &str, Rect) = (
+    Key::F3,
+    "Profiler##nadir::profiler",
+    Rect::new(Vec2::new(216.0, 8.0), Vec2::new(576.0, 308.0)),
+);
+
+/// What fills a window.
+#[derive(Clone, Copy)]
+enum Content {
+    /// A game's window.
+    Game(DebugWindow),
+    /// The engine's stats overlay.
+    Stats,
+    /// The engine's profiler.
+    Profiler,
+}
+
+/// A window of the debug UI: the engine's or a game's.
 struct Window {
     toggle: Key,
     title: &'static str,
     first: Rect,
-    add: DebugWindow,
+    content: Content,
     open: bool,
+}
+
+impl Window {
+    fn closed(toggle: Key, title: &'static str, first: Rect, content: Content) -> Self {
+        Self {
+            toggle,
+            title,
+            first,
+            content,
+            open: false,
+        }
+    }
 }
 
 /// The asset server's source in development builds: the engine's own
@@ -96,9 +139,9 @@ impl Source for EngineFiles {
     }
 }
 
-/// The debug UI's state in the app: the windows the game added, the
-/// window's events for the UI, the UI itself once a window has been open,
-/// and where its places are kept.
+/// The debug UI's state in the app: the engine's windows and the game's,
+/// the window's events for the UI, the UI itself once a window has been
+/// open, where its places are kept, and the profiler.
 pub(crate) struct DebugTools {
     windows: Vec<Window>,
     events: UiEvents,
@@ -120,12 +163,28 @@ pub(crate) struct DebugTools {
     places: Vec<places::Place>,
     /// The UI's places revision when they were last read or written.
     saved: u64,
+    /// The last frames' timings and scopes.
+    profiler: Profiler,
+    /// When the frame being run started, and how long the processor has
+    /// worked on it so far; how long it worked on the last one.
+    frame_start: Option<Instant>,
+    work: Duration,
+    last_work: Duration,
+    /// The folder the profiler's traces go to, which
+    /// [`App::run`](crate::App::run) names.
+    traces: Option<PathBuf>,
 }
 
 impl DebugTools {
     pub(crate) fn new() -> Self {
+        let engine = |(toggle, title, first): (Key, &'static str, Rect), content| {
+            Window::closed(toggle, title, first, content)
+        };
         Self {
-            windows: Vec::new(),
+            windows: vec![
+                engine(STATS, Content::Stats),
+                engine(PROFILER, Content::Profiler),
+            ],
             events: UiEvents::new(),
             input: DebugInput::new(),
             ui: None,
@@ -136,18 +195,42 @@ impl DebugTools {
             file: None,
             places: Vec::new(),
             saved: 0,
+            profiler: Profiler::new(),
+            frame_start: None,
+            work: Duration::ZERO,
+            last_work: Duration::ZERO,
+            traces: None,
         }
     }
 
-    /// Adds a window, closed.
+    /// Adds a game's window, closed.
     pub(crate) fn add(&mut self, toggle: Key, title: &'static str, first: Rect, add: DebugWindow) {
-        self.windows.push(Window {
-            toggle,
-            title,
-            first,
-            add,
-            open: false,
-        });
+        self.windows
+            .push(Window::closed(toggle, title, first, Content::Game(add)));
+    }
+
+    /// Writes the profiler's traces into `folder`.
+    pub(crate) fn write_traces_in(&mut self, folder: PathBuf) {
+        self.traces = Some(folder);
+    }
+
+    /// As a frame starts, at `now`: ends the frame before, if there was
+    /// one, and gives it to the profiler with `records`, the scopes
+    /// collected since it started.
+    pub(crate) fn start_profile(&mut self, now: Instant, records: &[ScopeRecord]) {
+        if let Some(start) = self.frame_start {
+            let length = now.saturating_duration_since(start);
+            self.profiler
+                .push(FrameTiming::new(start, length, self.work), records);
+            self.last_work = self.work;
+        }
+        self.frame_start = Some(now);
+        self.work = Duration::ZERO;
+    }
+
+    /// Counts `work` more of the processor's time on the frame being run.
+    pub(crate) fn add_work(&mut self, work: Duration) {
+        self.work += work;
     }
 
     /// Keeps the windows' places in the file at `path`: reads them now, and
@@ -270,7 +353,19 @@ impl DebugTools {
         let output = world.resource::<WindowSize>().0;
         let mut frame = ui.frame(&mut self.input, virtual_resolution, output);
         for window in self.windows.iter().filter(|window| window.open) {
-            frame.window(window.title, window.first, |ui| (window.add)(world, ui));
+            let (title, first) = (window.title, window.first);
+            match window.content {
+                Content::Game(add) => frame.window(title, first, |ui| add(world, ui)),
+                Content::Stats => {
+                    let stats = stats(world, &self.profiler, self.last_work);
+                    frame.window(title, first, |ui| stats.show(ui))
+                }
+                Content::Profiler => frame.window(title, first, |ui| {
+                    if self.profiler.show(ui).write_trace {
+                        write_trace(&mut self.profiler, self.traces.as_deref());
+                    }
+                }),
+            };
         }
         frame.finish(&mut world.resource_mut::<RenderFrame>().ui);
         if let Some(path) = &self.file
@@ -278,6 +373,53 @@ impl DebugTools {
         {
             self.saved = ui.places_revision();
             save(path, ui);
+        }
+    }
+}
+
+/// The stats overlay's numbers: the frame rate and the last frame's
+/// processor time from the profiler, the rest from the world's resources:
+/// this frame's ticks, and the last frame's drawing and allocations.
+fn stats(world: &World, profiler: &Profiler, work: Duration) -> Stats {
+    let ticks = *world.resource::<TickStats>();
+    let drawn = *world.resource::<FrameStats>();
+    let allocs = world.resource::<FrameAllocs>().0;
+    let audio = world.resource::<Audio>().stats();
+    let mut stats = Stats::default();
+    stats.frame_rate = profiler.frame_rate();
+    stats.frame_time = work;
+    stats.tick_time = ticks.time;
+    stats.ticks = ticks.ticks;
+    stats.draw_calls = drawn.batches + drawn.chunks + drawn.ui_batches;
+    stats.sprites = drawn.sprites;
+    stats.entities = world.entity_count();
+    stats.allocations = allocs.allocations;
+    stats.allocated_bytes = allocs.bytes;
+    stats.voices = audio.active_voices;
+    stats.underruns = audio.underruns;
+    stats
+}
+
+/// Writes the profiler's trace into `folder`, as `trace-<UTC time>.json`,
+/// and says where in its note and the log; or why not.
+fn write_trace(profiler: &mut Profiler, folder: Option<&Path>) {
+    let Some(folder) = folder else {
+        profiler.set_note("Traces are written only by App::run.");
+        return;
+    };
+    let path = folder.join(format!("trace-{}.json", DateTime::now().file_stamp()));
+    let written = fs::create_dir_all(folder).and_then(|()| fs::write(&path, profiler.trace_json()));
+    match written {
+        Ok(()) => {
+            info!("the profiler's trace is in {}", path.display());
+            profiler.set_note(format_args!("Wrote {}", path.display()));
+        }
+        Err(cause) => {
+            warn!(
+                "the profiler's trace is not written: {} cannot be: {cause}",
+                path.display()
+            );
+            profiler.set_note(format_args!("Not written: {cause}"));
         }
     }
 }
@@ -920,5 +1062,165 @@ mod tests {
         assert!(source.modified(&path("nadir/debug/other.qoi")).is_some());
         assert_eq!(source.read(&path("missing.qoi")), Err(AssetError::NotFound));
         fs::remove_dir_all(&root).expect("remove the folder");
+    }
+
+    // -- the engine's windows ---------------------------------------------
+
+    /// Where the frame's UI drew `text`, in the UI's units: pixels here.
+    fn text_at(app: &App, text: &str) -> Option<Vec2> {
+        let frame = app.world().resource::<RenderFrame>();
+        frame.ui.iter().find_map(|(draw, _)| match draw {
+            UiDraw::Text(draw, shown) if shown == text => Some(draw.position),
+            _ => None,
+        })
+    }
+
+    fn shows_starting(app: &App, start: &str) -> bool {
+        texts(app).iter().any(|text| text.starts_with(start))
+    }
+
+    #[test]
+    fn f1_shows_the_frame_s_stats_and_f3_the_profiler_of_its_scopes() {
+        let mut app = app();
+        for _ in 0..3 {
+            app.world_mut()
+                .spawn()
+                .with(crate::Transform::at(Vec2::ZERO));
+        }
+        for _ in 0..4 {
+            app.update(TICK, &[]);
+        }
+        app.update(TICK, &tap(Key::F1));
+        let shown = texts(&app);
+        assert!(shown.iter().any(|text| text == "Stats"), "{shown:?}");
+        assert!(shown.iter().any(|text| text == "entities 3"), "{shown:?}");
+        assert!(shows_starting(&app, "ticks 1 in "), "{shown:?}");
+        assert!(shown.iter().any(|text| text == "voices 0"), "{shown:?}");
+        assert!(shown.iter().any(|text| text == "underruns 0"), "{shown:?}");
+        app.update(TICK, &tap(Key::F1));
+        assert!(texts(&app).is_empty());
+
+        // Each frame before this one, its scopes collected as the next
+        // started: the first frame has none before it.
+        app.update(TICK, &tap(Key::F3));
+        let shown = texts(&app);
+        assert!(shown.iter().any(|text| text == "Profiler"), "{shown:?}");
+        assert!(shows_starting(&app, "6 frames, "), "{shown:?}");
+        assert!(
+            shown
+                .iter()
+                .any(|text| text == "Click a frame for its scopes.")
+        );
+
+        // A click on the graph, from (218, 40) to (431.6, 100), selects a
+        // frame: its scopes, the engine's and the systems', show.
+        app.update(TICK, &click(Vec2::new(400.0, 70.0)));
+        app.update(TICK, &[]);
+        let shown = texts(&app);
+        assert!(shows_starting(&app, "frame "), "{shown:?}");
+        assert!(shows_starting(&app, "nadir::tick "), "{shown:?}");
+        assert!(shows_starting(&app, "nadir::frame_stages "), "{shown:?}");
+        assert!(shows_starting(&app, "  nadir::debug_ui "), "{shown:?}");
+        let tick = shown
+            .iter()
+            .find(|text| text.starts_with("nadir::tick "))
+            .expect("the tick");
+        let at = text_at(&app, tick).expect("drawn");
+        app.update(TICK, &click(at + Vec2::new(2.0, 2.0)));
+        app.update(TICK, &[]);
+        // The tick opened: the engine's systems and the game's in it.
+        assert!(
+            shows_starting(&app, "  nadir::snapshot "),
+            "{:?}",
+            texts(&app)
+        );
+        assert!(shows_starting(&app, "  count "), "{:?}", texts(&app));
+
+        // Without App::run there is no folder to write a trace to.
+        let button = text_at(&app, "Write trace").expect("the button");
+        app.update(TICK, &click(button + Vec2::new(2.0, 2.0)));
+        app.update(TICK, &[]);
+        let shown = texts(&app);
+        assert!(
+            shown
+                .iter()
+                .any(|text| text == "Traces are written only by App::run."),
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn a_steady_frame_of_the_stats_and_a_profiled_frame_s_tree_allocates_nothing() {
+        let mut app = app();
+        app.update(TICK, &tap(Key::F1));
+        app.update(TICK, &tap(Key::F3));
+        // Until the ring is full, the graph's lines grow the buffers that
+        // hold them.
+        for _ in 0..nadir_debug::PROFILER_FRAMES + 10 {
+            app.update(TICK, &[]);
+        }
+        app.update(TICK, &click(Vec2::new(400.0, 70.0)));
+        for _ in 0..10 {
+            app.update(TICK, &[]);
+        }
+        assert!(shows_starting(&app, "nadir::tick "), "{:?}", texts(&app));
+        let start = nadir_platform::thread_alloc_counts();
+        for _ in 0..20 {
+            app.update(TICK, &[]);
+        }
+        let allocated = nadir_platform::thread_alloc_counts().since(start);
+        assert!(shows_starting(&app, "nadir::tick "), "{:?}", texts(&app));
+        assert!(shows_starting(&app, "entities 0"), "{:?}", texts(&app));
+        assert_eq!(allocated, nadir_platform::AllocCounts::default());
+    }
+
+    #[test]
+    fn a_trace_written_holds_each_frame_and_its_scopes_and_parses() {
+        use nadir_codec::json::{self, Value};
+        use nadir_core::profile::{self, ScopeRecord};
+
+        let mut tools = DebugTools::new();
+        let mut records: Vec<ScopeRecord> = Vec::new();
+        for _ in 0..4 {
+            {
+                nadir_core::profile_scope!("outer");
+                nadir_core::profile_scope!("inner");
+            }
+            profile::take_frame(&mut records);
+            tools.start_profile(Instant::now(), &records);
+        }
+        let folder = env::temp_dir().join(format!("nadir-engine-traces-{}", process::id()));
+        let _ = fs::remove_dir_all(&folder);
+        write_trace(&mut tools.profiler, Some(&folder));
+        let files: Vec<PathBuf> = fs::read_dir(&folder)
+            .expect("the folder was made")
+            .map(|entry| entry.expect("an entry").path())
+            .collect();
+        let [file] = &files[..] else {
+            panic!("one trace: {files:?}");
+        };
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("a name");
+        assert!(
+            name.starts_with("trace-") && name.ends_with(".json"),
+            "{name}"
+        );
+        let text = fs::read_to_string(file).expect("the trace");
+        let value = json::parse(&text, nadir_codec::Limits::default()).expect("it parses");
+        let events = value
+            .get("traceEvents")
+            .and_then(Value::as_array)
+            .expect("its events");
+        let names: Vec<&str> = events
+            .iter()
+            .filter(|event| event.get("ph").and_then(Value::as_str) == Some("X"))
+            .filter_map(|event| event.get("name").and_then(Value::as_str))
+            .collect();
+        // Three frames: the first push only starts one. Each holds the
+        // scopes collected as it ended, in the order they started.
+        assert_eq!(names, ["frame", "outer", "inner"].repeat(3));
+        fs::remove_dir_all(&folder).expect("remove the folder");
     }
 }

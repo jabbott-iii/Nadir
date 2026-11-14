@@ -73,10 +73,13 @@ const MATRIX: &[(&str, Allowed)] = &[
         "nadir-scene",
         Allowed::Only(&["nadir-core", "nadir-ecs", "nadir-assets", "nadir-codec"]),
     ),
+    // `nadir-codec` for the profiler's trace, written with our own JSON
+    // writer (ADR-0059).
     (
         "nadir-debug",
         Allowed::Only(&[
             "nadir-core",
+            "nadir-codec",
             "nadir-ecs",
             "nadir-scene",
             "nadir-render",

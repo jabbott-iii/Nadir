@@ -288,7 +288,8 @@ pub fn check_sized<T: std::fmt::Debug>(
   count for the last frame in the resource `FrameAllocs`: from the end of
   the frame before to the end of this one. The sandbox reports it once a
   second.
-- The debug overlay will show allocations per frame (M7.3).
+- The stats overlay (F1 in `cargo dev`, M7.3) shows the last frame's
+  allocations and their bytes.
 - Tests assert **0 allocations** in steady state:
   - the facade's unit test `steady_frames` in `crates/engine/src/app.rs`
     draws 10,000 sprite entities of its own through the real loop,

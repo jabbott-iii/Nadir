@@ -161,7 +161,7 @@ flowchart TB
         n_engine["nadir_engine, nadir in code<br/>App and the main loop, Config, the engine's components and systems, load_level, re-exports"]
     end
     subgraph L4["Layer 4: tooling inside the engine"]
-        n_debug["nadir-debug<br/>the debug UI: windows, widgets, capture, places. Planned M7: inspector, console, profiler"]
+        n_debug["nadir-debug<br/>the debug UI: windows, widgets, capture, places; the stats overlay, the profiler and its trace. Planned M7: inspector, console"]
     end
     subgraph L3["Layer 3: composed subsystems"]
         n_render["nadir-render<br/>sprite batching, y-sort, tilemap chunks, camera, texture and atlas assets"]
@@ -221,6 +221,7 @@ flowchart TB
     n_engine -->|"dev"| n_debug
     n_engine -->|"dev"| n_codec
     n_debug --> n_core
+    n_debug --> n_codec
     n_debug --> n_render
 
     classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
@@ -351,7 +352,7 @@ that no other crate allows it.
 | `nadir-render` | `crates/render` | 3, composed subsystems | deny | assets, codec, core, gfx |
 | `nadir-scene` | `crates/scene` | 3, composed subsystems | deny | assets, codec, core, ecs |
 | `nadir-audio` | `crates/audio` | 3, composed subsystems | deny | assets, codec, core |
-| `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | core, render (the debug UI, M7.2, shown in the game by M7.10; the tools are planned) |
+| `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | codec, core, render (the debug UI, M7.2, shown in the game by M7.10; the stats overlay and the profiler, M7.3, whose trace codec's JSON writes, ADR-0059; the other tools are planned) |
 | `nadir_engine` (`nadir` in code) | `crates/engine` | 5, facade | deny | assets, audio, collision, core, ecs, gfx, input, platform, render, scene; with `dev`, codec and debug (ADR-0058) |
 | `nadir-cook` | `tools/cook` | 6, applications | deny | assets, codec with `png`, core |
 | `xtask` | `xtask` | 6, applications | deny | codec with `png`, core |

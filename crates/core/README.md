@@ -43,8 +43,8 @@ Not yet:
 - names for gamepad buttons and axes, which come with gamepad support
   (roadmap M8); media keys, and the keys that only Japanese and Korean
   keyboards have;
-- collecting profile records from other threads, and the profiler that
-  shows them (M7.3);
+- collecting profile records from other threads: the profiler
+  (nadir-debug's, M7.3) shows the main thread's;
 - the debug console and crash reports, which are to read the log's ring
   buffer (M7.5, M9.6).
 

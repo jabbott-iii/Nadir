@@ -5028,7 +5028,7 @@ by the batched sprite renderer.
     the golden or kept 14 crates: all fixed, each fix's test failing on
     the old code.
 
-- [ ] **M7.3 — stats overlay and profiler**
+- [x] **M7.3 — stats overlay and profiler**
   - Note (from M2.3): `Caps` has no timer-query field yet. It is
     `#[non_exhaustive]`, so adding one breaks nothing.
   - Note (from M3.5): `FrameAllocs`, the last frame's allocations, is a
@@ -5067,10 +5067,98 @@ by the batched sprite renderer.
     A window without a title bar, or that takes no input, for the overlay
     is not built: an option of `Frame::window`, additive.
   - Do: the overlay; profiler ring, graph and scope tree; Chrome trace
-    export; GL timer queries.
+    export. (GL timer queries: M7.11, split off on 2026-11-13, ADR-0059.)
   - Accept: the exported trace parses with our JSON parser; manual: it
     opens in Perfetto UI.
   - Verify: `cargo test -p nadir-debug`; manual check described
+  - Built on 2026-11-13 (ADR-0059, with the user's choices: the GL timer
+    queries split off to M7.11, nadir-debug allowed nadir-codec, and
+    `dev` turning on nadir-core's `profile`):
+    - nadir-debug: `Stats` and its `show`; `Profiler`, the last 300
+      frames with their scopes in one pool of 32,768 records, paused or
+      not, its window (a graph of each frame's processor time, the scopes
+      of the frame clicked as a tree, "Write trace") and `trace_json`, in
+      whole microseconds rounded down; `FrameTiming`, `ProfiledFrame`,
+      `ProfilerResponse`; nadir-codec a dependency.
+    - nadir_engine, with `dev`: the stats overlay on F1 and the profiler
+      on F3, windows of the engine's (`nadir::stats`, `nadir::profiler`);
+      `App::update` collects the scopes as it starts, and pushes the last
+      frame with its processor time, the present's wait aside; the scopes
+      `nadir::tick`, `nadir::frame_stages`, `nadir::debug_ui`,
+      `nadir::render`, `nadir::present` and `nadir::finish_loads`; "Write
+      trace" writes `trace-<UTC time>.json` beside `nadir.log`, from
+      `App::run`.
+    - xtask: nadir-debug's row of the matrix allows nadir-codec.
+  - Linux check of `cargo dev`, on 2026-11-13, in this XWayland session,
+    with the config and data folders pointed at a scratch folder and
+    events sent by a script through the X server (`XSendEvent`): F1
+    showed 60 fps, 2.69 ms of CPU a frame, a tick, 28 draw calls, 57
+    sprites, 60 entities, 0 allocations, 1 voice and 0 underruns; F3 a
+    graph of 300 frames; a click on it selected frame 1129, 19 scopes and
+    4.862 ms of CPU, whose tick opened to its 7 systems; "Write trace"
+    wrote a trace of 498 KB beside `nadir.log`. That first trace, in
+    fractional microseconds, had 26 pairs of frames whose `ts + dur`,
+    added in floating point, passed the next frame's `ts`: the trace is
+    now in whole microseconds. The trace of a second run, 6,001 events
+    over 300 frames, parsed with nadir-codec's parser (a scratch
+    program), no event crossing another.
+  - Tests: `cargo test -p nadir-debug` (67 and 2 doc tests, 12 of them
+    the tools': the ring's frames, numbers and pool, a frame of many
+    records, pausing, the order of scopes started on one tick, the trace
+    parsed with our parser with its frames and scopes nested, sub-microsecond
+    times, escaped names; the window's graph, tree, pause, trace button and
+    note; the overlay's lines); `cargo test -p nadir_engine` (123) and
+    `cargo test -p nadir_engine --features dev` (165, 3 of them new: F1
+    and F3 over a game, the tree of the engine's scopes and the systems',
+    the note without `App::run`; a written trace parsed; a steady frame of
+    both tools allocating nothing once the ring is full). `cargo xtask ci`
+    passed with Mesa forced and `NADIR_EXPECT_GL_RENDERER=llvmpipe`.
+  - Review: one reviewer found the tree sorted by start time, which put a
+    scope under the wrong parent when two started on one tick of the
+    clock (common at Windows' 100 ns), and the overlay's docs calling this
+    frame's ticks the last frame's: both fixed, the order's test failing
+    on the old sort.
+  - Perfetto UI check, on 2026-11-13, with the user's go-ahead: the second
+    run's trace opened in Perfetto UI v59.1 (ui.perfetto.dev, in the
+    user's Chrome) as one thread, `main`, of 6,000 slices, with no error
+    or data-loss stat; its SQL said the 300 frames are all the slices at
+    depth 0, with 1,800 at depth 1 (the engine's six steps a frame), 3,884
+    at depth 2 and 16 at 3, every `nadir::snapshot` inside a
+    `nadir::tick` and every `nadir::tick` inside a `frame`. The scopes
+    shorter than a microsecond show as instants.
+
+- [ ] **M7.11 — gfx and render: GPU timings in the profiler**
+  - Split from M7.3 on 2026-11-13 (ADR-0059), the user's choice: M7.3's
+    GL timer queries, past three crates with the rest of it.
+  - Note (from M2.3): `Caps` has no timer-query field yet. It is
+    `#[non_exhaustive]`, so adding one breaks nothing.
+  - Note (from M7.3, ADR-0059): the profiler is nadir-debug's `Profiler`,
+    which the facade's `DebugTools` (`crates/engine/src/debug_ui.rs`)
+    pushes each frame as the next starts (`start_profile`), with a
+    `FrameTiming` (`#[non_exhaustive]`: a GPU time is a field more). A
+    frame is one `App::update` and, in `App::run`, its drawing
+    (`Graphics::draw` in `crates/engine/src/app.rs`): a time read back two
+    frames later belongs to the frame two pushes back. Its graph shows the
+    processor's time; its trace is one track, `pid` 1 and `tid` 1, so the
+    GPU's passes would be a track of their own (another `tid`, named by a
+    `thread_name` event). nadir-sys declares no query function yet.
+  - Note: as written it touches nadir-sys, nadir-gfx, nadir-render,
+    nadir-debug and the facade, past CLAUDE.md's three crates: the queries
+    (sys, gfx, render, with the time in `FrameStats`) and showing them
+    (nadir-debug, the facade) may be two tasks.
+  - Depends: M7.3
+  - Do: the GL query declarations (`/add-ffi-binding`: `glGenQueries`,
+    `glDeleteQueries`, `glBeginQuery`, `glEndQuery`, `glGetQueryObjectiv`
+    for `GL_QUERY_RESULT_AVAILABLE`, `glGetQueryObjectui64v`,
+    `GL_TIME_ELAPSED`); a `Caps` flag and a query API in nadir-gfx; render
+    timing each pass, read back two frames later so it never stalls; the
+    profiler's GPU time beside the processor's, and a GPU track in the
+    trace.
+  - Accept: unit tests of the query ring (no read before its result is
+    available, two frames of latency); a headless test of a timed pass on
+    llvmpipe; manual: the profiler shows the GPU's time in `cargo dev`.
+  - Verify: `cargo test -p nadir-gfx`; `cargo test -p nadir-render`;
+    `cargo test -p nadir_engine --features dev`; `cargo dev` (manual)
 
 - [ ] **M7.4 — inspector**
   - Note (from M4.2): `Registration::inspect` and `inspect_mut` hold the
@@ -5083,6 +5171,11 @@ by the batched sprite renderer.
     spawns, values) are not input, so a replay does not hold them: a world
     edited by hand replays differently.
   - Depends: M7.2, M7.10, M4.2
+  - Note (from M7.3, ADR-0059): the engine's own windows are variants of
+    `Content` in the facade's `DebugTools` (`crates/engine/src/debug_ui.rs`),
+    each with its key, title and first place (`STATS`, `PROFILER`), filled
+    with what `DebugTools` holds beside the world: the inspector on F2
+    would be one more.
   - Note (from M7.10, ADR-0058): a debug window runs after the frame
     stages and their commands, with `&World`: commands it queues apply
     after the next tick or the next frame's stages.
@@ -5103,6 +5196,13 @@ by the batched sprite renderer.
   - Note (from M4.4): `App::schedule()` gives the schedule. The engine's
     own systems are named `nadir::snapshot`, `nadir::movement`, and so on.
   - Depends: M7.2, M7.10
+  - Note (from M7.3, ADR-0059): `profile dump [path]` is
+    `Profiler::trace_json` and the facade's `write_trace`
+    (`crates/engine/src/debug_ui.rs`), which writes
+    `trace-<UTC time>.json` into the logs folder `App::run` names, or says
+    in the profiler's note that there is none; a path given would replace
+    that. The console, a window of `DebugTools` as the profiler is, can
+    reach it.
   - Note (from M7.10, ADR-0058): a window's toggle key works while a text
     field has the keyboard, and the field sees it too: on the backtick, the
     console's own field would take a typed `` ` `` as it closes or opens.
@@ -5133,6 +5233,9 @@ by the batched sprite renderer.
     replay's next tick (`App::play_replay`); a run of `run_fixed` alone
     would skip it.
   - Depends: M7.2, M7.10, M4.3
+  - Note (from M7.3, ADR-0059): the profiler's "Paused" holds its frames,
+    not the game; the frames of a paused game are still pushed, their
+    ticks 0.
   - Note (from M7.10, ADR-0058): debug windows run after `Extract`, so a
     tool's window can still push to the frame's sprites and texts before
     it is drawn; F4 to F7 reach it as keys while no debug field has the
