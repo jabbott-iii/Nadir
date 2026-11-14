@@ -41,7 +41,9 @@ Built:
   clip, and the mapping from the pointer to UI units;
 - a program rebuilt from new GLSL sources while the game runs, the one it
   had kept when they do not compile or do not declare its interface, and
-  textures reloaded behind their handles drawn from the next frame.
+  textures reloaded behind their handles drawn from the next frame;
+- the GPU's time over its passes, when asked for, read back two frames
+  later so that it never waits for the GPU.
 
 Not yet:
 

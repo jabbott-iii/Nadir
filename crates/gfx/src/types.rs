@@ -60,7 +60,14 @@ pub struct RenderTargetId(pub(crate) GenIndex);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PipelineId(pub(crate) GenIndex);
 
+/// A timer of a [`Device`](crate::Device): it measures how long the GPU
+/// takes over the work between [`Device::begin_timer`](crate::Device::begin_timer)
+/// and [`Device::end_timer`](crate::Device::end_timer).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TimerId(pub(crate) GenIndex);
+
 /// Any resource, for [`Device::destroy`](crate::Device::destroy).
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ResourceId {
     /// A texture.
@@ -71,6 +78,8 @@ pub enum ResourceId {
     RenderTarget(RenderTargetId),
     /// A pipeline.
     Pipeline(PipelineId),
+    /// A timer.
+    Timer(TimerId),
 }
 
 impl ResourceId {
@@ -81,6 +90,7 @@ impl ResourceId {
             Self::Buffer(_) => ResourceKind::Buffer,
             Self::RenderTarget(_) => ResourceKind::RenderTarget,
             Self::Pipeline(_) => ResourceKind::Pipeline,
+            Self::Timer(_) => ResourceKind::Timer,
         }
     }
 }
@@ -109,7 +119,14 @@ impl From<PipelineId> for ResourceId {
     }
 }
 
+impl From<TimerId> for ResourceId {
+    fn from(id: TimerId) -> Self {
+        Self::Timer(id)
+    }
+}
+
 /// The kinds of resource.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ResourceKind {
     /// A texture.
@@ -120,6 +137,8 @@ pub enum ResourceKind {
     RenderTarget,
     /// A pipeline.
     Pipeline,
+    /// A timer.
+    Timer,
 }
 
 /// What a texture slot samples: a texture, or what a render target holds.
@@ -460,6 +479,11 @@ pub struct Caps {
     pub version: String,
     /// The widest and tallest texture or render target, in pixels.
     pub max_texture_size: u32,
+    /// Whether the device can time the GPU's work
+    /// ([`Device::create_timer`](crate::Device::create_timer)): on OpenGL,
+    /// whether the counter of its timer queries (`GL_TIME_ELAPSED`, core in
+    /// 3.3) has any bits, as the specification lets it have none.
+    pub timer_queries: bool,
 }
 
 /// The kinds of backend.

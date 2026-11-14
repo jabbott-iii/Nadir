@@ -17,6 +17,7 @@
 use core::cell::Cell;
 use core::marker::PhantomData;
 use core::ops::Range;
+use core::time::Duration;
 
 use nadir_core::{IRect, LinearColor};
 use nadir_platform::{GlContextId, GpuSurface, HeadlessGl, PlatformError, create_headless_gl};
@@ -26,7 +27,7 @@ use crate::gl::{DrawVertices, GlDevice, GlFns, PassState};
 use crate::pod::{Pod, bytes_of};
 use crate::types::{
     BufferDesc, BufferId, Caps, IndexFormat, PassTarget, PipelineDesc, PipelineId, RenderTargetId,
-    ResourceId, Sampler, TextureDesc, TextureFormat, TextureId, TextureRef,
+    ResourceId, Sampler, TextureDesc, TextureFormat, TextureId, TextureRef, TimerId,
 };
 use nadir_core::UVec2;
 
@@ -303,8 +304,9 @@ impl Device {
     ///
     /// # Errors
     ///
-    /// [`GfxError::FrameOrder`] outside a frame, [`GfxError::WrongSurface`],
-    /// and [`GfxError::Present`] if the frame cannot be shown.
+    /// [`GfxError::FrameOrder`] outside a frame, and while a timer runs,
+    /// which stops it and shows nothing; [`GfxError::WrongSurface`], and
+    /// [`GfxError::Present`] if the frame cannot be shown.
     pub fn end_frame(&mut self, surface: GpuSurface<'_>) -> Result<(), GfxError> {
         self.gl.end_frame(surface)
     }
@@ -330,6 +332,55 @@ impl Device {
     pub fn end_offscreen_frame(&mut self) -> Result<(), GfxError> {
         let context = self.context.as_ref().ok_or(GfxError::WrongSurface)?;
         self.gl.end_frame(GpuSurface::Gl(context))
+    }
+
+    /// Makes a timer, which measures how long the GPU takes over the work
+    /// between [`Device::begin_timer`] and [`Device::end_timer`].
+    ///
+    /// # Errors
+    ///
+    /// [`GfxError::Unsupported`] on a device without
+    /// [`Caps::timer_queries`].
+    pub fn create_timer(&mut self) -> Result<TimerId, GfxError> {
+        self.gl.create_timer()
+    }
+
+    /// Starts `timer` on the work that follows, until [`Device::end_timer`]:
+    /// passes, and what is made or changed between them. It runs inside a
+    /// frame, outside a pass, and one timer runs at a time. Starting a timer
+    /// again drops its last result, read or not.
+    ///
+    /// # Errors
+    ///
+    /// [`GfxError::FrameOrder`] outside a frame or while a timer runs,
+    /// [`GfxError::StaleHandle`].
+    pub fn begin_timer(&mut self, timer: TimerId) -> Result<(), GfxError> {
+        self.gl.begin_timer(timer)
+    }
+
+    /// Stops the timer that runs. Its result comes once the GPU has done
+    /// the work it timed: [`Device::timer_result`].
+    ///
+    /// A frame cannot end while a timer runs: [`Device::end_frame`] then
+    /// stops the timer, and fails without showing the frame.
+    ///
+    /// # Errors
+    ///
+    /// [`GfxError::FrameOrder`] while no timer runs.
+    pub fn end_timer(&mut self) -> Result<(), GfxError> {
+        self.gl.end_timer()
+    }
+
+    /// How long the GPU took over the work `timer` last timed, once it has
+    /// done that work: `None` until then, and for a timer that never ran or
+    /// runs now. It never waits for the GPU, which is often a frame or two
+    /// behind: ask again in a later frame.
+    ///
+    /// # Errors
+    ///
+    /// [`GfxError::StaleHandle`].
+    pub fn timer_result(&mut self, timer: TimerId) -> Result<Option<Duration>, GfxError> {
+        self.gl.timer_result(timer)
     }
 
     /// Reads a render target back: RGBA8, from the top row, 4 bytes a pixel.

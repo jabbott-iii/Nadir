@@ -25,13 +25,14 @@ Built:
 - checks on every draw: a vertex, instance or index read outside its
   buffer, a uniform block or texture not set, or a resource that was
   destroyed is an error, not a draw;
-- an offscreen device for tests and tools, and readback of render targets.
+- an offscreen device for tests and tools, and readback of render targets;
+- GPU timers, which time the work between two calls and never wait for
+  their results.
 
 Not yet:
 
 - the OpenGL contexts of Windows (roadmap M2.6) and macOS (M2.7);
-- the Metal backend (M10.2);
-- GPU timer queries (M7.11).
+- the Metal backend (M10.2).
 
 ## Usage
 

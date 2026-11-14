@@ -47,6 +47,8 @@ The 2D renderer, built on `nadir-gfx`. It is ECS-agnostic: it consumes a
   `text_alignment`
 - M7.8: the UI pass (ADR-0055), in "The UI pass" below: `UiList`,
   `UiView`, `UiScale`, `UiSpace`, and the golden scene `ui_pass`
+- M7.11: the GPU's time over the two passes (ADR-0060), in "GPU timings"
+  below: `Renderer::set_gpu_timing`, `gpu_times` and `GpuTimes`
 - Not built yet:
   - debug draw and post
   - the smooth-camera and native-resolution modes
@@ -65,7 +67,11 @@ impl Renderer {
     pub fn ui_space(&self, scale: UiScale, output_size: UVec2) -> UiSpace;  // M7.8: where the UI lands
     pub fn screen_to_world(&self, camera: &Camera2D, output_size: UVec2, screen: Vec2) -> Vec2;
     pub fn world_to_screen(&self, camera: &Camera2D, output_size: UVec2, world: Vec2) -> Vec2;
+    pub fn set_gpu_timing(&mut self, on: bool);                    // M7.11: off at first
+    pub fn gpu_timing(&self) -> bool;
+    pub fn gpu_times(&self) -> &[GpuTimes];                         // read back by the last render, oldest first
 }
+#[non_exhaustive] pub struct GpuTimes { pub renders_ago: u32, pub world: Duration, pub output: Duration }  // total()
 pub struct Output { pub target: PassTarget, pub size: UVec2 }      // the caller knows the window's size
 pub struct FrameStats { pub sprites: u32, pub skipped: u32, pub batches: u32,
                         pub tiles: u32, pub chunks: u32,
@@ -654,6 +660,27 @@ Measured on min-spec; see `docs/00-overview.md`.
     the i7-11800H.
 - Zero heap allocations per frame in steady state.
 
+## GPU timings
+
+As built (M7.11, ADR-0060), for the profiler (M7.12):
+
+- With `set_gpu_timing(true)`, on a device with `Caps::timer_queries`,
+  each `render` times its two passes with the device's timers: the world
+  into the virtual image (`world`), and the output, the blit then the UI
+  (`output`). Each timer stops whether its pass fails or not.
+- A render's times are read back two renders later, while the GPU keeps
+  up, so that reading never waits: `gpu_times()` gives those the last
+  render read, oldest first, each with `renders_ago`. A ring of four slots
+  holds two timers each, made at a slot's first render: a render reads the
+  renders at least two before it whose timers both have results, then
+  takes its slot, or is not timed while that slot still waits. A render
+  that fails is not waited for.
+- A time longer than the wall time since its render started is dropped,
+  with a warning the first time: the GPU did the work after the render
+  started and before the result came. llvmpipe (Mesa 26.1) times a
+  context's first drawing at hours.
+- `FrameStats` is unchanged: it says what this frame drew.
+
 ## Tests
 
 - **Unit:**
@@ -717,6 +744,14 @@ Measured on min-spec; see `docs/00-overview.md`.
   layers among sprites. The headless tests draw placement, a change, a
   replaced layer or store, empty, unknown and removed layers, texture
   states, culling, order and batch splits, animation and flips.
+- As built (M7.11), the timing ring's unit tests, over a stand-in GPU:
+  each render read back two renders later, a render not read before its
+  results are there nor timed while its slot waits, several read
+  together oldest first, a time past the wall clock dropped, a render that
+  failed not waited for, and a reset. The headless tests time 200 sprites
+  on llvmpipe, each render read back two later with both passes longer
+  than 0, and a render that fails in its world pass, after which the
+  next renders run their timers.
 - As built (M7.8), the UI's headless tests draw pixel UI where its space
   says and cut at the image, a free scale from the output's corner over
   the bars, the UI unmoved by the camera, clips (one inside another, one

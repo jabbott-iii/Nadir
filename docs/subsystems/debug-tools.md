@@ -178,7 +178,8 @@ pub struct WindowSize(pub UVec2);   // a resource: the window's inside, physical
 ### As built (M7.3): the stats overlay and the profiler
 
 Two windows of the engine's, in the facade's debug UI (ADR-0059). The GL
-timer queries are M7.11's.
+timer queries are M7.11's, built (ADR-0060), and the profiler's GPU time
+M7.12's.
 
 ```rust
 // nadir-debug:
@@ -299,8 +300,10 @@ Games register their own commands with `console.register(name, help, fn)`.
   `ts` and `dur` are microseconds. Write the file with our own JSON writer.
 - **GPU timings (optional):** GL timer queries (`GL_TIME_ELAPSED`, core in
   3.3) around each pass, read back two frames later so we never stall.
-  Metal: the command buffer's `GPUStartTime`/`GPUEndTime`. Not built yet:
-  roadmap M7.11 (ADR-0059).
+  Metal: the command buffer's `GPUStartTime`/`GPUEndTime`. The timers are
+  built (M7.11, ADR-0060): nadir-render's `Renderer::gpu_times`, each
+  render's two passes read back two renders later. Showing them in the
+  profiler, and a GPU track in the trace, is roadmap M7.12.
 
 ## Tests
 

@@ -32,6 +32,7 @@ mod calls;
 mod fns;
 
 use core::ops::Range;
+use core::time::Duration;
 use std::ffi::CString;
 
 use nadir_core::log::{info, warn};
@@ -55,7 +56,7 @@ use crate::types::{
     BackendKind, BlendMode, BufferDesc, BufferId, BufferKind, BufferUsage, Caps, IndexFormat,
     MAX_TEXTURE_SLOTS, MAX_UNIFORM_BLOCKS, MAX_UNIFORM_BYTES, MAX_VERTEX_BUFFERS, PassTarget,
     PipelineDesc, PipelineId, RenderTargetId, ResourceId, ResourceKind, Sampler, ShaderStage,
-    TextureDesc, TextureFormat, TextureId, TextureRef, Topology, VertexStep,
+    TextureDesc, TextureFormat, TextureId, TextureRef, TimerId, Topology, VertexStep,
 };
 use crate::validate::{
     BoundIndices, BoundVertices, DrawKind, IndexShadow, NO_LOG, SlotLayout, check_draw,
@@ -222,6 +223,26 @@ fn full(size: UVec2) -> IRect {
     IRect::new(IVec2::ZERO, IVec2::new(side(size.x), side(size.y)))
 }
 
+/// A timer: a query of `GL_TIME_ELAPSED`.
+struct Timer {
+    name: GLuint,
+    state: TimerState,
+}
+
+/// Where a timer is. GL fails a query's result asked for before the query
+/// has run, or while it runs, so the device asks only once it has ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TimerState {
+    /// Made, and never run: the name is no query object yet.
+    Made,
+    /// Its query runs.
+    Running,
+    /// Its query has ended, and its result was not read yet.
+    Ended,
+    /// Its result, read, in nanoseconds.
+    Read(u64),
+}
+
 /// The open frame.
 struct Frame {
     /// The size of the surface's default framebuffer.
@@ -239,6 +260,9 @@ pub(crate) struct GlDevice {
     buffers: GenArena<Buffer>,
     targets: GenArena<Target>,
     pipelines: GenArena<Pipeline>,
+    timers: GenArena<Timer>,
+    /// The timer that runs: GL runs one at a time.
+    running: Option<TimerId>,
     /// The sampler objects, in the order of [`SAMPLERS`]; 0 until made.
     samplers: [GLuint; 4],
     ring: Ring,
@@ -301,12 +325,15 @@ impl GlDevice {
                 renderer: String::new(),
                 version: String::new(),
                 max_texture_size: 0,
+                timer_queries: false,
             },
             cache: Cache::default(),
             textures: GenArena::new(),
             buffers: GenArena::new(),
             targets: GenArena::new(),
             pipelines: GenArena::new(),
+            timers: GenArena::new(),
+            running: None,
             samplers: [0; 4],
             ring: Ring {
                 buffer: 0,
@@ -336,6 +363,7 @@ impl GlDevice {
         device.caps.renderer = gl.get_string(Text::Renderer)?;
         device.caps.max_texture_size =
             u32::try_from(gl.get_integer(Integer::MaxTextureSize)?).unwrap_or(0);
+        device.caps.timer_queries = gl.timer_counter_bits()? > 0;
         let alignment = gl.get_integer(Integer::UniformBufferOffsetAlignment)?;
         let alignment = usize::try_from(alignment)
             .ok()
@@ -759,6 +787,20 @@ impl GlDevice {
                 ],
                 None => return stale(resource),
             },
+            ResourceId::Timer(id) => match self.timers.remove(id.0) {
+                Some(timer) => {
+                    // A query deleted while it runs runs on, until a
+                    // `glEndQuery` that the device would no longer make.
+                    let end: Option<(GLuint, DeleteName)> = if self.running == Some(id) {
+                        self.running = None;
+                        Some((timer.name, |gl, _| gl.end_timer_query()))
+                    } else {
+                        None
+                    };
+                    [end, Some((timer.name, |gl, name| gl.delete_query(name)))]
+                }
+                None => return stale(resource),
+            },
         };
         // Once the context is gone, so are its objects. A lost device whose
         // context is still current deletes them.
@@ -809,6 +851,10 @@ impl GlDevice {
         if self.frame.take().is_none() {
             return Err(GfxError::FrameOrder("end_frame came outside a frame"));
         }
+        // A timer that runs is ended, so that the next frame can run one,
+        // and the frame is not shown.
+        let timed = self.running.is_some();
+        let ended = end_running(gl, &mut self.running, &mut self.timers);
         // Where errors are not checked after every call, this is where they
         // are seen. Out of memory loses the device, and shows nothing.
         match gl.drain_errors() {
@@ -819,6 +865,10 @@ impl GlDevice {
                 crate::error::gl_error_name(code),
                 self.status.last_call()
             ),
+        }
+        ended?;
+        if timed {
+            return Err(GfxError::FrameOrder("end_frame came while a timer ran"));
         }
         context.swap_buffers().map_err(GfxError::Present)
     }
@@ -1159,6 +1209,66 @@ impl GlDevice {
         drawn
     }
 
+    // -- Timers -----------------------------------------------------------------
+
+    pub(crate) fn create_timer(&mut self) -> Result<TimerId, GfxError> {
+        if !self.caps.timer_queries {
+            return Err(GfxError::Unsupported("timer queries"));
+        }
+        let gl = Gl::new(&self.fns, &self.status, self.context)?;
+        let name = gl.gen_query()?;
+        Ok(TimerId(self.timers.insert(Timer {
+            name,
+            state: TimerState::Made,
+        })))
+    }
+
+    pub(crate) fn begin_timer(&mut self, id: TimerId) -> Result<(), GfxError> {
+        let gl = Gl::new(&self.fns, &self.status, self.context)?;
+        if self.frame.is_none() {
+            return Err(GfxError::FrameOrder("a timer began outside a frame"));
+        }
+        if self.running.is_some() {
+            return Err(GfxError::FrameOrder("a timer began while another ran"));
+        }
+        let timer = self
+            .timers
+            .get_mut(id.0)
+            .ok_or(GfxError::StaleHandle(ResourceKind::Timer))?;
+        gl.begin_timer_query(timer.name)?;
+        timer.state = TimerState::Running;
+        self.running = Some(id);
+        Ok(())
+    }
+
+    pub(crate) fn end_timer(&mut self) -> Result<(), GfxError> {
+        let gl = Gl::new(&self.fns, &self.status, self.context)?;
+        if self.running.is_none() {
+            return Err(GfxError::FrameOrder("end_timer came while no timer ran"));
+        }
+        end_running(gl, &mut self.running, &mut self.timers)
+    }
+
+    pub(crate) fn timer_result(&mut self, id: TimerId) -> Result<Option<Duration>, GfxError> {
+        let gl = Gl::new(&self.fns, &self.status, self.context)?;
+        let timer = self
+            .timers
+            .get_mut(id.0)
+            .ok_or(GfxError::StaleHandle(ResourceKind::Timer))?;
+        match timer.state {
+            TimerState::Made | TimerState::Running => Ok(None),
+            TimerState::Read(nanoseconds) => Ok(Some(Duration::from_nanos(nanoseconds))),
+            TimerState::Ended => {
+                if !gl.query_available(timer.name)? {
+                    return Ok(None);
+                }
+                let nanoseconds = gl.query_result(timer.name)?;
+                timer.state = TimerState::Read(nanoseconds);
+                Ok(Some(Duration::from_nanos(nanoseconds)))
+            }
+        }
+    }
+
     pub(crate) fn read_pixels(&mut self, id: RenderTargetId) -> Result<Vec<u8>, GfxError> {
         let target = self
             .targets
@@ -1358,6 +1468,24 @@ fn delete(result: Result<(), GfxError>, what: &str) {
     }
 }
 
+/// Ends the query of the timer that runs, if one does.
+fn end_running(
+    gl: Gl<'_>,
+    running: &mut Option<TimerId>,
+    timers: &mut GenArena<Timer>,
+) -> Result<(), GfxError> {
+    let Some(id) = running.take() else {
+        return Ok(());
+    };
+    // Whatever the call gives, the device no longer counts the query as
+    // running: a failed `glEndQuery` means GL ran none.
+    let ended = gl.end_timer_query();
+    if let Some(timer) = timers.get_mut(id.0) {
+        timer.state = TimerState::Ended;
+    }
+    ended
+}
+
 /// Warns that a resource destroyed already was destroyed again.
 fn stale(resource: ResourceId) {
     warn!("{:?} was destroyed already", resource.kind());
@@ -1383,6 +1511,12 @@ impl Drop for GlDevice {
         for (_, pipeline) in self.pipelines.iter() {
             delete(gl.delete_program(pipeline.program), "a pipeline");
             delete(gl.delete_vertex_array(pipeline.vertex_array), "a pipeline");
+        }
+        if self.running.is_some() {
+            delete(gl.end_timer_query(), "the timer that ran");
+        }
+        for (_, timer) in self.timers.iter() {
+            delete(gl.delete_query(timer.name), "a timer");
         }
         for &sampler in self.samplers.iter().filter(|&&sampler| sampler != 0) {
             delete(gl.delete_sampler(sampler), "a sampler");

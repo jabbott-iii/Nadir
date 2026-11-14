@@ -5127,11 +5127,71 @@ by the batched sprite renderer.
     `nadir::tick` and every `nadir::tick` inside a `frame`. The scopes
     shorter than a microsecond show as instants.
 
-- [ ] **M7.11 — gfx and render: GPU timings in the profiler**
+- [x] **M7.11 — gfx and render: GPU timer queries**
   - Split from M7.3 on 2026-11-13 (ADR-0059), the user's choice: M7.3's
     GL timer queries, past three crates with the rest of it.
+  - Split again on 2026-11-14 (ADR-0060), the user's choice: the timers,
+    in nadir-sys, nadir-gfx and nadir-render, here; showing them in the
+    profiler, in nadir-debug and the facade, is M7.12.
   - Note (from M2.3): `Caps` has no timer-query field yet. It is
     `#[non_exhaustive]`, so adding one breaks nothing.
+  - Depends: M7.3
+  - Do: the GL query declarations (`/add-ffi-binding`: `glGenQueries`,
+    `glDeleteQueries`, `glBeginQuery`, `glEndQuery`, `glGetQueryObjectiv`
+    for `GL_QUERY_RESULT_AVAILABLE`, `glGetQueryObjectui64v`,
+    `GL_TIME_ELAPSED`); a `Caps` flag and a query API in nadir-gfx; render
+    timing each pass, read back two frames later so it never stalls.
+  - Accept: unit tests of the query ring (no read before its result is
+    available, two frames of latency); a headless test of a timed pass on
+    llvmpipe.
+  - Verify: `cargo test -p nadir-gfx`; `cargo test -p nadir-render`; and
+    their GPU tests, `LIBGL_ALWAYS_SOFTWARE=1
+    NADIR_EXPECT_GL_RENDERER=llvmpipe cargo test -p nadir-gfx --features
+    headless-test` and the same for nadir-render (as written, the first
+    two leave out the headless test the Accept asks for)
+  - Built on 2026-11-14 (ADR-0060):
+    - nadir-sys: `GLuint64`, `GL_TIME_ELAPSED`, `GL_QUERY_COUNTER_BITS`,
+      `GL_QUERY_RESULT`, `GL_QUERY_RESULT_AVAILABLE`, and the function
+      types of the six functions above and `glGetQueryiv`, each quoted
+      from `GL/glcorearb.h` (libglvnd 1.7.0).
+    - nadir-gfx: `Caps::timer_queries` (the counter of `GL_TIME_ELAPSED`
+      has bits); `TimerId`; `Device::create_timer`, `begin_timer`,
+      `end_timer` and `timer_result`, which never waits; `destroy` of a
+      timer; `ResourceId::Timer` and `ResourceKind::Timer`, both enums
+      now `#[non_exhaustive]` (a break); `GfxError::Unsupported`. The
+      loader looks up 67 functions.
+    - nadir-render: `Renderer::set_gpu_timing`, `gpu_timing` and
+      `gpu_times`; `GpuTimes { renders_ago, world, output }`, read two
+      renders later, from a ring of four slots of two timers; times
+      longer than the wall time since their render started dropped.
+  - Finding: llvmpipe (Mesa 26.1.6, LLVM 20.1.2) times a context's first
+    drawing at about 43,400 s; every timer after it is right. The ring
+    drops it, with a warning once.
+  - Measured on llvmpipe, in render's test of 200 sprites at 320 × 180
+    onto 640 × 360: about 0.14 ms for the world pass and 0.29 ms for the
+    output.
+  - Tests, on 2026-11-14, with Mesa forced and
+    `NADIR_EXPECT_GL_RENDERER=llvmpipe`: `cargo test -p nadir-gfx` (30 and
+    4 and 5 doc tests) and with `--features headless-test` (38, of them 2
+    new: a result read from GL once and only once GL says it is there, and
+    in release a timer that runs only if GL runs it; headless 49, 4 new:
+    a timed pass, one timer at a time inside a frame, a frame that ends on
+    a running timer, a destroyed timer); `cargo test -p nadir-render`
+    (137, 6 new: the ring) and with `--features headless-test` (140;
+    headless 55, 2 new: renders read back two later, and a render that
+    fails in its world pass); the timer tests in release builds too;
+    `cargo test -p nadir-sys` (14). `cargo xtask ci` passed.
+  - Layout: the new items are an integer type, constants and function
+    types: no struct, so no layout assertion. Built on Linux only.
+  - Review: one reviewer found `glBeginQuery` unchecked in release builds,
+    which could leave a timer counted as running that GL did not run, and
+    `end_frame` on a running timer skipping the frame's error check: both
+    fixed, with a test in release mode. Also the Verify line above, which
+    without `--features headless-test` skips the GPU tests, and a missing
+    note that a timer of the caller's around `render` fails it.
+
+- [ ] **M7.12 — debug and facade: GPU timings in the profiler**
+  - Split from M7.11 on 2026-11-14 (ADR-0060), the user's choice.
   - Note (from M7.3, ADR-0059): the profiler is nadir-debug's `Profiler`,
     which the facade's `DebugTools` (`crates/engine/src/debug_ui.rs`)
     pushes each frame as the next starts (`start_profile`), with a
@@ -5141,24 +5201,30 @@ by the batched sprite renderer.
     frames later belongs to the frame two pushes back. Its graph shows the
     processor's time; its trace is one track, `pid` 1 and `tid` 1, so the
     GPU's passes would be a track of their own (another `tid`, named by a
-    `thread_name` event). nadir-sys declares no query function yet.
-  - Note: as written it touches nadir-sys, nadir-gfx, nadir-render,
-    nadir-debug and the facade, past CLAUDE.md's three crates: the queries
-    (sys, gfx, render, with the time in `FrameStats`) and showing them
-    (nadir-debug, the facade) may be two tasks.
-  - Depends: M7.3
-  - Do: the GL query declarations (`/add-ffi-binding`: `glGenQueries`,
-    `glDeleteQueries`, `glBeginQuery`, `glEndQuery`, `glGetQueryObjectiv`
-    for `GL_QUERY_RESULT_AVAILABLE`, `glGetQueryObjectui64v`,
-    `GL_TIME_ELAPSED`); a `Caps` flag and a query API in nadir-gfx; render
-    timing each pass, read back two frames later so it never stalls; the
-    profiler's GPU time beside the processor's, and a GPU track in the
-    trace.
-  - Accept: unit tests of the query ring (no read before its result is
-    available, two frames of latency); a headless test of a timed pass on
-    llvmpipe; manual: the profiler shows the GPU's time in `cargo dev`.
-  - Verify: `cargo test -p nadir-gfx`; `cargo test -p nadir-render`;
-    `cargo test -p nadir_engine --features dev`; `cargo dev` (manual)
+    `thread_name` event).
+  - Note (from M7.11, ADR-0060): `Renderer::set_gpu_timing(true)` turns
+    the timing on (off at first, and nothing on a device without
+    `Caps::timer_queries`); after each `render`, `Renderer::gpu_times()`
+    gives the times it read back, oldest first, usually one, none at the
+    first two renders or while the GPU is behind, and up to four at once.
+    Each `GpuTimes` has `renders_ago` (2 while the GPU keeps up), `world`
+    and `output` (the blit and the UI), and `total()`. A frame the facade
+    does not draw (a modal frame, no GPU) is no render: count renders, not
+    frames, to find the frame a time belongs to. `GL_TIME_ELAPSED` gives
+    lengths only, not when the GPU started: the GPU track places them
+    (after the processor's `nadir::render` scope, say), or declares
+    `glQueryCounter` and `GL_TIMESTAMP`. A device runs one timer at a
+    time: with timing on, a timer of the facade's around `render` fails
+    it with `FrameOrder`. On llvmpipe the context's first
+    drawing is dropped, with a warning. The ring allocates nothing once
+    its four slots are made: the facade's test that a steady frame of the
+    tools allocates nothing can run with timing on.
+  - Depends: M7.11
+  - Do: the profiler's GPU time beside the processor's, the renderer's
+    timing turned on under `dev`, and a GPU track in the trace.
+  - Accept: manual: the profiler shows the GPU's time in `cargo dev`.
+  - Verify: `cargo test -p nadir-debug`; `cargo test -p nadir_engine
+    --features dev`; `cargo dev` (manual)
 
 - [ ] **M7.4 — inspector**
   - Note (from M4.2): `Registration::inspect` and `inspect_mut` hold the

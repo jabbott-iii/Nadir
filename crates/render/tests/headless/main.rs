@@ -33,4 +33,5 @@ mod sprites;
 mod text;
 mod textures;
 mod tiles;
+mod timing;
 mod ui;

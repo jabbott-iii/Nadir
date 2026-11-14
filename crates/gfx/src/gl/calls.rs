@@ -28,7 +28,8 @@
 //! also reads `glGetError`, and turns an error into [`GfxError::Gl`]. Release
 //! builds leave the errors for [`Gl::check_pending`], before each draw, and
 //! for the end of the frame. The calls that allocate (`glBufferData`,
-//! `glTexImage2D`) are checked in every build, and fail if an earlier call
+//! `glTexImage2D`, and `glBeginQuery`, which makes a query object at its
+//! first start) are checked in every build, and fail if an earlier call
 //! left an error: none is ever dropped unseen. Out of memory, wherever it is
 //! seen, loses the device.
 
@@ -41,9 +42,11 @@ use nadir_sys::gl::{
     GL_ACTIVE_UNIFORM_BLOCKS, GL_COLOR_ATTACHMENT0, GL_COMPILE_STATUS, GL_CONTEXT_PROFILE_MASK,
     GL_FALSE, GL_FLOAT, GL_FRAMEBUFFER, GL_INFO_LOG_LENGTH, GL_INVALID_VALUE, GL_LINK_STATUS,
     GL_MAJOR_VERSION, GL_MAX_TEXTURE_SIZE, GL_MINOR_VERSION, GL_NO_ERROR, GL_OUT_OF_MEMORY,
-    GL_RENDERER, GL_RGBA, GL_TEXTURE_2D, GL_TEXTURE0, GL_UNIFORM_BLOCK_DATA_SIZE,
+    GL_QUERY_COUNTER_BITS, GL_QUERY_RESULT, GL_QUERY_RESULT_AVAILABLE, GL_RENDERER, GL_RGBA,
+    GL_TEXTURE_2D, GL_TEXTURE0, GL_TIME_ELAPSED, GL_UNIFORM_BLOCK_DATA_SIZE,
     GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, GL_UNPACK_ALIGNMENT, GL_UNSIGNED_BYTE, GL_VENDOR,
     GL_VERSION, GLbitfield, GLchar, GLenum, GLfloat, GLint, GLintptr, GLsizei, GLsizeiptr, GLuint,
+    GLuint64,
 };
 
 use super::fns::GlFns;
@@ -919,6 +922,82 @@ impl<'a> Gl<'a> {
             )
         };
         self.after("glReadPixels")
+    }
+
+    // -- Timer queries ----------------------------------------------------------
+    //
+    // Every query is of `GL_TIME_ELAPSED`. The device keeps the rules GL
+    // fails on: one query runs at a time, a query is ended only while it
+    // runs, and a query's result is asked for only after the query has run
+    // and ended.
+
+    /// The bits of the timer queries' counter: 0 if their results mean
+    /// nothing.
+    pub(crate) fn timer_counter_bits(self) -> Result<GLint, GfxError> {
+        let mut bits = 0;
+        // SAFETY: see `Gl`. `GL_QUERY_COUNTER_BITS` writes one integer, to a
+        // live `GLint`.
+        unsafe { (self.fns.get_queryiv)(GL_TIME_ELAPSED, GL_QUERY_COUNTER_BITS, &raw mut bits) };
+        self.after("glGetQueryiv")?;
+        Ok(bits)
+    }
+
+    pub(crate) fn gen_query(self) -> Result<GLuint, GfxError> {
+        let mut name = 0;
+        // SAFETY: see `Gl`. One name goes to a live `GLuint`.
+        unsafe { (self.fns.gen_queries)(1, &raw mut name) };
+        self.after("glGenQueries")?;
+        self.named(name, "glGenQueries gave no name")
+    }
+
+    pub(crate) fn delete_query(self, name: GLuint) -> Result<(), GfxError> {
+        // SAFETY: see `Gl`. One name is read from a live `GLuint`.
+        unsafe { (self.fns.delete_queries)(1, &raw const name) };
+        self.after("glDeleteQueries")
+    }
+
+    /// Starts the timer query `name`, while no other runs. Checked in every
+    /// build, as the first start makes the query object, and the device
+    /// counts the query as running only if GL does: a later result would
+    /// otherwise be an earlier run's.
+    pub(crate) fn begin_timer_query(self, name: GLuint) -> Result<(), GfxError> {
+        self.check_pending("a timer")?;
+        // SAFETY: see `Gl`. `glBeginQuery` takes values.
+        unsafe { (self.fns.begin_query)(GL_TIME_ELAPSED, name) };
+        self.after_allocating("glBeginQuery", "a timer")
+    }
+
+    /// Ends the timer query that runs.
+    pub(crate) fn end_timer_query(self) -> Result<(), GfxError> {
+        // SAFETY: see `Gl`. `glEndQuery` takes a value.
+        unsafe { (self.fns.end_query)(GL_TIME_ELAPSED) };
+        self.after("glEndQuery")
+    }
+
+    /// Whether the result of the query `name`, which has run and ended, is
+    /// available. It never waits for the GPU.
+    pub(crate) fn query_available(self, name: GLuint) -> Result<bool, GfxError> {
+        let mut available = GLint::from(GL_FALSE);
+        // SAFETY: see `Gl`. `GL_QUERY_RESULT_AVAILABLE` writes one integer,
+        // to a live `GLint`.
+        unsafe {
+            (self.fns.get_query_objectiv)(name, GL_QUERY_RESULT_AVAILABLE, &raw mut available);
+        };
+        self.after("glGetQueryObjectiv")?;
+        Ok(available != GLint::from(GL_FALSE))
+    }
+
+    /// The result of the query `name`, in nanoseconds. Asked for before
+    /// [`Gl::query_available`] says it is, it waits for the GPU.
+    pub(crate) fn query_result(self, name: GLuint) -> Result<GLuint64, GfxError> {
+        let mut nanoseconds = 0;
+        // SAFETY: see `Gl`. `GL_QUERY_RESULT` writes one 64-bit value, to a
+        // live `GLuint64`.
+        unsafe {
+            (self.fns.get_query_objectui64v)(name, GL_QUERY_RESULT, &raw mut nanoseconds);
+        };
+        self.after("glGetQueryObjectui64v")?;
+        Ok(nanoseconds)
     }
 
     // -- Drawing ----------------------------------------------------------------

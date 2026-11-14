@@ -151,6 +151,12 @@ pub type GLsizeiptr = isize;
 /// Windows, the size of a pointer on both)
 pub type GLintptr = isize;
 
+/// An unsigned 64-bit integer: a timer query's result, in nanoseconds.
+/// `GL/glcorearb.h` (GL 3.2): `typedef khronos_uint64_t GLuint64;`, and
+/// `KHR/khrplatform.h`: `typedef uint64_t khronos_uint64_t;` (with
+/// `<stdint.h>`; `unsigned __int64` on Windows, 64 bits on every system)
+pub type GLuint64 = u64;
+
 // ---------------------------------------------------------------------------
 // Constants: booleans and errors
 // ---------------------------------------------------------------------------
@@ -458,6 +464,31 @@ pub const GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT: GLenum = 0x8CD6;
 /// The driver does not support this combination of attachments.
 /// `GL/glcorearb.h` (GL 3.0): `#define GL_FRAMEBUFFER_UNSUPPORTED 0x8CDD`
 pub const GL_FRAMEBUFFER_UNSUPPORTED: GLenum = 0x8CDD;
+
+// ---------------------------------------------------------------------------
+// Constants: queries
+// ---------------------------------------------------------------------------
+
+/// A query target: the time the GPU takes over the commands between
+/// `glBeginQuery` and `glEndQuery`, in nanoseconds. One query of the target
+/// is active at a time.
+/// `GL/glcorearb.h` (GL 3.3): `#define GL_TIME_ELAPSED 0x88BF`
+pub const GL_TIME_ELAPSED: GLenum = 0x88BF;
+
+/// For `glGetQueryiv`: the bits of a target's counter. A timer's may be 0,
+/// and then its results mean nothing; otherwise it has 30 or more.
+/// `GL/glcorearb.h` (GL 1.5): `#define GL_QUERY_COUNTER_BITS 0x8864`
+pub const GL_QUERY_COUNTER_BITS: GLenum = 0x8864;
+
+/// For `glGetQueryObject*`: the query's result. Read before the result is
+/// available, it waits for the GPU.
+/// `GL/glcorearb.h` (GL 1.5): `#define GL_QUERY_RESULT 0x8866`
+pub const GL_QUERY_RESULT: GLenum = 0x8866;
+
+/// For `glGetQueryObject*`: whether the query's result is available, as a
+/// [`GL_FALSE`] or another value. It never waits.
+/// `GL/glcorearb.h` (GL 1.5): `#define GL_QUERY_RESULT_AVAILABLE 0x8867`
+pub const GL_QUERY_RESULT_AVAILABLE: GLenum = 0x8867;
 
 // ---------------------------------------------------------------------------
 // Constants: primitives
@@ -965,6 +996,59 @@ pub type PFNGLREADPIXELSPROC = unsafe extern "system" fn(
     type_: GLenum,
     pixels: *mut c_void,
 );
+
+// ---------------------------------------------------------------------------
+// Functions: queries
+// ---------------------------------------------------------------------------
+
+/// `glGenQueries`: Writes `n` new query names to `ids`. A name becomes a
+/// query object at its first `glBeginQuery`, and until then has no result.
+/// `GL/glcorearb.h` (GL 1.5): `typedef void (APIENTRYP PFNGLGENQUERIESPROC)
+/// (GLsizei n, GLuint *ids);`
+pub type PFNGLGENQUERIESPROC = unsafe extern "system" fn(n: GLsizei, ids: *mut GLuint);
+
+/// `glDeleteQueries`: Deletes `n` queries. An active query is deleted once it
+/// ends.
+/// `GL/glcorearb.h` (GL 1.5): `typedef void (APIENTRYP PFNGLDELETEQUERIESPROC)
+/// (GLsizei n, const GLuint *ids);`
+pub type PFNGLDELETEQUERIESPROC = unsafe extern "system" fn(n: GLsizei, ids: *const GLuint);
+
+/// `glBeginQuery`: Starts the query `id` on `target`, such as
+/// [`GL_TIME_ELAPSED`], discarding the result it had. It fails while a query
+/// of the target is active, and for a name of a query of another target.
+/// `GL/glcorearb.h` (GL 1.5): `typedef void (APIENTRYP PFNGLBEGINQUERYPROC)
+/// (GLenum target, GLuint id);`
+pub type PFNGLBEGINQUERYPROC = unsafe extern "system" fn(target: GLenum, id: GLuint);
+
+/// `glEndQuery`: Ends the active query of `target`. Its result is available
+/// once the GPU has done the commands it covers. It fails when no query of
+/// the target is active.
+/// `GL/glcorearb.h` (GL 1.5): `typedef void (APIENTRYP PFNGLENDQUERYPROC)
+/// (GLenum target);`
+pub type PFNGLENDQUERYPROC = unsafe extern "system" fn(target: GLenum);
+
+/// `glGetQueryiv`: Writes one integer of a query target to `params`, such as
+/// its [`GL_QUERY_COUNTER_BITS`].
+/// `GL/glcorearb.h` (GL 1.5): `typedef void (APIENTRYP PFNGLGETQUERYIVPROC)
+/// (GLenum target, GLenum pname, GLint *params);`
+pub type PFNGLGETQUERYIVPROC =
+    unsafe extern "system" fn(target: GLenum, pname: GLenum, params: *mut GLint);
+
+/// `glGetQueryObjectiv`: Writes one integer of the query `id` to `params`:
+/// whether its result is available, for [`GL_QUERY_RESULT_AVAILABLE`]. It
+/// fails for a name that is no query object yet, and for an active query.
+/// `GL/glcorearb.h` (GL 1.5): `typedef void (APIENTRYP
+/// PFNGLGETQUERYOBJECTIVPROC) (GLuint id, GLenum pname, GLint *params);`
+pub type PFNGLGETQUERYOBJECTIVPROC =
+    unsafe extern "system" fn(id: GLuint, pname: GLenum, params: *mut GLint);
+
+/// `glGetQueryObjectui64v`: Writes one 64-bit value of the query `id` to
+/// `params`: its result, for [`GL_QUERY_RESULT`], which waits for the GPU
+/// until the result is available. It fails as `glGetQueryObjectiv` does.
+/// `GL/glcorearb.h` (GL 3.3): `typedef void (APIENTRYP
+/// PFNGLGETQUERYOBJECTUI64VPROC) (GLuint id, GLenum pname, GLuint64 *params);`
+pub type PFNGLGETQUERYOBJECTUI64VPROC =
+    unsafe extern "system" fn(id: GLuint, pname: GLenum, params: *mut GLuint64);
 
 // ---------------------------------------------------------------------------
 // Functions: drawing

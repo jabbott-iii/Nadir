@@ -37,3 +37,4 @@ mod golden;
 mod offscreen;
 mod pipelines;
 mod resources;
+mod timers;

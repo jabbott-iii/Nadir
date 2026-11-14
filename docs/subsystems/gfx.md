@@ -45,7 +45,7 @@ pub struct Device { backend: Backend /* GL now; an enum Gl | Metal from M10 */ }
 impl Device {
     pub fn new(surface: GpuSurface<'_>) -> Result<Self, GfxError>;   // keeps the context's id, not a borrow
     pub fn new_headless() -> Result<Self, GfxError>;     // owns an offscreen context: tests and tools (M3.2)
-    pub fn caps(&self) -> &Caps;                          // backend, vendor, renderer, version, max texture size (timer queries: M7.11)
+    pub fn caps(&self) -> &Caps;                          // backend, vendor, renderer, version, max texture size, timer_queries (M7.11)
 
     pub fn create_texture(&mut self, desc: &TextureDesc, data: Option<&[u8]>) -> Result<TextureId, GfxError>;
     pub fn update_texture(&mut self, id: TextureId, region: IRect, data: &[u8]) -> Result<(), GfxError>;
@@ -62,6 +62,12 @@ impl Device {
     pub fn end_offscreen_frame(&mut self) -> Result<(), GfxError>;
 
     pub fn read_pixels(&mut self, target: RenderTargetId) -> Result<Vec<u8>, GfxError>; // RGBA8, top-left origin (tests)
+
+    // GPU timers (M7.11, ADR-0060): in a frame, outside a pass, one running at a time.
+    pub fn create_timer(&mut self) -> Result<TimerId, GfxError>;     // Unsupported without Caps::timer_queries
+    pub fn begin_timer(&mut self, timer: TimerId) -> Result<(), GfxError>;
+    pub fn end_timer(&mut self) -> Result<(), GfxError>;
+    pub fn timer_result(&mut self, timer: TimerId) -> Result<Option<Duration>, GfxError>;  // never waits
 }
 
 impl Pass<'_> {
@@ -150,7 +156,7 @@ pub struct ShaderSource<'a> {
 
 ## OpenGL 3.3 backend notes
 
-- **Loader:** a `gl_fns!` macro lists the 60 functions we use, each with its
+- **Loader:** a `gl_fns!` macro lists the 67 functions we use, each with its
   `nadir_sys::gl` type (a compile-time check pairs name and type). It
   builds a struct of function pointers, loaded through
   `GlContext::get_proc_address`, every one before the first call. A missing
@@ -223,6 +229,20 @@ pub struct ShaderSource<'a> {
     wherever it is seen, loses the device: every later call is
     `ContextLost`.
 - **Readback:** `glReadPixels`, then flip vertically.
+- **Timers** (M7.11, ADR-0060): each a query of `GL_TIME_ELAPSED`, core in
+  3.3. `Caps::timer_queries` says whether its counter has bits
+  (`glGetQueryiv` with `GL_QUERY_COUNTER_BITS`), as GL lets it have none.
+  The device keeps GL's rules: one timer runs at a time, between passes,
+  inside a frame, and `glBeginQuery` is checked in every build, as the
+  calls that allocate are, so that a timer runs only if GL runs it; a
+  timer's result is asked for only after it has run and
+  ended, first whether it is available (`glGetQueryObjectiv`), which never
+  waits, then the result (`glGetQueryObjectui64v`), once, and kept until
+  the timer runs again. `end_frame` with a timer running stops it and
+  fails, without showing the frame; destroying a running timer ends its
+  query first, as GL would run it on. The timers are a resource of their
+  own: `TimerId`, and `ResourceId::Timer` and `ResourceKind::Timer`, both
+  enums `#[non_exhaustive]` since.
 - **Color space:** decided by ADR-0013.
   - Color textures (`Rgba8Srgb`) are uploaded as `SRGB8_ALPHA8`; blending
     happens in linear space with `GL_FRAMEBUFFER_SRGB` enabled on the
@@ -314,4 +334,10 @@ pub struct ShaderSource<'a> {
   - Where this system has no offscreen context yet, it fails with
     `GfxError::NoOffscreenContext`, which tests skip on. Other failures
     carry the platform's error in `GfxError::OffscreenContext`.
+- **Timers (M7.11):** a timed pass of 64 blended layers on llvmpipe,
+  longer than 0 and no longer than the time that passed; one timer at a
+  time, inside a frame; a frame that ends with one running; a destroyed
+  timer; and, inside the crate, that a result is read from GL once, and
+  only after GL says it is there. llvmpipe (Mesa 26.1) times a context's
+  first drawing at hours, so the test times its second.
 - **Benchmark:** 10k instanced sprites, upload plus draw time.

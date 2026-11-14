@@ -5195,7 +5195,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   timer queries off into a new task (M7.11), to let nadir-debug depend on
   nadir-codec for the trace, and to have the facade's `dev` turn on
   nadir-core's `profile`; the rest follows the spec and the roadmap's
-  notes
+  notes; ADR-0060 splits M7.11 again: the GPU row in the profiler is M7.12
 - **Date:** 2026-11-13
 - **Context:**
   - M7.3 asks for the overlay, the profiler's ring, graph and scope tree,
@@ -5299,3 +5299,124 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   `profile dump [path]`; the scopes of other threads (the asset workers,
   the audio thread) are wanted; or the overlay should let the pointer
   through.
+
+## ADR-0060 — M7.11 split in two: GPU timers in gfx and render (M7.11), the profiler's GPU row and track (M7.12); timers a device resource, `ResourceId` and `ResourceKind` `#[non_exhaustive]`, the renderer's ring read two renders later, and times past the wall clock dropped
+
+- **Status:** Accepted: the user chose, on 2026-11-14, to split M7.11 in
+  two, the timers (sys, gfx, render) and showing them (nadir-debug, the
+  facade); the rest follows the spec and the roadmap's notes
+- **Date:** 2026-11-14
+- **Context:**
+  - M7.11, split from M7.3 (ADR-0059), asks for the GL query
+    declarations, a `Caps` flag and a query API in nadir-gfx, render
+    timing each pass, and the profiler's GPU time and a GPU track in the
+    trace: nadir-sys, nadir-gfx, nadir-render, nadir-debug and the facade,
+    five crates, past CLAUDE.md's three.
+  - GL 3.3 core has timer queries (`GL_TIME_ELAPSED`), but lets a driver
+    give their counter 0 bits, whose results mean nothing. One query of
+    the target runs at a time; a query's result asked for before the
+    query has run, or while it runs, is `GL_INVALID_OPERATION`, and one
+    asked for before it is available waits for the GPU. A query deleted
+    while it runs runs on until a `glEndQuery`.
+  - `ResourceId` and `ResourceKind` are public enums, not
+    `#[non_exhaustive]`.
+  - `FrameStats` is a public struct, not `#[non_exhaustive]`, built as a
+    literal in the facade's tests (ADR-0023): a field more would break
+    them, and the facade is outside this half.
+  - The renderer draws two passes: the world into the virtual image, and
+    the output (the blit, then the UI). A pass borrows the device, so a
+    timer starts and stops between passes.
+  - llvmpipe (Mesa 26.1.6, LLVM 20.1.2) gives the timer over a context's
+    first drawing about 43,400 s, near 12 hours: in this session, a timer
+    around the first frame's 64 blended layers gave 43,411 s, and an
+    untimed frame first made every later timer right (5 µs to 21 ms). An
+    empty span before the first drawing gave 1 ns, and the drawing after
+    it hours again.
+- **Decision:**
+  - **Split:** M7.11 is the timers, in nadir-sys, nadir-gfx and
+    nadir-render; M7.12 shows them, in nadir-debug and the facade, after
+    M7.11.
+  - **nadir-sys:** `GLuint64`; `GL_TIME_ELAPSED`, `GL_QUERY_COUNTER_BITS`,
+    `GL_QUERY_RESULT` and `GL_QUERY_RESULT_AVAILABLE`; the function types
+    of `glGenQueries`, `glDeleteQueries`, `glBeginQuery`, `glEndQuery`,
+    `glGetQueryiv` (the counter's bits, for the flag),
+    `glGetQueryObjectiv` and `glGetQueryObjectui64v`, from
+    `GL/glcorearb.h` of libglvnd 1.7.0. The loader looks up 67
+    functions.
+  - **`Caps::timer_queries`:** whether `GL_TIME_ELAPSED`'s counter has
+    any bits.
+  - **Timers are a resource of the device,** named by a generational
+    `TimerId`, as the others are:
+    - `Device::create_timer`, `GfxError::Unsupported` (new) on a device
+      without the flag;
+    - `begin_timer(id)`, inside a frame and outside a pass, one running
+      at a time (`FrameOrder` otherwise); starting a timer again drops its
+      last result;
+    - `end_timer()`, `FrameOrder` while none runs;
+    - `timer_result(id) -> Option<Duration>`, which never waits: `None`
+      for a timer that never ran or runs, and while GL says its result is
+      not available; the result itself is asked of GL once, and kept;
+    - `destroy`, which ends a running timer first;
+    - `end_frame` while a timer runs stops it, and fails with
+      `FrameOrder` without showing the frame.
+  - **`ResourceId::Timer` and `ResourceKind::Timer`,** and both enums
+    become `#[non_exhaustive]`: a break for a `match` on either with no
+    `_` arm, as ADR-0038 has types become `#[non_exhaustive]` in the task
+    that first adds to them. The release after 0.3.0 raises the version
+    (ADR-0050).
+  - **The renderer:** `Renderer::set_gpu_timing(on)`, off at first, and
+    `gpu_timing()`; `Renderer::gpu_times() -> &[GpuTimes]`, the times the
+    last `render` read back, oldest first; `GpuTimes { renders_ago, world,
+    output }`, `#[non_exhaustive]`, with `total()`. `FrameStats` is
+    unchanged.
+  - **The ring:** four slots of two timers (world, output), made at each
+    slot's first render. A render reads back the renders at least two
+    before it, oldest first, a slot only once both its timers have
+    results, and asks GL only up to its first timer without one. It then
+    takes its own slot, render number mod 4, or goes untimed while that
+    slot still waits. A slot waits only once its render ends: a render
+    that fails is not waited for. Each pass's timer stops whether the pass
+    fails or not. The times read are a `Vec` of four made with the ring.
+  - **A time longer than the wall time since its render started** cannot
+    be right, as the GPU did the work after the render started and before
+    the result came: it is dropped, with a warning the first time.
+- **Consequences:**
+  - With timing on, a render makes four timer calls, and asks GL whether
+    about two results are there and for them: no wait, and no allocation
+    once the four slots are made. Off, nothing changes: no game turns it
+    on until M7.12, under `dev`.
+  - llvmpipe's reading of a context's first drawing is dropped, with one
+    warning; a driver whose readings are all wrong shows no times.
+  - The blit and the UI share the output's one time.
+  - `GL_TIME_ELAPSED` gives lengths, not when: a GPU track in the trace
+    (M7.12) places them, after the processor's `nadir::render` scope or
+    one after another from the frame's start, or declares `glQueryCounter`
+    with `GL_TIMESTAMP` to read where they began.
+  - The renderer has no teardown: its eight timers last until the device
+    drops, as its buffers do.
+  - A `match` outside the workspace on `ResourceId` or `ResourceKind` with
+    no `_` arm stops compiling.
+- **Alternatives considered:**
+  - All of M7.11 across five crates (the user chose the split).
+  - The GPU times in `FrameStats`: a field more breaks the facade's test
+    literal, so the facade would be a fourth crate; and `FrameStats` says
+    what this frame drew, not one two renders back.
+  - Timers without ids, a ring of the device's own: render's ring could
+    then be tested only on a GPU, and Metal's counter samples fit ids as
+    well.
+  - A timer begun by `begin_pass` and ended as the `Pass` drops: a drop
+    cannot return an error.
+  - Reading a render's times as soon as they are there: a latency that
+    changes from render to render, where the spec and M7.3's note give
+    two.
+  - Three slots: a GPU one render behind would leave a render in three
+    untimed.
+  - Timers past their bound kept: a 12-hour frame in M7.12's graph and
+    trace, on CI's renderer.
+  - An untimed drawing made by `Device::new`, to get past llvmpipe's
+    first: work in every device for one driver's mistake.
+- **Revisit when:** M7.12 shows the times; M10.2's Metal backend times its
+  passes (counter samples at stage boundaries, or a command buffer's
+  `GPUStartTime` and `GPUEndTime`, which time the frame alone); a new pass
+  in the renderer (debug draw, post) wants a timer of its own; or a Mesa
+  release times a context's first drawing right.

@@ -39,6 +39,12 @@
 //! with no renderer, gives where the UI lands at a [`UiScale`], and maps
 //! the pointer to UI units. Failures are [`RenderError`]s.
 //!
+//! **Timing.** [`Renderer::set_gpu_timing`] has each render time its
+//! passes on the GPU, where the device has timer queries, and
+//! [`Renderer::gpu_times`] gives the [`GpuTimes`] of earlier renders that
+//! the last one read back: two renders later, so that reading never waits
+//! for the GPU.
+//!
 //! **Reloading.** [`Renderer::reload_program`] builds one of the renderer's
 //! [`Program`]s again from GLSL it is given, such as its files under
 //! [`SHADER_DIR`] after an edit, and keeps the program it had when the
@@ -444,6 +450,7 @@ mod sort;
 mod text;
 mod texture;
 mod tiles;
+mod timing;
 mod ui;
 mod view;
 
@@ -463,5 +470,6 @@ pub use shader::{Program, SHADER_DIR};
 pub use text::{Align, Escaped, PlacedGlyph, TextLayout};
 pub use texture::{DecodedTexture, Texture};
 pub use tiles::{TILE_INSTANCE_FLOATS, Tile, TileLayer, TileLayerDraw, TileLayers, TileSet};
+pub use timing::GpuTimes;
 pub use ui::{UiDraw, UiList, UiScale, UiSpace, UiView};
 pub use view::Upscale;

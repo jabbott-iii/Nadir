@@ -45,6 +45,11 @@
 //! - render targets, textures that passes draw into:
 //!   [`Device::create_render_target`]; [`RenderTargetId`]
 //! - pipelines: [`Device::create_pipeline`]; [`PipelineId`]
+//! - timers, which measure the GPU's time over the work of a frame between
+//!   [`Device::begin_timer`] and [`Device::end_timer`]:
+//!   [`Device::create_timer`], on a device with [`Caps::timer_queries`].
+//!   [`Device::timer_result`] gives the time once the GPU has done the
+//!   work, a frame or two later, and never waits for it; [`TimerId`]
 //! - [`Device::destroy`] takes any of them, as a [`ResourceId`].
 //!
 //! **Pipelines.** A [`PipelineDesc`] holds the [`ShaderSource`], one
@@ -347,6 +352,6 @@ pub use types::{
     MAX_TEXTURE_SLOTS, MAX_UNIFORM_BLOCKS, MAX_UNIFORM_BYTES, MAX_VERTEX_ATTRIBUTES,
     MAX_VERTEX_BUFFERS, PassTarget, PipelineDesc, PipelineId, RenderTargetId, ResourceId,
     ResourceKind, Sampler, ShaderSource, ShaderStage, TextureDesc, TextureFormat, TextureId,
-    TextureRef, Topology, UniformBlockDesc, VertexAttribute, VertexFormat, VertexLayout,
+    TextureRef, TimerId, Topology, UniformBlockDesc, VertexAttribute, VertexFormat, VertexLayout,
     VertexStep,
 };

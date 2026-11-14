@@ -440,4 +440,97 @@ void main() {
         device.end_frame(GpuSurface::Gl(&gl)).unwrap();
         assert_eq!(device.read_pixels(target).unwrap(), [51, 102, 153, 255]);
     }
+
+    #[test]
+    fn a_timer_reads_its_result_once_and_only_after_gl_says_it_is_there() {
+        let Some(gl) = headless() else { return };
+        let (mut device, target, pipeline, quad) = color_device(&gl);
+        if !device.caps().timer_queries {
+            log::warn!("skipped: the driver has no timer queries");
+            return;
+        }
+        // In every build, so that a call GL refuses fails where it is made.
+        device.gl().status().set_every_call(true);
+        let count = |device: &Device, call| device.gl().status().count(call);
+        let timer = device.create_timer().unwrap();
+        // Never run, its name is no query object yet: GL is not asked.
+        assert_eq!(device.timer_result(timer), Ok(None));
+        device.begin_frame(GpuSurface::Gl(&gl)).unwrap();
+        device.begin_timer(timer).unwrap();
+        // Nor while it runs.
+        assert_eq!(device.timer_result(timer), Ok(None));
+        {
+            let mut pass = device.begin_pass(target.into(), None).unwrap();
+            pass.set_pipeline(pipeline).unwrap();
+            pass.set_vertex_buffer(0, quad, 0).unwrap();
+            pass.set_uniforms(0, &[0.2f32, 0.4, 0.6, 1.0]).unwrap();
+            pass.draw(0..4, 0..1).unwrap();
+        }
+        device.end_timer().unwrap();
+        device.end_frame(GpuSurface::Gl(&gl)).unwrap();
+        assert_eq!(count(&device, "glGetQueryObjectiv"), 0);
+
+        let started = std::time::Instant::now();
+        let mut polls = 0;
+        let elapsed = loop {
+            polls += 1;
+            if let Some(elapsed) = device.timer_result(timer).unwrap() {
+                break elapsed;
+            }
+            // Not there yet: the result itself, which would wait, is not
+            // asked for.
+            assert_eq!(count(&device, "glGetQueryObjectui64v"), 0);
+            assert!(
+                started.elapsed().as_secs() < 10,
+                "the timer's result did not come in 10 s"
+            );
+            std::thread::yield_now();
+        };
+        assert_eq!(count(&device, "glGetQueryObjectiv"), polls);
+        assert_eq!(count(&device, "glGetQueryObjectui64v"), 1);
+        // Asked again, the device has it.
+        assert_eq!(device.timer_result(timer), Ok(Some(elapsed)));
+        assert_eq!(count(&device, "glGetQueryObjectiv"), polls);
+        assert_eq!(count(&device, "glGetQueryObjectui64v"), 1);
+    }
+
+    #[test]
+    fn in_release_a_timer_runs_only_if_gl_runs_it() {
+        let Some(gl) = headless() else { return };
+        let mut device = Device::new(GpuSurface::Gl(&gl)).unwrap();
+        if !device.caps().timer_queries {
+            log::warn!("skipped: the driver has no timer queries");
+            return;
+        }
+        device.gl().status().set_every_call(false);
+        let timer = device.create_timer().unwrap();
+        device.begin_frame(GpuSurface::Gl(&gl)).unwrap();
+        // An error an earlier call left fails the start, under that call's
+        // name, and no timer runs.
+        assert_eq!(device.gl().enable(0), Ok(()));
+        assert_eq!(
+            device.begin_timer(timer),
+            Err(GfxError::Gl {
+                call: "glEnable",
+                code: nadir_sys::gl::GL_INVALID_ENUM
+            })
+        );
+        assert_eq!(
+            device.end_timer(),
+            Err(GfxError::FrameOrder("end_timer came while no timer ran"))
+        );
+        assert_eq!(device.timer_result(timer), Ok(None));
+        device.begin_timer(timer).unwrap();
+        // A frame that ends while the timer runs still sees the frame's
+        // errors.
+        assert_eq!(device.gl().enable(0), Ok(()));
+        assert_eq!(
+            device.end_frame(GpuSurface::Gl(&gl)),
+            Err(GfxError::FrameOrder("end_frame came while a timer ran"))
+        );
+        let logged = log::tail(log::RING_CAPACITY).into_iter().any(|record| {
+            record.contains("OpenGL reported GL_INVALID_ENUM in this frame, up to glEndQuery")
+        });
+        assert!(logged);
+    }
 }

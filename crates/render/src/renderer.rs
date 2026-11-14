@@ -17,12 +17,13 @@
 //! it.
 
 use std::mem;
+use std::time::Instant;
 
 use nadir_assets::{AssetServer, LoadState};
 use nadir_core::{IRect, IVec2, UVec2, Vec2};
 use nadir_gfx::{
     BufferDesc, BufferId, BufferKind, BufferUsage, Device, GfxError, PassTarget, PipelineDesc,
-    PipelineId, RenderTargetId, Sampler, ShaderSource, TextureFormat, TextureId, Topology,
+    PipelineId, RenderTargetId, Sampler, ShaderSource, TextureFormat, TextureId, TimerId, Topology,
     VertexLayout, VertexStep,
 };
 
@@ -30,6 +31,7 @@ use crate::batcher::Pipe;
 use crate::chunks::{self, ChunkDraw, Step, TileCache};
 use crate::glyphs::{Server, TextPass};
 use crate::shader::{BLIT, Interface, Program, SPRITE, TEXT, TILE_CHUNK, packed};
+use crate::timing::{GpuTimes, TimerRing};
 use crate::ui::UiPass;
 use crate::view::{self, Upscale, View};
 use crate::{
@@ -90,6 +92,23 @@ pub struct FrameStats {
     pub ui_texts: u32,
     /// The instanced draws of the UI's sprites and glyphs onto the output.
     pub ui_batches: u32,
+}
+
+/// Draws with `draw`, timed by `timer` if there is one. The timer stops
+/// whether the drawing fails or not, so that the next frame can run one.
+fn timed(
+    device: &mut Device,
+    timer: Option<TimerId>,
+    draw: impl FnOnce(&mut Device) -> Result<(), RenderError>,
+) -> Result<(), RenderError> {
+    let Some(timer) = timer else {
+        return draw(device);
+    };
+    device.begin_timer(timer)?;
+    let drawn = draw(device);
+    let ended = device.end_timer();
+    drawn?;
+    Ok(ended?)
 }
 
 /// The unit quad, as a triangle strip: (0, 0) to (1, 1).
@@ -169,6 +188,9 @@ pub struct Renderer {
     /// (Position among the sprites, index in `ready`) of each ready layer.
     positions: Vec<(u32, u32)>,
     steps: Vec<Step<(TextureId, Pipe)>>,
+    /// Whether the passes are timed on the GPU.
+    gpu_timing: bool,
+    timing: TimerRing<TimerId>,
 }
 
 impl Renderer {
@@ -225,7 +247,50 @@ impl Renderer {
             chunk_draws: Vec::new(),
             positions: Vec::new(),
             steps: Vec::new(),
+            gpu_timing: false,
+            timing: TimerRing::new(),
         })
+    }
+
+    /// Times the passes of each [`Renderer::render`] on the GPU, or stops:
+    /// off at first. On a device without
+    /// [`Caps::timer_queries`](nadir_gfx::Caps::timer_queries) nothing is
+    /// timed.
+    ///
+    /// Each render's times are read back by a later render, two later
+    /// while the GPU keeps up, so that reading never waits for the GPU:
+    /// [`Renderer::gpu_times`]. A render is not timed while the GPU has not
+    /// done the work of the one four renders before it. Timing makes the
+    /// device's timers at its first renders, two a render for four renders,
+    /// which the device keeps until it is dropped. Stopping forgets the
+    /// renders that wait.
+    ///
+    /// A device runs one timer at a time: while timing is on, a timer of
+    /// the caller's running around `render` makes it fail with
+    /// [`GfxError::FrameOrder`].
+    pub fn set_gpu_timing(&mut self, on: bool) {
+        if !on {
+            self.timing.reset();
+        }
+        self.gpu_timing = on;
+    }
+
+    /// Whether the passes are timed on the GPU: [`Renderer::set_gpu_timing`].
+    pub fn gpu_timing(&self) -> bool {
+        self.gpu_timing
+    }
+
+    /// The GPU's times over the passes of earlier renders that the last
+    /// [`Renderer::render`] read back, oldest first: none while timing is
+    /// off ([`Renderer::set_gpu_timing`]), on a device without timer
+    /// queries, and when no render had all its results yet. Each says how
+    /// many renders back it was drawn ([`GpuTimes::renders_ago`]).
+    ///
+    /// A time longer than the time that passed since its render started is
+    /// the driver's mistake (llvmpipe gives one for a context's first
+    /// drawing), and is dropped, with a warning the first time.
+    pub fn gpu_times(&self) -> &[GpuTimes] {
+        self.timing.read()
     }
 
     /// Builds `program` again from `source`, for shaders edited while the
@@ -331,6 +396,15 @@ impl Renderer {
         frame: &RenderFrame,
         output: Output,
     ) -> Result<FrameStats, RenderError> {
+        let timers = if self.gpu_timing && device.caps().timer_queries {
+            self.timing.begin_render(device, Instant::now())?
+        } else {
+            None
+        };
+        let [world_timer, output_timer] = match timers {
+            Some([world, output]) => [Some(world), Some(output)],
+            None => [None, None],
+        };
         let textures = assets.assets::<Texture>();
         let texture = |handle| {
             let textures = textures?;
@@ -390,7 +464,7 @@ impl Renderer {
 
         let clear = frame.clear.to_linear();
         stats.batches = 0;
-        {
+        timed(device, world_timer, |device| {
             let mut pass = device.begin_pass(self.world.into(), Some(clear))?;
             pass.set_uniforms(0, &view.uniform())?;
             let mut bound = Bound::Nothing;
@@ -436,8 +510,9 @@ impl Renderer {
                     }
                 }
             }
-        }
-        {
+            Ok(())
+        })?;
+        timed(device, output_timer, |device| {
             let upscale = self.upscale(output.size);
             let mut pass = device.begin_pass(output.target, Some(clear))?;
             pass.set_viewport(upscale.rect);
@@ -480,7 +555,9 @@ impl Renderer {
                     stats.ui_batches += 1;
                 }
             }
-        }
+            Ok(())
+        })?;
+        self.timing.end_render();
         Ok(stats)
     }
 

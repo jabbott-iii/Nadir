@@ -138,6 +138,10 @@ pub enum GfxError {
     /// [`Device::new_headless`](crate::Device::new_headless) could not be
     /// made.
     OffscreenContext(PlatformError),
+    /// The device cannot do what was asked, as its [`Caps`](crate::Caps)
+    /// say: for instance, make a timer without
+    /// [`Caps::timer_queries`](crate::Caps::timer_queries).
+    Unsupported(&'static str),
 }
 
 impl fmt::Display for GfxError {
@@ -205,6 +209,7 @@ impl fmt::Display for GfxError {
             Self::OffscreenContext(error) => {
                 write!(f, "could not make an offscreen OpenGL context: {error}")
             }
+            Self::Unsupported(what) => write!(f, "the graphics device cannot do this: {what}"),
         }
     }
 }
@@ -225,6 +230,7 @@ fn kind_name(kind: ResourceKind) -> &'static str {
         ResourceKind::Buffer => "buffer",
         ResourceKind::RenderTarget => "render target",
         ResourceKind::Pipeline => "pipeline",
+        ResourceKind::Timer => "timer",
     }
 }
 
@@ -304,6 +310,14 @@ mod tests {
                     max: 16384,
                 },
                 "a texture of 40000x1 pixels cannot be made: each side must be from 1 to 16384",
+            ),
+            (
+                GfxError::StaleHandle(ResourceKind::Timer),
+                "the timer was destroyed",
+            ),
+            (
+                GfxError::Unsupported("timer queries"),
+                "the graphics device cannot do this: timer queries",
             ),
         ];
         for (error, message) in cases {
