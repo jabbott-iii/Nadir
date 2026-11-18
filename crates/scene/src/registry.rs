@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`TypeRegistry`]: the reflected component types, by name.
+//! [`TypeRegistry`]: the reflected component types, by name, and the
+//! resource types saves keep.
 
 use std::any::{Any, TypeId};
 
@@ -21,7 +22,7 @@ use nadir_core::FastHashMap;
 use nadir_core::hash::fnv1a64;
 use nadir_ecs::{Commands, Component, Entity, World};
 
-use crate::{FromValue, Reflect, ReflectContext, ReflectError};
+use crate::{FromValue, Reflect, ReflectContext, ReflectError, SaveId, SpawnedFrom};
 
 type ConstructFn = fn(&Value, &mut ReflectContext<'_>) -> Result<Box<dyn Reflect>, ReflectError>;
 type InsertFn =
@@ -47,6 +48,9 @@ pub struct Layer<'v> {
 type InspectFn = fn(&World, Entity, &mut dyn FnMut(&dyn Reflect)) -> bool;
 type InspectMutFn = fn(&World, Entity, &mut dyn FnMut(&mut dyn Reflect)) -> bool;
 type EachFn = fn(&World, &mut dyn FnMut(Entity, &dyn Reflect));
+type WriteResourceFn = fn(&World, &mut ReflectContext<'_>) -> Option<Value>;
+type MakeResourceFn = fn(&Value, &mut ReflectContext<'_>) -> Result<Box<dyn Any>, ReflectError>;
+type ReplaceResourceFn = fn(&World, Box<dyn Any>);
 
 /// What the registry knows of one component type.
 pub struct Registration {
@@ -61,6 +65,7 @@ pub struct Registration {
     inspect: InspectFn,
     inspect_mut: InspectMutFn,
     each: EachFn,
+    saved: bool,
 }
 
 impl Registration {
@@ -72,6 +77,13 @@ impl Registration {
     /// The type.
     pub fn type_id(&self) -> TypeId {
         self.type_id
+    }
+
+    /// Whether saves keep the type's components
+    /// ([`TypeRegistry::register_saved_component`]). Those of other types
+    /// are transient: a load rebuilds them, or a prefab gives them.
+    pub fn is_saved(&self) -> bool {
+        self.saved
     }
 
     /// Makes a value of the type from `value`.
@@ -184,11 +196,63 @@ impl Registration {
     }
 }
 
+/// What the registry knows of one resource type that saves keep:
+/// [`TypeRegistry::register_saved_resource`].
+pub struct ResourceRegistration {
+    name: &'static str,
+    type_id: TypeId,
+    is_in: fn(&World) -> bool,
+    write: WriteResourceFn,
+    make: MakeResourceFn,
+    replace: ReplaceResourceFn,
+}
+
+impl ResourceRegistration {
+    /// The type's name, which saves use: `Score`.
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// The type.
+    pub fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+
+    /// Whether `world` has a resource of the type.
+    pub(crate) fn is_in(&self, world: &World) -> bool {
+        (self.is_in)(world)
+    }
+
+    /// The world's resource of the type as a value, if it has one.
+    pub(crate) fn write(&self, world: &World, cx: &mut ReflectContext<'_>) -> Option<Value> {
+        (self.write)(world, cx)
+    }
+
+    /// A value of the type made from `value`, for
+    /// [`ResourceRegistration::replace`].
+    pub(crate) fn make(
+        &self,
+        value: &Value,
+        cx: &mut ReflectContext<'_>,
+    ) -> Result<Box<dyn Any>, ReflectError> {
+        (self.make)(value, cx)
+    }
+
+    /// Replaces the world's resource of the type with `value`, which
+    /// [`ResourceRegistration::make`] made.
+    pub(crate) fn replace(&self, world: &World, value: Box<dyn Any>) {
+        (self.replace)(world, value);
+    }
+}
+
 /// The reflected component types, by the names data gives them: what
-/// prefabs, levels, saves and the inspector look components up in.
+/// prefabs, levels, saves and the inspector look components up in. Also
+/// the resource types saves keep, by name.
 pub struct TypeRegistry {
     registrations: Vec<Registration>,
     by_name: FastHashMap<&'static str, usize>,
+    resources: Vec<ResourceRegistration>,
+    resources_by_name: FastHashMap<&'static str, usize>,
 }
 
 impl TypeRegistry {
@@ -197,11 +261,15 @@ impl TypeRegistry {
         Self {
             registrations: Vec::new(),
             by_name: FastHashMap::default(),
+            resources: Vec::new(),
+            resources_by_name: FastHashMap::default(),
         }
     }
 
-    /// Adds the component type `T`, under its reflected name. Adding it
-    /// again does nothing.
+    /// Adds the component type `T`, under its reflected name, not saved:
+    /// prefabs, levels and the inspector see it, and a save leaves its
+    /// components out ([`Registration::is_saved`]). Adding it again does
+    /// nothing, and leaves one registered as saved saved.
     ///
     /// # Panics
     ///
@@ -228,6 +296,51 @@ impl TypeRegistry {
             inspect: inspect::<T>,
             inspect_mut: inspect_mut::<T>,
             each: each::<T>,
+            saved: false,
+        });
+    }
+
+    /// Adds the component type `T`, as
+    /// [`TypeRegistry::register_component`] does, as a type that saves
+    /// keep ([`capture`](crate::capture)). Adding one registered before
+    /// marks it saved.
+    ///
+    /// # Panics
+    ///
+    /// If another type has the same name.
+    pub fn register_saved_component<T: Component + FromValue>(&mut self) {
+        self.register_component::<T>();
+        let at = self.by_name[T::TYPE_NAME];
+        self.registrations[at].saved = true;
+    }
+
+    /// Adds the resource type `T`, under its reflected name, as one that
+    /// saves keep: [`capture`](crate::capture) writes the world's, if it
+    /// has one, among the save's `globals`, and [`restore`](crate::restore)
+    /// replaces it with the saved one, made from its `Default` with the
+    /// saved value applied, for a struct. Adding it again does nothing.
+    ///
+    /// # Panics
+    ///
+    /// If another resource type has the same name.
+    pub fn register_saved_resource<T: FromValue>(&mut self) {
+        if let Some(&at) = self.resources_by_name.get(T::TYPE_NAME) {
+            assert!(
+                self.resources[at].type_id == TypeId::of::<T>(),
+                "two resource types are named `{}`: rename one of them",
+                T::TYPE_NAME
+            );
+            return;
+        }
+        self.resources_by_name
+            .insert(T::TYPE_NAME, self.resources.len());
+        self.resources.push(ResourceRegistration {
+            name: T::TYPE_NAME,
+            type_id: TypeId::of::<T>(),
+            is_in: World::contains_resource::<T>,
+            write: write_resource::<T>,
+            make: make_resource::<T>,
+            replace: replace_resource::<T>,
         });
     }
 
@@ -241,11 +354,27 @@ impl TypeRegistry {
         self.registrations.iter()
     }
 
-    /// Registers every type with `world`, so that it can hold them.
+    /// The saved resource type named `name`.
+    pub fn resource(&self, name: &str) -> Option<&ResourceRegistration> {
+        self.resources_by_name
+            .get(name)
+            .map(|&at| &self.resources[at])
+    }
+
+    /// Every saved resource type, in the order they were added.
+    pub fn resources(&self) -> impl Iterator<Item = &ResourceRegistration> {
+        self.resources.iter()
+    }
+
+    /// Registers every type with `world`, so that it can hold them, and the
+    /// components saves and prefabs give entities: [`SaveId`] and
+    /// [`SpawnedFrom`].
     pub fn register_components(&self, world: &mut World) {
         for registration in &self.registrations {
             (registration.register_in)(world);
         }
+        world.register::<SaveId>();
+        world.register::<SpawnedFrom>();
     }
 
     /// A 64-bit FNV-1a hash of every component of every type here, in
@@ -423,6 +552,26 @@ fn each<T: Component + Reflect>(world: &World, f: &mut dyn FnMut(Entity, &dyn Re
     for (entity, component) in world.read::<T>().iter() {
         f(entity, component);
     }
+}
+
+fn write_resource<T: Reflect>(world: &World, cx: &mut ReflectContext<'_>) -> Option<Value> {
+    world
+        .contains_resource::<T>()
+        .then(|| world.resource::<T>().to_value(cx))
+}
+
+fn make_resource<T: FromValue>(
+    value: &Value,
+    cx: &mut ReflectContext<'_>,
+) -> Result<Box<dyn Any>, ReflectError> {
+    Ok(Box::new(T::from_value(value, cx)?))
+}
+
+fn replace_resource<T: 'static>(world: &World, value: Box<dyn Any>) {
+    let value = value
+        .downcast::<T>()
+        .expect("the registration made this value, of its own type");
+    *world.resource_mut::<T>() = *value;
 }
 
 fn inspect_mut<T: Component + Reflect>(

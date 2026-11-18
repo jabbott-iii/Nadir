@@ -1,0 +1,41 @@
+{
+ "next_id": 1,
+ "globals": {
+  "Notes": {
+   "lines": [
+    "café",
+    "",
+    "☃"
+   ],
+   "seen": [
+    true,
+    false
+   ]
+  }
+ },
+ "entities": [
+  {
+   "id": 9,
+   "prefab": "crate_2",
+   "components": {
+    "Mixed": {
+     "nothing": null,
+     "small": -64,
+     "large": -9223372036854775808,
+     "half": 0.5,
+     "nested": [
+      [],
+      [
+       1,
+       [
+        2
+       ]
+      ],
+      {}
+     ],
+     "empty": {}
+    }
+   }
+  }
+ ]
+}

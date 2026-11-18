@@ -2311,7 +2311,10 @@ mod tests {
         enter(&mut app, "schedule");
         let systems = after(&mut app, "schedule");
         assert!(
-            systems.iter().any(|line| line.ends_with("nadir::movement")),
+            // Still while paused (ADR-0067).
+            systems
+                .iter()
+                .any(|line| line.ends_with("nadir::movement (conditional)")),
             "{systems:?}"
         );
         assert!(

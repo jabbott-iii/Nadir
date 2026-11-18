@@ -1009,6 +1009,78 @@ The checks run in the order below, and the first that fails is the error:
   seeds, 487 read as they are and 3,368 once repaired; 303 reach an
   entry's KLZ stream as they are, and 1,639 repaired.
 
+### Save file reader and writer (documented, tested)
+
+`ksav::header(bytes, limits)` reads and checks a save file, `<slot>.ksav`,
+but for its payload's KBJ, for a list of saves; `ksav::parse` decodes the
+payload too; `ksav::read(&Value)` checks version 1's payload into a
+`SaveData`, and `SaveData::to_value` writes it back; `ksav::encode(game
+version, saved_at, &payload, limits)` writes a file. nadir-scene reads and
+writes saves with them (`docs/subsystems/scene.md`, "Saves"). As built in
+M9.4 (ADR-0068):
+
+```text
+header (24 bytes):
+  "KSAV" | version u16 (1) | game_version_len u16 | crc32 u32
+  | saved_at i64 | payload_size u32
+game version: game_version_len bytes of UTF-8
+payload: payload_size bytes of KBJ, to the end of the file
+
+{ "next_id": 12,
+  "globals": { "Score": { "points": 40 } },
+  "entities": [ { "id": 3, "prefab": "slime",
+                  "components": { "Health": { "current": 4, "max": 12 } } } ] }
+```
+
+Numbers are little-endian; `saved_at` is in seconds since 1970-01-01 UTC;
+the CRC-32 covers every byte after it, so a damaged time or game version
+is caught as a damaged payload is. The checks run in the order below, and
+the first that fails is the error:
+
+- **The container** (`header`): the magic; a whole header; the version,
+  1 to `ksav::VERSION` (an older one is read for its reader to migrate:
+  none is older yet; a newer one is not supported); the game version
+  within the file; a payload of at most `max_decoded_bytes` that ends where
+  the file does; the CRC-32; the game version UTF-8. `parse` then decodes
+  the KBJ within the limits; a KBJ error is `BadPayload`, at its byte in
+  the file.
+- **The payload** (`read`): an object of `next_id`, `globals` and
+  `entities` and no other member; `next_id` a save id; `globals` an object
+  of type names (`prefab::is_component_name`); `entities` an array of
+  objects of an `id`, unique, `components`, an object of type names, a
+  `prefab` if the entity has one (`prefab::is_name`), and no other member.
+  A save id is a `u64` as reflection writes one: an integer of 0 or more,
+  or, past what an `i64` holds, a string of its digits with no leading zero
+  (`ksav::id_value`, `ksav::read_id`). Values are any, `null` too: their
+  types check them where the game reflects them.
+- **The writer** refuses a game version over 65,535 bytes, and a payload
+  whose KBJ is over `max_decoded_bytes`, so that what it writes reads with
+  the same limits. Every save has one encoding: a file that reads, written
+  again from its header and payload, is the same bytes.
+- **Errors** say where: `CodecError::Ksav { offset, kind }` at the byte of
+  the field that is wrong, `CodecError::KsavData { at, kind }` at a path
+  such as `entities[2].id`, and `CodecError::KsavEncode { kind }`.
+- **Test vectors:** `crates/codec/tests/ksav/`, written field by field by
+  `make_vectors.py` with a KBJ writer of its own, sharing no code with the
+  reader, and read by `crates/codec/tests/ksav.rs`: 5 saves that read (no
+  entities and an empty game version; two entities, one of a prefab;
+  ids past an `i64`, a time before 1970 and a game version of two-byte
+  UTF-8; every kind of value; 300 entities), each with its payload as
+  JSON beside it, and each written again byte for byte; 19 that each break
+  a rule of the container, with the error and its byte; and 24 whose
+  payload breaks a rule of version 1's, with the error and its place.
+  Every prefix of the four small ones is refused, and so is each with any
+  one bit changed.
+- **Fuzz target:** `ksav`, with seeds in `fuzz/corpus/ksav/`: the 5 saves
+  that read. It reads each input, then a copy with its header mended (the
+  magic and version restored, the game version's length cut to the file,
+  the payload's size made the rest, the CRC rewritten), and asserts what
+  nadir-scene relies on: the header read alone as the file reads it; a
+  version from 1 to the newest; a payload that ends where the file does;
+  the file written again the same bytes; a payload that reads written
+  back as it was, its ids unique, its names names. A run of 120 s with
+  the default seed tried 3,167,130 inputs (M9.4).
+
 ## `nadir-assets`
 
 ### Handles and storage
@@ -1150,7 +1222,9 @@ pub struct FinalizeCtx<'a> { /* up to 4 `&mut dyn Any` resources, by type: no al
   - Failures log with the path and the error.
 - **Release:** a missing level file or prefab is an error from `load_level`
   (a `LevelError`, M5.6), and a missing texture a hard error with a dialog
-  in M9.1's loading state (ADR-0038). Until then, with
+  in M9.1's loading state (ADR-0038): a texture of the level that failed,
+  of its tile sets, atlases or entities' sprites, ends `App::run` with
+  `Error::Level` once the level's loads are done (ADR-0067). Elsewhere, with
   `OnFailure::Nothing`, it is `Failed` and logged.
 
 ### Virtual file system
@@ -1902,7 +1976,7 @@ bytes, its samples, the resampled ones, and the file).
   (`ldtk`), the level file reader (`level`) and the prefab file reader
   (`prefab`, all three M5.10), the pack file reader (`kpak`, M5.13), the
   sound file reader (`kpcm`, M6.8), the font file reader (`font`, M7.7)
-  and, from M9.4, the save reader.
+  and the save file reader (`ksav`, M9.4).
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   read every cooked file through `PackSource` and `LooseSource`, and find
   the same bytes (`tools/cook/tests/cook/workspace.rs`, M5.14).

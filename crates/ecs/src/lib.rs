@@ -63,6 +63,8 @@
 //!   [`RunCondition`]. [`Schedule::run_fixed`] runs a tick and
 //!   [`Schedule::run_frame`] a frame. [`Schedule::describe`] lists the
 //!   systems in the order they run, as [`SystemInfo`] with its [`Stage`].
+//!   [`run_system`] runs a system outside the stages as the schedule runs
+//!   its own, named and timed.
 //!
 //! # Example
 //!
@@ -215,6 +217,7 @@ pub use events::Events;
 pub use join::{Join2, for_each_mut_with, join2};
 pub use schedule::{
     FixedStage, FixedSystem, FrameStage, FrameSystem, RunCondition, Schedule, Stage, SystemInfo,
+    run_system,
 };
 pub use sparse::SparseSet;
 pub use world::{Component, EntityMut, Read, Res, ResMut, World, Write};

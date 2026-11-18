@@ -5737,7 +5737,43 @@ by the batched sprite renderer.
 
 ## M9 — Vertical slice
 
-- [ ] **M9.1 — game states and level transitions**
+- [x] **M9.1 — game states and level transitions**
+  - Note: built and checked on Linux (x86_64) on 2026-11-18 (ADR-0067,
+    accepted that day):
+    - nadir-scene: `LevelId`, `GameState`, `StateKind` (run conditions by
+      kind), `StateMachine`, `Transition` and `StateSystems`, whose `apply`
+      makes one queued transition between ticks: the old kind's exit
+      systems, then the new kind's enter systems, each group's commands
+      after it. nadir-ecs: `run_system`, so that they are named in borrow
+      panics.
+    - The facade: a `StateMachine` in `Boot` in every `App`;
+      `add_fixed_system_in`, `add_frame_system_in`, `on_enter`, `on_exit`;
+      transitions as a frame starts, after each tick and after the frame
+      stages. `Loading(level)` runs no tick and draws no world, loads the
+      level the frame after its screen shows (unloading the last level's
+      `Scope::Level`), waits for the asset server where frames are drawn,
+      then goes to `InGame`; a level that fails, or without `dev` a texture
+      of it, ends `App::run` with the new `Error::Level` after the dialog
+      (`Error` is `#[non_exhaustive]` and no longer `Eq`). `Paused` runs the
+      ticks but not `nadir::movement`, `parent_offsets` or `triggers`, and
+      holds `RenderFrame::time`.
+    - Tests: 7 in `crates/scene/tests/states.rs` (enter and exit order, no
+      transition mid-tick, the last queued wins); 7 in the facade's
+      `states.rs`, 2 of them drawn offscreen on llvmpipe (the loading waits
+      a frame for its textures; a missing one is `Error::Level` without
+      `dev`, its placeholder with it). The determinism test's hashes did not
+      change. The sandbox's schedule test now lists the engine's systems as
+      conditional; the sandbox is otherwise unchanged (M9.2's note).
+    - A run of `cargo xtask ci` failed once in nadir-platform's
+      `the_file_device_gets_every_sample_in_order` (`latency()` was `None`):
+      the `file:` device had taken over `OPEN_WAIT` (2 s) to open, which
+      `start` allows, and the test asked for the latency at once. It did not
+      fail again in 20 runs of the test binary, nor in 24 with four at once,
+      and what slowed the open was not found. The test now asks for the
+      latency once the device has played, and, where the stream had none at
+      once, that `start` waited its whole `open_wait`: with a zero wait the
+      old check failed as CI's did, and the new ones passed five times; a
+      `start` that waits for nothing fails them.
   - Note (from M4.7): a level transition must finish at a tick the
     simulation decides, the same with or without a window, or a replay
     recorded in the window drifts (ADR-0025).
@@ -5759,6 +5795,21 @@ by the batched sprite renderer.
 
 - [ ] **M9.2 — menu kit and game UI**
   - Depends: M7.1, M7.8, M8.4
+  - Note (from M9.1, ADR-0067):
+    - The sandbox still loads its field at setup (`App::load_level`): move
+      it onto `Boot` → `MainMenu` → `Loading("field")` → `InGame` ⇄
+      `Paused` here, as the user chose on 2026-11-18. Its captures and
+      replays then start with a loading frame or two.
+    - A pause menu reads its input in tick systems of `StateKind::Paused`:
+      the ticks come while paused. A loading screen is a frame system of
+      `StateKind::Loading`, on the clear colour, which it sets; its
+      frames' `dt` is real, and `RenderFrame::time` stands still.
+    - A transition queued by a frame system (a menu clicked) is made at a
+      frame boundary, which a replay does not reproduce: queue those that
+      replays must hold from tick systems.
+    - A system for two kinds of state (a HUD in `InGame` and `Paused`) is
+      added once for each. The console's `schedule` lists no enter or exit
+      system yet.
   - Note (from M7.1): text is drawn in the world pass only until M7.8, the
     UI pass (ADR-0054); `Font` and `TextDraw` are reached as
     `nadir::render::*`, not from `nadir::prelude`.
@@ -5808,7 +5859,40 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir_engine`;
     `cargo xtask fuzz-smoke --target settings --secs 120`
 
-- [ ] **M9.4 — saves**
+- [x] **M9.4 — saves**
+  - Note: built and checked on Linux (x86_64) on 2026-11-18 (ADR-0068,
+    accepted that day; the user chose its scope, scene-level saves with the
+    facade left to M9.7, and spawns that record their prefab):
+    - nadir-codec `ksav`: the file, a 24-byte header, the game's version
+      and the KBJ payload, with a CRC-32 over every byte after it
+      (`header`, `parse`, `encode`), and version 1's payload, `read` into
+      a `SaveData` of `next_id`, `globals` and `entities`;
+      `CodecError::Ksav`, `KsavEncode` and `KsavData`.
+    - nadir-scene `save`: `SaveId` (moved from the facade, which
+      re-exports it as `nadir::SaveId`), `SaveIds`, `SaveIdMap`,
+      `SpawnedFrom` (which `spawn` and `spawn_level` give), `Entity`
+      reflected as its id through `ReflectContext::with_save_ids`;
+      `TypeRegistry::register_saved_component` and
+      `register_saved_resource`; `capture`, `restore` (every value made
+      before anything changes), `write_file` (read back first, then
+      `.tmp`, `sync_all`, `.bak`, rename), `read_file` (the backup when
+      the file fails), `migrate` and `MIGRATIONS` (none yet), and
+      `PrefabLibrary::load_save`.
+    - Tests: 10 in `crates/scene/tests/saves.rs` (the round trip through a
+      file into another world; the backup when the file is damaged, cut,
+      empty or missing, and neither readable; the version 1 fixture,
+      `tests/saves/v1.ksav` from its own script, loaded, and written byte
+      for byte by today's writer; the migrations' order; eight loads that
+      fail and change nothing; an `Entity` as its id), 1 more in
+      `tests/prefabs.rs`; in nadir-codec, 5 in `tests/ksav.rs` over 48
+      vectors from `make_vectors.py` (5 that read, each written again byte
+      for byte, 19 that break the container, 24 the payload) and 4 beside
+      the reader.
+    - `cargo xtask fuzz-smoke --target ksav --secs 120`: 3,167,130 inputs
+      (26,393 a second), no finding.
+    - Not done here: M4.7's note (`nadir::world_hash` given a
+      `SaveIdMap`) and M7.4's ("Save as prefab" of the saved components
+      only), both "may"s; the facade's part is M9.7's (its note).
   - Note (from M4.2): reflect `Entity` as its `SaveId` here (ADR-0020).
     - Give `ReflectContext` the map between them. `Entity` has no
       `Default`, so implement `FromValue` for it directly.
@@ -5872,6 +5956,23 @@ by the batched sprite renderer.
     `cargo dev --debug-panic`, then inspect the report (manual)
 
 - [ ] **M9.7 — content: one complete level of the real game**
+  - Note (from M9.4, ADR-0068): nadir-scene saves, but the facade does not
+    yet. For the save point:
+    - give every `App` a `SaveIds`, and save and load a slot in the user
+      data folder (`nadir_platform::user_dirs`) with `write_file` and
+      `read_file`; tell the player when `LoadedSave::from_backup` is set;
+    - load a save after its level: `PrefabLibrary::load_save`, then
+      `restore`, which despawns every entity with a `SaveId`, so a level's
+      entity with one that the save lacks (a killed enemy) stays gone;
+    - register `Transform`, `Facing` and `Player` with
+      `register_saved_component`, and leave `Velocity`, `Sprite`,
+      `Collider` and `Animator` unsaved, rebuilt or given by the prefab;
+    - reflect `Parent` by hand (`Entity` has no `Default`), its entity as
+      the parent's `SaveId`;
+    - give a level's entities `SaveId`s that do not change between runs
+      (from LDtk's iids, say), apart from those `SaveIds` gives out;
+    - a component an entity of a prefab lost comes back from the prefab
+      on a load, even of a saved type: version 1 writes no removals.
   - Depends: M9.1–M9.6, M6.6
   - Do: build the level with LDtk and Aseprite content, enemies, pickups,
     music, a save point and a win condition.

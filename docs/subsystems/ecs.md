@@ -202,6 +202,10 @@ struct Entry<C> {
   - `run_frame(&mut World, &Frame)`: run the frame stages, apply the
     commands, clear the frame events.
   - `FixedStage` and `FrameStage` have `ALL`, in order.
+  - `run_system(&World, name, system, &context)` (M9.1, ADR-0067) runs one
+    system outside the stages as the schedule runs its own, named and
+    timed, applying no commands: nadir-scene's game states run their enter
+    and exit systems through it, between ticks.
 - Systems run strictly in stage order, then insertion order. There is no
   automatic dependency inference and no parallelism. Names need not be
   unique; they are labels.
@@ -227,8 +231,10 @@ struct Entry<C> {
   - A child's solid collider is in its parent's way when the child's layer
     is in the parent's mask: give it another layer, or make it a trigger.
 - **Stable IDs for saves:** a `SaveId(u64)` component, assigned from a
-  world-level counter. Saves never store raw `Entity` values. The facade
-  has the component (M4.4); saves add the counter (M9.4).
+  world-level counter. Saves never store raw `Entity` values. Both are
+  nadir-scene's since M9.4 (ADR-0068): `SaveId`, which the facade
+  re-exports, and `SaveIds`, the counter, a resource the facade does not
+  add yet (M9.7).
 - **Tags:** zero-sized components (`struct Enemy;`) use the normal
   `SparseSet<T>`. `Vec<ZST>` never allocates, so tags cost only the
   sparse/dense arrays.

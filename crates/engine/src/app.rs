@@ -27,7 +27,7 @@ use nadir_core::UVec2;
 use nadir_core::log::{debug, error, info, warn};
 use nadir_core::profile::{self, ScopeRecord};
 use nadir_core::profile_scope;
-use nadir_core::time::{FixedClock, Stopwatch};
+use nadir_core::time::{FixedClock, Frame, Stopwatch};
 use nadir_ecs::{Component, FixedStage, FixedSystem, FrameStage, FrameSystem, Schedule, World};
 use nadir_gfx::{Device, PassTarget, RenderTargetId, TextureFormat};
 use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Input, InputPlayer};
@@ -36,7 +36,9 @@ use nadir_platform::{
     open_audio, precise_sleep, show_error_dialog,
 };
 use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, TileLayers};
-use nadir_scene::{FromValue, PrefabLibrary, TypeRegistry};
+use nadir_scene::{
+    FromValue, PrefabLibrary, StateKind, StateMachine, TransitionSystem, TypeRegistry,
+};
 
 use crate::animation::AnimationClock;
 use crate::limiter::FrameLimiter;
@@ -412,6 +414,10 @@ impl EngineCore {
             *self.app.world.resource_mut::<crate::WindowSize>() = crate::WindowSize(size);
         }
         self.app.update(elapsed, events);
+        // A level the loading state could not load ends the loop.
+        if let Some(error) = self.app.states.take_failure() {
+            self.error.get_or_insert(error);
+        }
         if let (Some(graphics), Some((surface, size))) = (&mut self.graphics, window) {
             #[cfg(feature = "dev")]
             let drawing = Instant::now();
@@ -483,6 +489,11 @@ impl EngineCore {
 /// - `nadir::extract_level` (frame `Extract`): draws the tile layers of the
 ///   [`CurrentLevel`], with its background as the clear colour.
 ///
+/// While the game is paused ([`StateMachine`]), `nadir::movement`,
+/// `nadir::parent_offsets` and `nadir::triggers` do not run; while it
+/// loads, `nadir::extract_sprites` and `nadir::extract_level` do not, and
+/// no tick does ([`App::update`], ADR-0067).
+///
 /// So a game sets velocities in `Gameplay`, and reacts to the moves after
 /// the engine's, in `Movement` or `PostMovement`. It sets [`Facing`] and
 /// plays clips in ticks too, and reacts to finished clips in frames.
@@ -497,7 +508,7 @@ impl EngineCore {
 /// - [`RenderFrame`], emptied before the frame stages, which fill it; the
 ///   loop then draws it. Its `time`, which animated tiles show and
 ///   animators follow, is how long the simulation has run, ticks and
-///   `alpha`.
+///   `alpha`, less the time it was paused.
 /// - [`TileLayers`], the game's tile layers, which the frame's
 ///   `tile_layers` name and the loop draws from
 /// - [`FrameStats`], what the last frame drew
@@ -511,6 +522,8 @@ impl EngineCore {
 ///   until [`App::collision_layers`] gives them
 /// - [`CurrentLevel`], the level [`App::load_level`] loaded, none until it
 ///   loads one
+/// - [`StateMachine`], the game's state, [`GameState::Boot`](nadir_scene::GameState::Boot)
+///   until the game replaces it or queues a transition
 /// - [`Audio`](nadir_audio::Audio), the game's handle on the mixer, whose
 ///   buses start at [`Config::volumes`], and [`AudioState`], what
 ///   `nadir::sound` plays
@@ -565,6 +578,9 @@ pub struct App {
     /// The debug UI and the game's debug windows.
     #[cfg(feature = "dev")]
     debug: crate::debug_ui::DebugTools,
+    /// The game states' enter and exit systems, the loading, and the time
+    /// held while paused.
+    states: crate::states::States,
 }
 
 impl App {
@@ -619,6 +635,7 @@ impl App {
         world.insert_resource(CollisionLayers::default());
         world.insert_resource(PrefabLibrary::new());
         world.insert_resource(CurrentLevel::default());
+        world.insert_resource(StateMachine::default());
         world.insert_resource(AnimationClock::default());
         let sound = AudioConfig::default();
         let (audio, mixer) = nadir_audio::new(sound).expect("the default audio config is valid");
@@ -659,27 +676,43 @@ impl App {
         world.register::<MusicArea>();
         world.register::<Tracked>();
 
+        // Paused, the world stands still; loading, it is not drawn.
+        let still = crate::states::not_paused;
+        let hidden = crate::states::not_loading;
         let mut schedule = Schedule::new();
         schedule
             .add_fixed(FixedStage::Input, "nadir::snapshot", glue::snapshot)
-            .add_fixed(FixedStage::Movement, "nadir::movement", glue::movement)
-            .add_fixed(
+            .add_fixed_if(
+                FixedStage::Movement,
+                "nadir::movement",
+                glue::movement,
+                still,
+            )
+            .add_fixed_if(
                 FixedStage::PostMovement,
                 "nadir::parent_offsets",
                 glue::parent_offsets,
+                still,
             )
-            .add_fixed(FixedStage::PostMovement, "nadir::triggers", glue::triggers)
+            .add_fixed_if(
+                FixedStage::PostMovement,
+                "nadir::triggers",
+                glue::triggers,
+                still,
+            )
             .add_frame(FrameStage::Animate, "nadir::animate", glue::animate)
             .add_frame(FrameStage::Extract, "nadir::sound", crate::sound::sound)
-            .add_frame(
+            .add_frame_if(
                 FrameStage::Extract,
                 "nadir::extract_sprites",
                 glue::extract_sprites,
+                hidden,
             )
-            .add_frame(
+            .add_frame_if(
                 FrameStage::Extract,
                 "nadir::extract_level",
                 crate::level::extract_level,
+                hidden,
             );
         Self {
             config,
@@ -693,6 +726,7 @@ impl App {
             mixer: Some(mixer),
             #[cfg(feature = "dev")]
             debug: crate::debug_ui::DebugTools::new(),
+            states: crate::states::States::new(),
         }
     }
 
@@ -878,6 +912,76 @@ impl App {
         self
     }
 
+    /// Adds a system to a stage of each tick, as
+    /// [`App::add_fixed_system`] does, to run only while the game is in a
+    /// state of `state` ([`StateMachine`]): the state the tick started in,
+    /// as transitions happen between ticks.
+    #[must_use]
+    pub fn add_fixed_system_in(
+        mut self,
+        state: StateKind,
+        stage: FixedStage,
+        name: &'static str,
+        system: FixedSystem,
+    ) -> Self {
+        self.schedule
+            .add_fixed_if(stage, name, system, state.condition());
+        self
+    }
+
+    /// Adds a system to a stage of each frame, as
+    /// [`App::add_frame_system`] does, to run only while the game is in a
+    /// state of `state` ([`StateMachine`]): a loading screen in
+    /// [`StateKind::Loading`], say, or a pause menu in
+    /// [`StateKind::Paused`].
+    #[must_use]
+    pub fn add_frame_system_in(
+        mut self,
+        state: StateKind,
+        stage: FrameStage,
+        name: &'static str,
+        system: FrameSystem,
+    ) -> Self {
+        self.schedule
+            .add_frame_if(stage, name, system, state.condition());
+        self
+    }
+
+    /// Adds a system to run each time the game enters a state of `state`,
+    /// between ticks, after the state's others, with the
+    /// [`Transition`](nadir_scene::Transition): from where, to where. Its
+    /// commands apply before the next tick. The state the game starts in is
+    /// entered as the first frame starts, from `None`.
+    ///
+    /// The engine's own work comes after: entering
+    /// [`GameState::Loading`](nadir_scene::GameState::Loading), the level
+    /// loads a frame later, behind the loading screen ([`App::update`]).
+    #[must_use]
+    pub fn on_enter(
+        mut self,
+        state: StateKind,
+        name: &'static str,
+        system: TransitionSystem,
+    ) -> Self {
+        self.states.systems_mut().on_enter(state, name, system);
+        self
+    }
+
+    /// Adds a system to run each time the game leaves a state of `state`,
+    /// between ticks, after the state's others and before the enter systems
+    /// of the next, with the [`Transition`](nadir_scene::Transition). The
+    /// [`StateMachine`] is still in the state it leaves while it runs.
+    #[must_use]
+    pub fn on_exit(
+        mut self,
+        state: StateKind,
+        name: &'static str,
+        system: TransitionSystem,
+    ) -> Self {
+        self.states.systems_mut().on_exit(state, name, system);
+        self
+    }
+
     /// Adds a window to the debug UI, in development builds (feature
     /// `dev`): `toggle` shows and hides it, and it starts hidden. While it
     /// shows, `window` fills it with widgets each frame, after the frame
@@ -982,6 +1086,12 @@ impl App {
         &mut self.debug
     }
 
+    /// The game states' side of the app, for the tests beside it.
+    #[cfg(test)]
+    pub(crate) fn states(&mut self) -> &mut crate::states::States {
+        &mut self.states
+    }
+
     /// The systems, in stages: [`Schedule::describe`] lists them in the
     /// order they run.
     pub fn schedule(&self) -> &Schedule {
@@ -997,20 +1107,46 @@ impl App {
     ///    gives them to the profiler with the last frame's timing;
     /// 2. feeds the events to [`Input`], holding back from the game's
     ///    actions, with the `dev` feature, what the debug UI has;
-    /// 3. runs the ticks that are due, of a frame `elapsed` long, or with
+    /// 3. makes the game-state transition queued since the last frame's
+    ///    stages, if any (the first frame enters the state the game starts
+    ///    in), and takes the loading a step on (below);
+    /// 4. runs the ticks that are due, of a frame `elapsed` long, or with
     ///    the `dev` feature as the time controls leave the game's time
     ///    (none while paused but a tick for each F6, `elapsed` times the
     ///    scale of F7 or the console's `timescale`): for each,
     ///    latches the actions, or takes them from the replay that
-    ///    [`App::play_replay`] plays, and runs the tick stages, which apply
-    ///    their commands;
-    /// 4. sets [`TickStats`];
-    /// 5. empties the [`RenderFrame`], sets its `time` to how long the
-    ///    simulation has run, and runs the frame stages;
-    /// 6. with the `dev` feature, fills the open debug windows into the
+    ///    [`App::play_replay`] plays, runs the tick stages, which apply
+    ///    their commands, and then makes the transition the tick queued;
+    /// 5. sets [`TickStats`];
+    /// 6. empties the [`RenderFrame`], sets its `time` to how long the
+    ///    simulation has run, less the time it was paused, and runs the
+    ///    frame stages, then makes the transition they queued;
+    /// 7. with the `dev` feature, fills the open debug windows into the
     ///    `RenderFrame`'s UI, after the game's
     ///    ([`App::add_debug_window`]), and then loads the level the
     ///    console's `level` asked for, if it did.
+    ///
+    /// The game states ([`StateMachine`], ADR-0067) change only between
+    /// ticks, so a tick runs to its end in the state it started in. In
+    /// [`GameState::Loading`](nadir_scene::GameState::Loading) no tick runs
+    /// and the clock is not told the time, so the tick after the loading is
+    /// the one after the last before it, however long it took; the frame
+    /// stages run, with the frame's real `dt`, and the engine does not draw
+    /// the world, so that the game's loading screen, its frame systems of
+    /// [`StateKind::Loading`], shows on the clear colour. Once a frame's
+    /// stages have run in the state, the next frame loads its level with
+    /// [`load_level`](crate::load_level), in place of the last, whose
+    /// `Scope::Level` it unloads; the frames after wait until the asset
+    /// server has no load pending, where they are drawn ([`App::run`],
+    /// [`App::offscreen`]), and not at all here; then the game goes to
+    /// [`GameState::InGame`](nadir_scene::GameState::InGame). A level that
+    /// does not load, or, without the `dev` feature, one of whose textures
+    /// failed to load, is logged, the game stays in the state, and
+    /// [`App::run`] ends with [`Error::Level`] after showing it to the
+    /// player. In [`GameState::Paused`](nadir_scene::GameState::Paused) the
+    /// ticks come, but the engine's systems that move the world do not run,
+    /// and the frames' time stands still, and so do animators and animated
+    /// tiles.
     ///
     /// The engine's scopes are `nadir::tick` (each tick),
     /// `nadir::frame_stages` and `nadir::debug_ui`, beside each system's
@@ -1055,13 +1191,27 @@ impl App {
                 input.handle(event);
             }
         }
+        // Between the last frame's stages and this frame's ticks: a
+        // transition queued since, and the loading's next step.
+        self.states.start_frame(&mut self.world);
         // The time controls (F5 to F7) and the console's `timescale` pause,
         // step and scale the game's time.
         #[cfg(feature = "dev")]
         let elapsed = self.debug.game_time(elapsed);
-        let frame = self.clock.begin_frame(elapsed);
+        // While loading, no tick runs and the clock is not told the time, so
+        // the first tick after it comes as if the loading took no time.
+        let frame = if crate::states::ticks_run(&self.world) {
+            self.clock.begin_frame(elapsed)
+        } else {
+            Frame {
+                dt: elapsed.min(MAX_FRAME).as_secs_f32(),
+                alpha: self.clock.alpha(),
+            }
+        };
         let mut stats = TickStats::default();
-        while let Some(tick) = self.clock.consume_tick() {
+        while crate::states::ticks_run(&self.world)
+            && let Some(tick) = self.clock.consume_tick()
+        {
             profile_scope!("nadir::tick");
             let start = Instant::now();
             let replayed = {
@@ -1082,21 +1232,28 @@ impl App {
             if replayed {
                 self.end_replay_tick();
             }
+            // Between ticks: a transition this tick queued.
+            self.states.apply(&mut self.world);
             let took = start.elapsed();
             stats.ticks += 1;
             stats.time += took;
             stats.longest = stats.longest.max(took);
         }
         *self.world.resource_mut::<TickStats>() = stats;
+        let time = self
+            .states
+            .frame_time(&self.world, simulated_time(&self.clock));
         {
             let mut out = self.world.resource_mut::<RenderFrame>();
             out.clear();
-            out.time = simulated_time(&self.clock);
+            out.time = time;
         }
         {
             profile_scope!("nadir::frame_stages");
             self.schedule.run_frame(&mut self.world, &frame);
         }
+        // After the frame stages: a transition they queued.
+        self.states.end_frame(&mut self.world);
         #[cfg(feature = "dev")]
         {
             profile_scope!("nadir::debug_ui");
@@ -1224,13 +1381,20 @@ impl App {
     /// for each step of the resize on macOS. (Drawing there needs a surface
     /// in `ModalFrame`, roadmap M2.6 and M2.7.)
     fn run_loop(
-        self,
+        mut self,
         window: &mut dyn EventSource,
         graphics: Option<Graphics>,
     ) -> Result<(), Error> {
         debug!("the systems, in the order they run:");
         for system in self.schedule.describe() {
             debug!("  {system}");
+        }
+        for system in self.states.systems().describe() {
+            debug!("  {system}");
+        }
+        // Drawn frames finish the loads, which the loading state waits for.
+        if graphics.is_some() {
+            self.states.finish_loads();
         }
         #[cfg(feature = "dev")]
         let reload = graphics
@@ -1303,8 +1467,9 @@ impl App {
     /// ([`GfxError::NoOffscreenContext`](nadir_gfx::GfxError) on Windows
     /// and macOS, until roadmap M2.6 and M2.7) or it cannot be made, or the
     /// renderer or a target of `size` cannot be.
-    pub fn offscreen(self, size: UVec2) -> Result<Offscreen, Error> {
+    pub fn offscreen(mut self, size: UVec2) -> Result<Offscreen, Error> {
         let mut device = Device::new_headless()?;
+        self.states.finish_loads();
         let config = RenderConfig {
             virtual_resolution: self.config.virtual_resolution,
         };
@@ -1345,13 +1510,19 @@ impl Offscreen {
     ///
     /// # Errors
     ///
-    /// [`Error::Render`] if the frame cannot be drawn or read back.
+    /// [`Error::Render`] if the frame cannot be drawn or read back;
+    /// [`Error::Level`] if the level of the game state `Loading` could not
+    /// be loaded, as [`App::run`] would end with it: then the frame is not
+    /// drawn, and the game stays in the state.
     pub fn frame(&mut self, elapsed: Duration, events: &[Event]) -> Result<Vec<u8>, Error> {
         #[cfg(feature = "dev")]
         {
             *self.app.world.resource_mut::<crate::WindowSize>() = crate::WindowSize(self.size);
         }
         self.app.update(elapsed, events);
+        if let Some(error) = self.app.states.take_failure() {
+            return Err(error);
+        }
         self.graphics
             .draw_offscreen(&self.app.world, self.target, self.size)
     }
@@ -1569,29 +1740,33 @@ mod tests {
         let app = app()
             .add_frame_system(FrameStage::Extract, "draw_ground", |_, _| {})
             .add_fixed_system(FixedStage::Movement, "bounce", |_, _| {})
-            .add_fixed_system(FixedStage::Gameplay, "walk", |_, _| {})
+            .add_fixed_system_in(StateKind::InGame, FixedStage::Gameplay, "walk", |_, _| {})
             .add_frame_system(FrameStage::Camera, "follow", |_, _| {})
+            .add_frame_system_in(StateKind::Paused, FrameStage::Ui, "menu", |_, _| {})
             .add_frame_system(FrameStage::Animate, "react", |_, _| {});
         let printed: Vec<String> = app
             .schedule()
             .describe()
             .map(|system| system.to_string())
             .collect();
+        // Those that move the world wait while paused, and those that draw
+        // it while loading (ADR-0067).
         assert_eq!(
             printed,
             [
                 "tick  Input: nadir::snapshot",
-                "tick  Gameplay: walk",
-                "tick  Movement: nadir::movement",
+                "tick  Gameplay: walk (conditional)",
+                "tick  Movement: nadir::movement (conditional)",
                 "tick  Movement: bounce",
-                "tick  PostMovement: nadir::parent_offsets",
-                "tick  PostMovement: nadir::triggers",
+                "tick  PostMovement: nadir::parent_offsets (conditional)",
+                "tick  PostMovement: nadir::triggers (conditional)",
                 "frame Animate: nadir::animate",
                 "frame Animate: react",
                 "frame Camera: follow",
+                "frame Ui: menu (conditional)",
                 "frame Extract: nadir::sound",
-                "frame Extract: nadir::extract_sprites",
-                "frame Extract: nadir::extract_level",
+                "frame Extract: nadir::extract_sprites (conditional)",
+                "frame Extract: nadir::extract_level (conditional)",
                 "frame Extract: draw_ground",
             ]
         );

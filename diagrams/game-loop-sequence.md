@@ -233,10 +233,13 @@ sleeps until 1 ms before the due time, then spins.
 
 ## 4. The ticks of a frame: App::update
 
-`App::update` feeds the events to `Input`, then runs every tick that is due
-at 60 Hz, each with its own latch of the actions, and then the frame stages
-once. `FixedClock` counts a frame for at most 250 ms, so a stall runs at
-most 15 ticks, and the rest of it is lost.
+`App::update` feeds the events to `Input`, makes the game-state transition
+queued since the last frame and takes the loading a step on, then runs
+every tick that is due at 60 Hz, each with its own latch of the actions
+and the transition it queued after it, and then the frame stages once.
+`FixedClock` counts a frame for at most 250 ms, so a stall runs at most 15
+ticks, and the rest of it is lost. While the game is `Loading`, the clock
+is not told the time and no tick runs (ADR-0067).
 
 ```mermaid
 sequenceDiagram
@@ -247,14 +250,21 @@ sequenceDiagram
         participant Lt as Actions latch
         participant Rp as ReplayInput
         participant Sch as Schedule
+        participant St as States
         participant Wld as World
     end
 
     Upd->>Inp: handle each Event
-    Upd->>Clk: begin_frame(elapsed)
-    Clk->>Clk: cut to 250 ms, add to the accumulator
-    Clk-->>Upd: Frame: dt, alpha
-    loop while consume_tick gives a Tick
+    Upd->>St: start_frame(world)
+    St->>Wld: the transition queued, then a loading step: load_level, or InGame once loaded
+    alt not Loading
+        Upd->>Clk: begin_frame(elapsed)
+        Clk->>Clk: cut to 250 ms, add to the accumulator
+        Clk-->>Upd: Frame: dt, alpha
+    else Loading
+        Upd->>Upd: Frame: the real dt, the clock's alpha
+    end
+    loop while not Loading and consume_tick gives a Tick
         alt a replay plays
             Upd->>Rp: latch(input, world)
             Rp->>Inp: latch into a set of its own
@@ -269,11 +279,13 @@ sequenceDiagram
         opt the tick was replayed
             Upd->>Upd: end_replay_tick
         end
+        Upd->>St: apply(world): the transition the tick queued
         Upd->>Upd: count it in TickStats
     end
     Upd->>Wld: set TickStats
-    Upd->>Wld: RenderFrame clear, set its time
+    Upd->>Wld: RenderFrame clear, set its time, held while Paused
     Upd->>Sch: run_frame(world, frame)
+    Upd->>St: end_frame(world): the transition the stages queued
     Upd->>Upd: profile::take_frame
     Note over Upd,Wld: 16.67 ms runs 1 tick. 40 ms runs 2, at alpha 0.4. 1 s counts as 250 ms: 15 ticks.
 ```
@@ -283,7 +295,8 @@ tick its own presses and releases, and a tap between two ticks still
 counts. Before `add_actions`, and while a replay plays, the live input is
 latched into a set of its own that nothing reads. `end_replay_tick` sets
 `Replay` to `Ended` or `Failed` when no tick follows, and the input is live
-from then on. The `RenderFrame`'s time is the ticks so far plus `alpha`.
+from then on. The `RenderFrame`'s time is the ticks so far plus `alpha`,
+less the time spent paused.
 
 ## 5. One tick: Schedule::run_fixed
 

@@ -33,11 +33,23 @@ Built today:
   takes one out to be read again, and spawns entities of them, each
   component's value its base's, then its own, then an override's;
 - `Level`, the cooked level file as an asset, whose entities
-  `PrefabLibrary::spawn_level` spawns through their prefabs.
+  `PrefabLibrary::spawn_level` spawns through their prefabs;
+- game states: `GameState` (booting, loading a level, the main menu,
+  playing, paused) in a `StateMachine` resource, run conditions by
+  `StateKind`, and `StateSystems`, the systems that run on entering and
+  leaving a kind of state, which makes a queued transition between ticks;
+- saves: `capture` turns the entities with a `SaveId`, their components
+  of the types registered as saved, and the saved resources into a save,
+  which `write_file` writes atomically beside a backup, and `read_file`
+  reads back, from the backup if the file is damaged, migrating older
+  versions; `restore` puts it into a world, all or nothing, with an
+  `Entity` in a value written as its entity's `SaveId`.
 
 A whole level, its tile layers, grid and tall tiles with its entities, is
-loaded by the facade's `App::load_level`, which uses these. Not yet:
-entity references and saves with M9.4; game states with M9.1.
+loaded by the facade's `App::load_level`, which uses these; its `App` makes
+the state transitions after each tick and after the frame stages, and
+gives `Loading` and `Paused` their meaning. Not yet: saving and loading a
+game from the facade's `App`, with roadmap M9.7.
 
 ## Usage
 
@@ -169,6 +181,52 @@ let slime = library
 world.apply_commands();
 let health = world.read::<Health>().get(slime).cloned();
 assert_eq!(health, Some(Health { current: 5, max: 12 }));
+```
+
+A transition waits for the end of the tick that queues it, and the exit
+systems of the state left run before the enter systems of the next. A game
+on the engine adds these with `App::add_fixed_system_in`, `App::on_exit`
+and `App::on_enter`; on its own, the tick needs `nadir-core = "0.4"` too:
+
+```rust
+use nadir_core::time::Tick;
+use nadir_ecs::{FixedStage, Schedule, World};
+use nadir_scene::{GameState, StateKind, StateMachine, StateSystems};
+
+#[derive(Default)]
+struct Log(Vec<&'static str>);
+
+let mut world = World::new();
+world.insert_resource(StateMachine::new(GameState::InGame));
+world.insert_resource(Log::default());
+let mut schedule = Schedule::new();
+schedule
+    .add_fixed_if(
+        FixedStage::Gameplay,
+        "pause",
+        |world, _| world.resource_mut::<StateMachine>().set(GameState::Paused),
+        StateKind::InGame.condition(),
+    )
+    .add_fixed_if(
+        FixedStage::Cleanup,
+        "still_playing",
+        |world, _| world.resource_mut::<Log>().0.push("still playing"),
+        StateKind::InGame.condition(),
+    );
+let mut systems = StateSystems::new();
+systems
+    .on_exit(StateKind::InGame, "leave", |world, _| {
+        world.resource_mut::<Log>().0.push("leave");
+    })
+    .on_enter(StateKind::Paused, "menu", |world, _| {
+        world.resource_mut::<Log>().0.push("menu");
+    });
+
+systems.apply(&mut world); // the start: InGame's enter systems, none here
+schedule.run_fixed(&mut world, &Tick { index: 0, dt: 1.0 / 60.0 });
+systems.apply(&mut world); // between ticks
+assert!(world.resource::<StateMachine>().is(StateKind::Paused));
+assert_eq!(world.resource::<Log>().0, ["still playing", "leave", "menu"]);
 ```
 
 ## Documentation

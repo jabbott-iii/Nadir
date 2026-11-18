@@ -633,7 +633,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0020 — Reflection takes a context argument, writes compact encodings, and leaves Handle and Entity to prefabs and saves
 
-- **Status:** Accepted; ADR-0038 builds `Handle<T>` as its asset's path, through the context's asset server (M5.11)
+- **Status:** Accepted; ADR-0038 builds `Handle<T>` as its asset's path, through the context's asset server (M5.11); ADR-0068 builds `Entity` as its `SaveId`, through the context's map (M9.4)
 - **Date:** 2026-10-25
 - **Context:**
   - `docs/subsystems/scene.md` sketched `Reflect::to_value(&self)` and
@@ -6130,3 +6130,262 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - the crates reach 1.0, when a break needs a major version;
   - the crates stop sharing one version;
   - or crates.io refuses nadir-audio's or nadir-debug's name.
+
+## ADR-0067 — M9.1: game states in nadir-scene, made between ticks by the facade; Loading takes no tick and waits for drawn loads; Paused holds the world; a failed level ends the run with Error::Level
+
+- **Status:** Accepted: the user chose its four open points on 2026-11-18
+  (Paused, the loading, a failed load, the sandbox), and accepted it as
+  written the same day
+- **Date:** 2026-11-18
+- **Context:**
+  - M9.1 asks for the `GameState` machine with on-enter, on-exit and run
+    conditions, a loading screen, and level transitions that unload the
+    previous level's asset scope; its acceptance is the scene spec's state
+    tests (enter and exit order, no transition mid-tick).
+  - The scene spec sketches `GameState { Boot, Loading(LevelId), MainMenu,
+    InGame, Paused }` and a `StateMachine` resource with the queued
+    transition; the ECS spec's run condition is `fn(&World) -> bool`, a
+    function pointer, so it cannot hold a state.
+  - `load_level` needs `&mut World`, which no system has; a headless
+    `App::update` finishes no asset load (ADR-0030); a transition must
+    finish at a tick the simulation decides, with or without a window, or
+    a replay drifts (ADR-0025, M4.7's note); the release dialog for a
+    missing texture was left to this loading state (ADR-0038), which
+    should say a broken pack's error (M5.7's note, ADR-0041).
+  - A frame system sees only the last tick's input edges, and the same
+    again in a frame of none (`App::add_actions`), so a menu read in
+    frames alone misses presses.
+  - `nadir::animate` steps by `RenderFrame::time`, saturating.
+  - The facade's `Error` was `Eq` and exhaustive; ADR-0038 made it
+    `#[non_exhaustive]` in the task that first adds to it. `LevelError`
+    holds `PrefabError` and `ReflectError`, which are only `PartialEq`, and
+    is about 128 bytes.
+- **Decision:**
+  - **nadir-scene** (`state.rs`): `LevelId` (a level's name, a `String`);
+    `GameState` as the spec has it, `Clone` and `Eq`, `Boot` its default,
+    shown as `Loading(field)`; `StateKind`, its variant without the level,
+    with `condition()`, a `RunCondition` per kind by a `match` of five
+    functions; `StateMachine` (`new`, `state`, `is`, `queued`, `set`: a
+    later `set` replaces the queued one); `Transition { from:
+    Option<GameState>, to }`; and `StateSystems`, the enter and exit
+    systems, `fn(&World, &Transition)`, by kind. `StateSystems::apply`
+    makes at most one transition: the first call enters the start state
+    from `None`; then it takes the queued one, dropping one to the state
+    it is in; it runs the old kind's exits while the machine is still in
+    it, applies their commands, moves the machine, runs the new kind's
+    enters and applies theirs. A transition those systems queue waits for
+    the next call.
+  - **nadir-ecs:** `run_system(world, name, system, context)`, public, so
+    that the enter and exit systems are named in borrow panics and timed,
+    as the schedule's are.
+  - **The facade:** every `App` has a `StateMachine` in `Boot` and keeps
+    the `StateSystems`; `App::add_fixed_system_in`,
+    `App::add_frame_system_in`, `App::on_enter` and `App::on_exit`; the
+    prelude has `GameState`, `LevelId`, `StateKind`, `StateMachine` and
+    `Transition`. `App::update` makes a transition as the frame starts,
+    after each tick, and after the frame stages.
+  - **Loading** (the user's choice, "streamed over frames"): no tick runs
+    and the clock is not told the time; the frame stages run, with the
+    frame's real `dt`; `nadir::extract_sprites` and `nadir::extract_level`
+    do not run, so the game's frame systems of `StateKind::Loading` draw
+    the screen on the clear colour. Once a frame's stages have run in the
+    state, the next frame's start calls `load_level`, which unloads the
+    last level and `Scope::Level`; later frames wait until
+    `AssetServer::has_pending` is false where the frames finish loads
+    (`App::run` with a device, `App::offscreen`), and not at all
+    elsewhere; then the engine queues `InGame` and makes it.
+  - **A failed level** (the user's choice, "dialog, then the game ends"):
+    a `LevelError`, or without `dev` a failed texture of the level (its
+    tile sets', its atlases' pages, its entities' sprites, as a
+    `LevelError::Load` of its path), is logged; the game stays in
+    `Loading`, running no tick; `App::run` ends with the new
+    `Error::Level { name, error: Box<LevelError> }`, which `fatal` logs and
+    shows; `Offscreen::frame` returns it. With `dev` a failed texture
+    shows its placeholder and the game plays. `Error` becomes
+    `#[non_exhaustive]` and is no longer `Eq`; the `LevelError` is boxed
+    to keep `Result<_, Error>` small (clippy's `result_large_err`).
+  - **Paused** (the user's choice, "ticks run, world frozen"): the ticks
+    come, latched and recorded; `nadir::movement`, `nadir::parent_offsets`
+    and `nadir::triggers` run only when not paused; `nadir::snapshot`
+    runs, so the drawn position does not swing with `alpha`; and
+    `RenderFrame::time` leaves out the time spent paused (held at the last
+    frame's, then going on from it), so animators and animated tiles stand
+    still and resume without a jump. `nadir::animate` itself has no
+    condition.
+  - **The sandbox** (the user's choice) keeps `App::load_level` at its
+    setup; M9.2 moves it onto the states with its menus.
+- **Consequences:**
+  - Good: a transition queued in a tick is made after it, and the loading
+    takes no tick, so a replay meets the same states at the same ticks
+    whether the loading took one frame or thirty; a game that uses no
+    state stays in `Boot`, where everything runs as before (the
+    determinism test's hashes are unchanged); the enter and exit order,
+    and the tick that finishes in its state, are tested in nadir-scene
+    (7 tests) and through `App::update` and `App::offscreen` in the facade
+    (7 tests, 2 of them drawn on llvmpipe).
+  - Bad: a transition queued by a frame system is made at a frame
+    boundary, which a replay does not reproduce; a game whose systems
+    should run in two kinds of state adds them twice, or writes its own
+    condition and its own schedule; the console's `schedule` does not list
+    the enter and exit systems (the main loop logs them at debug level);
+    `load_level` blocks the frame it runs in (about 500 ms for the biggest
+    level the budget allows), so the screen stands still meanwhile; the
+    clear colour during the loading is the game's or the last level's
+    until the screen sets it; `Error` lost `Eq` and its exhaustiveness, a
+    break; a frame of the leftover time of the frame that entered
+    `Loading` runs after it, at most a frame's ticks.
+  - Follow-up: M9.2 builds the main and pause menus on these states and
+    moves the sandbox onto them; a level's music and camera bounds
+    (ADR-0051) could start in the loading state.
+- **Alternatives considered:**
+  - Paused stopping the clock, as F5 does: frame systems would see the
+    last tick's edges every frame, so a pause menu could not read presses.
+  - Loading in one frame with `finish_all_loads`: simpler, but a still
+    screen and a window that does not answer while it loads.
+  - A failed level going back to `MainMenu` with the error in a resource:
+    not fatal, but the release dialog was promised to this state
+    (ADR-0038), and the game has no menu yet.
+  - On-enter systems as run conditions ("entered this tick"): the exit and
+    enter order would follow the stages, and none would run in `Loading`,
+    which has no tick.
+  - Boxed closures as run conditions, `in_state(GameState::InGame)`: a
+    break of nadir-ecs's `RunCondition`; the five kinds fit function
+    pointers.
+  - `fn(&mut World)` for the enter and exit systems: unlike every other
+    system, and unnamed in panics.
+  - A game's own state enum, generic: the spec fixes one, and no game asks
+    for another yet.
+  - `Error::Level` holding the error's text, to keep `Eq`: it would lose
+    the source chain.
+- **Revisit when:**
+  - a game needs a state the enum does not have, or a system in two kinds
+    of state that it cannot add twice;
+  - a level's `load_level` takes over the 500 ms level-load budget
+    (M11.5), so the loading screen needs to load in steps;
+  - a replay drifts at a transition, or M8.4 changes the replay format;
+  - or M9.2's menus need frame-queued transitions to be reproduced in
+    replays.
+
+## ADR-0068 — M9.4: saves in nadir-scene, the file's bytes in nadir-codec; a CRC-32 over all after it; `SaveId` and the prefab an entity came from in nadir-scene; a load replaces every saved entity, all or nothing
+
+- **Status:** Accepted: the user chose its two open points on 2026-11-18
+  (the scope, scene-level saves with the facade left to M9.7; and spawns
+  that record their prefab), and accepted it as written the same day
+- **Date:** 2026-11-18
+- **Context:**
+  - M9.4 asks for the `.ksav` format, an atomic write with a `.bak`, a
+    CRC, migration scaffolding with a version 1 fixture and a fuzz target;
+    its acceptance is the scene spec's save tests (a round trip, a damaged
+    file that falls back to its backup, migrations from stored fixtures,
+    the reader fuzzed).
+  - The spec sketches a header (magic `KSAV`, a `u16` version, the game's
+    version, a UTC time, the payload's CRC-32) and a KBJ payload of
+    `globals` by resource name and `entities`, each an `id`, a `prefab` if
+    any and its `components`; only entities with a `SaveId`, and only
+    components registered as `saved`.
+  - `xtask`, which runs the fuzz targets, may depend only on `core` and
+    `codec`. `SaveId` was the facade's, and the world-level counter that
+    gives them out was not built (ADR-0020, M4.4). Nothing recorded the
+    prefab an entity was spawned of.
+  - Reflecting an `Entity` needs the map between entities and their save
+    ids in the context (ADR-0020). A load must know every saved entity's
+    new `Entity` before it reads a value that holds one; `Commands::spawn`
+    gives one at once.
+  - The facade's `loading_context` borrows world resources (the clips,
+    the collision layers), so a load cannot take `&mut World`.
+- **Decision:**
+  - **nadir-codec `ksav`:** version 1's file is a 24-byte header,
+    `"KSAV" | version u16 | game_version_len u16 | crc32 u32 | saved_at
+    i64 | payload_size u32`, then the game's version in UTF-8, then the
+    payload's KBJ to the end of the file. `saved_at` is in seconds since
+    1970 UTC. The CRC-32 covers every byte after it, the time and the game
+    version as well as the payload. `header` checks the container,
+    `parse` decodes the payload too (a KBJ error is `BadPayload`, at its
+    byte in the file), `encode` writes, and `read` checks version 1's
+    payload, `{"next_id", "globals", "entities"}`, into a `SaveData` of
+    `SavedEntity`s: ids unique, as reflection writes a `u64` (a string of
+    digits past an `i64`), prefabs' and types' names as prefab files have
+    them. `next_id` is the counter's, which the spec's sketch lacked, so
+    that an id is not given out again after its entity is gone. Errors are
+    `CodecError::Ksav`, `KsavEncode` and `KsavData`.
+  - **nadir-scene `save`:** `SaveId` (moved from the facade, which
+    re-exports it as `nadir::SaveId`); `SpawnedFrom(String)`, which
+    `PrefabLibrary::spawn` and `spawn_level` give each entity, not in the
+    registry; `SaveIds`, the counter, a resource; `SaveIdMap`, which the
+    context holds (`ReflectContext::with_save_ids`). An `Entity` is written
+    as its id, `null` with a warning without one, `[index, generation]`
+    for a hash without one; read through the map, `UnknownEntity` for an
+    id the save lacks. `TypeRegistry::register_saved_component` and
+    `register_saved_resource` mark what saves keep; `register_components`
+    registers `SaveId` and `SpawnedFrom` with the world.
+  - **`capture`** writes each entity with a `SaveId` by id, its
+    `SpawnedFrom` as its `prefab`, its saved components in the registry's
+    order (never `SaveId`), the saved resources the world has, and the
+    counter (the largest id plus one without one): the same world gives
+    the same bytes. Two entities of one id are `DuplicateId`.
+  - **`restore`** spawns every saved entity anew through commands, puts the
+    map in the context, makes every value (an entity of a prefab as
+    `spawn` makes one, its saved components over the prefab's; one of none
+    of its saved components alone), and only then despawns the entities
+    that had a `SaveId`, gives the new ones their components, replaces the
+    saved resources (the world must have them) and sets `SaveIds`. One that
+    fails changes nothing but the entities it reserved, despawned with the
+    commands. An unknown component or resource is an error, as in prefabs
+    and levels; a game fixes up an old save's `SaveData` before restoring
+    it.
+  - **Files:** `write_file` encodes, reads its bytes back as `read_file`
+    would, then writes `<slot>.tmp` and `sync_all`s it, renames the save
+    to `<slot>.bak` and the new file to the save. `read_file` reads, checks
+    the CRC, migrates and checks the payload, and on any failure of the
+    file reads the backup, with a warning and `LoadedSave::from_backup`
+    saying why; neither is `SaveError::Unreadable`.
+  - **Migrations:** `Migration = fn(&mut Value)`, `MIGRATIONS` (none: index
+    `i` turns version `i + 1` into `i + 2`, checked against
+    `ksav::VERSION` at compile time), `migrate(payload, version, list)`.
+    Version 1's fixture, `crates/scene/tests/saves/v1.ksav`, is written by
+    a script of its own and never again; a test checks that today's writer
+    writes it byte for byte while version 1 is the newest.
+  - **The fuzz target** `ksav` reads each input and a copy with its header
+    and CRC mended, and asserts one encoding of every save.
+- **Consequences:**
+  - Good: a save that would not read is never written; a crash at any
+    step leaves the last save or its backup; a damaged byte anywhere
+    after the CRC is caught; a level's scenery, without a `SaveId`, stays
+    through a load, and a killed enemy that had one stays gone; what only
+    a prefab gives, such as a sprite, is not saved and follows the prefab;
+    the world hash does not change (`SpawnedFrom` is not registered).
+  - Bad: every spawned entity carries its prefab's name, a `String`; a
+    save's entities get new `Entity`s, so a component that holds one of an
+    entity without a `SaveId` loses it (an `Option<Entity>` reads `None`);
+    resources are replaced at once, the entities when the commands are
+    applied; a component an entity of a prefab lost comes back from the
+    prefab on a load, even of a saved type, as version 1 writes no
+    removals; a game that removes a component type needs to fix up its old
+    saves itself, as the engine has no migrations of a game's data; the
+    renames are not followed by a sync of the folder, so a power cut just
+    after one may lose the newest save, keeping the one before.
+  - Follow-up, M9.7's (its note): the facade's `App` keeps a `SaveIds`,
+    saves and loads a slot in the user data folder, marks its components
+    saved (`Transform`, `Facing`, `Player`) or not (`Velocity`, `Sprite`,
+    `Collider`, `Animator`), reflects `Parent`, and gives a level's
+    entities ids that do not change between runs.
+- **Alternatives considered:**
+  - The CRC of the payload alone, as the sketch has it: a damaged time or
+    game version would read.
+  - The container in nadir-scene: the fuzz target could not reach it.
+  - Loading into `&mut World`, or a plan applied after: the facade's
+    contexts borrow the world, and commands already give an entity at once.
+  - Applying a save onto the entities that have its ids: entities the save
+    lacks would have to be found and despawned anyway, and a level's would
+    keep values the save does not name.
+  - Unknown components as warnings: a load that silently drops data; a
+    game can drop them from `SaveData` itself.
+  - Registered components saved unless marked transient: the spec says
+    `saved`, and a sprite saved over its prefab's would stop following it.
+  - Keeping `SaveId` in the facade and passing the map in: every caller
+    would build it, and the counter would sit apart from the saves.
+- **Revisit when:**
+  - a version 2 of the payload is needed (add its migration and fixture);
+  - a game ships an update that removes or reshapes a saved component;
+  - a save takes over 100 ms to write or read, or over 1 MiB;
+  - or M9.7 finds the facade needs `restore` to change.

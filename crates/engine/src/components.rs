@@ -235,22 +235,15 @@ nadir_scene::reflect_enum! {
 /// whose chain is longer, or loops, or ends at an entity without a
 /// `Transform` (one that was despawned, say) is left where it is.
 ///
-/// It is not reflected until saves bring the `Entity` encoding (roadmap
-/// M9.4, ADR-0020).
+/// It is not reflected yet: saves write an `Entity` as its
+/// [`SaveId`](crate::SaveId) since roadmap M9.4 (ADR-0068), and M9.7
+/// reflects `Parent`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Parent {
     /// The entity it goes with.
     pub entity: Entity,
     /// Where it is from that entity, in pixels.
     pub offset: Vec2,
-}
-
-nadir_scene::reflect_newtype! {
-    /// An entity's id in saves, which stays the same from one run to the
-    /// next, unlike its [`Entity`]. Saves (roadmap M9.4) store only
-    /// entities that have one.
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub struct SaveId(pub u64);
 }
 
 /// Where the game hears from: the first entity with one and a
@@ -366,7 +359,6 @@ impl Component for Collider {}
 impl Component for Player {}
 impl Component for Facing {}
 impl Component for Parent {}
-impl Component for SaveId {}
 impl Component for AudioListener {}
 impl Component for AudioEmitter {}
 impl Component for MusicArea {}

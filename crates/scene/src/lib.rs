@@ -19,9 +19,9 @@
 //! runtime reflection (ADR-0007): declarative macros define a type and its
 //! impls together, with no procedural macros. So far it has reflection
 //! (roadmap M4.2), the world hash (M4.7), and asset handles in data,
-//! prefabs with `extends` and a level's entities (M5.11, ADR-0038).
-//! Entity references and saves come with M9.4, and game states with M9.1.
-//! `docs/subsystems/scene.md` has the design.
+//! prefabs with `extends` and a level's entities (M5.11, ADR-0038), game
+//! states (M9.1, ADR-0067), and saves, with entity references (M9.4,
+//! ADR-0068). `docs/subsystems/scene.md` has the design.
 //!
 //! The facade crate, `nadir_engine`, re-exports this crate as
 //! `nadir::scene`. Every `App` keeps a [`TypeRegistry`] as a world
@@ -61,7 +61,10 @@
 //!   [`ReflectContext::field`], [`ReflectContext::key`],
 //!   [`ReflectContext::index`], [`ReflectContext::with_source`],
 //!   [`ReflectContext::expected`], [`ReflectContext::unknown_field`] and
-//!   [`ReflectContext::warn`] are for impls written by hand.
+//!   [`ReflectContext::warn`] are for impls written by hand. For saves, it
+//!   holds which entity has which save id ([`ReflectContext::with_save_ids`],
+//!   [`SaveIdMap`]), so that an [`Entity`](nadir_ecs::Entity) is written as
+//!   its entity's [`SaveId`].
 //! - **Errors.** [`ReflectError`], with a [`ReflectErrorKind`].
 //! - **The registry.** [`TypeRegistry`] holds component types by name:
 //!   [`TypeRegistry::register_component`], [`TypeRegistry::get`],
@@ -74,7 +77,10 @@
 //!   [`Registration::inspect_mut`]), and walks every one in a world
 //!   ([`Registration::each`]). [`Registration::insert_layers`] makes one
 //!   value of several [`Layer`]s, a prefab's base's, its own and an
-//!   override, applied in order.
+//!   override, applied in order. Saves keep the components of the types
+//!   registered with [`TypeRegistry::register_saved_component`]
+//!   ([`Registration::is_saved`]), and the resources registered with
+//!   [`TypeRegistry::register_saved_resource`] ([`ResourceRegistration`]).
 //! - **Prefabs.** [`PrefabLibrary`] loads prefabs, cooked to
 //!   `data/prefabs/<name>.kbj`, with the prefabs they extend
 //!   ([`PrefabLibrary::load`], at most [`MAX_EXTENDS`] of them, with no
@@ -91,6 +97,26 @@
 //!   position, after [`PrefabLibrary::load_level`] loads their prefabs.
 //!   Its tile layers and grid are the facade's, whose `load_level` loads a
 //!   whole level (M5.6).
+//! - **Game states.** [`GameState`] is where the game is: booting,
+//!   loading a level ([`LevelId`]), in the main menu, playing or paused.
+//!   The [`StateMachine`] resource holds it and the transition queued
+//!   ([`StateMachine::set`]); [`StateKind::condition`] is a run condition
+//!   for the systems of one kind of state; [`StateSystems`] holds the
+//!   systems that run on entering and leaving a kind of state, given the
+//!   [`Transition`], and makes the queued transition between ticks
+//!   ([`StateSystems::apply`]). The facade calls it after each tick and
+//!   after the frame stages, and loads the level of
+//!   [`GameState::Loading`] itself.
+//! - **Saves.** [`capture`] turns the entities that have a [`SaveId`], with
+//!   their saved components and the prefab each was spawned of
+//!   ([`SpawnedFrom`], which spawns give), and the saved resources, into a
+//!   [`SaveData`]; [`write_file`] writes it atomically, the save before
+//!   kept as its backup ([`backup_path`]); [`read_file`] reads it back,
+//!   from the backup when the file is damaged ([`LoadedSave`]), migrated
+//!   from older versions ([`migrate`], [`MIGRATIONS`]); [`restore`] puts it
+//!   into a world, every value made before anything changes. [`SaveIds`]
+//!   gives out new ids; [`SaveError`] says why a save failed. The file's
+//!   bytes are `nadir-codec`'s `ksav`.
 //! - **[`Value`]** is `nadir-codec`'s JSON tree, re-exported. `nadir-codec`
 //!   reads JSONC text and KBJ into one.
 //!
@@ -208,6 +234,8 @@ mod macros;
 pub mod prefab;
 mod reflect;
 mod registry;
+mod save;
+mod state;
 #[cfg(test)]
 mod tests;
 
@@ -218,9 +246,18 @@ struct ReadmeDoctests;
 
 pub use level::Level;
 pub use nadir_codec::json::Value;
+pub use nadir_codec::ksav::{SaveData, SavedEntity};
 pub use prefab::{MAX_EXTENDS, Prefab, PrefabAsset, PrefabError, PrefabLibrary};
 pub use reflect::{
     FieldInfo, FromValue, Reflect, ReflectContext, ReflectError, ReflectErrorKind, ReflectKind,
     ReflectWarning,
 };
-pub use registry::{Layer, Registration, TypeRegistry};
+pub use registry::{Layer, Registration, ResourceRegistration, TypeRegistry};
+pub use save::{
+    LoadedSave, MIGRATIONS, Migration, SaveError, SaveId, SaveIdMap, SaveIds, SpawnedFrom,
+    backup_path, capture, migrate, read_file, restore, temp_path, write_file,
+};
+pub use state::{
+    GameState, LevelId, StateKind, StateMachine, StateSystemInfo, StateSystems, Transition,
+    TransitionSystem,
+};

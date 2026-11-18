@@ -19,14 +19,28 @@ use std::fmt;
 use nadir_platform::PlatformError;
 use nadir_render::RenderError;
 
+use crate::LevelError;
+
 /// Errors that end [`App::run`](crate::App::run).
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// It is `#[non_exhaustive]` since roadmap M9.1, which added
+/// [`Error::Level`] (ADR-0067).
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Error {
     /// The window could not be opened.
     Platform(PlatformError),
     /// The renderer could not start, or a frame could not be drawn or
     /// shown.
     Render(RenderError),
+    /// The level of the game state `Loading` could not be loaded, or,
+    /// without the `dev` feature, a texture of it failed to load.
+    Level {
+        /// The level's name.
+        name: String,
+        /// Why, boxed: it is much larger than the other variants.
+        error: Box<LevelError>,
+    },
 }
 
 impl fmt::Display for Error {
@@ -34,6 +48,7 @@ impl fmt::Display for Error {
         match self {
             Self::Platform(error) => write!(f, "could not open the window: {error}"),
             Self::Render(error) => write!(f, "could not draw: {error}"),
+            Self::Level { name, error } => write!(f, "could not load the level `{name}`: {error}"),
         }
     }
 }
@@ -43,6 +58,7 @@ impl std::error::Error for Error {
         match self {
             Self::Platform(error) => Some(error),
             Self::Render(error) => Some(error),
+            Self::Level { error, .. } => Some(error.as_ref()),
         }
     }
 }
@@ -83,6 +99,22 @@ mod tests {
             source.as_deref(),
             Some("this operating system has no backend yet")
         );
+    }
+
+    #[test]
+    fn a_level_error_names_the_level_and_says_why() {
+        let error = Error::Level {
+            name: "cave".to_string(),
+            error: Box::new(LevelError::Load {
+                path: "levels/cave.klvl".to_string(),
+                error: nadir_assets::AssetError::NotFound,
+            }),
+        };
+        assert_eq!(
+            error.to_string(),
+            "could not load the level `cave`: `levels/cave.klvl` could not be loaded: no such file"
+        );
+        assert!(error.source().is_some());
     }
 
     #[test]

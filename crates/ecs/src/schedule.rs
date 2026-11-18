@@ -273,3 +273,26 @@ fn run<C>(world: &World, entry: &Entry<C>, context: &C) {
         (entry.run)(world, context);
     }
 }
+
+/// Runs `system` once, with `context`, as the schedule runs its own: under
+/// `name`, which a borrow that panics in it names, and inside
+/// `nadir_core::profile_scope!` of that name. It applies no commands.
+///
+/// For systems that run outside the stages, such as the enter and exit
+/// systems of nadir-scene's game states, which run between ticks.
+///
+/// ```
+/// use nadir_ecs::{World, run_system};
+///
+/// struct Visits(u32);
+///
+/// let mut world = World::new();
+/// world.insert_resource(Visits(0));
+/// run_system(&world, "visit", |world, by: &u32| world.resource_mut::<Visits>().0 += by, &2);
+/// assert_eq!(world.resource::<Visits>().0, 2);
+/// ```
+pub fn run_system<C>(world: &World, name: &'static str, system: fn(&World, &C), context: &C) {
+    let _named = SystemScope::enter(name);
+    nadir_core::profile_scope!(name);
+    system(world, context);
+}

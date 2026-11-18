@@ -31,12 +31,13 @@ use std::fmt;
 
 use nadir_assets::{Asset, AssetError, AssetServer, DecodeCtx, FinalizeCtx, Scope};
 use nadir_codec::json::Value;
+use nadir_codec::ksav::SaveData;
 use nadir_codec::level::LevelFile;
 pub use nadir_codec::prefab::PrefabFile;
 use nadir_core::IVec2;
 use nadir_ecs::{Commands, Entity};
 
-use crate::{Layer, ReflectContext, ReflectError, Registration, TypeRegistry};
+use crate::{Layer, ReflectContext, ReflectError, Registration, SpawnedFrom, TypeRegistry};
 
 /// The most prefabs one may extend, through one another: a chain of 16
 /// `extends` at most, so that a cycle or a runaway chain is an error, not a
@@ -107,7 +108,7 @@ pub struct PrefabLibrary {
 }
 
 /// One component a prefab spawns with, and the type that makes it.
-type Made<'r> = (&'r Registration, Box<dyn Any>);
+pub(crate) type Made<'r> = (&'r Registration, Box<dyn Any>);
 
 impl PrefabLibrary {
     /// No prefabs.
@@ -226,6 +227,29 @@ impl PrefabLibrary {
         Ok(())
     }
 
+    /// Loads, as [`PrefabLibrary::load`] does, every prefab the entities of
+    /// the save `data` were spawned of, for [`restore`](crate::restore).
+    ///
+    /// # Errors
+    ///
+    /// As [`PrefabLibrary::load`], for the first prefab that fails.
+    pub fn load_save(
+        &mut self,
+        server: &mut AssetServer,
+        registry: &TypeRegistry,
+        data: &SaveData,
+        scope: Scope,
+    ) -> Result<(), PrefabError> {
+        for prefab in data
+            .entities
+            .iter()
+            .filter_map(|entity| entity.prefab.as_ref())
+        {
+            self.load(server, registry, prefab, scope)?;
+        }
+        Ok(())
+    }
+
     /// The prefab `name` and the prefabs it extends, the furthest base
     /// first and `name` last: the order their values apply in.
     ///
@@ -296,7 +320,8 @@ impl PrefabLibrary {
     /// asset server and the scope to load handles in, and the facade's
     /// resources ([`ReflectContext::loading`],
     /// [`ReflectContext::with_resource`]). The entity is alive at once, and
-    /// its components are added when the commands are applied.
+    /// its components are added when the commands are applied, with a
+    /// [`SpawnedFrom`] naming the prefab, which saves write (M9.4).
     ///
     /// # Errors
     ///
@@ -314,8 +339,8 @@ impl PrefabLibrary {
         commands: &mut Commands<'_>,
         cx: &mut ReflectContext<'_>,
     ) -> Result<Entity, PrefabError> {
-        let made = self.make(name, overrides, registry, cx)?;
-        Ok(insert(made, commands))
+        let made = self.make(name, overrides, "overrides", registry, cx)?;
+        Ok(insert(name, made, commands))
     }
 
     /// Spawns, as [`PrefabLibrary::spawn`] does, each entity of `level`,
@@ -343,25 +368,28 @@ impl PrefabLibrary {
         cx.field("entities", |cx| {
             for (index, entity) in level.entities.iter().enumerate() {
                 let components = cx.index(index, |cx| {
-                    self.make(&entity.prefab, &entity.overrides, registry, cx)
+                    self.make(&entity.prefab, &entity.overrides, "overrides", registry, cx)
                 })?;
                 let [x, y] = entity.position;
-                made.push((components, IVec2::new(x, y)));
+                made.push((&entity.prefab, components, IVec2::new(x, y)));
             }
             Ok::<(), PrefabError>(())
         })?;
         Ok(made
             .into_iter()
-            .map(|(components, position)| (insert(components, commands), position))
+            .map(|(prefab, components, position)| (insert(prefab, components, commands), position))
             .collect())
     }
 
     /// The components of an entity of the prefab `name` with `overrides`,
-    /// made, as [`PrefabLibrary::spawn`] says.
-    fn make<'r>(
+    /// made, as [`PrefabLibrary::spawn`] says; the overrides' places named
+    /// as members `member` of `cx`'s path: `overrides` of a level's entity,
+    /// `components` of a save's.
+    pub(crate) fn make<'r>(
         &self,
         name: &str,
         overrides: &[(String, Value)],
+        member: &str,
         registry: &'r TypeRegistry,
         cx: &mut ReflectContext<'_>,
     ) -> Result<Vec<Made<'r>>, PrefabError> {
@@ -399,9 +427,9 @@ impl PrefabLibrary {
                 });
             };
             let at = if outer.is_empty() {
-                format!("overrides.{component}")
+                format!("{member}.{component}")
             } else {
-                format!("{outer}.overrides.{component}")
+                format!("{outer}.{member}.{component}")
             };
             let source = override_source.as_str();
             add_layer(&mut components, registration, Layer { source, at, value });
@@ -433,12 +461,14 @@ fn add_layer<'v, 'r>(
     }
 }
 
-/// Spawns an entity with the components `made`, through `commands`.
-fn insert(made: Vec<Made<'_>>, commands: &mut Commands<'_>) -> Entity {
+/// Spawns an entity of the prefab `prefab` with the components `made`,
+/// and its [`SpawnedFrom`], through `commands`.
+fn insert(prefab: &str, made: Vec<Made<'_>>, commands: &mut Commands<'_>) -> Entity {
     let entity = commands.spawn().id();
     for (registration, value) in made {
         registration.insert_made(commands, entity, value);
     }
+    commands.insert(entity, SpawnedFrom(prefab.to_string()));
     entity
 }
 

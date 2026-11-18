@@ -1,0 +1,26 @@
+{
+ "next_id": "18446744073709551615",
+ "globals": {},
+ "entities": [
+  {
+   "id": 9223372036854775807,
+   "components": {
+    "Follow": {
+     "target": null
+    }
+   }
+  },
+  {
+   "id": "9223372036854775808",
+   "components": {
+    "Follow": {
+     "target": "18446744073709551615"
+    }
+   }
+  },
+  {
+   "id": 0,
+   "components": {}
+  }
+ ]
+}

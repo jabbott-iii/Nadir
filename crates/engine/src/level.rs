@@ -136,7 +136,9 @@ pub enum LevelError {
         /// The name.
         name: String,
     },
-    /// The level file, or an atlas of its tile sets, could not be loaded.
+    /// The level file, or an atlas of its tile sets, could not be loaded;
+    /// or, in the game state `Loading` without the `dev` feature, a texture
+    /// of the level failed to load (ADR-0067).
     Load {
         /// Its path.
         path: String,
@@ -304,6 +306,38 @@ pub fn unload_level(world: &mut World) -> bool {
     };
     remove(world, level);
     true
+}
+
+/// The first texture of the level `world` holds that failed to load, as a
+/// [`LevelError::Load`] of its path and why: of its tile layers' tile
+/// sets, then of its atlases' pages, then of its entities' sprites. `None`
+/// if none did, or no level is loaded. The game state `Loading` asks it
+/// once the level's loads are done, in builds without `dev`, where a
+/// failed texture shows nothing (ADR-0067).
+pub(crate) fn failed_texture(world: &World) -> Option<LevelError> {
+    let current = world.resource::<CurrentLevel>();
+    let level = current.level.as_ref()?;
+    let server = world.resource::<AssetServer>();
+    let layers = world.resource::<TileLayers>();
+    let sprites = world.read::<Sprite>();
+    let tile_sets = level
+        .layers
+        .iter()
+        .filter_map(|draw| layers.get(draw.tiles))
+        .map(|layer| layer.tileset().texture);
+    let pages = level.atlases.iter().flatten().copied();
+    let drawn = level
+        .entities
+        .iter()
+        .filter_map(|&entity| sprites.get(entity))
+        .map(|sprite| sprite.texture);
+    tile_sets.chain(pages).chain(drawn).find_map(|texture| {
+        let error = server.error(texture)?.clone();
+        Some(LevelError::Load {
+            path: server.path(texture).unwrap_or("(unknown)").to_string(),
+            error,
+        })
+    })
 }
 
 /// Makes the level `world` holds again, from its files as they are now,
@@ -690,7 +724,7 @@ pub(crate) fn extract_level(world: &World, _frame: &Frame) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
@@ -703,7 +737,7 @@ mod tests {
     use crate::{App, Collider, Config};
 
     /// Files in memory, by path.
-    struct Memory(HashMap<String, Vec<u8>>);
+    pub(crate) struct Memory(pub(crate) HashMap<String, Vec<u8>>);
 
     impl Source for Memory {
         fn read(&self, path: &AssetPath) -> Result<Vec<u8>, AssetError> {
@@ -777,7 +811,7 @@ mod tests {
 
     /// The files above, by path, with the prefabs of the stone and the
     /// ghost.
-    fn files() -> HashMap<String, Vec<u8>> {
+    pub(crate) fn files() -> HashMap<String, Vec<u8>> {
         HashMap::from([
             ("atlas/tiles.kbj".to_string(), kbj(ATLAS)),
             ("atlas/tiles_0.qoi".to_string(), page(64, 64)),
@@ -800,7 +834,7 @@ mod tests {
 
     /// An app whose assets are the files above, with the collision layer
     /// `World` named if `named`.
-    fn app(named: bool) -> App {
+    pub(crate) fn app(named: bool) -> App {
         let app = App::new(Config::default()).insert_resource(AssetServer::with_source(
             Memory(files()),
             OnFailure::Nothing,

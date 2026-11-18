@@ -38,6 +38,10 @@ Built:
 - levels made in LDtk and cooked, which `App::load_level` loads whole, in
   place of the last: their tile layers drawn, their grid collided with,
   their tall tiles and entities spawned;
+- game states, made between ticks: systems that run in one kind of state
+  or as one is entered or left, a loading state that loads a level behind
+  the game's loading screen, and a paused state that holds the world
+  still;
 - assets loaded on worker threads, and an offline cook that packs images,
   Aseprite exports and bitmap fonts into atlases, makes level files of
   LDtk projects, turns WAVs into the game's sounds and music, and puts
@@ -67,7 +71,8 @@ Not built yet:
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
 - gamepads (M8);
-- game states (M9.1), settings (M9.3), saves (M9.4), pathfinding (M9.5);
+- settings (M9.3), pathfinding (M9.5), and saving a game from `App`
+  (M9.7; nadir-scene has saves since M9.4);
 - the Metal backend for macOS (M10).
 
 ## What you need
@@ -552,6 +557,33 @@ path there is found from the folder the game runs in.
 - Loads finish only in drawn frames, at no frame known in advance, so tick
   systems must not depend on whether an asset has loaded.
 
+### Game states
+
+The resource `StateMachine` holds the game's `GameState`: `Boot` as it
+starts, `Loading(level)`, `MainMenu`, `InGame` or `Paused`. A system
+queues a transition with `StateMachine::set`, and the engine makes it after
+the tick, or the frame stages, that queued it: a tick runs to its end in
+the state it started in.
+
+- `App::add_fixed_system_in(StateKind::InGame, …)` and
+  `App::add_frame_system_in` add a system that runs only in one kind of
+  state. Systems added without one run in every state.
+- `App::on_exit` and `App::on_enter` add systems that run once as a kind of
+  state is left or entered, given the `Transition`, from where to where:
+  the old state's exits, then the new state's enters. The first frame
+  enters the state the game starts in; insert `StateMachine::new(state)`
+  to start elsewhere.
+- In `Loading(level)` no tick runs and the engine does not draw the world:
+  the game's frame systems of `StateKind::Loading` draw its loading screen.
+  The level loads a frame after the screen first shows, in place of the
+  last, whose `Scope::Level` assets go, and once the asset server has no
+  load pending the game goes on to `InGame` by itself. A level that does
+  not load, or, in a release build, one whose texture failed to load,
+  ends `App::run` with `nadir::Error::Level`, after a dialog.
+- In `Paused` the ticks come, so that a pause menu's tick systems see the
+  input, but the engine moves nothing, fires no trigger, and holds the
+  frames' time, which animators and animated tiles follow.
+
 ### Logs and errors
 
 Log with `nadir::log::{error, warn, info, debug, trace}`. Records go to
@@ -563,7 +595,8 @@ default), on Windows `%LOCALAPPDATA%\<studio>\<game>`, and on macOS
 without it.
 
 `App::run` returns a `nadir::Error` when the window cannot open, the
-renderer cannot start, or a frame cannot be drawn. It logs the error and
+renderer cannot start, a frame cannot be drawn, or the level of the
+`Loading` state cannot be loaded. It logs the error and
 shows it to the player first: on standard error on Linux, and in a message
 box on Windows or an alert on macOS.
 

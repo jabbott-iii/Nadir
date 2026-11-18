@@ -1210,22 +1210,24 @@ mod tests {
             .describe()
             .map(|system| system.to_string())
             .collect();
+        // The engine's that move the world wait while paused, and those
+        // that draw it while loading (ADR-0067).
         assert_eq!(
             printed,
             [
                 "tick  Input: nadir::snapshot",
                 "tick  Gameplay: move_player",
-                "tick  Movement: nadir::movement",
-                "tick  PostMovement: nadir::parent_offsets",
-                "tick  PostMovement: nadir::triggers",
+                "tick  Movement: nadir::movement (conditional)",
+                "tick  PostMovement: nadir::parent_offsets (conditional)",
+                "tick  PostMovement: nadir::triggers (conditional)",
                 "tick  Cleanup: count_ticks",
                 "tick  Cleanup: footsteps",
                 "frame Animate: nadir::animate",
                 "frame Camera: follow_camera",
                 "frame Ui: report",
                 "frame Extract: nadir::sound",
-                "frame Extract: nadir::extract_sprites",
-                "frame Extract: nadir::extract_level",
+                "frame Extract: nadir::extract_sprites (conditional)",
+                "frame Extract: nadir::extract_level (conditional)",
             ]
         );
     }

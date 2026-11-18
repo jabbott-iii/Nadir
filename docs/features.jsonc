@@ -266,14 +266,16 @@
     {
       "name": "Game states, menus and settings",
       "area": "Simulation",
-      "summary": "A state machine will run the game's screens and level transitions, menus will work with keys, mouse or gamepad, and a settings file will keep what it does not understand.",
-      "tasks": ["M9.1", "M9.2", "M9.3"]
+      "summary": "A state machine runs the game's states, booting, loading a level, the main menu, playing and paused, and changes them only between ticks, with systems that run in one kind of state or as one is entered or left, so a replay meets each state at the same tick. Loading takes no tick and hides the world behind the game's loading screen while the level, in place of the last, and its textures load, and a level that cannot load ends the game with a dialog; paused, the ticks still come but the world and its animations stand still. Menus will work with keys, mouse or gamepad, and a settings file will keep what it does not understand.",
+      "tasks": ["M9.1", "M9.2", "M9.3"],
+      "ticked": ["M9.1"]
     },
     {
       "name": "Saves",
       "area": "Content",
-      "summary": "Saves will be written atomically with a backup and a checksum, and migrated from older versions.",
-      "tasks": ["M9.4"]
+      "summary": "A save keeps the entities a game gives a save id, with the components and resources it marks as saved and the prefab each was spawned of, so that what only the prefab gives is rebuilt from it. It is written atomically beside a backup of the save before, with a checksum over the whole file, and read back from the backup when it is damaged; a save that would not read is never written. A load replaces the saved entities all at once or not at all, a reference to another entity follows it, and saves of older versions are migrated in order, each version keeping a file its tests load. The reader is a parser of our own, which a fuzzer throws about 26,000 damaged saves a second at.",
+      "tasks": ["M9.4"],
+      "ticked": ["M9.4"]
     },
     {
       "name": "Pathfinding and enemy AI",

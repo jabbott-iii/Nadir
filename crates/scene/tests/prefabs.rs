@@ -27,7 +27,7 @@ use nadir_codec::{Limits, kbj, level};
 use nadir_ecs::{Component, World};
 use nadir_scene::{
     FromValue, MAX_EXTENDS, PrefabError, PrefabLibrary, Reflect, ReflectContext, ReflectErrorKind,
-    TypeRegistry,
+    SaveData, SavedEntity, SpawnedFrom, TypeRegistry,
 };
 
 nadir_scene::reflect_struct! {
@@ -516,6 +516,11 @@ fn a_level_s_entities_spawn_through_their_prefabs_in_the_level_scope() {
             .map(|h| (h.current, h.max)),
         Some((1, 12))
     );
+    // Each knows its prefab, for saves (M9.4).
+    let from = world.read::<SpawnedFrom>();
+    assert_eq!(from.get(lamp), Some(&SpawnedFrom("lamp".into())));
+    assert_eq!(from.get(slime), Some(&SpawnedFrom("slime".into())));
+    drop(from);
     let note = world.read::<Look>().get(lamp).expect("a look").0;
     server.finish_all_loads(&mut FinalizeCtx::new());
     assert_eq!(server.get(note), Some(&Note("hello".into())));
@@ -577,4 +582,28 @@ fn a_level_s_entities_spawn_through_their_prefabs_in_the_level_scope() {
         error.to_string(),
         "data/prefabs/slime.kbj: at `components.Health.max`: expected an integer, found a string"
     );
+}
+
+#[test]
+fn a_save_s_prefabs_load_with_their_bases() {
+    let mut server = a_server(&[("enemy", ENEMY), ("slime", SLIME)]);
+    let mut data = SaveData::new(3);
+    let mut slime = SavedEntity::new(1);
+    slime.prefab = Some("slime".into());
+    data.entities.push(slime);
+    data.entities.push(SavedEntity::new(2));
+    let mut library = PrefabLibrary::new();
+    library
+        .load_save(&mut server, &types(), &data, Scope::Level)
+        .expect("the save's prefabs load");
+    let names: Vec<&str> = library.iter().map(|prefab| prefab.name()).collect();
+    assert_eq!(names, ["enemy", "slime"]);
+
+    let mut ghost = SavedEntity::new(4);
+    ghost.prefab = Some("ghost".into());
+    data.entities.push(ghost);
+    assert!(matches!(
+        library.load_save(&mut server, &types(), &data, Scope::Level),
+        Err(PrefabError::Load { ref path, .. }) if path == "data/prefabs/ghost.kbj"
+    ));
 }

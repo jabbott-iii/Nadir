@@ -2101,19 +2101,31 @@ mod device_tests {
         let (done, finished) = mpsc::channel();
         let render = Pattern::new(frames, Some(done));
         let allocated = Arc::clone(&render.allocations);
+        let timing = TIMING;
+        let opening = Instant::now();
         let started = start(
             file_device(&path),
             AudioOutputConfig::default(),
             Box::new(render),
-            TIMING,
+            timing,
         );
+        let waited = opening.elapsed();
         let stream = started.unwrap_or_else(|error| panic!("{error}"));
-        // 1,440 frames of buffer.
-        assert_eq!(stream.latency(), Some(Duration::from_millis(30)));
+        // 1,440 frames of buffer. `start` waits for the device to open, but
+        // only for `open_wait`: on a busy system even this device has taken
+        // longer, and the stream then gets its latency once it opens.
+        if stream.latency().is_none() {
+            assert!(
+                waited >= timing.open_wait,
+                "`start` gave up on the device after {waited:?}"
+            );
+        }
 
         finished
             .recv_timeout(Duration::from_secs(10))
             .expect("the audio thread rendered a second of sound");
+        // It renders only once the device is open, so it is open now.
+        assert_eq!(stream.latency(), Some(Duration::from_millis(30)));
         // Joins the thread, which closes the device and flushes the file.
         drop(stream);
 

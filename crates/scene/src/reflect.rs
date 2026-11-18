@@ -24,6 +24,8 @@ use nadir_assets::{AssetServer, Scope};
 use nadir_codec::json::Value;
 use nadir_core::log::warn;
 
+use crate::SaveIdMap;
+
 /// A value whose fields can be walked by name, and that turns into a
 /// [`Value`] and back: what saves, prefabs, the inspector and settings
 /// need. The macros [`reflect_struct!`](crate::reflect_struct),
@@ -154,7 +156,10 @@ enum Assets<'a> {
 /// - resources of the types that need them, such as the facade's clips and
 ///   collision layers: [`ReflectContext::with_resource`];
 /// - whether the values are for a hash, which leaves out what changes each
-///   frame: [`ReflectContext::hashing`].
+///   frame: [`ReflectContext::hashing`];
+/// - which entity has which save id, to write an [`Entity`](nadir_ecs::Entity)
+///   as its id and read it back (M9.4, ADR-0068):
+///   [`ReflectContext::with_save_ids`]. Saves give the context theirs.
 pub struct ReflectContext<'a> {
     source: Cow<'a, str>,
     path: Vec<Segment>,
@@ -162,6 +167,7 @@ pub struct ReflectContext<'a> {
     assets: Assets<'a>,
     resources: Vec<&'a dyn Any>,
     hashing: bool,
+    save_ids: Option<SaveIdMap>,
 }
 
 impl<'a> ReflectContext<'a> {
@@ -176,6 +182,7 @@ impl<'a> ReflectContext<'a> {
             assets: Assets::None,
             resources: Vec::new(),
             hashing: false,
+            save_ids: None,
         }
     }
 
@@ -214,6 +221,27 @@ impl<'a> ReflectContext<'a> {
     /// Whether the values are for a hash: see [`ReflectContext::hashing`].
     pub fn is_hashing(&self) -> bool {
         self.hashing
+    }
+
+    /// This context with `ids`, so that an [`Entity`](nadir_ecs::Entity) is
+    /// written as its save id, and read back from one: for a hash that
+    /// numbers entities by their ids, say. [`capture`](crate::capture) and
+    /// [`restore`](crate::restore) give the context their own while they
+    /// run.
+    pub fn with_save_ids(mut self, ids: SaveIdMap) -> Self {
+        self.save_ids = Some(ids);
+        self
+    }
+
+    /// Which entity has which save id, if the context has the map.
+    pub fn save_ids(&self) -> Option<&SaveIdMap> {
+        self.save_ids.as_ref()
+    }
+
+    /// Puts `ids` in place of the context's map of save ids, and returns
+    /// the one it had: for a save, which puts the outer one back after.
+    pub(crate) fn replace_save_ids(&mut self, ids: Option<SaveIdMap>) -> Option<SaveIdMap> {
+        std::mem::replace(&mut self.save_ids, ids)
     }
 
     /// The asset server, to write a handle as its asset's path, if the
@@ -438,7 +466,7 @@ pub struct ReflectError {
 /// What is wrong with a value: see [`ReflectError`].
 ///
 /// Non-exhaustive (ADR-0038): types that need more of the context than a
-/// value, such as handles, brought more ways to fail.
+/// value, such as handles and entities, brought more ways to fail.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum ReflectErrorKind {
@@ -500,6 +528,11 @@ pub enum ReflectErrorKind {
         /// The name the data gave.
         name: String,
     },
+    /// An entity's save id that no entity of the save has (M9.4).
+    UnknownEntity {
+        /// The id.
+        id: u64,
+    },
 }
 
 impl fmt::Display for ReflectError {
@@ -542,6 +575,9 @@ impl fmt::Display for ReflectError {
             }
             ReflectErrorKind::UnknownName { what, name } => {
                 write!(f, "there is no {what} named `{name}`")
+            }
+            ReflectErrorKind::UnknownEntity { id } => {
+                write!(f, "no entity of the save has the save id {id}")
             }
         }
     }

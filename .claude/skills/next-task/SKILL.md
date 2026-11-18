@@ -78,6 +78,7 @@ Requested task: `$ARGUMENTS` (empty means "pick the next unblocked task").
 ## 6. Do not commit
 
 Leave all changes uncommitted. Do not commit, amend, rebase, tag or push.
+Offer the commit message in the report instead (step 7).
 
 ## 7. Report
 
@@ -90,3 +91,5 @@ End with a summary containing:
 - **Assumptions** you made.
 - **Unresolved issues and residual risks.**
 - **Next:** the next unblocked task ID.
+- **Commit message:** one for the user to commit, in a `text` block, as
+  `CLAUDE.md` → "Commit messages" describes. It has no attribution lines.

@@ -1,0 +1,33 @@
+{
+ "next_id": 5,
+ "globals": {
+  "Score": {
+   "points": 40,
+   "best": 120
+  }
+ },
+ "entities": [
+  {
+   "id": 1,
+   "components": {
+    "Health": {
+     "current": 7,
+     "max": 10
+    },
+    "Follow": {
+     "target": 3
+    }
+   }
+  },
+  {
+   "id": 3,
+   "prefab": "slime",
+   "components": {
+    "Health": {
+     "current": 2,
+     "max": 12
+    }
+   }
+  }
+ ]
+}

@@ -111,7 +111,7 @@
 //! | [`Facing`] | Which way it faces: facing left mirrors its `Sprite` |
 //! | [`Parent`] | Puts it at another entity's position, plus an offset |
 //! | [`Player`] | A tag for the entity the player controls |
-//! | [`SaveId`] | Its id in saves, which come with roadmap M9.4 |
+//! | [`SaveId`] | Its id in saves, nadir-scene's (roadmap M9.4) |
 //! | [`PrevTransform`] | Where it was at the start of the last tick, for drawing between ticks: the engine keeps it |
 //! | [`AudioListener`] | Where the game hears from, in place of the camera |
 //! | [`AudioEmitter`] | A sound that plays at it, and follows it |
@@ -120,7 +120,8 @@
 //! [`Transform`], [`Velocity`], [`Player`], [`SaveId`], [`Facing`],
 //! [`Sprite`], [`Collider`] and [`Animator`] are reflected, so prefabs and
 //! levels can give them; [`Parent`], [`AudioListener`], [`AudioEmitter`]
-//! and [`MusicArea`] are not yet (M9.4 brings `Parent`), and
+//! and [`MusicArea`] are not yet (M9.7 brings `Parent`, whose entity saves
+//! can write since M9.4), and
 //! [`PrevTransform`] is the engine's own, and is never in data. A
 //! [`Sprite`] is written with its texture's path, and a prefab may name a
 //! frame of a cooked atlas instead, `{"atlas": "atlas/sprites.kbj",
@@ -152,6 +153,60 @@
 //! layers each frame, its background the clear colour. [`CurrentLevel`]
 //! says what it made, and the next load removes it whole; a
 //! [`LevelError`] says why one did not load (ADR-0038).
+//!
+//! # Game states
+//!
+//! The resource [`StateMachine`](scene::StateMachine) holds the game's
+//! [`GameState`](scene::GameState): `Boot`, as it starts, `Loading` a
+//! level, `MainMenu`, `InGame` or `Paused`. A system queues a transition
+//! with [`StateMachine::set`](scene::StateMachine::set), and the engine
+//! makes it between ticks, after the tick or the frame stages that queued
+//! it, so a tick runs to its end in the state it started in (ADR-0067).
+//!
+//! - [`App::add_fixed_system_in`] and [`App::add_frame_system_in`] add a
+//!   system that runs only in one kind of state, a
+//!   [`StateKind`](scene::StateKind); a system added without one runs in
+//!   every state.
+//! - [`App::on_exit`] and [`App::on_enter`] add systems that run once as a
+//!   kind of state is left or entered, with the
+//!   [`Transition`](scene::Transition): the old state's exits, then the new
+//!   state's enters. The first frame enters the state the game starts in.
+//!   To start elsewhere, insert a `StateMachine::new(state)`.
+//! - `Loading(level)` is the loading screen: no tick runs and the world is
+//!   not drawn, while the game's frame systems of `StateKind::Loading` draw
+//!   its screen. The level loads a frame after the screen first shows, in
+//!   place of the last, and once its assets have loaded the game goes to
+//!   `InGame` by itself. A level that does not load ends [`App::run`] with
+//!   [`Error::Level`], after a dialog.
+//! - `Paused` holds the world still: the ticks come, so that a pause menu's
+//!   tick systems see the input, but the engine's movement, parent offsets
+//!   and triggers do not run, and the frames' time, which animators and
+//!   animated tiles follow, stands still.
+//!
+//! ```
+//! use std::time::Duration;
+//!
+//! use nadir::prelude::*;
+//!
+//! /// The hero's steps, which the pause leaves alone.
+//! #[derive(Default)]
+//! struct Steps(u32);
+//!
+//! let mut app = App::new(Config::default())
+//!     .insert_resource(Steps::default())
+//!     .insert_resource(StateMachine::new(GameState::InGame))
+//!     .add_fixed_system_in(StateKind::InGame, FixedStage::Gameplay, "walk", |world, _| {
+//!         world.resource_mut::<Steps>().0 += 1;
+//!     })
+//!     .on_enter(StateKind::Paused, "pause_menu", |_, transition: &Transition| {
+//!         assert_eq!(transition.from, Some(GameState::InGame));
+//!     });
+//! let tick = Duration::from_nanos(16_666_667);
+//! app.update(tick, &[]);
+//! app.world().resource_mut::<StateMachine>().set(GameState::Paused);
+//! app.update(tick, &[]);
+//! assert_eq!(app.world().resource::<Steps>().0, 1);
+//! ```
 //!
 //! # Collision
 //!
@@ -303,7 +358,7 @@
 //! | [`ecs`] | `nadir-ecs` | The world, components, resources, events, commands, the schedule |
 //! | [`input`] | `nadir-input` | Actions, bindings, their state, replays |
 //! | [`render`] | `nadir-render` | The frame to draw, sprites, tiles, the camera, textures, atlases |
-//! | [`scene`] | `nadir-scene` | Reflection: the macros that define reflected types, and the type registry |
+//! | [`scene`] | `nadir-scene` | Reflection: the macros that define reflected types, and the type registry; prefabs, levels and game states |
 //! | [`log`] | `nadir-core` | The log macros, `error!` to `trace!` |
 //! | [`cli`] | `nadir-core` | A small parser of command lines |
 //!
@@ -489,6 +544,7 @@ mod pack;
 mod reflected;
 mod replay;
 mod sound;
+mod states;
 mod tick_stats;
 #[cfg(feature = "dev")]
 mod window_size;
@@ -511,7 +567,7 @@ pub use app::{App, Config, Offscreen, TICK_HZ, Volumes};
 pub use collisions::{Collisions, TriggerEnter, TriggerExit};
 pub use components::{
     AudioEmitter, AudioListener, Collider, Facing, MusicArea, Parent, Player, PrevTransform,
-    SaveId, Sprite, Transform, Velocity,
+    Sprite, Transform, Velocity,
 };
 #[cfg(feature = "dev")]
 pub use debug_ui::{ConsoleCommand, DebugWindow};
@@ -519,6 +575,7 @@ pub use error::Error;
 #[cfg(feature = "dev")]
 pub use frame_allocs::FrameAllocs;
 pub use level::{CurrentLevel, LevelError, load_level, unload_level};
+pub use nadir_scene::SaveId;
 pub use reflected::{CollisionLayers, loading_context, reflect_context};
 pub use replay::{Replay, world_hash};
 pub use sound::AudioState;
@@ -542,6 +599,7 @@ pub mod prelude {
         FrameStats, RenderFrame, SortMode, SpriteDraw, Texture, Tile, TileLayer, TileLayerDraw,
         TileLayers, TileSet,
     };
+    pub use nadir_scene::{GameState, LevelId, StateKind, StateMachine, Transition};
 
     pub use crate::{
         AnimationFinished, Animator, App, AudioEmitter, AudioListener, AudioState, Clip, ClipError,

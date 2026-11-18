@@ -75,8 +75,11 @@ pub trait FromValue: Reflect + Sized {
   context's server, `null` with a warning for a handle the server does not
   know; read by checking the path is an asset path of one of `T`'s
   extensions and loading it in the context's scope, which needs a loading
-  context. `Entity` references (as `SaveId`) come with saves (M9.4), and
-  need the `SaveId` map in the context.
+  context. An `Entity` (M9.4, ADR-0068) as its entity's `SaveId`, through
+  the context's `SaveIdMap` (`ReflectContext::with_save_ids`, which saves
+  give it): `null`, with a warning, for one without an id; for a hash,
+  `[index, generation]`; read back through the map, an id it lacks
+  `ReflectErrorKind::UnknownEntity`.
 - **Encodings** (ADR-0020):
   - integers are JSON integers; a `u64` or `usize` too large for an `i64` is
     a string of digits;
@@ -118,7 +121,8 @@ pub trait FromValue: Reflect + Sized {
   A hash leaves out what the engine rewrites each frame: the context is
   for a hash (`ReflectContext::hashing`), and the facade's `Sprite` leaves
   out its texture, uv, size, pivot and `flip.x`, which `nadir::animate`
-  writes (ADR-0038; a per-field marker waits for M9.4's `saved` flag).
+  writes (ADR-0038; M9.4's `saved` flag is per type, so a per-field marker
+  is still to come).
 
   `xtask` cannot find unregistered components. Each prefab is checked
   against the registry when it loads (`PrefabLibrary::load` takes the
@@ -127,8 +131,9 @@ pub trait FromValue: Reflect + Sized {
   file at startup is deferred (ADR-0038).
 - **The engine's components** (the facade's, M4.4, ADR-0022):
   - reflected: `Transform` as `{"position": [x, y]}`, `Velocity` as
-    `[x, y]` in pixels a second, `Player` as `{}`, `SaveId` as an
-    integer, and `Facing` (M4.6) as its variant's name;
+    `[x, y]` in pixels a second, `Player` as `{}`, `SaveId` (nadir-scene's
+    since M9.4, which the facade re-exports) as an integer, and `Facing`
+    (M4.6) as its variant's name;
   - reflected by hand (M5.11, ADR-0038, `crates/engine/src/reflected.rs`):
     - `Sprite` as its fields, `{"texture": "atlas/sprites_0.qoi", "uv":
       {...}, "size": [w, h], "pivot": [x, y], "rotation": 0.0, "color":
@@ -151,7 +156,7 @@ pub trait FromValue: Reflect + Sized {
       transient, and a read one starts its clip (ADR-0024). A clip with no
       name is written as `null`, with a warning, and for a hash as its
       handle's index and generation;
-  - not yet: `Parent` (an `Entity`, M9.4);
+  - not yet: `Parent`, whose `Entity` saves can write since M9.4: M9.7's;
   - never in data: `PrevTransform`, which the engine gives every drawn
     entity.
 
@@ -243,8 +248,8 @@ As built in M5.11 (ADR-0038):
   A `LevelError` says why a level did not load: the previous one is gone
   then, and nothing of the new one is in the world but the prefabs it
   read, which the `PrefabLibrary` keeps. Its textures stream
-  in as any do, a frame or more later; a loading state (M9.1) can wait
-  for the asset server's `has_pending` to clear. The clips of an atlas
+  in as any do, a frame or more later; the game state `Loading` (M9.1,
+  below) loads a level behind a loading screen and waits for them. The clips of an atlas
   only a prefab names, not a tile set, are not added: the cook lists only
   tile sets' atlases among a level's assets. It does not play the level's
   `music` or `ambience`, nor use its camera bounds, yet: the cook writes
@@ -290,6 +295,71 @@ As built in M5.11 (ADR-0038):
 - **Migrations:** `fn migrate_v1_to_v2(&mut Value)` functions, applied in
   order, with fixture tests for every version ever shipped.
 
+As built in M9.4 (ADR-0068; `crates/scene/src/save.rs`, the bytes in
+`nadir_codec::ksav`, `docs/subsystems/assets-and-codecs.md`):
+
+- **The file**, version 1: a 24-byte header, `"KSAV" | version u16 |
+  game_version_len u16 | crc32 u32 | saved_at i64 | payload_size u32`,
+  the game's version, then the payload's KBJ. The time is in seconds since
+  1970 UTC, and the CRC-32 covers every byte after it. The payload, a
+  `SaveData`, has `next_id` beside the sketch's members: the counter, so
+  that no id is given out twice.
+- **The types:** `SaveId(u64)` (moved from the facade, which re-exports it
+  as `nadir::SaveId`); `SaveIds`, the world's counter, a resource
+  (`assign`, `next_id`); `SaveIdMap`, which entity has which id
+  (`of_world`, `insert`, `id`, `entity`); and `SpawnedFrom(String)`, which
+  `PrefabLibrary::spawn` and `spawn_level` give every entity they spawn.
+  It is not in the registry, so prefabs, levels, the inspector and the
+  world hash do not see it. `TypeRegistry::register_components` registers
+  `SaveId` and `SpawnedFrom` with the world.
+- **What is saved:** components registered with
+  `TypeRegistry::register_saved_component` (`Registration::is_saved`),
+  and resources registered with `register_saved_resource`, as `globals`;
+  `register_component` stays unsaved. A `SaveId` is the entity's `id`,
+  never one of its components.
+- **`capture(world, registry, cx)`** gives the payload: each entity with a
+  `SaveId`, by id, its `SpawnedFrom` as its `prefab`, its saved components
+  in the registry's order; the saved resources the world has; the
+  world's `SaveIds`, or the largest id plus one. The same world gives the
+  same bytes. Two entities of one id are `SaveError::DuplicateId`.
+- **`restore(data, world, registry, library, cx)`** spawns each saved
+  entity anew, through commands, and returns them in the save's order:
+  - each is alive at once, so that the context's `SaveIdMap` holds the
+    new entities while the values are read;
+  - one of a prefab is made as `PrefabLibrary::spawn` makes one, its saved
+    components applied over the prefab's, and keeps its `SpawnedFrom`, so
+    a component the prefab gives comes back, even one of a saved type the
+    entity had lost; one of none, of its saved components alone. Load the
+    prefabs first (`PrefabLibrary::load_save`);
+  - every value is made before anything changes, so a load that fails
+    changes nothing but the entities it reserved, despawned with the
+    commands; an unknown component or resource is an error, as in
+    prefabs, and a game fixes up an old save's `SaveData` before it;
+  - then the entities that had a `SaveId` are despawned and the new ones
+    get their components and ids, when the commands are applied, and
+    the saved resources replace the world's, at once (the world must have
+    them); the world's `SaveIds`, if any, goes on from the save's. A load
+    gives the saved entities new `Entity`s, and entities without a
+    `SaveId`, such as a level's scenery, stay.
+- **The atomic write** is `write_file(path, data, game_version)`: it reads
+  its bytes back, as `read_file` would, before it writes any, so that a
+  save that would not read is never written; then the three steps above
+  (`temp_path`, `backup_path`). `read_file(path, limits)` falls back to the
+  backup on any failure of the file (damaged, cut short, missing, a
+  version it cannot migrate), with a warning, and `LoadedSave::from_backup`
+  says why; if neither reads, `SaveError::Unreadable`, and
+  `SaveError::is_missing` is an empty slot.
+- **Migrations:** `Migration` is `fn(&mut Value)`; `MIGRATIONS` has none
+  yet (index `i` turns version `i + 1` into `i + 2`, checked against
+  `ksav::VERSION` when it compiles); `migrate(payload, version, list)`
+  runs those from the file's version on. Version 1's fixture,
+  `crates/scene/tests/saves/v1.ksav`, is written by `make_fixture.py`
+  beside it and never again.
+- **Not yet** (M9.7, the facade): a `SaveIds` in every `App`, a slot in
+  the user data folder, the engine's components marked saved or not,
+  `Parent` reflected, and ids for a level's entities that do not change
+  between runs.
+
 ## Game states
 
 ```rust
@@ -302,6 +372,69 @@ pub enum GameState { Boot, Loading(LevelId), MainMenu, InGame, Paused }
   checks before calling the system.
 - Transitions happen between ticks, never mid-tick.
 
+As built in M9.1 (ADR-0067):
+
+- **The types** (`crates/scene/src/state.rs`): `LevelId` is a level's
+  name, as `load_level` takes it. `GameState` is `Clone` and `Eq`, not
+  `Copy`, for its `LevelId`; `Boot` is its default, and it displays as its
+  variant's name, `Loading(field)` with the level. `StateKind` is its
+  variant without the level: run conditions and enter and exit systems are
+  by kind, so `Loading` of any level is one kind.
+- **`StateMachine`**: `new(first)` (default `Boot`), `state()`,
+  `is(kind)`, `queued()` and `set(next)`, which queues: a later `set`
+  replaces the queued one, at debug level. It never changes by itself.
+- **Run conditions**: `StateKind::condition()` is a `RunCondition`, the
+  schedule's `fn(&World) -> bool`, one function per kind; it asks the state
+  the machine is in, not the queued one.
+- **Enter and exit systems** are `fn(&World, &Transition)`, `Transition {
+  from: Option<GameState>, to: GameState }`, held by `StateSystems`
+  (`on_enter`, `on_exit`, `describe`). `StateSystems::apply(&mut World)`
+  makes at most one transition:
+  - its first call runs the enter systems of the state the machine started
+    in, from `None`, and leaves a transition queued before it for the next
+    call;
+  - after that it takes the queued transition, and drops one to the state
+    the machine is in;
+  - the exit systems of the kind left run, in the order added, while the
+    machine is still in it, then their commands apply; the machine goes to
+    the new state; its kind's enter systems run, then their commands
+    apply; the transition is logged;
+  - a transition these systems queue waits for the next call;
+  - each runs through `nadir_ecs::run_system`, named in borrow panics and
+    timed for the profiler.
+- **In the facade** (`crates/engine/src/states.rs`): every `App` has a
+  `StateMachine` in `Boot`, and `App::add_fixed_system_in`,
+  `App::add_frame_system_in`, `App::on_enter` and `App::on_exit`.
+  `App::update` makes a transition as the frame starts (the first frame's
+  start enters the first state), after each tick, and after the frame
+  stages:
+  - `Loading(level)`: no tick runs and the clock is not told the time, so
+    the tick after the loading is the one after the last before it; the
+    frame stages run, with the frame's real `dt`, and the engine's
+    `nadir::extract_sprites` and `nadir::extract_level` do not, so the
+    game's frame systems of `StateKind::Loading` draw a loading screen on
+    the clear colour. Once a frame's stages have run in the state, the
+    next frame's start loads the level (`load_level`, which unloads the
+    last level and its `Scope::Level`); the frames after wait until the
+    asset server has no load pending, where the frames are drawn and so
+    finish loads (`App::run` with a device, `App::offscreen`), and not at
+    all where they are not; then the engine queues `InGame` and makes it.
+    A `LevelError`, or without `dev` a failed texture of the level's tile
+    sets, atlases or entities' sprites, is logged, the game stays in the
+    state, and `App::run` ends with `Error::Level` (its dialog says why,
+    a pack's opening error included), as does `Offscreen::frame`.
+  - `Paused`: the ticks come, latched and recorded as any, but
+    `nadir::movement`, `nadir::parent_offsets` and `nadir::triggers` do
+    not run, and `RenderFrame::time` leaves out the time spent paused, so
+    animators and animated tiles stand still and go on without a jump.
+    `nadir::snapshot` runs, so that nothing is drawn between two places.
+  - The others are the game's to give a meaning to. A system added
+    without a state runs in every state.
+- **Determinism:** a transition queued in a tick is made after it, at a
+  tick the simulation decides, and the loading takes no tick, so a replay
+  meets the same states at the same ticks with or without a window. One
+  queued by a frame system is made at a frame boundary, which is not.
+
 ## Tests
 
 - **Reflection:**
@@ -311,9 +444,9 @@ pub enum GameState { Boot, Loading(LevelId), MainMenu, InGame, Paused }
 - **Prefabs:**
   - inheritance and override order
   - a cycle is a clear error
-- **Saves:**
+- **Saves** (`crates/scene/tests/saves.rs`, M9.4):
   - write/read round-trip
   - a corrupted main file falls back to `.bak`
   - migrations from stored fixtures
-  - fuzz the reader
+  - fuzz the reader (`cargo xtask fuzz-smoke --target ksav`)
 - **States:** enter/exit ordering; no transition mid-tick.

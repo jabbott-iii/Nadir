@@ -15,8 +15,8 @@
 //! File-format codecs for the Nadir engine: Adler-32, inflate, PNG, QOI, QOA,
 //! WAV, the sound file (KPCM) and a resampler, KLZ block compression,
 //! JSON(C), binary JSON (KBJ), BMFont, Aseprite's sprite sheet data, LDtk's
-//! projects, the cook's atlas, font, level and prefab files, and the pack
-//! file.
+//! projects, the cook's atlas, font, level and prefab files, the pack
+//! file, and the save file.
 //!
 //! # Where it fits
 //!
@@ -51,6 +51,7 @@
 //! | [`prefab`] | The prefab file, `data/prefabs/<name>.kbj`: a prefab's base and its components' values | [`prefab::parse`], [`prefab::read`] |
 //! | [`kpak`] | The pack file, `game.kpak`: its header, its table of contents, and each entry checked against its CRC-32 | [`kpak::header`], [`kpak::toc`], [`kpak::parse`] |
 //! | [`klz`] | KLZ, an LZ77 block compression of Nadir's own, for pack entries | [`klz::decompress`], [`klz::compress`] |
+//! | [`ksav`] | The save file, `<slot>.ksav`: a header with the game's version, the time and a CRC-32, and a KBJ payload of saved entities and resources | [`ksav::header`], [`ksav::parse`], [`ksav::read`], [`ksav::encode`] |
 //!
 //! Today the game reads QOI textures, atlas files, prefab files and level
 //! files, which the engine's `load_level` loads into the world. The pack
@@ -60,7 +61,8 @@
 //! sound file's (M6.8): the cook writes both, and the mixer plays QOA
 //! (M6.2); the game loads them as assets from M6.9. The font file's reader
 //! is built (M7.7), and the cook reads back each font file it writes;
-//! nadir-render's `Font` asset reads it (M7.1).
+//! nadir-render's `Font` asset reads it (M7.1). The save file's reader and
+//! writer are built (M9.4): nadir-scene writes and reads saves with them.
 //!
 //! [`pcm`] changes a sound's rate, with a windowed sinc that gives the same
 //! bits on every system and keeps a loop's seam ([`pcm::resample`]), and
@@ -140,20 +142,22 @@
 //!
 //! - a byte offset in a binary format: [`CodecError::Qoi`],
 //!   [`CodecError::Qoa`], [`CodecError::Kbj`], [`CodecError::Klz`], [`CodecError::Kpak`],
-//!   [`CodecError::Kpcm`], [`CodecError::Inflate`], [`CodecError::Wav`]
-//!   and, with `png`, `CodecError::Png`;
+//!   [`CodecError::Kpcm`], [`CodecError::Ksav`], [`CodecError::Inflate`],
+//!   [`CodecError::Wav`] and, with `png`, `CodecError::Png`;
 //! - a line and a column, counted in characters from 1, in text:
 //!   [`CodecError::Json`] and [`CodecError::BmFont`];
 //! - a member path, such as `sprites[2].frames[0].w`, in a file checked
 //!   after its KBJ or JSON is read: [`CodecError::Atlas`],
 //!   [`CodecError::Font`], [`CodecError::Level`], [`CodecError::Prefab`],
-//!   [`CodecError::Aseprite`] and [`CodecError::Ldtk`]. KBJ or JSON that
-//!   cannot be read at all is the KBJ or JSON error.
+//!   [`CodecError::KsavData`], [`CodecError::Aseprite`] and
+//!   [`CodecError::Ldtk`]. KBJ or JSON that cannot be read at all is the
+//!   KBJ or JSON error.
 //!
 //! The `ErrorKind` of each module that can fail says what is wrong. An
 //! encoder that refuses a value has a variant of its own,
 //! [`CodecError::QoiEncode`], [`CodecError::QoaEncode`],
-//! [`CodecError::KpcmEncode`] and [`CodecError::KbjEncode`]; samples
+//! [`CodecError::KpcmEncode`], [`CodecError::KbjEncode`] and
+//! [`CodecError::KsavEncode`]; samples
 //! [`pcm::resample`] refuses are [`CodecError::Pcm`]. [`CodecError`]
 //! is `#[non_exhaustive]`: which variants exist depends on the features, so
 //! a `match` on it needs a `_` arm.
@@ -232,6 +236,7 @@ pub mod kbj;
 pub mod klz;
 pub mod kpak;
 pub mod kpcm;
+pub mod ksav;
 pub mod ldtk;
 pub mod level;
 mod limits;

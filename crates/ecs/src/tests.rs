@@ -429,6 +429,31 @@ fn a_conflicting_borrow_panics_naming_the_system_and_the_type() {
     assert!(message.contains("(system `(none)`)"), "{message}");
 }
 
+#[test]
+fn a_system_run_on_its_own_is_named_in_its_panics_and_only_while_it_runs() {
+    let mut world = World::new();
+    world.register::<Health>();
+    let message = panic_message(|| crate::run_system(&world, "on_enter", write_twice, &tick(0)));
+    assert!(
+        message.starts_with("the component `nadir_ecs::tests::Health` is borrowed elsewhere")
+            && message.contains("(system `on_enter`)"),
+        "{message}"
+    );
+    let message = panic_message(|| drop(world.resource::<u64>()));
+    assert!(message.contains("(system `(none)`)"), "{message}");
+    // It runs the system with its context, and applies no commands.
+    world.insert_resource(0u64);
+    let spawned = |world: &World, by: &u64| {
+        *world.resource_mut::<u64>() += by;
+        world.commands().spawn().with(Health);
+    };
+    crate::run_system(&world, "spawn", spawned, &3);
+    assert_eq!(*world.resource::<u64>(), 3);
+    assert_eq!(world.read::<Health>().len(), 0);
+    world.apply_commands();
+    assert_eq!(world.read::<Health>().len(), 1);
+}
+
 // ---- Events --------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

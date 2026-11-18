@@ -19,8 +19,8 @@ use std::fmt;
 #[cfg(feature = "png")]
 use crate::png;
 use crate::{
-    aseprite, atlas, bmfont, font, inflate, json, kbj, klz, kpak, kpcm, ldtk, level, pcm, prefab,
-    qoa, qoi, wav,
+    aseprite, atlas, bmfont, font, inflate, json, kbj, klz, kpak, kpcm, ksav, ldtk, level, pcm,
+    prefab, qoa, qoi, wav,
 };
 
 /// Errors produced by `nadir-codec`.
@@ -88,6 +88,28 @@ pub enum CodecError {
         offset: u64,
         /// What is wrong.
         kind: kpak::ErrorKind,
+    },
+    /// A save file is malformed, damaged, of a version not supported, or
+    /// exceeds a limit ([`ksav`](crate::ksav)).
+    Ksav {
+        /// The byte offset of the problem in the save file.
+        offset: usize,
+        /// What is wrong.
+        kind: ksav::ErrorKind,
+    },
+    /// A save file cannot be written ([`ksav::encode`](crate::ksav::encode)).
+    KsavEncode {
+        /// Why not.
+        kind: ksav::EncodeErrorKind,
+    },
+    /// A value is not a save file's payload
+    /// ([`ksav::read`](crate::ksav::read)).
+    KsavData {
+        /// Where the problem is, such as `entities[2].id`; empty for the
+        /// payload as a whole.
+        at: String,
+        /// What is wrong.
+        kind: ksav::DataErrorKind,
     },
     /// A sound file is malformed or exceeds a limit ([`kpcm`](crate::kpcm)).
     Kpcm {
@@ -216,6 +238,12 @@ impl fmt::Display for CodecError {
             Self::Inflate { offset, kind } => write!(f, "inflate error at byte {offset}: {kind}"),
             Self::Klz { offset, kind } => write!(f, "KLZ error at byte {offset}: {kind}"),
             Self::Kpak { offset, kind } => write!(f, "pack error at byte {offset}: {kind}"),
+            Self::Ksav { offset, kind } => write!(f, "save file error at byte {offset}: {kind}"),
+            Self::KsavEncode { kind } => write!(f, "cannot write a save file: {kind}"),
+            Self::KsavData { at, kind } if at.is_empty() => {
+                write!(f, "save data error in the payload: {kind}")
+            }
+            Self::KsavData { at, kind } => write!(f, "save data error at `{at}`: {kind}"),
             Self::Kpcm { offset, kind } => write!(f, "KPCM error at byte {offset}: {kind}"),
             Self::KpcmEncode { kind } => write!(f, "cannot encode as KPCM: {kind}"),
             Self::Pcm { kind } => write!(f, "cannot resample: {kind}"),

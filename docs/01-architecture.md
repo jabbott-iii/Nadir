@@ -150,14 +150,17 @@ pub fn run(mut app: App) -> Result<(), Error> {
 
         // App::update(elapsed, events): everything a frame does but draw.
         for event in &events { input.handle(event); }        // the Input resource: edges accumulate here
-        let frame = app.clock.begin_frame(stopwatch.lap());  // clamps hitches
-        while let Some(tick) = app.clock.consume_tick() {
+        states.start_frame(&mut app.world);                  // a transition queued; the loading's step (ADR-0067)
+        let frame = app.clock.begin_frame(stopwatch.lap());  // clamps hitches; while Loading, not told the time
+        while !loading && let Some(tick) = app.clock.consume_tick() {
             latch(&mut input, &app.world);                   // edges -> this tick's actions; or a replay's (ADR-0025)
             app.schedule.run_fixed(&mut app.world, &tick);   // snapshot first; then its commands (ecs.md)
+            states.apply(&mut app.world);                    // the transition the tick queued: between ticks
         }
         draw.clear();                                        // the RenderFrame resource
-        draw.time = simulated_time(&app.clock);              // ticks + alpha: animated tiles (ADR-0023)
+        draw.time = simulated_time(&app.clock);              // ticks + alpha, less the time paused: animated tiles (ADR-0023)
         app.schedule.run_frame(&mut app.world, &frame);      // frame.dt, frame.alpha; Extract sends the sound, fills `draw`
+        states.end_frame(&mut app.world);                    // the transition the frame stages queued
 
         gfx.begin_frame(platform.gpu_surface())?;
         renderer.render(&mut gfx, &assets, &tiles, &draw,    // the AssetServer and TileLayers resources
@@ -258,6 +261,17 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
   | frame `Extract` | `nadir::sound` | puts the listener at the first `AudioListener` or the camera, plays each `AudioEmitter` at its entity between the last two ticks, sends the track of the `MusicArea` the listener is in, then calls `Audio::update` (ADR-0051) |
   | frame `Extract` | `nadir::extract_sprites` | draws each `Sprite` between the last two ticks |
   | frame `Extract` | `nadir::extract_level` | draws the `CurrentLevel`'s tile layers, its background the clear colour |
+
+  `nadir::movement`, `nadir::parent_offsets` and `nadir::triggers` do not
+  run while the game state is `Paused`, and `nadir::extract_sprites` and
+  `nadir::extract_level` not while it is `Loading`, when no tick runs
+  either (M9.1, ADR-0067; `docs/subsystems/scene.md`, "Game states").
+- **Game states** change only between ticks: `App::update` makes the
+  transition queued as the frame starts, after each tick, and after the
+  frame stages. A game adds a system for one kind of state with
+  `App::add_fixed_system_in` or `App::add_frame_system_in`, and systems
+  that run as one is entered or left with `App::on_enter` and
+  `App::on_exit`.
 - Structural changes (spawn, despawn, add or remove component) are deferred
   through `Commands`. They are applied after each fixed tick and after the
   frame stages, never mid-iteration. The one exception is the engine's

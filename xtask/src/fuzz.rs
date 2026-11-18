@@ -34,7 +34,7 @@ use std::time::Duration;
 use nadir_codec::inflate::ErrorKind as InflateError;
 use nadir_codec::{
     CodecError, Limits, adler32, aseprite, atlas, bmfont, font, inflate, json, kbj, klz, kpak,
-    kpcm, ldtk, level, png, prefab, qoa, qoi, wav,
+    kpcm, ksav, ldtk, level, png, prefab, qoa, qoi, wav,
 };
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
@@ -122,6 +122,10 @@ const TARGETS: &[Target] = &[
     Target {
         name: "font",
         run: parse_font,
+    },
+    Target {
+        name: "ksav",
+        run: parse_save,
     },
 ];
 
@@ -775,6 +779,121 @@ fn parse_prefab(input: &[u8]) {
             .all(|(name, value)| prefab::is_component_name(name) && !value.is_null()),
         "a component of no type's name, or null"
     );
+}
+
+/// The `ksav` target: `nadir_codec::ksav::parse`, then `ksav::read` of the
+/// payload, on the input and on a copy with its header mended
+/// ([`repaired_save`]), so that mutations get past the CRC-32 to the KBJ and
+/// to the payload's checks.
+fn parse_save(input: &[u8]) {
+    check_save(input);
+    if let Some(repaired) = repaired_save(input)
+        && repaired != input
+    {
+        check_save(&repaired);
+    }
+}
+
+/// Reads `input` as a save file. What it accepts must keep the promises
+/// nadir-scene's saves rely on: the header alone read as the whole file
+/// reads it; a version from 1 to the newest; a payload that ends where the
+/// file does; one encoding of every save, so that the file written again is
+/// the input; and a payload that reads written back as it was, its ids
+/// unique, its prefabs' and types' names names.
+fn check_save(input: &[u8]) {
+    let limits = Limits::default();
+    let header = ksav::header(input, limits);
+    let parsed = ksav::parse(input, limits);
+    match (&header, &parsed) {
+        (Ok(alone), Ok((whole, _))) => {
+            assert!(alone == whole, "the header read alone is not the file's");
+        }
+        (Ok(_), Err(CodecError::Ksav { kind, .. })) => {
+            assert!(
+                matches!(kind, ksav::ErrorKind::BadPayload { .. }),
+                "a file whose header reads is refused for {kind}, not its payload"
+            );
+        }
+        (Err(alone), Err(whole)) => {
+            assert!(
+                alone == whole,
+                "the header is refused for {alone}, the file for {whole}"
+            );
+        }
+        (header, parsed) => panic!(
+            "the header gives {:?} and the file {:?}",
+            header.as_ref().err(),
+            parsed.as_ref().err()
+        ),
+    }
+    let Ok((header, payload)) = parsed else {
+        return;
+    };
+    assert!(
+        (1..=ksav::VERSION).contains(&header.version),
+        "a save of version {}",
+        header.version
+    );
+    assert!(
+        header.payload_offset() + header.payload_size as usize == input.len(),
+        "a payload of {} bytes at byte {} in a file of {}",
+        header.payload_size,
+        header.payload_offset(),
+        input.len()
+    );
+    let again = ksav::encode(&header.game_version, header.saved_at, &payload, limits);
+    assert!(
+        again.as_deref() == Ok(input),
+        "a save of {} bytes is written again as {:?} bytes",
+        input.len(),
+        again.as_ref().map(Vec::len)
+    );
+    let Ok(data) = ksav::read(&payload) else {
+        return;
+    };
+    assert!(
+        data.to_value() == payload,
+        "a payload is not written back as it was read"
+    );
+    let mut ids = std::collections::BTreeSet::new();
+    for entity in &data.entities {
+        assert!(ids.insert(entity.id), "the save id {} twice", entity.id);
+        assert!(
+            entity.prefab.as_deref().is_none_or(prefab::is_name),
+            "a prefab of no name"
+        );
+        assert!(
+            entity
+                .components
+                .iter()
+                .all(|(name, _)| prefab::is_component_name(name)),
+            "a component of no type's name"
+        );
+    }
+    assert!(
+        data.globals
+            .iter()
+            .all(|(name, _)| prefab::is_component_name(name)),
+        "a resource of no type's name"
+    );
+}
+
+/// `input` with its header mended, if it is long enough to have one: the
+/// magic and the newest version restored, the game version's length cut to
+/// what follows the header, the payload's size made the rest of the file,
+/// and the CRC-32 rewritten for the bytes after it.
+fn repaired_save(input: &[u8]) -> Option<Vec<u8>> {
+    let mut out = input.to_vec();
+    let after_header = out.len().checked_sub(ksav::HEADER_SIZE)?;
+    out[..4].copy_from_slice(&ksav::MAGIC);
+    out[4..6].copy_from_slice(&ksav::VERSION.to_le_bytes());
+    let game_version_len = usize::from(u16::from_le_bytes([out[6], out[7]])).min(after_header);
+    let payload_size = u32::try_from(after_header - game_version_len).ok()?;
+    out[6..8].copy_from_slice(&u16::try_from(game_version_len).ok()?.to_le_bytes());
+    out[20..24].copy_from_slice(&payload_size.to_le_bytes());
+    let crc = crc32(&out[12..]);
+    out[8..12].copy_from_slice(&crc.to_le_bytes());
+    Some(out)
 }
 
 /// The most bytes the `kpak` target lets a TOC, or an entry, be, as

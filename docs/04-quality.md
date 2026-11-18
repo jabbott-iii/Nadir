@@ -263,11 +263,12 @@ pub fn check_sized<T: std::fmt::Debug>(
   settings loader registers a fuzz target.
   - A target may do more than call its parser. One whose format carries
     checksums repairs a copy of each input, so that mutations get past
-    them (`png`, `kpak`). One that can check its own answers asserts them, so that
-    a wrong answer is a finding too (`inflate`, `klz`, `kbj`, `kpcm`), and so does
+    them (`png`, `kpak`, `ksav`). One that can check its own answers asserts them, so that
+    a wrong answer is a finding too (`inflate`, `klz`, `kbj`, `kpcm`, `ksav`), and so does
     one whose reader makes promises its users rely on (`atlas`, `font`,
-    `aseprite`, `ldtk`, `level`, `prefab`, `kpak`). See
-    `docs/subsystems/assets-and-codecs.md`.
+    `aseprite`, `ldtk`, `level`, `prefab`, `kpak`, `ksav`). See
+    `docs/subsystems/assets-and-codecs.md`. The save loader's is `ksav`
+    (M9.4), nadir-codec's reader of the save file.
 - The optional coverage-guided fuzzing (`cargo fuzz`) is a separate,
   **unapproved** proposal (policy item 29).
 

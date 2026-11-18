@@ -72,6 +72,7 @@ classDiagram
     class Atlas["render::Atlas"]
     class TypeRegistry["scene::TypeRegistry"]
     class PrefabLibrary["scene::PrefabLibrary"]
+    class StateMachine["scene::StateMachine"]
     class Level["scene::Level"]
     class PrefabAsset["scene::PrefabAsset"]
     class CollisionWorld["collision::CollisionWorld"]
@@ -93,6 +94,7 @@ classDiagram
     World o-- RenderFrame : resource
     World o-- TypeRegistry : resource
     World o-- PrefabLibrary : resource
+    World o-- StateMachine : resource
     World o-- Collisions : resource
     Collisions *-- CollisionWorld
     AssetServer o-- Source : Arc
@@ -860,7 +862,8 @@ classDiagram
 
 The `TypeRegistry` keeps, for each component type, a `Registration`: the
 functions that build the component from a `Value`, insert it through
-`Commands`, and inspect it in a `World`.
+`Commands`, and inspect it in a `World`, and whether saves keep it. For
+each resource type saves keep, it keeps a `ResourceRegistration` (M9.4).
 
 ```mermaid
 classDiagram
@@ -868,10 +871,15 @@ classDiagram
     class TypeRegistry {
         -registrations Vec~Registration~
         -by_name FastHashMap
+        -resources Vec~ResourceRegistration~
         +new() TypeRegistry
         +register_component~T~()
+        +register_saved_component~T~()
+        +register_saved_resource~T~()
         +get(name) Option~Registration~
         +iter() Iterator
+        +resource(name) Option~ResourceRegistration~
+        +resources() Iterator
         +register_components(world)
         +hash_world(world, cx) u64
     }
@@ -881,13 +889,21 @@ classDiagram
         -construct fn
         -insert fn
         -inspect fn
+        -saved bool
         +name() str
         +type_id() TypeId
+        +is_saved() bool
         +from_value(value, cx) Result~Box~Reflect~~
         +insert(commands, entity, value, cx) Result
         +insert_layers(commands, entity, layers, cx) Result
         +inspect(world, entity, f) bool
         +each(world, f)
+    }
+    class ResourceRegistration {
+        -name str
+        -type_id TypeId
+        +name() str
+        +type_id() TypeId
     }
     class Layer {
         +source str
@@ -901,6 +917,7 @@ classDiagram
     class World["ecs::World"]
     class Commands["ecs::Commands"]
     TypeRegistry "1" *-- "0..*" Registration : one per component type
+    TypeRegistry "1" *-- "0..*" ResourceRegistration : one per saved resource type
     TypeRegistry ..> FromValue : register_component, T is a
     Registration ..> Commands : inserts with
     Registration ..> World : registers, inspects
@@ -1011,6 +1028,131 @@ classDiagram
     LevelFile "1" *-- "0..1" GridEntry
     LevelFile "1" *-- "0..*" EntityEntry
     EntityEntry --> Prefab : by name
+```
+
+## scene: game states
+
+The `StateMachine` resource holds the game's state and the transition
+queued; `StateSystems`, which the facade's `App` keeps beside its
+`Schedule`, makes it between ticks, running the exit systems of the state
+left, then the enter systems of the next. Run conditions and those systems
+are by `StateKind`, the state without its level (ADR-0067).
+
+```mermaid
+classDiagram
+    direction TB
+    class GameState {
+        <<enumeration>>
+        Boot
+        Loading(LevelId)
+        MainMenu
+        InGame
+        Paused
+        +kind() StateKind
+    }
+    class StateKind {
+        <<enumeration>>
+        +ALL [StateKind; 5]
+        +condition() RunCondition
+    }
+    class LevelId {
+        +new(name) LevelId
+        +as_str() str
+    }
+    class StateMachine {
+        -state GameState
+        -queued Option~GameState~
+        +new(first) StateMachine
+        +state() GameState
+        +is(kind) bool
+        +queued() Option~GameState~
+        +set(next)
+    }
+    class StateSystems {
+        -enter Vec~Hook~ per StateKind
+        -exit Vec~Hook~ per StateKind
+        +on_enter(kind, name, system) StateSystems
+        +on_exit(kind, name, system) StateSystems
+        +apply(world) Option~Transition~
+        +describe() Iterator~StateSystemInfo~
+    }
+    class Transition {
+        +from Option~GameState~
+        +to GameState
+    }
+    StateMachine *-- GameState
+    GameState *-- LevelId
+    GameState ..> StateKind : kind
+    StateSystems ..> StateMachine : apply takes the queued
+    StateSystems ..> Transition : gives its systems
+```
+
+## scene: saves
+
+`capture` turns the entities with a `SaveId` and the saved resources into
+a `SaveData`, the codec's payload of a save file; `write_file` writes it
+beside a backup, and `read_file` reads it back, from the backup when the
+file is damaged; `restore` puts it into a world. While they run, the
+`ReflectContext` holds a `SaveIdMap`, so that an `Entity` is written as its
+entity's id (M9.4, ADR-0068).
+
+```mermaid
+classDiagram
+    direction TB
+    class save["scene::save"] {
+        <<module>>
+        +capture(world, registry, cx) Result~SaveData~
+        +restore(data, world, registry, library, cx) Result~Vec~Entity~~
+        +write_file(path, data, game_version) Result
+        +read_file(path, limits) Result~LoadedSave~
+        +migrate(payload, version, migrations) Result
+        +MIGRATIONS [Migration]
+    }
+    class SaveId {
+        +0 u64
+    }
+    class SaveIds {
+        -next u64
+        +assign() SaveId
+        +next_id() u64
+    }
+    class SaveIdMap {
+        +of_world(world) Result~SaveIdMap~
+        +insert(entity, id) Option~Entity~
+        +id(entity) Option~u64~
+        +entity(id) Option~Entity~
+    }
+    class SpawnedFrom {
+        +0 String
+    }
+    class LoadedSave {
+        +header ksav::Header
+        +data SaveData
+        +from_backup Option~SaveError~
+    }
+    class SaveData["codec::ksav::SaveData"] {
+        +next_id u64
+        +globals Vec~(String, Value)~
+        +entities Vec~SavedEntity~
+        +to_value() Value
+    }
+    class SavedEntity["codec::ksav::SavedEntity"] {
+        +id u64
+        +prefab Option~String~
+        +components Vec~(String, Value)~
+    }
+    class ReflectContext {
+        +with_save_ids(ids) ReflectContext
+        +save_ids() Option~SaveIdMap~
+    }
+    save ..> SaveData : captures, restores
+    save ..> LoadedSave : read_file
+    save ..> SaveIdMap : gives the context
+    ReflectContext o-- SaveIdMap
+    SaveData "1" *-- "0..*" SavedEntity
+    LoadedSave *-- SaveData
+    SaveIds ..> SaveId : gives out
+    SaveIdMap ..> SaveId : of the entities with one
 ```
 
 ## render: the renderer
@@ -2426,7 +2568,8 @@ classDiagram
 
 ## engine: built-in components and the traits they implement
 
-The facade defines thirteen components. All implement `Component`. Eight
+The facade defines twelve components and re-exports a thirteenth,
+nadir-scene's `SaveId` (M9.4, ADR-0068). All implement `Component`. Eight
 also implement `FromValue`, and so `Reflect`: `App::new` registers those in
 the `TypeRegistry`, so prefabs and levels can name them. `PrevTransform`,
 `Parent`, `AudioListener`, `AudioEmitter` and `MusicArea` are not
@@ -2449,7 +2592,7 @@ classDiagram
     class Player
     class Facing
     class Parent
-    class SaveId
+    class SaveId["scene::SaveId"]
     class Animator
     class AudioListener
     class AudioEmitter
@@ -2529,7 +2672,7 @@ classDiagram
         +entity Entity
         +offset Vec2
     }
-    class SaveId {
+    class SaveId["scene::SaveId"] {
         +0 u64
     }
     class Animator {
