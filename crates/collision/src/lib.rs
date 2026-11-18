@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Kinematic collision and spatial queries for top-down 2D games: shapes,
-//! solid tiles, a spatial hash, move-and-slide, casts, overlap queries and
-//! triggers.
+//! Kinematic collision, spatial queries and pathfinding for top-down 2D
+//! games: shapes, solid tiles, a spatial hash, move-and-slide, casts,
+//! overlap queries, triggers, A* and flow fields.
 //!
 //! It is the collision of [Nadir](https://github.com/jabbott-iii/Nadir),
 //! a plain library over `nadir-core`, with no rigid-body physics
@@ -59,6 +59,11 @@
 //! - **Triggers:** [`Triggers::update`], once a tick, then
 //!   [`Triggers::entered`] and [`Triggers::exited`]: the [`TriggerPair`]s,
 //!   by id, that began and stopped overlapping.
+//! - **Paths:** [`Pathfinder`], A* on the tile grid, 8-connected with no
+//!   corner cut, whose [`find`](Pathfinder::find) smooths the path for an
+//!   agent's size with [`line_of_sight`]; [`PathQueue`], requests by key
+//!   searched a budget of expansions a tick; [`FlowField`], the way to one
+//!   goal from every cell, for a crowd.
 //!
 //! # Example
 //!
@@ -199,6 +204,45 @@
 //! assert_eq!(triggers.exited(), [pair]);
 //! ```
 //!
+//! # Paths
+//!
+//! An agent asks a [`PathQueue`] for a path, and the queue searches a
+//! budget of expansions an update, so that many agents asking at once
+//! expand no more cells in a tick than the budget. The path comes as the
+//! points to walk through, smoothed for the agent's box.
+//!
+//! ```
+//! use nadir_collision::{FlowField, PathQueue, PathRequest, PathResult, TileGrid};
+//! use nadir_core::{IVec2, Vec2};
+//!
+//! // A room of 8 × 6 cells of 16 px, with a wall down column 4 but for
+//! // a gap in row 4.
+//! let mut grid = TileGrid::new(8, 6, 16.0, Vec2::ZERO);
+//! for y in [0, 1, 2, 3, 5] {
+//!     grid.set_solid(IVec2::new(4, y), true);
+//! }
+//! let mut paths = PathQueue::new();
+//! let from = Vec2::new(24.0, 24.0);
+//! let to = Vec2::new(104.0, 24.0);
+//! // Agent 7, a box of 10 × 6 px, from the west side to the east.
+//! paths.request(7, PathRequest::new(from, to).with_clearance(Vec2::new(5.0, 3.0)));
+//! assert!(paths.is_pending(&7));
+//! paths.update(&grid);
+//! let Some(PathResult::Found(points)) = paths.result(&7) else {
+//!     panic!("there is a way through the gap");
+//! };
+//! // Where it was, round the wall's end through the gap, to the goal.
+//! assert_eq!(points.first(), Some(&from));
+//! assert_eq!(points.last(), Some(&to));
+//! assert!(points.iter().any(|point| point.y > 64.0));
+//!
+//! // A pack's way to the same place, from every cell.
+//! let mut field = FlowField::new();
+//! assert!(field.compute(&grid, to));
+//! // From the start's cell, down toward the gap.
+//! assert_eq!(field.direction_at(from), Vec2::new(0.0, 1.0));
+//! ```
+//!
 //! # Using it well
 //!
 //! - **Units:** pixels, +X right and +Y down. A collider's position is its
@@ -235,17 +279,25 @@
 //!   past 31.
 //! - **Threads:** [`CollisionWorld`] is `Send` and `Sync`, and queries,
 //!   casts and [`move_and_slide`] take it by shared reference.
-//! - **Not yet:** A* and flow fields (roadmap M9.5), and tiles other than
-//!   full cells, such as half cells and diagonal walls (backlog).
+//! - **Paths and size:** A* walks cells, so an agent wider than a cell does
+//!   not fit every path it finds; smoothing keeps its box clear of the
+//!   tiles. Paths and flow fields see a grid's tiles only, not colliders:
+//!   an agent walking one slides along a collider it meets at an angle,
+//!   and stops at one it meets head-on, such as a tree's trunk across its
+//!   path. Give them a grid with the cells of such props solid.
+//! - **Not yet:** tiles other than full cells, such as half cells and
+//!   diagonal walls (backlog).
 
 // The README's examples are compiled as doc tests too.
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
+mod flow;
 mod geometry;
 mod grid;
 mod hash;
+mod path;
 mod shape;
 mod slide;
 mod sweep;
@@ -254,7 +306,11 @@ mod tests;
 mod trigger;
 mod world;
 
+pub use flow::FlowField;
 pub use grid::TileGrid;
+pub use path::{
+    DIAGONAL_COST, PathQueue, PathRequest, PathResult, Pathfinder, STRAIGHT_COST, line_of_sight,
+};
 pub use shape::{Collider, ColliderKind, LayerMask, Shape};
 pub use slide::{Contact, move_and_slide};
 pub use sweep::{Obstacle, SweepHit};

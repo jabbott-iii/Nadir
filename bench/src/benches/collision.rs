@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Collision benchmarks: the spatial hash's rebuild and queries, and a
-//! tick of movement for 5,000 entities.
+//! Collision benchmarks: the spatial hash's rebuild and queries, a tick of
+//! movement for 5,000 entities, and A* across a large grid.
 
 use std::hint::black_box;
 
 use nadir_collision::{
-    Collider, CollisionWorld, Contact, LayerMask, Shape, TileGrid, move_and_slide,
+    Collider, CollisionWorld, Contact, LayerMask, PathRequest, Pathfinder, Shape, TileGrid,
+    move_and_slide,
 };
 use nadir_core::{IVec2, Pcg32, Rect, Vec2};
 
@@ -139,10 +140,66 @@ pub(crate) fn slide(bencher: &mut Bencher) {
     bencher.iter(|| slide_all(&world, &bodies, &mut contacts));
 }
 
+/// The side of the A* benchmark's grid, in cells.
+const MAZE: i32 = 256;
+
+/// The A* benchmark's grid: [`MAZE`] × [`MAZE`] cells of [`TILE`] px,
+/// three in ten solid, but for the 5 × 5 cells round each end; and the
+/// request, from near the top-left corner to near the bottom-right, for a
+/// box of 10 × 6 px. The same every time.
+fn maze() -> (TileGrid, PathRequest) {
+    let mut rng = Pcg32::new(0x6173_7461, 0);
+    let mut grid = TileGrid::new(MAZE as u32, MAZE as u32, TILE, Vec2::ZERO);
+    let (start, goal) = (IVec2::splat(4), IVec2::splat(MAZE - 5));
+    for y in 0..MAZE {
+        for x in 0..MAZE {
+            let cell = IVec2::new(x, y);
+            let near = |end: IVec2| (x - end.x).abs() <= 2 && (y - end.y).abs() <= 2;
+            if !near(start) && !near(goal) && rng.range(0..10u32) < 3 {
+                grid.set_solid(cell, true);
+            }
+        }
+    }
+    let center = |cell: IVec2| grid.cell_rect(cell).center();
+    let request = PathRequest::new(center(start), center(goal)).with_clearance(Vec2::new(5.0, 3.0));
+    (grid, request)
+}
+
+/// `astar_256`: A* across [`maze`]'s grid, 256 × 256 cells, three in ten
+/// solid, from corner to corner, and the path smoothed for a box: a search
+/// across the whole of a level that size (one for a goal it cannot reach
+/// takes more). The pathfinder's memory is kept between iterations, as a
+/// game keeps it.
+pub(crate) fn astar(bencher: &mut Bencher) {
+    let (grid, request) = maze();
+    let mut finder = Pathfinder::new();
+    let mut points = Vec::new();
+    bencher.iter(|| finder.find(&grid, black_box(request), u32::MAX, &mut points));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::harness::Config;
+
+    #[test]
+    fn the_a_star_benchmark_crosses_the_grid() {
+        let (grid, request) = maze();
+        let mut finder = Pathfinder::new();
+        let mut points = Vec::new();
+        let length = finder
+            .find(&grid, request, u32::MAX, &mut points)
+            .expect("a way across");
+        // The ends are 247 cells apart each way: at least the diagonal's
+        // 247 corners.
+        assert!(length >= 247 * 1_414, "{length}");
+        // A search of thousands of cells, smoothed to far fewer points:
+        // 22,264 expansions and 156 points, of a path 432.368 cells long,
+        // when it was written.
+        let expansions = finder.expansions();
+        assert!((2_000..60_000).contains(&expansions), "{expansions}");
+        assert!(points.len() > 10 && points.len() < 400, "{}", points.len());
+    }
 
     #[test]
     fn the_movement_benchmark_stops_a_share_of_its_moves() {
@@ -173,7 +230,7 @@ mod tests {
 
     #[test]
     fn the_benchmarks_time_their_work() {
-        for run in [hash, slide] {
+        for run in [hash, slide, astar] {
             let mut bencher = Bencher::new(Config::fast());
             run(&mut bencher);
             let measurement = bencher.finish().unwrap();

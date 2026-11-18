@@ -257,15 +257,17 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
   | tick `Movement` | `nadir::movement` | rebuilds `Collisions`, moves each `Velocity`, sliding `Collider`s |
   | tick `PostMovement` | `nadir::parent_offsets` | puts each `Parent`'s child at its root plus the offsets |
   | tick `PostMovement` | `nadir::triggers` | sends `TriggerEnter` and `TriggerExit` |
+  | tick `PostMovement` | `nadir::navigation` | forgets despawned entities' paths, then searches the `Navigation` requests on the grid, within its budget (M9.5, ADR-0069) |
   | frame `Animate` | `nadir::animate` | advances each `Animator` by the clock's step, writes its frame into its `Sprite`, sends `AnimationFinished`, mirrors each Sprite that faces left and unmirrors the rest with a `Facing` (ADR-0024) |
   | frame `Extract` | `nadir::sound` | puts the listener at the first `AudioListener` or the camera, plays each `AudioEmitter` at its entity between the last two ticks, sends the track of the `MusicArea` the listener is in, then calls `Audio::update` (ADR-0051) |
   | frame `Extract` | `nadir::extract_sprites` | draws each `Sprite` between the last two ticks |
   | frame `Extract` | `nadir::extract_level` | draws the `CurrentLevel`'s tile layers, its background the clear colour |
 
-  `nadir::movement`, `nadir::parent_offsets` and `nadir::triggers` do not
-  run while the game state is `Paused`, and `nadir::extract_sprites` and
-  `nadir::extract_level` not while it is `Loading`, when no tick runs
-  either (M9.1, ADR-0067; `docs/subsystems/scene.md`, "Game states").
+  `nadir::movement`, `nadir::parent_offsets`, `nadir::triggers` and
+  `nadir::navigation` do not run while the game state is `Paused`, and
+  `nadir::extract_sprites` and `nadir::extract_level` not while it is
+  `Loading`, when no tick runs either (M9.1, ADR-0067;
+  `docs/subsystems/scene.md`, "Game states").
 - **Game states** change only between ticks: `App::update` makes the
   transition queued as the frame starts, after each tick, and after the
   frame stages. A game adds a system for one kind of state with

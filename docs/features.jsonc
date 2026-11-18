@@ -280,8 +280,9 @@
     {
       "name": "Pathfinding and enemy AI",
       "area": "Simulation",
-      "summary": "A* with a budget and path smoothing, and flow fields, will steer the sandbox's enemies.",
-      "tasks": ["M9.5"]
+      "summary": "A* of our own across the tile grid, 8-connected and cutting no wall's corner, finds the shortest path by exact integer lengths, the same on every run, and smooths it for the agent's size by string-pulling with a line of sight that keeps its box clear of the walls. Agents ask the engine for paths by entity, and it searches them each tick within a budget of expansions shared by all, the oldest first, a long search going on in the next tick and starting again if its grid changes; a game whose props stand in the way gives it a grid with their cells solid. Flow fields give a crowd the way to one goal from every cell, following a moving goal at most every 10 ticks. A search from corner to corner of a 256 × 256 grid, three cells in ten solid, takes 5.3 ms on an i7-11800H. In the sandbox, three guards walk their rounds and chase the person when they see them, and a pack in the south hunts them down a flow field and goes home when they leave; F4 draws the nav grid and the paths.",
+      "tasks": ["M9.5"],
+      "ticked": ["M9.5"]
     },
     {
       "name": "Crash reports",

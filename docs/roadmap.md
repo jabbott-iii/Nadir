@@ -5924,7 +5924,7 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-scene`;
     `cargo xtask fuzz-smoke --target ksav --secs 120`
 
-- [ ] **M9.5 — pathfinding and enemy AI**
+- [x] **M9.5 — pathfinding and enemy AI**
   - Note (from M4.3): A* reads `TileGrid::is_solid`, `cell_at` and
     `cell_rect`. Cells outside the grid are not solid, so keep the search
     inside it. `segment` with the grid's layer gives a line of sight for
@@ -5944,6 +5944,55 @@ by the batched sprite renderer.
   - Accept: the A* tests in the collision spec pass; the A* benchmark is
     recorded.
   - Verify: `cargo test -p nadir-collision`; `cargo xtask bench astar`
+  - Note: built and checked on Linux (x86_64) on 2026-11-18 (ADR-0069,
+    accepted that day; the user chose its scope, a path queue in the
+    facade with F4's overlays, and its enemies, guards and a pack):
+    - nadir-collision: `Pathfinder`, A* 8-connected with no corner cut,
+      steps of 1,000 and 1,414, a `BinaryHeap` and an arena kept from
+      search to search (`find_cells`, `find`, `expansions`);
+      `PathRequest` with the agent's clearance; `line_of_sight` for a box
+      over the grid, in `f64` and the same both ways, which string-pulling
+      smooths with, legs of 16 cells at most; `PathQueue<K>`, the queue's
+      order, 1,024 expansions an update and 65,536 a search by default;
+      `FlowField`, a Dijkstra and its directions, following a goal at most
+      once every 10 ticks. `TileGrid` takes a new stamp at each edit, which
+      starts a search under way, or a flow field, again.
+    - The facade: the `Navigation` resource, searched by
+      `nadir::navigation` after `nadir::triggers`, not while paused, on a
+      grid of its own if the game gives it one (`set_grid`); F4's "Nav
+      grid" (off at first) and "Paths" (on); the prelude's `Navigation`,
+      `PathRequest` and `PathResult`.
+    - The sandbox (`games/sandbox/src/enemies.rs`): the enemies' grid, the
+      level's with its trees' and rocks' cells solid, which `Navigation`
+      searches; three guards that walk their rounds and chase the person
+      on sight along its paths; a pack of five that hunts them down a flow
+      field in the south and goes home when they leave.
+    - `astar_256`, in `bench/baseline.json`: a median of 5.3 ms (p95
+      5.6 ms) on an i7-11800H for a search of 22,264 expansions, 4.2 ms of
+      it the search, about 190 ns an expansion, and 1.1 ms the smoothing,
+      before the review. The queue's default budget came down from 4,096
+      to 1,024 for it. After the review's 16-cell legs, under a load
+      average of 5 to 12 from another program, 5.6 to 7.1 ms, and, in the
+      same runs, 5.4 ms without smoothing: the baseline is the first run,
+      before that program.
+    - Review: a workflow of seven reviewers and a skeptic or two for each
+      finding upheld 34 findings (some found twice), all fixed (ADR-0069
+      lists them): a re-asked request that starved the queue, unbudgeted
+      quadratic smoothing, searches over an edited grid, smoothing round
+      the start's and goal's cells, the line of sight's rounding far away,
+      the enemies pinned on props, a stuck guard asking every tick, and
+      docs. A sweep of 119 cells of the south then left no pack member
+      pinned, and each one home.
+    - Tests: 18 in `crates/collision/tests/paths.rs`, against a Dijkstra
+      oracle written apart from the crate, and a buffer test; 4 of
+      `Navigation`; 2 of F4's overlays, and the steady frame of every
+      overlay still allocating nothing; 5 of the sandbox's enemies. Of 27 bugs
+      planted after the first five, 15 had passed the tests: the new tests
+      catch 14 of them, and the 15th, a flow field blind to its grid's
+      place, can no longer happen, a grid elsewhere being another grid,
+      with another stamp. Of 7 more planted to undo the review's fixes,
+      they catch 6; the 7th, the line of sight walking from either end,
+      gives the same answers on every input tried.
 
 - [ ] **M9.6 — crash reporting basics**
   - Depends: M1.4
@@ -5973,6 +6022,13 @@ by the batched sprite renderer.
       (from LDtk's iids, say), apart from those `SaveIds` gives out;
     - a component an entity of a prefab lost comes back from the prefab
       on a load, even of a saved type: version 1 writes no removals.
+  - Note (from M9.5, ADR-0069): enemies ask `Navigation` for paths, or
+    follow a `FlowField` in a crowd; the sandbox's `enemies.rs` shows
+    both. Paths see a grid's tiles only, and asking again does not route
+    round a prop: give `Navigation` (`set_grid`) and the flow fields a grid
+    with the props' cells solid, as the sandbox's `NavGrid` does. Most
+    searches across a 64 × 48 level fit the default budget of 1,024
+    expansions; one to a goal it cannot reach takes up to 3 ticks.
   - Depends: M9.1–M9.6, M6.6
   - Do: build the level with LDtk and Aseprite content, enemies, pickups,
     music, a save point and a win condition.
@@ -6176,6 +6232,7 @@ three OSes from a tag, and the release checklist is complete.
 | Lock-free audio command queue | Measured `try_lock` contention |
 | Localization pipeline (string tables, plurals) | Before the first non-English release |
 | Per-cell tile shapes in `TileGrid` (half cells, corner triangles; M4.3 has full cells) | A level needs half-height ledges or diagonal walls |
+| Paths round props and for big agents: A* and flow fields see a grid's tiles only, so a game marks its props' cells solid in a grid of its own and gives it to `Navigation` (`set_grid`), as the sandbox does; a path a cell wide may not fit an agent wider than a cell (M9.5, ADR-0069). A nav grid the engine derives from the level's static solids, or a clearance per cell | Two games doing the marking by hand, props that move, or an agent wider than a cell |
 | `CollisionWorld::candidates` widens a query only by the drift, so a query can miss a collider by a rounding step. A moved collider whose center rounds a step further than its move is missed by a step anywhere: `nearest((9, 576.00006103515625), 0.0, ALL, None)` misses a box of half (4, 64 - 2^-13 - 2^-14), offset (0, 2^-15), rebuilt at (9, 512 + 2^-13) and moved to (9, 512 + 3 × 2^-14), and finds it after a rebuild. Past about 2^17 px the miss exceeds `EPSILON`, which `move_and_slide`'s sweeps add: `nearest((9, 268553.40625), 0.0, ALL, None)` misses a box of half (2, 2.03125), offset (0, 0.015625), rebuilt at (9, 268541.9375) and moved to (9, 268551.34375). Unmoved, a hashed solid whose half extent is 2^18 px or more is missed in cells over 512 px. `move_and_slide`'s gather finds the last two (ADR-0026) | A query at an exact edge that must not miss, such as picking; a level past 2^17 px from the origin; or solids that wide. The fix widens queries by a few f32 steps of the moved collider's coordinates and of the widest collider in the hash |
 | `inflate_10mb` times stored and fixed-Huffman blocks only: the workspace has no DEFLATE encoder, so the bench writes its own stream. The dynamic blocks that zlib writes for most PNG image data are not timed: their headers, and their codes longer than 9 bits, which the decoder reads a bit at a time. A stream of them needs a Huffman code builder in the bench, or an encoder | When cook times matter (M5.4), or inflate shows in a profile |
 | A determinism lint (clippy `disallowed-methods` or `xtask`): std `HashMap::new`/`HashSet::new`, `Instant::now`, `sin`/`cos`/`atan2` in tick systems; and `FxLikeHasher`'s rustdoc saying its order holds on one target only (ADR-0025) | A determinism regression that slipped past review, or CI disagreeing with the stored hashes |

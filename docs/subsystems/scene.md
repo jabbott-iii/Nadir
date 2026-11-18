@@ -425,7 +425,7 @@ As built in M9.1 (ADR-0067):
     a pack's opening error included), as does `Offscreen::frame`.
   - `Paused`: the ticks come, latched and recorded as any, but
     `nadir::movement`, `nadir::parent_offsets` and `nadir::triggers` do
-    not run, and `RenderFrame::time` leaves out the time spent paused, so
+    not run (nor, since M9.5, `nadir::navigation`), and `RenderFrame::time` leaves out the time spent paused, so
     animators and animated tiles stand still and go on without a jump.
     `nadir::snapshot` runs, so that nothing is drawn between two places.
   - The others are the game's to give a meaning to. A system added

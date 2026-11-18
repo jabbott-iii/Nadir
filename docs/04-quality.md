@@ -383,7 +383,8 @@ pub fn check_sized<T: std::fmt::Debug>(
   - a whole tick of the facade for 5,000 colliding entities
     (`facade_tick_5k`, M4.4, ADR-0022), with a frame of 10,000 animated
     sprites (`facade_frame_10k`, M4.6, ADR-0024)
-  - A* on 256×256
+  - A* on 256×256 (`astar_256`, M9.5: from corner to corner of 256 × 256
+    cells, 30% solid, smoothed for a 10 × 6 box, ADR-0069)
   - mixer with 32 voices (`mixer_32_voices`, M6.2: a callback of 512
     frames at 48 kHz with 32 looping voices, most resampled and half at a
     position, and a QOA track streaming)

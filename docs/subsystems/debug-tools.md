@@ -526,9 +526,10 @@ impl CollisionWorld { pub fn hash_cells(&self, each: impl FnMut(Rect, u32)); }
 ```
 
 - **The window** (F4, `nadir::debug_draw`, first at (952, 8) to (1092,
-  128)): a checkbox for each overlay, its name in its color. While the
+  162), 128 before M9.5's two rows): a checkbox for each overlay, its name
+  in its color. While the
   window is open, collapsed or not, the ticked overlays draw; closed, none
-  do. At first: colliders, triggers and the tile grid.
+  do. At first: colliders, triggers, the tile grid and the paths.
 - **The overlays,** each as the frame draws it, entities `alpha` of the
   way from the last tick's place, culled to the camera's view:
 
@@ -537,12 +538,14 @@ impl CollisionWorld { pub fn hash_cells(&self, each: impl FnMut(Rect, u32)); }
   | Colliders | each solid `Collider`'s box, or circle of 24 sides, at its entity's `Transform` | cyan |
   | Triggers | the same, of each trigger | magenta |
   | Tile grid | the collision grid's solid cells, filled | cyan, faint |
+  | Nav grid | a dot two virtual pixels wide in the middle of each open cell of the grid paths cross: `Navigation`'s own, or else the collision grid (M9.5) | green |
+  | Paths | each path of `Navigation` found: its legs, and a mark three pixels wide at each point after its first (M9.5) | yellow |
   | Spatial hash | each cell that holds colliders, as the last tick's rebuild left it (`hash_cells`), with its count | white, faint |
   | Tile chunks | each chunk of each tile layer drawn this frame, `TileLayer::CHUNK` tiles a side, cut at the layer's edge | orange |
   | Camera | a cross at the camera's position, 6 virtual pixels each way, and the view's rect: the zoom rounded to a whole number, at least 1, about the position and the shake | red |
 
-  A nav grid and the current paths are M9.5's (pathfinding is not built);
-  the engine has no camera limits, so the camera's overlay is its view.
+  The nav grid and the paths are M9.5's (ADR-0069). The engine has no
+  camera limits, so the camera's overlay is its view.
 - **Drawing:** sprites of the debug UI's white texel in the world's
   sprites, layer 255 at `SortMode::Fixed(u32::MAX)`, in front of every
   sprite, as the inspector's outline: an outline is four sprites inside the
@@ -586,7 +589,7 @@ impl CollisionWorld { pub fn hash_cells(&self, each: impl FnMut(Rect, u32)); }
   once the log's level lets it through (`log level nadir debug`). The
   debug UI is made for the label if no window has made it.
 - **Not built:** sound pausing with the game (music and voices play on),
-  render's `DebugDrawList`, a nav grid and paths (M9.5), camera limits.
+  render's `DebugDrawList`, camera limits.
 
 ## Tools
 

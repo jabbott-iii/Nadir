@@ -28,12 +28,12 @@ shows only a few of its fields and methods: the ones the design rests on.
 
 Nothing here is planned work: the diagrams show only what is built. The
 Metal backend, audio's output on Windows and macOS, the inspector, the
-console and the other debug tools, gamepads, saves and pathfinding are
-not built yet (see `docs/roadmap.md`), so they do not appear; audio's
-mixer is (M6.2), its output on Linux (M6.3), its assets (M6.9), and the
-game's sound (M6.6); bitmap text in the world is (M7.1), the UI pass
-(M7.8), the debug UI (M7.2), which the facade's `dev` shows (M7.10), and
-its stats overlay and profiler (M7.3).
+console and the other debug tools, and gamepads are not built yet (see
+`docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
+output on Linux (M6.3), its assets (M6.9), and the game's sound (M6.6);
+bitmap text in the world is (M7.1), the UI pass (M7.8), the debug UI
+(M7.2), which the facade's `dev` shows (M7.10), and its stats overlay and
+profiler (M7.3); saves are (M9.4), and pathfinding (M9.5).
 The members only the `dev` feature compiles, the facade's hot reload's
 (roadmap M5.8), are marked `dev`. One member that exists in the code for
 planned work, `ShaderSource::msl`, carries a note.
@@ -2077,7 +2077,6 @@ classDiagram
 reports what stopped it. The sweeps return the first hit along a path.
 `Triggers` turns overlaps into entered and exited pairs. A pair's ids are
 the `u64`s given to `rebuild`: the facade packs an `Entity` into each.
-Pathfinding (roadmap M9.5) is not built.
 
 ```mermaid
 classDiagram
@@ -2128,6 +2127,81 @@ classDiagram
     CollisionWorld ..> SweepHit : segment, sweeps
     Contact *-- Obstacle
     SweepHit *-- Obstacle
+```
+
+## collision: paths and flow fields
+
+`Pathfinder` is A* on the tile grid, with its arena kept from search to
+search; `find` smooths the cells' path for an agent's box with
+`line_of_sight`. `PathQueue` searches requests by key a budget of
+expansions an update, the oldest first, and keeps each key's last path.
+`FlowField` holds the way to one goal from every cell (roadmap M9.5,
+ADR-0069).
+
+```mermaid
+classDiagram
+    direction TB
+    class Pathfinder {
+        -cost Vec~u32~
+        -parent Vec~u32~
+        -state Vec~u32~
+        -open BinaryHeap
+        +new() Pathfinder
+        +find_cells(grid, start, goal, limit, out) Option~u32~
+        +find(grid, request, limit, out) Option~u32~
+        +expansions() u32
+    }
+    class PathRequest {
+        +from Vec2
+        +to Vec2
+        +clearance Vec2
+        +new(from, to) PathRequest
+        +with_clearance(half) PathRequest
+    }
+    class PathQueue~K~ {
+        -finder Pathfinder
+        -slots Vec~Slot~
+        -waiting VecDeque~usize~
+        +DEFAULT_BUDGET u32
+        +DEFAULT_LIMIT u32
+        +new() PathQueue
+        +with_budget(budget) PathQueue
+        +request(key, request)
+        +cancel(key) bool
+        +retain(keep)
+        +update(grid) u32
+        +is_pending(key) bool
+        +result(key) Option~PathResult~
+        +results() Iterator
+    }
+    class PathResult {
+        <<enumeration>>
+        Found
+        NotFound
+    }
+    class FlowField {
+        -cost Vec~u32~
+        -next Vec~u8~
+        +EVERY u64
+        +compute(grid, goal) bool
+        +update(grid, goal, tick) bool
+        +goal() Option~IVec2~
+        +cost(cell) Option~u32~
+        +next_cell(cell) Option~IVec2~
+        +direction(cell) Vec2
+        +direction_at(point) Vec2
+    }
+    class line_of_sight {
+        <<function>>
+        +line_of_sight(grid, from, to, clearance) bool
+    }
+    class TileGrid
+    PathQueue *-- Pathfinder
+    PathQueue ..> PathRequest : takes
+    PathQueue ..> PathResult : gives
+    Pathfinder ..> TileGrid : searches
+    Pathfinder ..> line_of_sight : smooths with
+    FlowField ..> TileGrid : integrates
 ```
 
 ## audio: the mixer and its two sides
@@ -2429,9 +2503,10 @@ classDiagram
 ```
 
 `App::new` adds the engine's own systems to the schedule:
-`nadir::snapshot`, `nadir::movement`, `nadir::parent_offsets` and
-`nadir::triggers` in fixed stages, and `nadir::animate`, `nadir::sound`,
-`nadir::extract_sprites` and `nadir::extract_level` in frame stages.
+`nadir::snapshot`, `nadir::movement`, `nadir::parent_offsets`,
+`nadir::triggers` and `nadir::navigation` in fixed stages, and
+`nadir::animate`, `nadir::sound`, `nadir::extract_sprites` and
+`nadir::extract_level` in frame stages.
 
 ## engine: the resources App::new inserts
 
@@ -2461,6 +2536,7 @@ classDiagram
         +longest Duration
     }
     class Collisions
+    class Navigation
     class Clips
     class CollisionLayers {
         -names Vec~String~
@@ -2493,6 +2569,7 @@ classDiagram
     World o-- FrameStats
     World o-- TickStats
     World o-- Collisions
+    World o-- Navigation
     World o-- Clips
     World o-- CollisionLayers
     World o-- PrefabLibrary
@@ -2513,7 +2590,9 @@ classDiagram
 
 `Collisions` wraps the collision crate's world for the ECS. It maps each
 collider's index back to its `Entity` and sends `TriggerEnter` and
-`TriggerExit` events. `CurrentLevel` remembers what `load_level` spawned and
+`TriggerExit` events. `Navigation` holds a path queue keyed by entity,
+which `nadir::navigation` searches each tick across a grid of its own, if
+the game gives it one, or else the grid of `Collisions` (M9.5). `CurrentLevel` remembers what `load_level` spawned and
 loaded, so that `unload_level` can remove it.
 
 ```mermaid
@@ -2532,6 +2611,22 @@ classDiagram
         +entity(index) Entity
         +index(entity) Option~u32~
     }
+    class Navigation {
+        -queue PathQueue~Entity~
+        -grid Option~TileGrid~
+        +new() Navigation
+        +with_budget(budget) Navigation
+        +set_grid(grid)
+        +grid() Option~TileGrid~
+        +request(entity, request)
+        +cancel(entity) bool
+        +is_pending(entity) bool
+        +path(entity) Option~PathResult~
+        +paths() Iterator
+        +queue() PathQueue
+        +queue_mut() PathQueue
+    }
+    class PathQueue["collision::PathQueue"]
     class CurrentLevel {
         -level Option~Loaded~
         +name() Option~str~
@@ -2561,6 +2656,8 @@ classDiagram
     Collisions ..> TriggerEnter : sends
     Collisions ..> TriggerExit : sends
     Collisions o-- Entity : by collider index
+    Navigation *-- PathQueue
+    Navigation ..> Collisions : searches its grid
     CurrentLevel "1" *-- "0..1" Loaded
     Loaded o-- Entity : spawned
     Loaded "1" *-- "0..*" TileLayerDraw : layers

@@ -115,7 +115,7 @@ const CONSOLE: (Key, &str, Rect) = (
 const DEBUG_DRAW: (Key, &str, Rect) = (
     Key::F4,
     "Debug draw##nadir::debug_draw",
-    Rect::new(Vec2::new(952.0, 8.0), Vec2::new(1092.0, 128.0)),
+    Rect::new(Vec2::new(952.0, 8.0), Vec2::new(1092.0, 162.0)),
 );
 
 /// How far the time controls' label is from the screen's top-right
@@ -2631,6 +2631,109 @@ mod tests {
     }
 
     #[test]
+    fn f4_dots_the_open_cells_and_draws_the_paths() {
+        use nadir_collision::{PathRequest, TileGrid};
+        use nadir_core::IVec2;
+
+        use crate::{Collisions, Navigation};
+
+        let mut app = app();
+        *app.world_mut().resource_mut::<WindowSize>() = WindowSize(UVec2::new(1280, 720));
+        let world = app.world_mut();
+        // 4 × 3 cells of 16 from (-32, -24), all in view, one solid.
+        let mut grid = TileGrid::new(4, 3, 16.0, Vec2::new(-32.0, -24.0));
+        grid.set_solid(IVec2::new(1, 1), true);
+        world.resource_mut::<Collisions>().set_grid(grid);
+        let walker = world.spawn().id();
+        let request = PathRequest::new(Vec2::new(-24.0, -16.0), Vec2::new(-8.0, 16.0));
+        world.resource_mut::<Navigation>().request(walker, request);
+        app.update(TICK, &tap(Key::F4));
+        app.update(TICK, &[]);
+        // The paths at first, not the nav grid. Round the solid cell: down
+        // column 0, then right, two legs, and a mark at each leg's end.
+        let path = colored(&app, draw::PATH);
+        let (legs, marks): (Vec<_>, Vec<_>) = path
+            .iter()
+            .partition(|&&(_, size, _)| size.y == 1.0 && size.x > 3.0);
+        assert_eq!((legs.len(), marks.len()), (2, 2), "{path:?}");
+        // The corner at (-24, 16), on whole pixels.
+        assert!(marks.contains(&&(Vec2::new(-25.0, 15.0), Vec2::splat(3.0), 0.0)));
+        assert!(colored(&app, draw::NAV).is_empty());
+
+        let overlays = &mut app.debug_tools().overlays;
+        overlays.nav_grid = true;
+        overlays.paths = false;
+        // Another solid cell, off the diagonal: (2, 1).
+        app.world()
+            .resource_mut::<Collisions>()
+            .grid_mut()
+            .set_solid(IVec2::new(2, 1), true);
+        app.update(TICK, &[]);
+        // A dot two pixels wide in the middle of each of the 10 open cells:
+        // none in (1, 1) or (2, 1), one in (1, 2).
+        let dots = colored(&app, draw::NAV);
+        let dot = |x: i32, y: i32| {
+            (
+                Vec2::new(-25.0 + 16.0 * x as f32, -17.0 + 16.0 * y as f32),
+                Vec2::splat(2.0),
+                0.0,
+            )
+        };
+        assert_eq!(dots.len(), 10);
+        assert!(dots.contains(&dot(0, 0)));
+        assert!(!dots.contains(&dot(1, 1)) && !dots.contains(&dot(2, 1)));
+        assert!(dots.contains(&dot(1, 2)));
+        assert!(colored(&app, draw::PATH).is_empty());
+        // Navigation's own grid is the one drawn, when it has one.
+        let mut own = TileGrid::new(4, 3, 16.0, Vec2::new(-32.0, -24.0));
+        own.set_solid(IVec2::new(0, 0), true);
+        app.world().resource_mut::<Navigation>().set_grid(Some(own));
+        app.update(TICK, &[]);
+        let dots = colored(&app, draw::NAV);
+        assert_eq!(dots.len(), 11);
+        assert!(!dots.contains(&dot(0, 0)) && dots.contains(&dot(1, 1)));
+    }
+
+    #[test]
+    fn f4_draws_only_the_cells_in_view_and_every_leg_that_reaches_it() {
+        use nadir_collision::{PathRequest, PathResult, TileGrid};
+
+        use crate::{Collisions, Navigation};
+
+        let mut app = app();
+        *app.world_mut().resource_mut::<WindowSize>() = WindowSize(UVec2::new(1280, 720));
+        let world = app.world_mut();
+        // 40 × 3 cells from (-320, -24), wider than the view, (-240, -135)
+        // to (240, 135).
+        world.resource_mut::<Collisions>().set_grid(TileGrid::new(
+            40,
+            3,
+            16.0,
+            Vec2::new(-320.0, -24.0),
+        ));
+        let walker = world.spawn().id();
+        // From the view's middle west, out past its left edge.
+        let request = PathRequest::new(Vec2::new(100.0, -16.0), Vec2::new(-300.0, -16.0));
+        world.resource_mut::<Navigation>().request(walker, request);
+        app.update(TICK, &tap(Key::F4));
+        app.debug_tools().overlays.nav_grid = true;
+        app.update(TICK, &[]);
+        let legs = match app.world().resource::<Navigation>().path(walker) {
+            Some(PathResult::Found(points)) => points.len() - 1,
+            other => panic!("{other:?}"),
+        };
+        // Every leg reaches the view, the last one leaving it to the left.
+        let path = colored(&app, draw::PATH);
+        let drawn = path.iter().filter(|&&(_, size, _)| size.x > 3.0).count();
+        assert_eq!(drawn, legs, "{path:?}");
+        // The dots of the cells the view touches, columns 5 to 35, not the
+        // rest of the grid's 40.
+        let dots = colored(&app, draw::NAV);
+        assert_eq!(dots.len(), 31 * 3);
+        assert!(dots.iter().all(|&(at, _, _)| at.x > -240.0 && at.x < 256.0));
+    }
+
+    #[test]
     fn a_box_off_the_pixel_grid_is_a_closed_ring_on_it_and_a_thin_one_a_fill() {
         use nadir_collision::Shape;
 
@@ -2830,8 +2933,22 @@ mod tests {
                 .with(crate::Velocity(Vec2::new(5.0, 0.0)))
                 .with(Collider::solid(Shape::Circle { radius: 6.0 }));
         }
+        // A grid with a wall, and a path round it.
+        let mut grid = nadir_collision::TileGrid::new(8, 8, 16.0, Vec2::splat(-64.0));
+        for y in 0..6 {
+            grid.set_solid(nadir_core::IVec2::new(4, y), true);
+        }
+        let world = app.world_mut();
+        world.resource_mut::<crate::Collisions>().set_grid(grid);
+        let walker = world.spawn().id();
+        let request =
+            nadir_collision::PathRequest::new(Vec2::new(-40.0, -40.0), Vec2::new(40.0, -40.0));
+        world
+            .resource_mut::<crate::Navigation>()
+            .request(walker, request);
         app.update(TICK, &tap(Key::F4));
         let overlays = &mut app.debug_tools().overlays;
+        overlays.nav_grid = true;
         overlays.hash = true;
         overlays.chunks = true;
         overlays.camera = true;
@@ -2845,6 +2962,8 @@ mod tests {
         }
         let allocated = nadir_platform::thread_alloc_counts().since(start);
         assert!(!colored(&app, draw::SOLID).is_empty());
+        assert!(!colored(&app, draw::NAV).is_empty());
+        assert!(!colored(&app, draw::PATH).is_empty());
         assert!(texts(&app).iter().any(|text| text == "time x2"));
         assert_eq!(allocated, nadir_platform::AllocCounts::default());
     }

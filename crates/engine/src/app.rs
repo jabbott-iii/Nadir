@@ -476,6 +476,9 @@ impl EngineCore {
 ///   a [`Parent`] where its parent is, plus its offset;
 /// - `nadir::triggers` (tick `PostMovement`): sends [`TriggerEnter`] and
 ///   [`TriggerExit`];
+/// - `nadir::navigation` (tick `PostMovement`): forgets the paths of
+///   entities despawned and searches the [`Navigation`](crate::Navigation)
+///   requests, within its budget;
 /// - `nadir::animate` (frame `Animate`): advances every [`Animator`] and
 ///   writes its frame into its [`Sprite`], sends [`AnimationFinished`],
 ///   mirrors the Sprite of each entity that faces [`Facing::Left`], and
@@ -490,9 +493,10 @@ impl EngineCore {
 ///   [`CurrentLevel`], with its background as the clear colour.
 ///
 /// While the game is paused ([`StateMachine`]), `nadir::movement`,
-/// `nadir::parent_offsets` and `nadir::triggers` do not run; while it
-/// loads, `nadir::extract_sprites` and `nadir::extract_level` do not, and
-/// no tick does ([`App::update`], ADR-0067).
+/// `nadir::parent_offsets`, `nadir::triggers` and `nadir::navigation` do
+/// not run; while it loads, `nadir::extract_sprites` and
+/// `nadir::extract_level` do not, and no tick does ([`App::update`],
+/// ADR-0067).
 ///
 /// So a game sets velocities in `Gameplay`, and reacts to the moves after
 /// the engine's, in `Movement` or `PostMovement`. It sets [`Facing`] and
@@ -631,6 +635,7 @@ impl App {
         world.insert_resource(FrameStats::default());
         world.insert_resource(TickStats::default());
         world.insert_resource(Collisions::new());
+        world.insert_resource(crate::Navigation::new());
         world.insert_resource(Clips::new());
         world.insert_resource(CollisionLayers::default());
         world.insert_resource(PrefabLibrary::new());
@@ -698,6 +703,12 @@ impl App {
                 FixedStage::PostMovement,
                 "nadir::triggers",
                 glue::triggers,
+                still,
+            )
+            .add_fixed_if(
+                FixedStage::PostMovement,
+                "nadir::navigation",
+                crate::navigation::navigation,
                 still,
             )
             .add_frame(FrameStage::Animate, "nadir::animate", glue::animate)
@@ -1760,6 +1771,7 @@ mod tests {
                 "tick  Movement: bounce",
                 "tick  PostMovement: nadir::parent_offsets (conditional)",
                 "tick  PostMovement: nadir::triggers (conditional)",
+                "tick  PostMovement: nadir::navigation (conditional)",
                 "frame Animate: nadir::animate",
                 "frame Animate: react",
                 "frame Camera: follow",

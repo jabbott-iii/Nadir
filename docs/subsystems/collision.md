@@ -1,7 +1,7 @@
 # Subsystem: `nadir-collision`
 
 Kinematic collision and spatial queries for top-down games, plus
-pathfinding. It is a pure library: it depends only on `nadir-core`. The
+pathfinding (M9.5). It is a pure library: it depends only on `nadir-core`. The
 facade wires it to the ECS. There is no rigid-body physics (ADR-0011).
 
 ## Shapes and colliders
@@ -169,6 +169,13 @@ The facade's systems drive the world each tick (ADR-0022):
 - The `Collisions` resource gives the world to systems for queries, with
   `entity(index)` and `index(entity)`. Until the next tick's movement, its
   colliders are the last tick's: check that an entity it gives is alive.
+- `nadir::navigation` (in `PostMovement`, after `nadir::triggers`) forgets
+  the paths of entities despawned, then searches the requests of the
+  `Navigation` resource across its own grid, if the game gave it one, or
+  else the collision grid, within its budget (M9.5, ADR-0069). A path a
+  system asks for in `Gameplay` is searched that tick, so it is there in
+  the next tick's `Gameplay` if the budget lasted, the oldest request
+  first; a search it did not finish goes on in the next tick.
 - Contacts are not passed on yet.
 - A child's solid collider is in its parent's way when the child's layer is
   in the parent's mask, since the parent moves while the child is still
@@ -217,18 +224,70 @@ picking.
 
 ## Pathfinding
 
-- **A\*** on the tile grid:
-  - 8-connected, octile heuristic
-  - corners can't be cut through solid cells
-  - `std::collections::BinaryHeap` with a reused node arena
-  - path smoothing by string-pulling with grid line-of-sight
-- **Budget:** at most N expansions per tick, spread across requests (a
-  request queue). Deterministic order.
-- **Flow fields**, for many agents heading to one goal:
-  - a Dijkstra integration field from the goal
-  - a direction field from it
-  - recomputed when the goal moves to another cell, at most once every 10
-    ticks
+As built in M9.5 (ADR-0069; `crates/collision/src/path.rs` and
+`flow.rs`):
+
+- **A\*** on the tile grid (`Pathfinder`):
+  - 8-connected: a step to a cell beside costs `STRAIGHT_COST`, 1,000, one
+    to a corner `DIAGONAL_COST`, 1,414, thousandths of a cell; the octile
+    heuristic counts in the same units, so the paths are the shortest by
+    that measure, with exact lengths.
+  - Corners can't be cut through solid cells: a step to a corner needs
+    both cells beside it open. Paths cross only cells in the grid and not
+    solid.
+  - `std::collections::BinaryHeap` of (estimate, heuristic, index), the
+    nearer the goal first of two equal estimates, then the lower index, so
+    every run finds the same path; and a reused node arena of three `u32`s
+    a cell, stamped with each search's number so that nothing is cleared.
+  - `find_cells(grid, start, goal, limit, out)` gives the cells and the
+    length, or `None` if an end is not open or the goal cannot be reached
+    within `limit` expansions. `expansions()` says how many it took.
+  - Lengths are `u32`s of thousandths: a path longer than 4,294,967
+    cells is not found.
+  - Its memory is kept: once the arena and the heap have grown to fit the
+    largest search yet, a search allocates nothing.
+  - `find(grid, request, limit, out)` takes a `PathRequest`: from and to
+    points, and the `clearance` of the agent's box. An end in a solid cell
+    uses the open cell of the eight around it nearest the point. The path
+    is smoothed by string-pulling with the grid's line of sight, over the
+    centers of all its cells, each leg at most 16 cells long: `out` gets
+    `from`, the centers of the cells where it turns (and one every 16 cells
+    of a straight run, and each cell's own where the box sees past none),
+    and `to`. Smoothing costs about 16 cells of line of sight a cell of
+    the path.
+  - `line_of_sight(grid, from, to, clearance)`: whether the box, moving in
+    a straight line, comes no nearer than `EPSILON` to a solid cell, edges
+    and corners included, walking the cells under its path column by
+    column. Lines along a seam between two solid cells, or through the
+    corner where two meet, are stopped. It is the same both ways: its
+    arithmetic is in `f64` from the end nearer the grid, widened by a bound
+    on its rounding, so that far from the grid it errs toward no sight.
+- **Budget** (`PathQueue<K>`): requests by key, searched in the queue's
+  order, at most `budget` expansions an update (1,024 by default, about
+  0.2 ms) spread across them, a search not finished going on in the next
+  update, and at most `limit` (65,536) in one search. The update that ends
+  a search smooths its path too, which the budget does not count.
+  - A new request for a key replaces the old one in its place in the
+    queue; one being searched, if it asks for other ends, goes to the back
+    to start again there, so that an agent asking again and again holds up
+    no one but itself. The last path stays until the new one comes.
+  - A search under way starts again when its grid changes: another size,
+    or a cell set since it began (each `TileGrid` edit takes a new stamp).
+  - The facade's `Navigation` is one, keyed by entity, which searches a
+    grid of its own when the game gives it one (`set_grid`).
+- **Flow fields** (`FlowField`), for many agents heading to one goal:
+  - a Dijkstra integration field from the goal's cell over A*'s steps;
+  - a direction field from it: toward the neighbour that leads to the goal
+    soonest, the first in A*'s order of two as soon;
+  - `update(grid, goal, tick)` recomputes it when the goal moves to
+    another cell, at most once every `EVERY`, 10, ticks, and at once for a
+    grid of another size or place, or with a cell set since.
+- What they see is a grid's tiles: colliders, such as a tree's trunk, are
+  not in the way of a path. An agent walking one slides along a collider
+  it meets at an angle, and stops at one it meets head-on. A game whose
+  props stand in the way gives `Navigation`, and its flow fields, a grid
+  with the props' cells solid, as the sandbox does. An agent wider than a
+  cell does not fit every path A* finds.
 
 ## Invariants
 
@@ -308,10 +367,33 @@ picking.
   allocation counter counts 0 allocations in a steady tick of 5,000
   colliding entities, with triggers and entities spawned and despawned
   (`steady_ticks` in `crates/engine/src/glue.rs`, feature `dev`).
-- **A\*:**
-  - optimal-length tests on small handcrafted grids
-  - no corner cutting
-  - an unreachable goal returns `None` within budget
+- **A\*** (`tests/paths.rs`, M9.5), against an oracle written apart from
+  the crate, a Dijkstra that scans for its nearest cell:
+  - optimal-length tests on small handcrafted grids, and on 300 random
+    ones, whose paths are steps a search may take;
+  - no corner cutting;
+  - an unreachable goal returns `None` within budget: once every cell it
+    can reach is expanded, or at the limit;
+  - the queue spends its budget across requests, the oldest first, a
+    search spread over updates costing what it costs alone; a new request
+    replaces the old in its place, one being searched for other ends goes
+    to the back, and the old path stays till the new one comes; an agent
+    asking again and again holds up no one; the same request carries the
+    search on; a search starts again when a cell it expanded is set solid;
+    a cancel or a freed slot gives no key another's path; a budget of 0
+    finishes nothing;
+  - ends in solid cells and the nearest open neighbour, by each cell's
+    nearest point, the first of two as near;
+  - smoothing: each leg in sight for the box, the cells' own steps at
+    either end when it sees past none, a point every 16 cells of a run;
+  - the line of sight against seams, corners and faces within `EPSILON`,
+    a clearance below 0 or not a number, the same both ways, and ends as
+    far as 3e38 px;
+  - flow fields' costs are the oracle's, and each step goes down the field
+    by its own cost; the goal followed at most once every 10 ticks, and a
+    grid moved or edited at once; a point off the field has no way.
+  - A steady tick of requests keeps every buffer of the queue
+    (`src/path.rs`).
 - **Benchmarks** (`cargo xtask bench collision`):
   - `collision_hash_5k`: rebuild plus 5k overlap queries;
   - `collision_slide_5k`: 5,000 `move_and_slide` calls, a crowd among 16 px
@@ -319,4 +401,7 @@ picking.
   - `facade_tick_5k` (`cargo xtask bench facade`): the same crowd as
     entities, a tenth of them triggers, through a whole tick of the facade,
     after 60 ticks have jammed it: most moves are stopped (ADR-0022);
-  - A* on 256×256 with 30% obstacles (M9.5).
+  - `astar_256` (`cargo xtask bench astar`, M9.5): A* from corner to
+    corner of 256 × 256 cells, 30% solid, smoothed for a 10 × 6 box: about
+    22,000 expansions, 5.3 ms on an i7-11800H, of which the smoothing is
+    1.1 ms.

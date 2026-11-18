@@ -80,6 +80,10 @@ pub(crate) const ALL: &[Benchmark] = &[
         run: collision::slide,
     },
     Benchmark {
+        name: "astar_256",
+        run: collision::astar,
+    },
+    Benchmark {
         name: "facade_tick_5k",
         run: facade::tick,
     },

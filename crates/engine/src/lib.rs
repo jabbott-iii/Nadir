@@ -179,9 +179,9 @@
 //!   `InGame` by itself. A level that does not load ends [`App::run`] with
 //!   [`Error::Level`], after a dialog.
 //! - `Paused` holds the world still: the ticks come, so that a pause menu's
-//!   tick systems see the input, but the engine's movement, parent offsets
-//!   and triggers do not run, and the frames' time, which animators and
-//!   animated tiles follow, stands still.
+//!   tick systems see the input, but the engine's movement, parent
+//!   offsets, triggers and navigation do not run, and the frames' time,
+//!   which animators and animated tiles follow, stands still.
 //!
 //! ```
 //! use std::time::Duration;
@@ -218,6 +218,13 @@
 //! tiles collide. [`TriggerEnter`] and [`TriggerExit`] are the events of
 //! colliders that start and stop overlapping a trigger. [`collision`] has
 //! the shapes, the layers and the queries.
+//!
+//! [`Navigation`] is the resource of paths: a system asks it for a path for
+//! an entity, and the engine searches the tile grid, or a grid the game
+//! gives it, each tick, within a budget of expansions, so that the path is
+//! there by the next tick, or, if the budget runs out first, a tick or more
+//! later. A crowd heading to one place follows a
+//! [`FlowField`](collision::FlowField) instead.
 //!
 //! # Animation
 //!
@@ -540,6 +547,7 @@ mod hot_reload;
 mod level;
 mod limiter;
 mod log_file;
+mod navigation;
 mod pack;
 mod reflected;
 mod replay;
@@ -576,6 +584,7 @@ pub use error::Error;
 pub use frame_allocs::FrameAllocs;
 pub use level::{CurrentLevel, LevelError, load_level, unload_level};
 pub use nadir_scene::SaveId;
+pub use navigation::Navigation;
 pub use reflected::{CollisionLayers, loading_context, reflect_context};
 pub use replay::{Replay, world_hash};
 pub use sound::AudioState;
@@ -587,7 +596,7 @@ pub use window_size::WindowSize;
 pub mod prelude {
     pub use nadir_assets::{AssetServer, FinalizeCtx, Handle, LoadState};
     pub use nadir_audio::{Audio, Bus, Music, PlayParams, Sound, VoiceChange, VoiceId};
-    pub use nadir_collision::{LayerMask, Shape, TileGrid};
+    pub use nadir_collision::{LayerMask, PathRequest, PathResult, Shape, TileGrid};
     pub use nadir_core::time::{Frame, Stopwatch, Tick};
     pub use nadir_core::{Color, IVec2, Key, MouseButton, Pcg32, Rect, UVec2, Vec2};
     pub use nadir_ecs::{
@@ -603,8 +612,8 @@ pub mod prelude {
 
     pub use crate::{
         AnimationFinished, Animator, App, AudioEmitter, AudioListener, AudioState, Clip, ClipError,
-        ClipFrame, Clips, Collider, Collisions, Config, Facing, MusicArea, Parent, Placement,
-        Playback, Player, PrevTransform, SaveId, Sprite, TickStats, Transform, TriggerEnter,
-        TriggerExit, Velocity, Volumes,
+        ClipFrame, Clips, Collider, Collisions, Config, Facing, MusicArea, Navigation, Parent,
+        Placement, Playback, Player, PrevTransform, SaveId, Sprite, TickStats, Transform,
+        TriggerEnter, TriggerExit, Velocity, Volumes,
     };
 }

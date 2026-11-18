@@ -14,9 +14,19 @@
 
 //! [`TileGrid`]: which tiles are solid.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use nadir_core::{IVec2, Rect, Vec2};
 
 use crate::{LayerMask, geometry};
+
+/// The next grid's stamp: each grid made, and each edit, takes the next.
+static STAMPS: AtomicU64 = AtomicU64::new(1);
+
+/// A stamp no grid has had.
+fn next_stamp() -> u64 {
+    STAMPS.fetch_add(1, Ordering::Relaxed)
+}
 
 /// A grid of square cells, each solid or not: how tiles collide. There
 /// are no colliders per tile.
@@ -24,7 +34,9 @@ use crate::{LayerMask, geometry};
 /// Cell `(0, 0)` has its top-left corner at the origin; `x` grows to the
 /// right and `y` down. Cells outside the grid are not solid, so a level
 /// needs walls round its edge.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// Two grids are equal when their cells, size, origin and layer are.
+#[derive(Clone, Debug)]
 pub struct TileGrid {
     width: u32,
     height: u32,
@@ -35,6 +47,29 @@ pub struct TileGrid {
     /// What the tiles are: a mover collides with them when its mask has
     /// it. Every layer at first.
     pub layer: LayerMask,
+    /// Changes whenever a cell may have: a new grid, `set_solid`, `clear`.
+    /// A copy keeps it, and no other grid has it, so a search or a flow
+    /// field can tell that its grid changed (M9.5). Only equality counts:
+    /// its value depends on the order grids were made in.
+    stamp: u64,
+}
+
+impl PartialEq for TileGrid {
+    fn eq(&self, other: &Self) -> bool {
+        (
+            self.width,
+            self.height,
+            self.cell_size,
+            self.origin,
+            self.layer,
+        ) == (
+            other.width,
+            other.height,
+            other.cell_size,
+            other.origin,
+            other.layer,
+        ) && self.solid == other.solid
+    }
 }
 
 impl TileGrid {
@@ -59,6 +94,7 @@ impl TileGrid {
             origin,
             solid: vec![0; cells.div_ceil(64)],
             layer: LayerMask::ALL,
+            stamp: next_stamp(),
         }
     }
 
@@ -110,11 +146,19 @@ impl TileGrid {
         } else {
             self.solid[word] &= !bit;
         }
+        self.stamp = next_stamp();
     }
 
     /// Makes every cell not solid.
     pub fn clear(&mut self) {
         self.solid.fill(0);
+        self.stamp = next_stamp();
+    }
+
+    /// What tells this grid's cells from any other's: equal for a grid and
+    /// its unedited copies, and for no other grid.
+    pub(crate) fn stamp(&self) -> u64 {
+        self.stamp
     }
 
     /// The cell that holds `point`, inside the grid or not.

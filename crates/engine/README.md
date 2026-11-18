@@ -60,9 +60,9 @@ Built:
   entity despawned or written as a prefab; a console on the backtick,
   over the log, with history, Tab completion, the engine's commands and
   the game's; debug drawing on F4
-  (colliders, triggers, the collision grid, the spatial hash, tile chunks,
-  the camera); and time controls, F5 to pause, F6 to step a tick, F7 to
-  scale the game's time;
+  (colliders, triggers, the collision grid, the nav grid, the paths, the
+  spatial hash, tile chunks, the camera); and time controls, F5 to pause,
+  F6 to step a tick, F7 to scale the game's time;
 - a world hash, to check that a replay gives the same simulation.
 
 Not built yet:
@@ -71,8 +71,8 @@ Not built yet:
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
 - gamepads (M8);
-- settings (M9.3), pathfinding (M9.5), and saving a game from `App`
-  (M9.7; nadir-scene has saves since M9.4);
+- settings (M9.3), and saving a game from `App` (M9.7; nadir-scene has
+  saves since M9.4);
 - the Metal backend for macOS (M10).
 
 ## What you need
@@ -425,6 +425,7 @@ adds its own first in their stages:
 | tick `Movement` | `nadir::movement` | Moves each entity with a `Velocity`; one with a `Collider` slides along what it meets |
 | tick `PostMovement` | `nadir::parent_offsets` | Puts each entity with a `Parent` at its parent's position, plus its offset |
 | tick `PostMovement` | `nadir::triggers` | Sends `TriggerEnter` and `TriggerExit` |
+| tick `PostMovement` | `nadir::navigation` | Searches the paths asked of `Navigation`, within its budget of expansions a tick |
 | frame `Animate` | `nadir::animate` | Advances each `Animator`, writes its frame into its `Sprite`, and mirrors the sprites that face left |
 | frame `Extract` | `nadir::sound` | Puts the listener at the `AudioListener` or the camera, plays each `AudioEmitter` at its entity, and sends the track of the `MusicArea` the listener is in |
 | frame `Extract` | `nadir::extract_sprites` | Draws each `Sprite` into the `RenderFrame`, between the last two ticks |
@@ -488,8 +489,19 @@ events when a collider starts and stops overlapping it.
 The resource `Collisions` holds the colliders, rebuilt each tick. Its
 `world()` answers queries (`point`, `aabb`, `circle`, `nearest`, and the
 casts `segment`, `sweep_aabb` and `sweep_circle`) with collider indices,
-which `Collisions::entity` turns into entities. Pathfinding comes with
-roadmap task M9.5.
+which `Collisions::entity` turns into entities.
+
+The resource `Navigation` finds paths across the tile grid. A system asks
+it for one with `request(entity, PathRequest::new(from, to))`, adding
+`with_clearance(half)` for the entity's size, and the engine searches it
+in the same tick, within a budget of expansions a tick shared by every
+request, the oldest first; `path(entity)` gives it from the next tick on,
+or a tick or more later if the budget ran out, the points to walk
+through, smoothed where the entity can see past a corner. Paths see the
+grid's tiles only: a game whose props stand in the way gives `Navigation`
+a grid of its own with their cells solid (`set_grid`). A crowd heading to
+one place follows a `nadir::collision::FlowField` instead: the way to it
+from every cell, computed again as the goal moves.
 
 ### Animation
 
@@ -581,8 +593,8 @@ the state it started in.
   not load, or, in a release build, one whose texture failed to load,
   ends `App::run` with `nadir::Error::Level`, after a dialog.
 - In `Paused` the ticks come, so that a pause menu's tick systems see the
-  input, but the engine moves nothing, fires no trigger, and holds the
-  frames' time, which animators and animated tiles follow.
+  input, but the engine moves nothing, fires no trigger, finds no path,
+  and holds the frames' time, which animators and animated tiles follow.
 
 ### Logs and errors
 

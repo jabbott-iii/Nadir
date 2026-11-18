@@ -71,6 +71,13 @@
       "iterations": 9
     },
     {
+      "name": "astar_256",
+      "median_ns": 5297732.5,
+      "p95_ns": 5582142.0,
+      "samples": 50,
+      "iterations": 2
+    },
+    {
       "name": "facade_tick_5k",
       "median_ns": 2392315.25,
       "p95_ns": 2455379.75,

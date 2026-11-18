@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! F4's debug drawing (roadmap M7.6, ADR-0064): the overlays its window
-//! ticks, drawn into the world as sprites of the debug UI's white texel, a
-//! virtual pixel wide, in front of every sprite, as the inspector's outline
-//! is (render's `DebugDrawList` is not built).
+//! F4's debug drawing (roadmap M7.6, ADR-0064; the nav grid and the paths
+//! M9.5, ADR-0069): the overlays its window ticks, drawn into the world as
+//! sprites of the debug UI's white texel, a virtual pixel wide, in front of
+//! every sprite, as the inspector's outline is (render's `DebugDrawList` is
+//! not built).
 
 use nadir_assets::Handle;
-use nadir_collision::{ColliderKind, Shape};
+use nadir_collision::{ColliderKind, PathResult, Shape};
 use nadir_core::{Color, IVec2, Rect, UVec2, Vec2};
 use nadir_debug::Ui;
 use nadir_ecs::World;
@@ -26,7 +27,7 @@ use nadir_render::{
     Camera2D, Font, RenderFrame, SortMode, SpriteDraw, TextDraw, Texture, TileLayer, TileLayers,
 };
 
-use crate::{Collider, Collisions, Parent, PrevTransform, Transform};
+use crate::{Collider, Collisions, Navigation, Parent, PrevTransform, Transform};
 
 /// The solid colliders' outlines.
 pub(crate) const SOLID: Color = Color::rgb(0, 220, 255);
@@ -34,6 +35,11 @@ pub(crate) const SOLID: Color = Color::rgb(0, 220, 255);
 pub(crate) const TRIGGER: Color = Color::rgb(255, 96, 255);
 /// The collision grid's solid cells, filled.
 pub(crate) const GRID: Color = Color::rgba(0, 220, 255, 56);
+/// The open cells that paths cross, of `Navigation`'s own grid or else the
+/// collision grid: a dot in each.
+pub(crate) const NAV: Color = Color::rgba(160, 255, 96, 176);
+/// The paths of [`Navigation`]: their legs, and a mark at the end of each.
+pub(crate) const PATH: Color = Color::rgb(255, 214, 0);
 /// The spatial hash's cells and their counts.
 pub(crate) const HASH: Color = Color::rgba(255, 255, 255, 160);
 /// The tile layers' chunks.
@@ -53,19 +59,24 @@ pub(crate) struct Overlays {
     pub(crate) colliders: bool,
     pub(crate) triggers: bool,
     pub(crate) grid: bool,
+    pub(crate) nav_grid: bool,
+    pub(crate) paths: bool,
     pub(crate) hash: bool,
     pub(crate) chunks: bool,
     pub(crate) camera: bool,
 }
 
 impl Overlays {
-    /// The colliders, the triggers and the grid: what a game's collision is
-    /// made of. The rest are the engine's insides.
+    /// The colliders, the triggers, the grid and the paths: what a game's
+    /// collision and its agents' ways are made of. The rest are the
+    /// engine's insides.
     pub(crate) fn new() -> Self {
         Self {
             colliders: true,
             triggers: true,
             grid: true,
+            nav_grid: false,
+            paths: true,
             hash: false,
             chunks: false,
             camera: false,
@@ -74,10 +85,16 @@ impl Overlays {
 
     /// Fills the window: a checkbox for each overlay, its name in its color.
     pub(crate) fn show(&mut self, ui: &mut Ui<'_>) {
-        let rows: [(&str, Color, &mut bool); 6] = [
+        let rows: [(&str, Color, &mut bool); 8] = [
             ("Colliders##colliders", SOLID, &mut self.colliders),
             ("Triggers##triggers", TRIGGER, &mut self.triggers),
             ("Tile grid##grid", Color::rgb(0, 220, 255), &mut self.grid),
+            (
+                "Nav grid##nav_grid",
+                Color::rgb(160, 255, 96),
+                &mut self.nav_grid,
+            ),
+            ("Paths##paths", PATH, &mut self.paths),
             (
                 "Spatial hash##hash",
                 Color::rgb(255, 255, 255),
@@ -209,6 +226,47 @@ impl Overlays {
             }
         }
 
+        if self.nav_grid {
+            let collisions = world.resource::<Collisions>();
+            let navigation = world.resource::<Navigation>();
+            let grid = navigation.grid().unwrap_or(collisions.grid());
+            if grid.width() > 0 && grid.height() > 0 {
+                let last = IVec2::new(
+                    i32::try_from(grid.width() - 1).unwrap_or(i32::MAX),
+                    i32::try_from(grid.height() - 1).unwrap_or(i32::MAX),
+                );
+                let first = grid.cell_at(view.min).max(IVec2::ZERO);
+                let end = grid.cell_at(view.max).min(last);
+                for y in first.y..=end.y {
+                    for x in first.x..=end.x {
+                        let cell = IVec2::new(x, y);
+                        if !grid.is_solid(cell) {
+                            pen.dot(grid.cell_rect(cell).center(), 1.0, NAV);
+                        }
+                    }
+                }
+            }
+        }
+
+        if self.paths {
+            for (_, path) in world.resource::<Navigation>().paths() {
+                let PathResult::Found(points) = path else {
+                    continue;
+                };
+                for leg in points.windows(2) {
+                    let (from, to) = (leg[0], leg[1]);
+                    if touches(Rect::new(from.min(to), from.max(to)), view) {
+                        pen.line(from, to, PATH);
+                    }
+                }
+                for &corner in points.iter().skip(1) {
+                    if touches(Rect::new(corner, corner), view) {
+                        pen.dot(corner, 1.5, PATH);
+                    }
+                }
+            }
+        }
+
         if self.chunks {
             let layers = world.resource::<TileLayers>();
             for drawn in tile_layers.iter() {
@@ -324,6 +382,12 @@ impl Pen<'_> {
         let side = Vec2::new(w, max.y - min.y - 2.0 * w);
         self.sprite(Vec2::new(min.x, min.y + w), side, color);
         self.sprite(Vec2::new(max.x - w, min.y + w), side, color);
+    }
+
+    /// A square `size` lines wide each way from `center`.
+    fn dot(&mut self, center: Vec2, size: f32, color: Color) {
+        let reach = Vec2::splat(self.width * size);
+        self.fill(Rect::new(center - reach, center + reach), color);
     }
 
     /// A line from `from` to `to`, centered on it: a sprite turned about

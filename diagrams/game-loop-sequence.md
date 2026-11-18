@@ -59,7 +59,7 @@ sequenceDiagram
     Srv->>Wk: Workers::new: 1 to 4 threads
     App->>App: the other resources, the events, the TypeRegistry
     App->>App: nadir_audio::new: Audio, AudioState, each bus's volume queued, the Mixer kept
-    App->>App: Schedule: the engine's 8 systems
+    App->>App: Schedule: the engine's 9 systems
     App->>App: FixedClock::new(60 Hz, 250 ms)
     App-->>Main: app
     Main->>Srv: Sprites::load: load_now an Atlas
@@ -321,6 +321,8 @@ sequenceDiagram
     Note over Sch,Wld: FixedStage::Gameplay
     Sch->>Game: move_player
     Game->>Wld: Velocity, Facing, Animator from Move
+    Sch->>Game: nav_grid, guards, pack
+    Game->>Wld: the enemies' grid if the level changed, Navigation requests, the enemies' Velocity, Facing, Animator
     Note over Sch,Wld: FixedStage::Movement
     Sch->>Eng: nadir::movement
     Eng->>Col: rebuild from Collider and Transform
@@ -333,6 +335,8 @@ sequenceDiagram
     Sch->>Eng: nadir::triggers
     Eng->>Col: sync, update_triggers
     Col->>Wld: send TriggerEnter, TriggerExit
+    Sch->>Eng: nadir::navigation
+    Eng->>Wld: forget despawned entities' paths, search Navigation's requests on the grid
     Note over Sch,Wld: FixedStage::Cleanup
     Sch->>Game: count_ticks
     Game->>Wld: Report ticks plus 1

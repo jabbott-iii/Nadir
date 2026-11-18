@@ -23,7 +23,12 @@
 //! camera follows them. Their steps sound where their feet come down, the
 //! pond's water laps, and the music crossfades from the north's tune to
 //! the south's as they go south past the tall walls of row 36, and back
-//! (`footsteps`, `field`). Once a second it logs how fast the
+//! (`footsteps`, `field`). Three red guards walk their rounds, and chase
+//! the person when they see them, along paths the engine finds; a violet
+//! pack in the south-west hunts them down a flow field while they are in
+//! the south, and goes home when they leave (`enemies.rs`). They stop
+//! beside the person and do no harm, and the person walks through them.
+//! Once a second it logs how fast the
 //! simulation ticks and the frames come, how long the ticks take, and what
 //! was drawn; with the `dev` feature, also how often the frames allocated.
 //! Close the window to quit.
@@ -88,6 +93,7 @@
 //! recording does not reach the hashes it logged.
 
 mod capture;
+mod enemies;
 mod map;
 mod replay;
 mod stress;
@@ -576,9 +582,10 @@ const POND_AT: Vec2 = Vec2::new(560.0, 112.0);
 
 /// The field: the level `field` (`assets/levels/field.ldtk`, cooked to
 /// `levels/field.klvl`), its ground, grid, tall walls, trees and rocks,
-/// then the person, and the camera on them; and its sound, the music of
-/// the north and the south, which crossfades from one to the other
-/// as the camera crosses [`SOUTH_TOP`], and the pond's water.
+/// then the person, and the camera on them; its sound, the music of the
+/// north and the south, which crossfades from one to the other as the
+/// camera crosses [`SOUTH_TOP`], and the pond's water; and its enemies,
+/// the guards and the pack, and their systems.
 ///
 /// # Errors
 ///
@@ -621,11 +628,14 @@ fn field(app: App, sprites: &Sprites) -> Result<App, Box<dyn Error>> {
         water.params.volume = 0.5;
         world.spawn().with(Transform::at(POND_AT)).with(water);
     }
-    Ok(app.insert_resource(gait).add_frame_system(
-        FrameStage::Camera,
-        "follow_camera",
-        follow_camera,
-    ))
+    // Last, so that everything before them keeps its id.
+    enemies::spawn(world, person, &gait);
+    Ok(app
+        .insert_resource(gait)
+        .add_fixed_system(FixedStage::Gameplay, "nav_grid", enemies::nav_grid)
+        .add_fixed_system(FixedStage::Gameplay, "guards", enemies::guards)
+        .add_fixed_system(FixedStage::Gameplay, "pack", enemies::pack)
+        .add_frame_system(FrameStage::Camera, "follow_camera", follow_camera))
 }
 
 /// The person, at [`PLAYER_START`], drawn as `sprite`, standing as `gait`
@@ -999,7 +1009,7 @@ mod tests {
     }
 
     /// The field, set up as the game sets it, without a window.
-    fn sandbox() -> App {
+    pub(crate) fn sandbox() -> App {
         scene(Scene::Field)
     }
 
@@ -1217,9 +1227,13 @@ mod tests {
             [
                 "tick  Input: nadir::snapshot",
                 "tick  Gameplay: move_player",
+                "tick  Gameplay: nav_grid",
+                "tick  Gameplay: guards",
+                "tick  Gameplay: pack",
                 "tick  Movement: nadir::movement (conditional)",
                 "tick  PostMovement: nadir::parent_offsets (conditional)",
                 "tick  PostMovement: nadir::triggers (conditional)",
+                "tick  PostMovement: nadir::navigation (conditional)",
                 "tick  Cleanup: count_ticks",
                 "tick  Cleanup: footsteps",
                 "frame Animate: nadir::animate",
@@ -1332,12 +1346,24 @@ mod tests {
         let out = world.resource::<RenderFrame>();
         let sprites = world.resource::<Sprites>();
         let map = map::build(sprites.tiles);
-        assert_eq!(out.sprites.len(), map.walls.len() + map.props.len() + 1);
+        assert_eq!(
+            out.sprites.len(),
+            map.walls.len() + map.props.len() + 1 + enemies::COUNT
+        );
         assert!(out.sprites.iter().all(|sprite| sprite.layer == 1));
+        // The person, and the enemies, people tinted.
+        let tinted = |tint| {
+            out.sprites
+                .iter()
+                .filter(|sprite| is_person(&sprites, sprite) && sprite.color == tint)
+                .count()
+        };
+        assert_eq!(tinted(enemies::GUARD_TINT), 3);
+        assert_eq!(tinted(enemies::PACK_TINT), 5);
         let drawn: Vec<&SpriteDraw> = out
             .sprites
             .iter()
-            .filter(|sprite| is_person(&sprites, sprite))
+            .filter(|sprite| is_person(&sprites, sprite) && sprite.color == Color::WHITE)
             .collect();
         assert_eq!(drawn.len(), 1);
         assert_eq!(drawn[0].position, PLAYER_START);

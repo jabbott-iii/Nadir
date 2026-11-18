@@ -5826,7 +5826,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   drawn as sprites in the facade (render's `DebugDrawList` left unbuilt),
   F4 as a window of checkboxes, the camera's overlay as its cross and view
   with the nav grid and paths left to M9.5, and a corner label for the
-  time's state; the rest is Proposed
+  time's state; the rest is Proposed. ADR-0069 adds the nav grid and the
+  paths (M9.5)
 - **Date:** 2026-11-14
 - **Context:**
   - M7.6 asks for F4's overlays (colliders, triggers, the spatial hash's
@@ -6389,3 +6390,188 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - a game ships an update that removes or reshapes a saved component;
   - a save takes over 100 ms to write or read, or over 1 MiB;
   - or M9.7 finds the facade needs `restore` to change.
+
+## ADR-0069 — M9.5: A* with a budgeted request queue and string-pulling for an agent's box in nadir-collision; flow fields; the facade's `Navigation` served by `nadir::navigation` after the triggers, on a grid of its own if given one; F4's nav grid and paths; the sandbox's guards and pack
+
+- **Status:** Accepted: the user chose its two open points on 2026-11-18
+  (the scope, a path queue in the facade, `Navigation`, with F4's
+  overlays, over the game keeping its own; and the sandbox's enemies,
+  guards that patrol and chase and a pack on a flow field), and accepted
+  it as written the same day
+- **Date:** 2026-11-18
+- **Context:**
+  - M9.5 asks for A* with a budget and smoothing, flow fields, and sandbox
+    enemies that chase and patrol; its acceptance is the collision spec's
+    A* tests (optimal lengths on hand-made grids, no corner cutting, an
+    unreachable goal giving `None` within budget) and a recorded A*
+    benchmark on 256 × 256 with 30% obstacles.
+  - The spec sketches A* on the tile grid, 8-connected with an octile
+    heuristic, no corner cut through solid cells, a `BinaryHeap` with a
+    reused node arena, smoothing by string-pulling with a grid line of
+    sight; a budget of N expansions a tick spread across a request queue
+    in a fixed order; and flow fields (a Dijkstra integration field and a
+    direction field) recomputed when the goal moves to another cell, at
+    most once every 10 ticks.
+  - nadir-collision depends only on nadir-core. The F4 debug drawing of
+    M7.6 left a nav grid and the current paths to this task (ADR-0064),
+    which the facade can draw only if it holds the paths.
+  - An agent's position is its feet, which rest on a wall's edge when it
+    stands against one: the cell under them can be the wall's.
+  - The sandbox's trees and rocks are colliders on open cells: a path or a
+    flow field over the tiles alone leads an agent into them, and one that
+    meets a collider head-on stops there.
+- **Decision:**
+  - **A\* (`Pathfinder`):**
+    - Steps cost `STRAIGHT_COST`, 1,000, and `DIAGONAL_COST`, 1,414:
+      thousandths of a cell, so lengths are exact integers and ties are
+      decided the same way on every run. The heuristic is the octile
+      distance in the same units, consistent with them. A path longer than
+      4,294,967 cells is not found.
+    - A step to a corner needs both cells beside it open. Paths cross only
+      cells in the grid and not solid.
+    - The open cells are a `BinaryHeap` of (estimate, heuristic, index):
+      of two equal estimates, the one nearer the goal first, then the
+      lower index. Stale entries are skipped, not removed.
+    - The arena is three `u32`s a cell (cost, parent, a state stamped
+      with the search's number), kept and grown to the largest grid, so a
+      search clears nothing; the stamps restart before they overflow. A
+      grid of `u32::MAX` cells or more has no paths. Once the arena and the
+      heap fit the largest search yet, a search allocates nothing.
+    - `find_cells` gives the cells and the length; `limit` caps the
+      expansions, the goal's own counted; a limit of 0 finds nothing.
+      `expansions` says how many the last search took.
+  - **Smoothing (`Pathfinder::find`, `PathRequest`):**
+    - A request is from and to points, with a `clearance`, the half size
+      of the agent's box. An end whose cell is solid or outside the grid
+      uses the open cell of the eight around it nearest the point.
+    - `line_of_sight(grid, from, to, clearance)`: the box, moving from
+      `from` to `to`, comes no nearer than `EPSILON` to a solid cell,
+      edges and corners included. It walks the grid column by column, the
+      rows the box covers in each, so its cost is the cells under the
+      box's path. Its arithmetic is in `f64`, from the end nearer the grid,
+      widened by a bound on its rounding: the same answer both ways, and
+      far from the grid an error toward no sight.
+    - String-pulling over the centers of all the path's cells, then the
+      goal: from each point kept, the furthest of the next points it sees,
+      one after another and no more than 16 cells away, is the next kept;
+      a point that sees not even the next keeps it, so the cells' own steps
+      are the fallback at either end. Smoothing then costs about 16 cells
+      of line of sight a cell of the path.
+  - **The queue (`PathQueue<K>`):**
+    - Requests by key, `u64` by default. A new request for a key replaces
+      its old one, which keeps its place in the queue; one being searched
+      that asks for other ends goes to the back, to start again there. The
+      last path found stays until the new one comes.
+    - `update(grid)` searches in the queue's order, carrying one search
+      over to the next update when the budget runs out, until none waits
+      or the budget is spent: 1,024 expansions an update by default, about
+      0.2 ms, and 65,536 a search. The update that ends a search smooths
+      its path, which the budget does not count.
+    - Each `TileGrid` edit (`set_solid`, `clear`) and each new grid takes a
+      new stamp, which a copy keeps: a search under way whose grid's stamp
+      or size changed starts again, as does a flow field's `update`.
+    - Results keep their buffers, so a steady tick allocates nothing.
+  - **Flow fields (`FlowField`):** a Dijkstra from the goal's cell (the
+    open one nearest it) over A*'s steps, costs in A*'s units, then a
+    direction toward the neighbour of least cost-through, the first of
+    A*'s neighbour order on a tie. `update(grid, goal, tick)` computes it
+    on its first call, for a grid of another size or place or with a cell
+    set since, or when the goal is in another cell and `EVERY`, 10, ticks
+    have passed since the last; `direction_at(point)` is a unit vector,
+    zero at the goal and off the field.
+  - **The facade:**
+    - `Navigation`, a resource of a `PathQueue<Entity>`, inserted by
+      `App::new`. Systems `request` paths; `path(entity)` gives the last.
+      `set_grid(Some(grid))` gives it a grid of its own to search in place
+      of the grid of `Collisions`: the level's with its props' cells solid.
+    - `nadir::navigation`, an engine system in `PostMovement` after
+      `nadir::triggers`, not run while paused: forgets the paths of
+      entities despawned, then updates the queue on its own grid or the
+      grid of `Collisions`. A path asked in a tick's `Gameplay` is searched
+      in that tick, there for the next one's if the budget lasted.
+    - F4 gains "Nav grid", a dot in each open cell in view of the grid
+      paths cross, off at first, and "Paths", each found path's legs and a
+      mark at the end of each, on at first.
+    - The prelude gains `Navigation`, `PathRequest` and `PathResult`.
+  - **The sandbox:**
+    - The enemies' grid (`NavGrid`): the collision grid with the cells
+      under its solid, unmoving colliders on the world's layer set solid
+      (the trees and rocks), made again when the level's grid or props
+      change; `Navigation` searches it, and the pack's fields cross it.
+    - Three guards, the person tinted red, walk rounds of cells and chase
+      the person when they see them within 112 px past no wall, tree or
+      rock (a `segment` on the world's layer), running straight at them
+      when the enemies' grid gives them room and along a path asked every
+      half second when not, and give up 3 s after they last saw them. One
+      that makes no progress for 40 ticks asks again, at most once every 40.
+    - Five violet pack members wait in a den in the south-west, hunt the
+      person down a flow field while they are in the south, each heading
+      for the middle of the next cell the field leads to, and go home down
+      another, walking through the people on the way so that the first home
+      do not bar the den to the rest.
+    - They stop 14 px from the person. Their colliders are on the people's
+      layer; the person's still stop at the world's only.
+- **Consequences:**
+  - The collision spec's A* tests pass, against a Dijkstra oracle written
+    apart from the crate, on 6 hand-made grids and 300 random ones.
+  - A review the same day, a workflow of seven reviewers and a skeptic or
+    two for each finding, upheld 34 findings (some found twice), all fixed:
+    a request re-asked while searched that held up every other key; the
+    unbudgeted, quadratic smoothing (a 4,096-cell corridor's took 267 ms);
+    searches and fields carrying on over an edited or replaced grid, to
+    paths through walls; smoothing that skipped the start's and the goal's
+    cells and cut a corner; a far end's rounding in the line of sight; the
+    pack and the guards pinned on the trees and rocks that paths did not
+    see (29 of 76 sampled cells of the south pinned a pack member); a
+    stuck guard asking every tick; allocation claims; and docs. A sweep of
+    119 cells of the south now leaves no pack member pinned, and each
+    member home.
+  - Of 27 bugs planted after the first five, 15 passed the tests: the new
+    tests catch 14 of them, and the 15th, a flow field blind to its grid's
+    place, can no longer happen, a grid elsewhere being another grid with
+    another stamp. Of 7 more planted to undo the review's fixes, they catch
+    6; the 7th, the line of sight walking from either end, gives the same
+    answers on every input tried.
+  - `astar_256`: a corner-to-corner search across 256 × 256 cells, 30%
+    solid, smoothed for a 10 × 6 box: 22,264 expansions and 156 points, a
+    median of 5.3 ms (p95 5.6 ms) on an i7-11800H before the review, of
+    which the search was 4.2 ms, about 190 ns an expansion, and the
+    smoothing 1.1 ms; so the queue's default budget is 1,024 expansions,
+    not the 4,096 first written. After the review, under a load average of
+    5 to 12 from another program, 5.6 to 7.1 ms with smoothing and, in the
+    same runs, 5.4 ms without.
+  - A* walks cells: an agent wider than a cell does not fit every path it
+    finds, and paths and flow fields see a grid's tiles only, so a game
+    marks its props' cells in a grid of its own.
+  - A search too long for one update starts again whenever its request
+    changes, or its grid: a chaser must not ask every tick, and a grid
+    edited every tick starves the searches under way.
+  - The person walks through the enemies, so the sandbox's tour and its
+    tests are unchanged; the sandbox's frames draw 8 sprites more.
+- **Alternatives considered:**
+  - The game keeping its own queue (the user's choice was the facade's):
+    the engine could not draw the paths on F4.
+  - Costs in `f32`: equal lengths summed in another order could differ by
+    a rounding step, and tie-breaking would follow it.
+  - Integer costs of 10 and 14: 14 is 1% off √2, enough to take a longer
+    path on a long diagonal.
+  - Smoothing as a line only: a box would clip a wall's corner on every
+    shortcut, and slide along it.
+  - Smoothing with the world's `segment`: it stops at colliders, which
+    move, and needs a `CollisionWorld`; the grid alone is the same on
+    every tick.
+  - Counting smoothing in the budget, or spreading it over updates: more
+    state for a cost the 16-cell leg already bounds.
+  - A fingerprint of the grid's cells to tell an edit: a pass over every
+    cell at each search's start; the stamp costs nothing.
+  - A* across colliders too, or a nav grid the engine derives from the
+    level's static colliders: the spec puts A* on the tile grid; a grid of
+    the game's own, given to `Navigation`, does it for now (backlog).
+  - Ends in solid cells refused: an agent standing against a wall to its
+    south would get no path.
+- **Revisit when:**
+  - a game needs agents wider than a cell, or props that move;
+  - the queue's default budget takes over 0.5 ms of a tick in the
+    profiler, or a path's smoothing shows in it;
+  - a level is over 4,096 × 4,096 cells (the arena's 12 bytes a cell);
+  - or M9.7's enemies need more than paths to a point, such as fleeing.

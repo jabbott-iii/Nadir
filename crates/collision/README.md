@@ -1,8 +1,8 @@
 # nadir-collision
 
-Kinematic collision and spatial queries for top-down 2D games: box and
-circle colliders, a grid of solid tiles, a spatial hash, move-and-slide,
-casts, overlap queries and triggers.
+Kinematic collision, spatial queries and pathfinding for top-down 2D
+games: box and circle colliders, a grid of solid tiles, a spatial hash,
+move-and-slide, casts, overlap queries, triggers, A* and flow fields.
 
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine
 for top-down games on Windows, macOS and Linux, written in Rust with no
@@ -25,11 +25,14 @@ Built:
   walls;
 - casts (a segment, a moving box, a moving circle) and overlap queries (a
   point, a box, a circle, the nearest collider);
-- triggers: which pairs began and stopped overlapping, tick by tick.
+- triggers: which pairs began and stopped overlapping, tick by tick;
+- A* on the tile grid, 8-connected with no corner cut, its path smoothed
+  for an agent's box, and a queue that searches many agents' requests a
+  budget of expansions a tick;
+- flow fields: the way to one goal from every cell, for a crowd.
 
 Not yet:
 
-- pathfinding, A* and flow fields (roadmap M9.5);
 - tiles other than full cells, such as half cells and diagonal walls.
 
 Movement is kinematic: there is no rigid-body physics.
