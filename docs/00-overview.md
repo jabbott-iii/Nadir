@@ -27,7 +27,7 @@ them.** A subsystem is not "done" until the sandbox uses it.
 - A general-purpose editor. Levels are authored in LDtk; sprites in Aseprite
   or any PNG tool (ADR-0012). The studio planned for M12 manages assets,
   edits LDtk projects and launches the game as a demo for bug reports
-  (ADR-0070, proposed).
+  (ADR-0070).
 - Networking/multiplayer. Not in scope; it would require a new ADR because it
   changes simulation determinism requirements.
 - Scripting languages. Gameplay is Rust plus data files.

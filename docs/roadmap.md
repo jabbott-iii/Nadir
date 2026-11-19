@@ -6218,10 +6218,10 @@ The studio is a desktop GUI for making a game with the engine: it manages
 a project's assets, edits its LDtk levels, launches the game as a demo
 build, shows that build's diagnostics live, and files bug tickets with
 screenshots into a folder. From M12.7 it is the core binary of a release,
-beside the crates (ADR-0070, proposed; the user chose its four open
-points on 2026-11-18: LDtk projects edited in the studio, this milestone
-after M11, the demo as a release build with a `diagnostics` feature, and
-the site's fonts baked as bitmap fonts).
+beside the crates (ADR-0070, accepted on 2026-11-18; the user chose its
+four open points that day: LDtk projects edited in the studio, this
+milestone after M11, the demo as a release build with a `diagnostics`
+feature, and the site's fonts baked as bitmap fonts).
 
 - It is built from the engine's own parts, with no third-party crates: a
   window of the facade, the immediate-mode UI of nadir-debug, the cook,

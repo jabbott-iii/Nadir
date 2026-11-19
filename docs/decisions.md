@@ -277,8 +277,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0012 — Use external content tools; no custom level editor
 
-- **Status:** Accepted; ADR-0070, proposed, would replace its "no custom
-  level editor" with the studio's editing of LDtk projects (M12.3)
+- **Status:** Accepted; superseded in part by ADR-0070, whose studio edits
+  LDtk projects (M12.3) in place of "no custom level editor"
 - **Date:** 2026-10-12
 - **Context:** Building editors is the classic engine scope trap.
 - **Decision:**
@@ -6579,11 +6579,11 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0070 — M12: the studio, a development GUI in jabbott.dev's style for assets, LDtk level editing, demo launching with diagnostics, and bug tickets; the core binary of a release
 
-- **Status:** Proposed: the user asked for the studio on 2026-11-18 and
+- **Status:** Accepted: the user asked for the studio on 2026-11-18 and
   chose its four open points that day (levels edited as LDtk projects in
   the studio; a milestone M12 after M11; the demo as a release build with
   a `diagnostics` feature; Saira and JetBrains Mono baked as bitmap
-  fonts); the rest waits for acceptance
+  fonts), and accepted it as written the same day
 - **Date:** 2026-11-18
 - **Context:**
   - The user asked for a GUI in the style of jabbott.dev for asset
