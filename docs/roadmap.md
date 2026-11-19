@@ -6212,7 +6212,204 @@ three OSes from a tag, and the release checklist is complete.
 
 ---
 
-## Backlog (M12+, each needs a trigger or a decision)
+## M12 — Studio: the development GUI
+
+The studio is a desktop GUI for making a game with the engine: it manages
+a project's assets, edits its LDtk levels, launches the game as a demo
+build, shows that build's diagnostics live, and files bug tickets with
+screenshots into a folder. From M12.7 it is the core binary of a release,
+beside the crates (ADR-0070, proposed; the user chose its four open
+points on 2026-11-18: LDtk projects edited in the studio, this milestone
+after M11, the demo as a release build with a `diagnostics` feature, and
+the site's fonts baked as bitmap fonts).
+
+- It is built from the engine's own parts, with no third-party crates: a
+  window of the facade, the immediate-mode UI of nadir-debug, the cook,
+  the codecs. It never links the game: it runs the cook and the demo as
+  processes, and talks to the demo over the child's pipes. Nothing leaves
+  the machine: no network, no upload.
+- **Its look is jabbott.dev's** (`assets/css/style.css` there, read on
+  2026-11-18), a dark "deep space" theme:
+  - Background `#0b0c0d`, raised `#121517`, panels `#14181a` (78% opaque
+    over the backdrop where it shows), slate `#29353a` and `#1b2326`;
+    lines white at 8% and 16%.
+  - Text `#eef2f3`, secondary `#b3bdc1`, muted `#7d898e`.
+  - Accents: teal `#5ccbcb` (hover `#8fe5e5`, a wash at 10%, a glow at
+    35%), the main one, for focus, links and selection; amber `#f2c200`
+    (hover `#ffd84a`) for the one action that matters most; green
+    `#3ddc97`, rust `#f09a4a` and violet `#a58cff` to tell kinds apart.
+  - Type: Saira (300 to 700) for text, 16 px at 1.65 line height,
+    headings at weight 500; JetBrains Mono (400, 600) for paths, numbers
+    and logs.
+  - Motifs: labels and buttons in capitals, letter-spaced 0.08 to 0.32
+    em; corners cut at 10 px rather than rounded; panels with bracket
+    corners; kickers like `// Assets`; titles underlined with `===` and
+    `---`; numbered lists (`01`, `02`); a 2 px teal focus ring; a faint
+    teal and amber glow in the backdrop. Buttons: ghost, teal, amber and
+    slate.
+
+- [ ] **M12.1 — studio: the crate, its window, theme and fonts**
+  - Depends: M11.8
+  - Do:
+    - `tools/studio`, package `nadir-studio`, in layer 6, with its row in
+      the dependency matrix (the facade, nadir-debug, nadir-codec,
+      nadir-core) and its line in `AGENTS.md`'s workspace map. The cook,
+      in the same layer, runs as a process.
+    - The UI outside `dev`: the facade's debug UI is `dev` only, and the
+      studio ships as a release build. Let an app draw nadir-debug's UI in
+      a release build without hot reload, placeholders or the engine's
+      own debug windows (an ADR), and keep the shipped game's tree free of
+      it (`cargo xtask release-no-dev`).
+    - A theme for nadir-debug's UI: its colors, fonts, spacing, corner
+      cuts and bracket corners as tokens, the engine's present look the
+      default; the studio's from the palette above.
+    - Saira and JetBrains Mono baked to bitmap fonts at the UI's sizes
+      with a BMFont-compatible generator (ADR-0012 keeps fonts in such
+      tools), cooked by the font pipeline (M7.7), their SIL OFL 1.1 text
+      beside them and in the release's notices.
+    - The shell: a sidebar of the studio's pages (Assets, Levels, Demo,
+      Tickets, Settings), a status bar, the window's place and the last
+      project kept across runs.
+  - Accept: the studio opens a window in the theme; a golden image of its
+    shell; the default theme leaves every existing golden image as it is;
+    no third-party crate; the shipped game's tree has no studio UI.
+  - Verify: `cargo xtask ci`; `cargo xtask golden`; `cargo run -p
+    nadir-studio`, looked at (manual)
+
+- [ ] **M12.2 — studio: projects and assets**
+  - Depends: M12.1
+  - Do:
+    - Open a game's project: its `assets/`, its cooked output and its
+      package, through a file browser of the studio's own (Linux has no
+      native file dialog without a third-party library).
+    - Assets by kind (sprites and Aseprite exports, tile sets, sounds,
+      music, fonts, prefabs, data files, LDtk projects), with previews: a
+      texture, a clip playing, a sound through the mixer, a prefab's fields
+      through reflection.
+    - Each cook job's state (up to date, stale, failed with its file and
+      message), from running `nadir-cook` and its `--watch` as processes.
+    - Import a file into `assets/` under the cook's path rules (lowercase,
+      `/`, no `..`, no names that collide by case), and list broken
+      references: a prefab, level or data file naming an asset that does
+      not exist.
+  - Accept: the sandbox's project opens, every asset listed and
+    previewed; a cook failure shows its file and message; an imported PNG
+    is cooked into the atlas; a planted broken reference is listed.
+  - Verify: `cargo test -p nadir-studio`; `cargo run -p nadir-studio --
+    --project .` with the sandbox (manual)
+
+- [ ] **M12.3 — studio: editing LDtk levels**
+  - Depends: M12.2
+  - Note: ADR-0070 replaces ADR-0012's "no custom level editor": the
+    studio edits LDtk projects, which LDtk still opens.
+  - Do:
+    - An LDtk writer beside nadir-codec's reader, which only the cook
+      uses now: what the studio does not edit, unknown fields included, is
+      written back as it was read, and the supported LDtk version is
+      pinned.
+    - Editing: tile layers (paint, erase, fill, pick), the IntGrid that
+      the collision grid comes from, entities (place, move, delete, their
+      fields through the prefab registry), a level's size; undo and redo;
+      saving recooks the level and reloads it into a running demo.
+  - Accept: the sandbox's field opens, is edited and saved, LDtk opens the
+    saved file, and the cooked level shows the change in the game; a
+    project read and written with no edit is unchanged; the reader and
+    writer agree on every fuzz input that reads; fixtures beside the tests.
+  - Verify: `cargo test -p nadir-codec`; `cargo xtask fuzz-smoke --target
+    ldtk`; an edit opened in LDtk (manual)
+
+- [ ] **M12.4 — engine: the `diagnostics` feature and its report channel**
+  - Depends: M9.6
+  - Do:
+    - A facade feature, `diagnostics`, apart from `dev`: the demo build is
+      a release build with it. A shipped game has none of it, checked as
+      `release-no-dev` checks `dev`.
+    - Checks the engine runs, each on or off, with a level (info, warn,
+      error) and a category the studio sets while the demo runs: runtime
+      inconsistencies (a `Transform` or `Velocity` that is not a number,
+      an entity outside the level), broken hierarchy (a `Parent` that is
+      dead, or a chain of parents that loops), assets (a placeholder
+      shown, a sprite with no texture, an animator's clip missing),
+      timing (a tick over its budget, a frame's hitch), audio (an
+      underrun, a voice stolen), paths not found, and the game's own
+      checks (`App::add_diagnostic`).
+    - Metrics sampled each second: tick and frame times, entities, draw
+      calls, sprites, voices, allocations a frame.
+    - The channel: records of a versioned format of our own (with the
+      log's records) written to the child's stdout, the studio's settings
+      read from its stdin; bounded, so a slow reader costs the game drops,
+      counted, never a stall.
+  - Accept: a test for each check, a planted broken hierarchy among them;
+    a steady tick with every check on allocates nothing; the format has a
+    fixture, its documented subset and a fuzz target; the cost of the
+    checks is benchmarked.
+  - Verify: `cargo test -p nadir_engine --features diagnostics`; `cargo
+    xtask fuzz-smoke --target diagnostics`; `cargo xtask bench
+    diagnostics`
+
+- [ ] **M12.5 — studio: launching the demo and its live log**
+  - Depends: M12.2, M12.4
+  - Do:
+    - Build the project's demo (`--release --features diagnostics`) where
+      a toolchain is present, or run the demo build shipped beside the
+      studio; launch it as a child process on the project's assets; stop
+      and restart it.
+    - The live log: the demo's records and log filtered by level,
+      category, entity and text; a category or threshold changed in the
+      studio reaches the running demo; metrics as graphs; a demo that
+      exits or crashes reported with its code and M9.6's crash report.
+    - Each run's records saved as a session in the project.
+  - Accept: the sandbox's demo launches from the studio and its records
+    arrive live; a category switched off stops arriving; a demo killed is
+    reported; a saved session reopens.
+  - Verify: `cargo test -p nadir-studio` (with a stand-in child
+    process); the sandbox's demo launched and stopped (manual, Linux)
+  - ⏳ needs Windows and macOS: launching, the pipes and a crash, by hand
+
+- [ ] **M12.6 — studio: bug tickets and screenshots**
+  - Depends: M12.5
+  - Do:
+    - A key in the demo, and a form in the studio, that file a ticket: a
+      title, what happened, steps, a severity, labels; with the game's
+      version, the OS and GPU (M9.6's report), the session's last records
+      and log, and the session's replay (`--record`), to reproduce it.
+    - An optional screenshot: the renderer reads back the frame it last
+      presented, and the demo writes it beside the ticket.
+    - The ticket folder: `tickets/<time>-<slug>/` in the project, a
+      `ticket` file of a versioned format of our own, the screenshot, the
+      records and the replay. The studio lists, opens, edits and closes
+      tickets, and shows the screenshot.
+  - Accept: a ticket filed by the demo's key and one filed in the studio
+    each land in the folder, screenshot included; the studio lists and
+    reopens them; a ticket's replay plays its session's ticks again to
+    the same world hash; the format has a fixture and a fuzz target.
+  - Verify: `cargo test -p nadir-studio`; `cargo xtask fuzz-smoke
+    --target ticket`; a ticket filed from the sandbox's demo (manual)
+
+- [ ] **M12.7 — the studio in the release**
+  - Depends: M12.3, M12.6, M11.2
+  - Do:
+    - Make `nadir-studio` the core binary of a release: in the archives
+      of the six targets, a `.deb`, the packages of M11.1 (a signed and
+      notarized `.app` on macOS through M11.2's workflow), with the
+      sandbox's demo build beside it; the crates published as before.
+    - `docs/05-release.md`'s "What a release publishes", the READMEs and
+      the release checklist.
+  - Accept: a pre-release tag's release holds the studio for every
+    target, and it launches on each OS; the shipped game's tree still has
+    neither `dev` nor `diagnostics`.
+  - Verify: the release workflow on a pre-release tag (a human runs it);
+    the studio launched from each package (manual)
+  - ⏳ needs Windows and macOS: the packages launched there
+
+**Exit criteria (M12):** on each OS, a developer opens a project in the
+studio, edits a level, cooks it, launches the demo, watches its
+diagnostics, and files a ticket with a screenshot; and a release ships the
+studio.
+
+---
+
+## Backlog (M13+, each needs a trigger or a decision)
 
 | Item | Trigger / reason |
 | :- | :- |
@@ -6227,7 +6424,7 @@ three OSes from a tag, and the release checklist is complete.
 | Windows installer | A non-Steam/itch distribution channel requires one |
 | Opt-in crash upload | Volume of player bug reports; requires a privacy review |
 | Native file watchers (inotify, FSEvents, `ReadDirectoryChangesW`) | Polling cost on large asset trees |
-| Play-in-editor tooling | After the vertical slice, if level iteration is the bottleneck |
+| Play-in-editor tooling: the game running inside the studio's level editor, rather than as the demo it launches (M12) | After M12, if level iteration is the bottleneck |
 | ECS change detection | A profiled need (e.g. render extract of static sprites) |
 | Lock-free audio command queue | Measured `try_lock` contention |
 | Localization pipeline (string tables, plurals) | Before the first non-English release |

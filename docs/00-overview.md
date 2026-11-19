@@ -25,11 +25,13 @@ them.** A subsystem is not "done" until the sandbox uses it.
 - Web/WASM, Android, iOS, consoles (ADR-0001).
 - 3D rendering of any kind; skeletal animation; rigid-body physics (ADR-0011).
 - A general-purpose editor. Levels are authored in LDtk; sprites in Aseprite
-  or any PNG tool (ADR-0012).
+  or any PNG tool (ADR-0012). The studio planned for M12 manages assets,
+  edits LDtk projects and launches the game as a demo for bug reports
+  (ADR-0070, proposed).
 - Networking/multiplayer. Not in scope; it would require a new ADR because it
   changes simulation determinism requirements.
 - Scripting languages. Gameplay is Rust plus data files.
-- Native Wayland before M12 (ADR-0009).
+- Native Wayland before the backlog's M13+ (ADR-0009).
 
 ## Performance budgets
 
@@ -101,7 +103,7 @@ binding gets layout tests.
 | :- | :- |
 | Hand-written FFI has subtle ABI or layout bugs | Bindings only in `sys`; `size_of`/`align_of` asserts against values taken from official headers; safe wrappers in `platform`; `/add-ffi-binding` skill enforces the procedure |
 | Apple removes OpenGL | Metal backend at M10; RHI designed for both from day one; pull M10 earlier if Apple announces removal |
-| Wayland-only systems without XWayland | Rare today on desktop distros; native Wayland in backlog (M12) with a written trigger condition |
+| Wayland-only systems without XWayland | Rare today on desktop distros; native Wayland in backlog (M13+) with a written trigger condition |
 | Scope creep (editor, render graph, scripting) | Explicit non-goals; anything new needs an ADR |
 | Untrusted file parsing (saves, mods, downloaded content) | Runtime loads only simple formats; every parser fuzzed; size and allocation caps |
 | Gamepad diversity | XInput, evdev and GameController cover mainstream pads; HID-level support is backlog |

@@ -277,7 +277,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0012 — Use external content tools; no custom level editor
 
-- **Status:** Accepted
+- **Status:** Accepted; ADR-0070, proposed, would replace its "no custom
+  level editor" with the studio's editing of LDtk projects (M12.3)
 - **Date:** 2026-10-12
 - **Context:** Building editors is the classic engine scope trap.
 - **Decision:**
@@ -6575,3 +6576,94 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     profiler, or a path's smoothing shows in it;
   - a level is over 4,096 × 4,096 cells (the arena's 12 bytes a cell);
   - or M9.7's enemies need more than paths to a point, such as fleeing.
+
+## ADR-0070 — M12: the studio, a development GUI in jabbott.dev's style for assets, LDtk level editing, demo launching with diagnostics, and bug tickets; the core binary of a release
+
+- **Status:** Proposed: the user asked for the studio on 2026-11-18 and
+  chose its four open points that day (levels edited as LDtk projects in
+  the studio; a milestone M12 after M11; the demo as a release build with
+  a `diagnostics` feature; Saira and JetBrains Mono baked as bitmap
+  fonts); the rest waits for acceptance
+- **Date:** 2026-11-18
+- **Context:**
+  - The user asked for a GUI in the style of jabbott.dev for asset
+    management, level creation and launching the game as a demo to
+    collect data on bugs: a logging system that can be customized, for
+    runtime inconsistencies, potential bugs, broken hierarchy and other
+    metrics; bug tickets with optional screenshots, put in a ticket
+    folder; and the GUI as the core binary that ships in production
+    beside the crates.
+  - ADR-0012 keeps levels in LDtk and the engine to no editor of its own
+    but the debug inspector and console; `docs/00-overview.md` makes a
+    general-purpose editor a non-goal. The cook reads LDtk 1.5.3 projects.
+  - A release ships `nadir-cook`, the sandbox and the crates (ADR-0036).
+    M11 plans the game's signed packages.
+  - The facade draws nadir-debug's UI only with `dev`, which a release
+    build leaves out (`cargo xtask release-no-dev`). The engine draws
+    bitmap fonts only (ADR-0010); a TrueType rasterizer is backlog.
+  - jabbott.dev's stylesheet (`assets/css/style.css`, read on
+    2026-11-18) is a dark theme: background `#0b0c0d`, panels `#14181a`,
+    text `#eef2f3`, accents teal `#5ccbcb` and amber `#f2c200`, Saira and
+    JetBrains Mono from Google Fonts (SIL OFL 1.1), capitals letter-spaced,
+    corners cut at 10 px, bracket corners on panels.
+- **Decision:**
+  - **The studio** (`tools/studio`, package `nadir-studio`, layer 6), a
+    milestone of its own, M12, after M11: the game ships as M11 plans, and
+    M12.7 makes the studio the core binary of the releases after it.
+  - **Built from the engine:** the facade's window, nadir-debug's UI, the
+    codecs, no third-party crate. It runs the cook and the demo as
+    processes, so it links neither the game nor the cook (which share its
+    layer), and nothing it does leaves the machine.
+  - **Look:** jabbott.dev's palette, motifs and type, as M12's preamble in
+    the roadmap lists them, through a theme for nadir-debug's UI whose
+    default is the present look. Saira and JetBrains Mono are baked as
+    bitmap fonts with a BMFont-compatible tool, cooked as fonts are, their
+    license beside them.
+  - **Levels:** the studio edits LDtk projects (tile layers, the IntGrid,
+    entities and their fields), writing back as read what it does not
+    edit, so that LDtk still opens them; ADR-0012's "no custom level
+    editor" gives way to this, and LDtk stays a way to edit them.
+  - **The demo build:** a release build with a facade feature,
+    `diagnostics`, apart from `dev`: checks the engine runs (runtime
+    inconsistencies, broken hierarchy, assets, timing, audio, paths, and
+    the game's own), each on or off at a level and category the studio
+    sets while it runs, metrics, and the log, as records of a versioned
+    format of our own on the child's stdout, bounded so the game never
+    waits. A shipped game has neither `dev` nor `diagnostics`.
+  - **Tickets:** a folder in the project, `tickets/<time>-<slug>/`, of a
+    ticket file of a versioned format of our own, an optional screenshot
+    the renderer reads back from the last frame, the session's records,
+    and its replay.
+- **Consequences:**
+  - Seven tasks, M12.1 to M12.7, with new parsers (the diagnostics
+    records, the ticket file) and an LDtk writer, each with fixtures and
+    a fuzz target as `.claude/rules/parsers.md` asks.
+  - nadir-debug gains a theme, and a way to draw its UI in a release
+    build, each needing its own design and ADR in M12.1.
+  - The renderer gains a readback of the presented frame, and the facade
+    a feature that the release checks must keep out of a shipped game.
+  - The engine owns an editor's upkeep: LDtk's format moves under it, and
+    each LDtk version supported is pinned and tested.
+  - The fonts are third-party assets under the SIL OFL 1.1: not crates,
+    but their license ships beside them and in the release's notices.
+  - On Windows and macOS, launching a child process, its pipes and the
+    packages need checks on those systems.
+- **Alternatives considered:**
+  - Launching LDtk from the studio, ADR-0012 unchanged: no editing in the
+    studio, which the user asked for.
+  - A level format of the studio's own, LDtk only imported: a new format,
+    parser and migrations, and artists lose LDtk.
+  - The studio before M11, which M11.1 would wait for: delays the first
+    release.
+  - The demo as the `dev` build: slower than what players run, and with
+    tools a bug report does not need.
+  - The engine's pixel font with the site's colors only: less like the
+    site.
+  - A third-party GUI crate (egui, iced): against the dependency policy.
+- **Revisit when:**
+  - LDtk ships a version whose files the writer cannot round-trip;
+  - the studio needs the network (an upload of tickets), which the
+    overview's scope (no networking) and the privacy review that the
+    crash upload awaits would have to allow;
+  - a TrueType rasterizer lands, and the fonts could be read as they are;
+  - or a second game uses the studio and its project model must change.
