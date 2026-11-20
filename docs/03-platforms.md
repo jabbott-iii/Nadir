@@ -36,8 +36,10 @@ releases build on `ubuntu-24.04`, whose symbols set their glibc floor
 ### Window and event loop
 
 - Call `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`
-  at startup. Also declare it in the embedded manifest, so it applies even
-  before code runs.
+  at startup, before the first window: the window's backend does, and so
+  does the error dialog's message box, which can come first, as the crash
+  notice of the next launch does (ADR-0071). Also declare it in the
+  embedded manifest, so it applies even before code runs.
 - Create the window with `RegisterClassExW` and `CreateWindowExW` (UTF-16
   strings via a small `wide()` helper).
 - Pump messages with `PeekMessageW(PM_REMOVE)`, then `TranslateMessage` and

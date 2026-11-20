@@ -193,6 +193,7 @@ impl AudioStream {
 
 pub fn user_dirs(studio: &str, game: &str) -> Result<UserDirs, PlatformError>;  // config, data, logs
 pub fn show_error_dialog(title: &str, message: &str);
+pub fn os_description() -> String;  // one line, for crash reports: system, its version where known, architecture
 pub fn precise_sleep(until: std::time::Instant);
 pub fn create_headless_gl() -> Result<HeadlessGl, PlatformError>;               // tests/goldens; HeadlessGl: GlContext, !Send, !Sync
 ```
@@ -371,6 +372,11 @@ it requires `unsafe impl GlobalAlloc`.
 - `user_dirs` only works out paths; it creates no folder. It rejects a
   studio or game name that is not a valid folder name on all three OSes,
   whichever OS it runs on, so a name that works on one works on all.
+- `os_description` reads `PRETTY_NAME` from `/etc/os-release` (else
+  `/usr/lib/os-release`) and `/proc/sys/kernel/osrelease` on Linux, as
+  `Pop!_OS 24.04 LTS (Linux 7.2.15-76070215-generic, x86_64)`. On Windows
+  and macOS it gives the system's name and the architecture only, until
+  M1.5 and M1.6 read their versions (ADR-0071).
 
 ## Tests
 

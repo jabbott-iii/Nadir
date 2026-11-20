@@ -47,7 +47,7 @@ use crate::sound::{AudioState, MixerOutput, Tracked};
 use crate::{
     AnimationFinished, Animator, AudioEmitter, AudioListener, Clips, Collider, CollisionLayers,
     Collisions, CurrentLevel, Error, Facing, LevelError, MusicArea, Parent, Player, PrevTransform,
-    Replay, SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit, Velocity, glue,
+    Replay, SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit, Velocity, crash, glue,
     log_file,
 };
 
@@ -1316,13 +1316,37 @@ impl App {
     /// profiler shows each frame's GPU time once it is read back, two
     /// renders later or more.
     ///
+    /// Before anything else, it sets a panic hook that writes a crash
+    /// report for each panic in the process, on any thread, from then on:
+    /// a file in `crashes` in the game's data folder, on Linux
+    /// `~/.local/share/<game>/crashes`, named after the time, as
+    /// `2026-11-19_12-34-56.txt`. It has the panic's message and place, a
+    /// backtrace, the engine's version, the system, the GPU and the log's
+    /// last 200 records; the hook set before it runs first. A panic that
+    /// ends `run` is shown to the player with [`show_error_dialog`] once
+    /// the window has closed, with where its report is, and goes on
+    /// unwinding. The next launch tells the player of the reports written
+    /// since the last, in the log and with the same dialog. Where the data
+    /// folder is not known, a panic's report goes into the log alone. A
+    /// panic in a game's setup, before `run`, gets no report.
+    ///
     /// # Errors
     ///
     /// Fails if the window cannot be opened, the renderer cannot start, or
     /// a frame cannot be drawn. Before it returns the error, it logs it and
     /// shows it to the player with [`show_error_dialog`].
-    pub fn run(mut self) -> Result<(), Error> {
+    pub fn run(self) -> Result<(), Error> {
+        crash::install(&self.config);
+        let title = self.config.title.clone();
+        // Unwinding out of `run_window` closes the window, then the player
+        // is told.
+        crash::run_reporting(&title, || self.run_window())
+    }
+
+    /// [`App::run`]'s work, after the panic hook is set.
+    fn run_window(mut self) -> Result<(), Error> {
         log_file::start(&self.config.studio, &self.config.game);
+        crash::tell_of_unseen(&self.config.title);
         #[cfg(feature = "dev")]
         match nadir_platform::user_dirs(&self.config.studio, &self.config.game) {
             Ok(dirs) => {
@@ -1342,6 +1366,14 @@ impl App {
             Platform::new(&self.config.window()).map_err(|error| fatal(&title, error.into()))?;
         let graphics = match Device::new(platform.gpu_surface()) {
             Ok(mut device) => {
+                let caps = device.caps();
+                crash::set_gpu(format!(
+                    "{}, by {}; {} {}",
+                    caps.renderer,
+                    caps.vendor,
+                    caps.backend.name(),
+                    caps.version
+                ));
                 let config = RenderConfig {
                     virtual_resolution: self.config.virtual_resolution,
                 };
@@ -1351,6 +1383,7 @@ impl App {
             }
             Err(error) => {
                 error!("no GPU device, so the game draws nothing: {error}");
+                crash::set_gpu(format!("none: {error}"));
                 None
             }
         };

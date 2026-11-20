@@ -287,8 +287,9 @@
     {
       "name": "Crash reports",
       "area": "Release",
-      "summary": "Every panic will leave a report, and on Windows a native crash will leave a minidump, with symbols archived to read them.",
-      "tasks": ["M9.6", "M11.3"]
+      "summary": "Every panic, on any thread, leaves a report in the game's data folder: the panic and its backtrace, the engine's version, the system, the GPU and the log's last 200 records. A panic that ends the game is shown to the player once its window has closed, and the next launch says where the report is. On Windows a native crash will leave a minidump, with symbols archived to read them.",
+      "tasks": ["M9.6", "M11.3"],
+      "ticked": ["M9.6"]
     },
     {
       "name": "A complete level",

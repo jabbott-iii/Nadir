@@ -1,8 +1,8 @@
 # nadir-platform
 
 The OS layer of the Nadir engine: a window and its events, gamepads, OpenGL
-contexts, audio output, the user's folders, an error dialog and a precise
-sleep, with one safe API on Linux, Windows and macOS.
+contexts, audio output, the user's folders, an error dialog, what system it
+runs on and a precise sleep, with one safe API on Linux, Windows and macOS.
 
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine for
 top-down games on Windows, macOS and Linux, written in Rust with no
@@ -41,7 +41,8 @@ Built today:
   default device from a callback, recovers from underruns, and opens the
   device again when it is lost.
 - `user_dirs`, the folders for settings, saves and logs; `show_error_dialog`;
-  `precise_sleep`, for a frame limiter.
+  `os_description`, the system on one line (on Linux with the distribution
+  and the kernel's version); `precise_sleep`, for a frame limiter.
 - With the `dev` feature, an allocation counter.
 
 Not yet: OpenGL on Windows and macOS (roadmap tasks M2.6 and M2.7), audio

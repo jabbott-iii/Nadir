@@ -35,6 +35,9 @@ fn wide(text: &str) -> Vec<u16> {
 
 /// Shows an error in a message box, and waits until the player closes it.
 pub(crate) fn message_box(title: &str, message: &str) {
+    // A box can come before the game's window, as the crash notice of the
+    // next launch does: the process's DPI awareness must be set first.
+    window::become_dpi_aware();
     let (title, message) = (wide(title), wide(message));
     // SAFETY: both strings end with a NUL, and a box with no owner window is
     // allowed.

@@ -406,6 +406,19 @@ loop on Linux, Windows and macOS. No GPU yet.
     Control+Space, Control+1 or the Windows key, nor with Alt+key; with
     Microsoft Pinyin on, the keys still reported. And `cargo test -p
     nadir-platform` there, for the translator's typed-text tests.
+  - ⏳ needs Windows (moved from M9.6 on 2026-11-19, the user's choice,
+    ADR-0071), to write and run there:
+    - the next launch's crash notice as a box that offers to open the
+      `crashes` folder (`MB_YESNO`, then `ShellExecuteW` on the folder), in
+      place of `show_error_dialog`'s OK box that names the report
+      (`crash::tell_of_unseen` in `crates/engine/src/crash.rs`);
+    - `os_description` with the system's version (`RtlGetVersion`, from
+      `ntdll.dll`), in place of `Windows (x86_64)`;
+    - `cargo dev --debug-panic`: the report in
+      `%LOCALAPPDATA%\Nadir\Sandbox\crashes`, its box once the window has
+      closed, and the notice at the next launch; on a display scaled to
+      150%, the window after that notice still DPI-aware (`message_box`
+      sets the awareness first now, written on Linux and not run).
   - Note: written on Linux on 2026-10-17, without a Windows target or SDK
     headers. A copy of the workspace with the OS `cfg`s swapped compiled the
     Windows code on Linux:
@@ -471,6 +484,19 @@ loop on Linux, Windows and macOS. No GPU yet.
     gives é) through `characters`; nothing typed with ⌘ or Control; no
     character for the arrows and the function keys. And `cargo test -p
     nadir-platform` there, for the translator's typed-text tests.
+  - ⏳ needs macOS (moved from M9.6 on 2026-11-19, the user's choice,
+    ADR-0071), to write and run there:
+    - the next launch's crash notice as an alert that offers to open the
+      `crashes` folder (a second button, then `-[NSWorkspace openURL:]` on
+      the folder), on the main thread, in place of `show_error_dialog`'s
+      alert that names the report (`crash::tell_of_unseen` in
+      `crates/engine/src/crash.rs`);
+    - `os_description` with the system's version
+      (`sysctlbyname("kern.osproductversion")`), in place of
+      `macOS (aarch64)`;
+    - `cargo dev --debug-panic`: the report in
+      `~/Library/Application Support/Sandbox/crashes`, its alert once the
+      window has closed, and the notice at the next launch.
   - Note: written on Linux on 2026-10-17, without a macOS target or SDK
     headers. A copy of the workspace with the OS `cfg`s swapped compiled the
     macOS code on Linux, on its x86_64 path only (the arm64 `BOOL` and the
@@ -5994,7 +6020,59 @@ by the batched sprite renderer.
       they catch 6; the 7th, the line of sight walking from either end,
       gives the same answers on every input tried.
 
-- [ ] **M9.6 — crash reporting basics**
+- [x] **M9.6 — crash reporting basics**
+  - Note: built and checked on Linux (x86_64) on 2026-11-19 (ADR-0071,
+    accepted on 2026-11-20; the user chose its two open points: Windows
+    and macOS's prompt that opens the folder, and their OS versions, moved
+    to M1.5 and M1.6, and the build hash left to M11.1):
+    - nadir-platform: `os_description`, one line: on Linux the
+      distribution's `PRETTY_NAME` from `os-release`, the kernel's version
+      and the architecture; on Windows and macOS the system's name and the
+      architecture.
+    - The facade (`crates/engine/src/crash.rs`): `App::run` sets the panic
+      hook before anything else, keeping the hook set before it. Every
+      panic, on any thread, writes `crashes/<stamp>.txt` in the data folder
+      (the game, the engine's version, `build unknown` until M11.1, the
+      time, the system, the GPU once the device is made, the thread, the
+      panic's place and message, a backtrace, the log's last 200 records)
+      and names it in `crashes/unseen.txt`. A panic that ends `run` is
+      shown with `show_error_dialog` once unwinding has closed the window,
+      and unwinds on; the next launch tells of the unseen reports, in the
+      log and the dialog, and removes the list.
+    - The sandbox: `--debug-panic`, with `dev` only, panics at tick 120;
+      refused with `--headless` and `--capture`, which do not call
+      `App::run`.
+    - Tests: 5 in `crash.rs`. One is the hook itself in a child process
+      (the test binary run again with `NADIR_CRASH_TEST_FOLDER`), after a
+      hook of its own and two installs: a panic on a thread of its own, one
+      caught on the test's, two with no data folder, whose reports reach
+      the log without its records, and one out of `run_reporting`, which
+      drops what it held, shows the dialog's line naming its report and
+      ends the child with 101. The others: the report's text, the names to
+      `-100` and a report that cannot be listed, the unseen list (lines
+      that name nothing, a cut list, a folder whose list cannot be
+      removed), the notice. 5 in nadir-platform (the `os-release` reader as
+      a shell reads it, this system's description against its files) and 2
+      in the sandbox (`--debug-panic`, and its tick). The refusal without
+      `dev` is a branch of the first, which `cargo xtask ci`, with
+      `--all-features`, does not take: `cargo test -p sandbox` took it
+      here, and by hand below.
+    - `cargo dev --debug-panic`, with the XDG folders in a scratch folder:
+      exit code 101; a report with every part (the backtrace through
+      `sandbox::debug_panic` and `main`, the GPU as `Mesa Intel(R) UHD
+      Graphics (TGL GT1), by Intel; OpenGL 4.6 (Core Profile) Mesa 26.1.6`,
+      the log's last 9 records, from before the log file opened); the
+      dialog's line on stderr after the window closed. The next launch
+      told of it once, the one after did not, and the report stayed.
+      `cargo run -p sandbox -- --debug-panic`, without `dev`, is refused.
+    - Review: one round of five reviewers and a skeptic for each serious
+      finding (ADR-0071 lists them) upheld 7, all fixed, the worst a
+      report that could not be written logged with the log's records,
+      which doubled with each (40 MB after 14 panics in the reviewer's
+      trial). Of 8 bugs planted after the fixes (5 in `crash.rs`, 3 in the
+      `os-release` reader), the tests caught 7; the 8th, the kernel's
+      version read from another file, once the description's test checked
+      that it is a version.
   - Depends: M1.4
   - Do: the panic-hook report (message, backtrace, version, OS, GPU string,
     log tail); the native error dialog; the "open crash folder" prompt on
@@ -6125,6 +6203,11 @@ by the batched sprite renderer.
 ## M11 — Production hardening and release
 
 - [ ] **M11.1 — packaging for all three OSes**
+  - Note (from M9.6, ADR-0071): crash reports read the build's git hash
+    from `NADIR_BUILD_HASH` when the facade is compiled
+    (`option_env!`), and say `build unknown` without it: set it to the short
+    hash in the packages' builds, and in `cargo xtask dist`'s. Cargo
+    compiles the facade again when it changes.
   - Depends: M9.7
   - Do: `xtask package <os>`:
     - Windows: manifest and resources via `rc.exe`
@@ -6154,6 +6237,13 @@ by the batched sprite renderer.
     archives too.
 
 - [ ] **M11.3 — Windows minidumps, symbol archiving, `xtask symbolicate`**
+  - Note (from M9.6, ADR-0071): a panic's report is `crashes/<stamp>.txt`
+    in the data folder (`crates/engine/src/crash.rs`), named in
+    `crashes/unseen.txt`, which the next launch tells of. A dump named
+    there is skipped today: `is_report_name` takes `.txt` names only, and
+    the notice speaks of crash reports; widen both for dumps. A report's
+    backtrace has the build's version and `NADIR_BUILD_HASH` (M11.1's note)
+    above it, for `symbolicate` to find the symbols by.
   - Depends: M9.6
   - Do: `SetUnhandledExceptionFilter` → `MiniDumpWriteDump`; archive symbols
     per build hash; `xtask symbolicate <report>` using external tools.
@@ -6195,6 +6285,10 @@ by the batched sprite renderer.
     logs)
 
 - [ ] **M11.7 — documentation**
+  - Note (from M9.6): the crash reports are in `crashes` in the data
+    folder: on Linux `~/.local/share/<game>/crashes`, on Windows
+    `%LOCALAPPDATA%\<studio>\<game>\crashes`, on macOS
+    `~/Library/Application Support/<game>/crashes`.
   - Depends: M11.1
   - Do: a player-facing note on log, save and crash locations;
     `cargo doc --workspace --no-deps` with no warnings.

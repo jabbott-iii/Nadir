@@ -49,6 +49,10 @@
 //!   window and no sound, and writes the frames into `DIR`, for the demo page
 //!   (`capture.rs`). In the field the person walks a tour, unless
 //!   `--replay` plays a replay.
+//! - `--debug-panic`, with `dev` only: panics two seconds in, on purpose,
+//!   so that the engine writes a crash report, into `crashes` in the
+//!   game's data folder (on Linux `~/.local/share/Sandbox/crashes`), and
+//!   says where; the next launch says so again
 //!
 //! The sprites are cooked (`assets/sprites/`, cooked by `cargo xtask cook`
 //! into one atlas): they are read from `assets` beside the executable, as
@@ -136,6 +140,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
     let mut app = game(App::new(config), options.scene)?;
+    if options.debug_panic {
+        app = app.add_fixed_system(FixedStage::Gameplay, "debug_panic", debug_panic);
+    }
     let mut recording = None;
     if let Some(path) = &options.record {
         let (recorded, session) = replay::record(app, path)?;
@@ -185,6 +192,7 @@ struct Options {
     replay: Option<PathBuf>,
     headless: bool,
     capture: Option<PathBuf>,
+    debug_panic: bool,
 }
 
 impl Options {
@@ -209,6 +217,8 @@ impl Options {
         let replay = args.value("--replay")?.map(PathBuf::from);
         let headless = args.flag("--headless");
         let capture = args.value("--capture")?.map(PathBuf::from);
+        // Left to `finish` to refuse without `dev`.
+        let debug_panic = cfg!(feature = "dev") && args.flag("--debug-panic");
         // `cargo dev` ends in `--` already, so `cargo dev -- --fps 144` would
         // pass the options as positionals: refuse them rather than ignore them.
         if let Some(extra) = args.finish()?.first() {
@@ -233,6 +243,13 @@ impl Options {
                 "`--capture` draws a frame a tick: leave out `--fps` and `--no-vsync`".into(),
             );
         }
+        if debug_panic && (headless || capture.is_some()) {
+            return Err(
+                "`--debug-panic` checks the crash report, which the game writes only in \
+                        its window: leave out `--headless` and `--capture`"
+                    .into(),
+            );
+        }
         Ok(Self {
             fps,
             vsync,
@@ -241,6 +258,7 @@ impl Options {
             replay,
             headless,
             capture,
+            debug_panic,
         })
     }
 }
@@ -683,6 +701,20 @@ fn move_player(world: &World, _tick: &Tick) {
                 gait.walk
             });
         }
+    }
+}
+
+/// The tick that `--debug-panic` panics at: two seconds in, after the
+/// first of the reports that the log has once a second.
+const DEBUG_PANIC_TICK: u64 = 2 * nadir::TICK_HZ as u64;
+
+/// Panics at [`DEBUG_PANIC_TICK`], for `--debug-panic`: the engine then
+/// writes a crash report.
+fn debug_panic(_world: &World, tick: &Tick) {
+    if tick.index == DEBUG_PANIC_TICK {
+        panic!(
+            "--debug-panic: a panic on purpose, at tick {DEBUG_PANIC_TICK}, to check the crash report"
+        );
     }
 }
 
@@ -1160,6 +1192,7 @@ mod tests {
             replay: None,
             headless: false,
             capture: None,
+            debug_panic: false,
         };
         assert_eq!(options(&[]), Ok(Options { ..plain }));
         let recording = options(&["--record", "a.nrpl", "--scene", "stress-sprites"]);
@@ -1173,6 +1206,7 @@ mod tests {
                 replay: None,
                 headless: false,
                 capture: None,
+                debug_panic: false,
             })
         );
         let headless = options(&["--replay", "a.nrpl", "--headless"]).expect("valid");
@@ -1211,6 +1245,47 @@ mod tests {
             let error = options(args).expect_err("refused");
             assert!(error.contains(why), "{args:?}: {error}");
         }
+    }
+
+    #[test]
+    fn debug_panic_is_a_development_option_for_the_game_in_its_window() {
+        let asked = options(&["--debug-panic"]);
+        if cfg!(feature = "dev") {
+            assert_eq!(asked.map(|options| options.debug_panic), Ok(true));
+            for args in [
+                &["--debug-panic", "--replay", "a", "--headless"][..],
+                &["--debug-panic", "--capture", "out"],
+            ] {
+                let error = options(args).expect_err("refused");
+                assert!(error.contains("only in its window"), "{args:?}: {error}");
+            }
+        } else {
+            let error = asked.expect_err("refused without dev");
+            assert!(error.contains("--debug-panic"), "{error}");
+        }
+        assert_eq!(options(&[]).map(|options| options.debug_panic), Ok(false));
+    }
+
+    #[test]
+    fn debug_panic_panics_two_seconds_in() {
+        let world = World::new();
+        let tick = |index| Tick {
+            index,
+            dt: 1.0 / nadir::TICK_HZ as f32,
+        };
+        debug_panic(&world, &tick(0));
+        debug_panic(&world, &tick(DEBUG_PANIC_TICK - 1));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            debug_panic(&world, &tick(DEBUG_PANIC_TICK));
+        }));
+        let payload = caught.expect_err("a panic");
+        let message = payload
+            .downcast_ref::<String>()
+            .expect("a formatted message");
+        assert!(
+            message.starts_with("--debug-panic: a panic on purpose"),
+            "{message}"
+        );
     }
 
     #[test]

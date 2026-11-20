@@ -43,8 +43,7 @@ Not yet:
 
 - media keys, and the keys that only Japanese and Korean keyboards have;
 - collecting profile records from other threads: the profiler
-  (nadir-debug's, M7.3) shows the main thread's;
-- crash reports, which are to read the log's ring buffer (M9.6).
+  (nadir-debug's, M7.3) shows the main thread's.
 
 ## Usage
 

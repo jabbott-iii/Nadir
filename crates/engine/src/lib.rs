@@ -504,6 +504,9 @@
 //!   message box on Windows or an alert on macOS. The [`log`] macros write to standard
 //!   error, and [`App::run`] also writes the log to `nadir.log` in the
 //!   game's logs folder, named by [`Config::studio`] and [`Config::game`].
+//!   From [`App::run`] on, every panic writes a crash report into `crashes`
+//!   in the game's data folder, which the player is told of when it ends
+//!   the game and again at the next launch ([`App::run`]).
 //! - **Platforms.** On Linux the engine needs X11, or XWayland, and OpenGL
 //!   3.3, which it loads at run time, and plays sound through ALSA's
 //!   `libasound.so.2`, loaded at run time too: without it the game is
@@ -536,6 +539,7 @@ mod animation;
 mod app;
 mod collisions;
 mod components;
+mod crash;
 #[cfg(feature = "dev")]
 mod debug_ui;
 mod error;

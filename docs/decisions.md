@@ -6667,3 +6667,143 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     crash upload awaits would have to allow;
   - a TrueType rasterizer lands, and the fonts could be read as they are;
   - or a second game uses the studio and its project model must change.
+
+## ADR-0071 — M9.6: crash reports from a panic hook that `App::run` sets; a report for every panic, the dialog only for one that ends `App::run`, after the window closes; `unseen.txt` told of on the next launch; `os_description` in nadir-platform; Windows and macOS's folder-opening prompt and OS versions moved to M1.5 and M1.6; the build hash left to M11.1
+
+- **Status:** Accepted: the user chose its two open points on 2026-11-19
+  (Windows and macOS's prompt that opens the folder, and their OS
+  versions, moved to M1.5 and M1.6 over bindings written now and unrun;
+  and the build hash left to M11.1's packaging over `cargo xtask dist`
+  setting it now), and accepted it as written on 2026-11-20
+- **Date:** 2026-11-19
+- **Context:**
+  - M9.6 asks for a panic-hook report (message, backtrace, version, OS,
+    GPU string, log tail), the native error dialog, and an "open crash
+    folder" prompt on the next launch; its acceptance is that a forced
+    panic, `--debug-panic` in development builds, gives a complete
+    report. `docs/05-release.md` puts reports in `crashes/<utc-timestamp>.txt`
+    in the user data folder, with the last 200 log lines, and has
+    `App::run` install the hook.
+  - Unit tests make `App`s by the hundred and some panic on purpose
+    (`should_panic`): a hook that `App::new` set would write their
+    reports into the player's data folder. Tests never call `App::run`,
+    which opens a window.
+  - The engine survives some panics: the asset workers turn a decoder's
+    into a failed load (`read_and_decode`), and the audio thread's ends
+    only the sound (`docs/03-platforms.md`). On Windows a message box runs
+    the thread's window messages while it is open, the game's window
+    procedure among them.
+  - On Linux the error dialog is a line on stderr, and the game starts no
+    other program (M1.4), so it cannot open a folder. Windows and macOS
+    have only an OK box (`MessageBoxW`, `NSAlert`) bound, and no call that
+    gives the system's version.
+  - Nothing sets a build hash yet: `docs/05-release.md` says xtask will
+    pass it in an environment variable.
+- **Decision:**
+  - **The hook:** `App::run` sets it before anything else, once in a
+    process (a later `run` changes only the game it reports), and keeps
+    the hook set before it, which runs first: the standard one writes the
+    panic to stderr. `App::new`, `App::update` and `App::offscreen` set
+    none, so a panic in a game's setup, before `run`, gets no report.
+  - **The report:** one for every panic, on any thread, written by the
+    hook into a new file of `crashes` in the data folder, named after the
+    UTC time to the second (`DateTime::file_stamp`), then `-2` and on to
+    `-100` within the same second, never over another. It has the game and
+    studio, the engine's version (`CARGO_PKG_VERSION`) and the build's
+    hash (`option_env!("NADIR_BUILD_HASH")`, `unknown` without it), debug
+    or release and `dev`, the time, the system (`os_description`), the
+    GPU (the device's renderer, vendor, backend and version once it is
+    made, or why there is none), the thread, the panic's place and
+    message, `Backtrace::force_capture`, and the log's last 200 records
+    (`log::tail`). The hook logs where it went; where the data folder is
+    unknown or the write fails, the log gets the report itself, without the
+    log's records: they are in the log already, and with them each report
+    so logged would hold the one before, twice its size. A report written
+    but not named in `unseen.txt` is still written, with a warning.
+  - **The dialog:** `App::run` runs the rest inside
+    `crash::run_reporting`, a `catch_unwind`; a panic that comes out of it
+    has already closed the window by unwinding, and is then shown with
+    `show_error_dialog`, naming this thread's last report, and unwinds on
+    (`resume_unwind`, exit code 101 from `main`). A panic on another thread, or one caught on the main
+    thread, gets its report and no dialog.
+  - **The next launch:** the hook names each report in `crashes/unseen.txt`,
+    oldest first. `App::run`, after opening the log file, reads it (its
+    last 64 KiB, a line kept only if it names a `.txt` file in the folder
+    that is still there), removes it, and tells the player, in the log and
+    with `show_error_dialog`: the latest report's path, and how many there
+    were. On Windows the message box first sets the process's DPI
+    awareness, as the window's backend does, since this box comes before
+    the window.
+    A list that cannot be removed is told of again next time, with a
+    warning.
+  - **`nadir_platform::os_description`:** one line. On Linux, `PRETTY_NAME`
+    from `/etc/os-release` (`/usr/lib/os-release` only when that is not
+    there), read as a shell reads it, the kernel's version from
+    `/proc/sys/kernel/osrelease` and the architecture, as `Pop!_OS 24.04 LTS
+    (Linux 7.2.15-76070215-generic, x86_64)`; each file 64 KiB at most, each
+    part 200 characters, control characters made spaces. On Windows and
+    macOS, the system's name and the architecture.
+  - **Windows and macOS (the user's choice):** for now the next launch
+    shows the same OK box, naming the report; a box that offers to open
+    the folder (`MB_YESNO` and `ShellExecuteW`, an `NSAlert` with two
+    buttons and `NSWorkspace`) and the system's version (`RtlGetVersion`,
+    `sysctlbyname("kern.osproductversion")`) are M1.5's and M1.6's, where
+    they can be run.
+  - **The hash (the user's choice):** M11.1's packaging sets
+    `NADIR_BUILD_HASH`; until then every report says `build unknown`.
+  - **The sandbox:** `--debug-panic`, taken only with `dev` (without it,
+    the parser refuses the argument), panics in a tick system at tick 120,
+    two seconds in; refused with `--headless` and `--capture`, which do not
+    call `App::run`.
+- **Consequences:**
+  - Good: a report for each panic, whichever thread it was on, with the
+    GPU and the log before it; no test writes one into the player's
+    folder; the dialog comes after the window has gone, so no window
+    message runs mid-panic; every OS reports and tells the player today,
+    and Linux's part was checked end to end.
+  - The hook's test runs in a child process (the test binary again, with
+    `NADIR_CRASH_TEST_FOLDER` set), since a hook is the whole process's.
+  - Bad: a panic that a game catches, or a worker's, still leaves a
+    report and a notice at the next launch, which says the game crashed.
+  - Bad: a panic while the logger's lock is held on the panicking thread
+    (its `since` callback, say) deadlocks or aborts in the hook's
+    `log::tail`; nothing in the engine panics there.
+  - Bad: with `panic = "abort"` the report is written but no dialog
+    shows until the next launch's.
+  - Bad: reports are never removed, however many there are; of a list of
+    more than about 2,600 unseen names, the oldest are not told of.
+  - Review: one round, five reviewers (the hook, the files, the docs, the
+    task and the platforms, and bugs planted in a copy) and a skeptic for
+    each of 12 serious findings, upheld 7, all fixed: the log's copy of an
+    unwritten report holding the log, which doubled with each (40 MB after
+    14 panics in the reviewer's trial); the M11.3 note; nadir-core's README;
+    the next launch's box before the window's DPI awareness on Windows; and
+    three gaps in the tests (the failure path, the Linux description, the
+    hook set before and a second install). Of the low ones, fixed too: a
+    report called unwritten when only its line in the list failed, a long
+    list cut at its newest end, `os-release`'s quoting, a test's file in the
+    shared temporary folder, and the child test's backtrace setting.
+  - Follow-up: M1.5 and M1.6 (the prompt that opens the folder, the OS
+    version), M11.1 (`NADIR_BUILD_HASH`), M11.3 (minidumps beside the
+    reports), M11.7 (telling players where the reports are).
+- **Alternatives considered:**
+  - The hook from `App::new`: covers a game's setup, but the tests' panics
+    would write reports into the player's folder.
+  - The dialog from the hook: it would show for panics the engine
+    survives, and on Windows run the window's messages mid-panic.
+  - The bindings for Windows and macOS now (the user's other option):
+    written and compiled here, run nowhere until M1.5 and M1.6, and a
+    fourth crate.
+  - `xdg-open` for the folder on Linux: starts another program, against
+    M1.4's rule.
+  - Knowing a crash by comparing the reports' times with the last launch:
+    needs the launch's time kept anyway, and a clock that moved misleads
+    it.
+  - `uname` for Linux's version: a new binding, and it gives no
+    distribution.
+- **Revisit when:**
+  - a game needs its setup reported before `App::run`;
+  - a player's crashes folder is found with more than 100 reports in it,
+    or a player asks to clear them;
+  - a game builds with `panic = "abort"`;
+  - or the opt-in uploader of `docs/05-release.md` is taken up.

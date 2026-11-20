@@ -455,5 +455,6 @@ rule yet: `release-no-dev` looks only for `nadir-debug`.
 - The folders are named after `Config::game`; on Windows they sit inside a
   folder named after `Config::studio` (`nadir_platform::user_dirs`). Both
   must be valid folder names on every OS.
-- Crash reports: the `crashes/` directory in user data (see
-  `docs/05-release.md`).
+- Crash reports: the `crashes/` directory in user data, with `unseen.txt`
+  naming those the player has not been told of yet (see
+  `docs/05-release.md`, ADR-0071).

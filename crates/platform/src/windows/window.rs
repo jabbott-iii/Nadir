@@ -716,8 +716,10 @@ unsafe extern "system" fn window_proc(
 }
 
 /// Makes the process aware of each monitor's DPI, so that Windows does not
-/// scale its windows, and sizes and positions are physical pixels.
-fn become_dpi_aware() {
+/// scale its windows, and sizes and positions are physical pixels. It must
+/// come before the process's first window, a message box's included: a
+/// later call fails, which it ignores.
+pub(super) fn become_dpi_aware() {
     // SAFETY: the value is one of the `DPI_AWARENESS_CONTEXT` constants.
     let set = unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
     if set == FALSE {

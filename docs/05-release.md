@@ -353,13 +353,29 @@ M11.2. Until then the workflow publishes the engine's releases above.
 
 ## Crash reporting
 
-- **Panic hook** (all OSes; installed first thing in `main` by `App::run`):
-  - Writes `crashes/<utc-timestamp>.txt` containing the panic message,
-    `std::backtrace::Backtrace::force_capture()`, the build version and hash,
-    OS version, GPU vendor/renderer string, and the last 200 log lines from
-    the in-memory ring buffer.
-  - Then shows a native message box (`MessageBoxW` / `NSAlert` / stderr on
-    Linux) pointing to the file.
+- **Panic hook** (all OSes; `App::run` sets it before anything else, once
+  in a process, keeping the hook set before it, which runs first; M9.6,
+  ADR-0071):
+  - Writes a report for every panic, on any thread, into
+    `crashes/<utc-timestamp>.txt` in the user data folder
+    (`2026-11-19_12-34-56.txt`, then `-2` and on within the same second):
+    the game, the engine's version and the build's hash, debug or release
+    and `dev`, the time, the OS (`nadir_platform::os_description`), the
+    GPU's renderer, vendor and version, the thread, the panic's place and
+    message, `std::backtrace::Backtrace::force_capture()`, and the last 200
+    log lines from the in-memory ring buffer. The hash is
+    `NADIR_BUILD_HASH` at build time, which packaging will set (M11.1):
+    `unknown` until then. The hook logs where the report went; where the
+    data folder is unknown or the write fails, the log gets the report,
+    without the log's records, which it holds already.
+  - A panic that ends `App::run` is shown, once unwinding has closed the
+    window, in a native message box (`MessageBoxW` / `NSAlert` / stderr on
+    Linux, `show_error_dialog`) pointing to the file, then unwinds on. A
+    panic on another thread, such as an asset worker's or the audio
+    thread's, which the engine survives, gets its report and no box.
+  - A panic before `App::run`, in a game's setup, gets no report. With
+    `panic = "abort"` the report is written, and no box shows until the
+    next launch.
 - **Native crashes:**
   - Windows: `SetUnhandledExceptionFilter` → `MiniDumpWriteDump` (from
     `dbghelp.dll`) into `crashes/<ts>.dmp`.
@@ -368,7 +384,13 @@ M11.2. Until then the workflow publishes the engine's releases above.
   - Document for players where to find these files.
 - **Upload:**
   - There is no automatic upload.
-  - On next launch after a crash, the game offers to open the crash folder.
+  - The hook names each report in `crashes/unseen.txt`. On the next
+    launch, `App::run` tells the player of them, in the log and with
+    `show_error_dialog`, naming the latest, and removes the list (of a list
+    over 64 KiB, about 2,600 names, the newest only). On Linux
+    that is stderr, as the game starts no other program, so it cannot
+    open the folder. On Windows and macOS it is the same box for now; a
+    box that offers to open the folder is M1.5's and M1.6's (ADR-0071).
   - An opt-in uploader is backlog, and would require a privacy review: no
     personal data, no file paths containing user names.
 - **Symbolication:** we archive `.pdb`/`.dSYM`/`.dwp` per build hash.

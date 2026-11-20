@@ -13,8 +13,9 @@
 // limitations under the License.
 
 //! The OS layer of the Nadir engine: a window and its events, gamepads,
-//! OpenGL contexts, audio output, the user's folders, an error dialog and a
-//! precise sleep, with one safe API on Linux, Windows and macOS.
+//! OpenGL contexts, audio output, the user's folders, an error dialog, what
+//! system it runs on and a precise sleep, with one safe API on Linux,
+//! Windows and macOS.
 //!
 //! # Where it fits
 //!
@@ -133,6 +134,9 @@
 //! - [`show_error_dialog`] tells the player about an error that stops the
 //!   game: on stderr, and also in a message box on Windows and an alert on
 //!   macOS.
+//! - [`os_description`] names the system and the processor's architecture
+//!   on one line, for crash reports: on Linux the distribution and the
+//!   kernel's version too.
 //! - [`precise_sleep`] blocks until an [`Instant`](std::time::Instant), for
 //!   a frame limiter. It sleeps, then spins through the last millisecond,
 //!   and never returns early.
@@ -323,6 +327,7 @@ mod gamepad;
 mod gpu;
 mod paths;
 mod sleep;
+mod system;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod text;
 
@@ -353,6 +358,7 @@ pub use gamepad::{GamepadId, GamepadState};
 pub use gpu::{GlContext, GlContextId, GpuSurface, HeadlessGl, create_headless_gl};
 pub use paths::{UserDirs, user_dirs};
 pub use sleep::precise_sleep;
+pub use system::os_description;
 
 #[cfg(target_os = "linux")]
 use linux::Backend;
