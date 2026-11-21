@@ -130,7 +130,7 @@ fn a_world() -> (World, TypeRegistry) {
 }
 
 const ENEMY: &str = r#"{ "name": "enemy", "components": {
-    "Health": { "current": 5, "max": 10, "drops": [1, 2], "shield": { "strength": 1, "color": "grey" } },
+    "Health": { "current": 5, "max": 10, "drops": [1, 2], "shield": { "strength": 1, "color": "gray" } },
     "Hostile": {} } }"#;
 const SLIME: &str = r#"{ "name": "slime", "extends": "enemy", "components": {
     "Health": { "max": 12, "drops": [7], "shield": { "strength": 4 } } } }"#;
@@ -180,7 +180,7 @@ fn base_derived_and_override_apply_in_that_order_onto_one_value() {
             // An option's value merges: the slime's strength, the base's color.
             shield: Some(Shield {
                 strength: 4,
-                color: "grey".to_string(),
+                color: "gray".to_string(),
             }),
         })
     );
@@ -402,13 +402,13 @@ fn an_unknown_component_is_reported_and_the_spawn_leaves_no_entity() {
     // An override's unknown component is named with its source.
     let spawned = library.spawn(
         "enemy",
-        &[("Armour".to_string(), Value::Object(Vec::new()))],
+        &[("Armor".to_string(), Value::Object(Vec::new()))],
         &registry,
         &mut world.commands(),
         &mut cx,
     );
     assert!(
-        matches!(&spawned, Err(PrefabError::UnknownComponent { source, component, .. }) if source == "test" && component == "Armour"),
+        matches!(&spawned, Err(PrefabError::UnknownComponent { source, component, .. }) if source == "test" && component == "Armor"),
         "{spawned:?}"
     );
     drop(cx);

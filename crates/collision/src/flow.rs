@@ -20,7 +20,7 @@ use std::collections::BinaryHeap;
 use nadir_core::{IVec2, Vec2};
 
 use crate::TileGrid;
-use crate::path::{NEIGHBOURS, cell_count, cell_of, index_of, open_cell_near, step};
+use crate::path::{NEIGHBORS, cell_count, cell_of, index_of, open_cell_near, step};
 
 /// A cell the field does not reach.
 const UNREACHED: u32 = u32::MAX;
@@ -28,7 +28,7 @@ const UNREACHED: u32 = u32::MAX;
 /// No step: the goal, or a cell the field does not reach.
 const NONE: u8 = u8::MAX;
 
-/// The unit vector toward each of [`NEIGHBOURS`].
+/// The unit vector toward each of [`NEIGHBORS`].
 const DIRECTIONS: [Vec2; 8] = {
     const D: f32 = std::f32::consts::FRAC_1_SQRT_2;
     [
@@ -129,7 +129,7 @@ impl FlowField {
                 continue;
             }
             let cell = cell_of(at, self.width);
-            for direction in 0..NEIGHBOURS.len() {
+            for direction in 0..NEIGHBORS.len() {
                 let Some((next, step)) = step(grid, cell, direction) else {
                     continue;
                 };
@@ -150,7 +150,7 @@ impl FlowField {
             }
             let cell = cell_of(at as u32, self.width);
             let mut best = (UNREACHED, NONE);
-            for (direction, way) in (0u8..).zip(0..NEIGHBOURS.len()) {
+            for (direction, way) in (0u8..).zip(0..NEIGHBORS.len()) {
                 let Some((next, step)) = step(grid, cell, way) else {
                     continue;
                 };
@@ -214,7 +214,7 @@ impl FlowField {
     /// the goal, and where the field does not reach.
     pub fn next_cell(&self, cell: IVec2) -> Option<IVec2> {
         let direction = self.next[self.index(cell)?];
-        let offset = NEIGHBOURS.get(usize::from(direction))?;
+        let offset = NEIGHBORS.get(usize::from(direction))?;
         Some(IVec2::new(cell.x + offset.x, cell.y + offset.y))
     }
 

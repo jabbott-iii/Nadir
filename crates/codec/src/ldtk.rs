@@ -486,7 +486,7 @@ impl fmt::Display for ErrorKind {
             Self::NotAFraction => write!(f, "must be a number from 0 to 1"),
             Self::WrongLength { expected } => write!(f, "must have {expected} items"),
             Self::UnknownValue { found } => write!(f, "{found:?} is not a value it may take"),
-            Self::BadColor => write!(f, "a colour is `#rrggbb`"),
+            Self::BadColor => write!(f, "a color is `#rrggbb`"),
             Self::DuplicateUid { uid } => write!(f, "another definition has the uid {uid}"),
             Self::NoSuchTileset { uid } => write!(f, "the project has no tile set of uid {uid}"),
             Self::NoSuchLayer { uid } => write!(f, "the project has no layer of uid {uid}"),

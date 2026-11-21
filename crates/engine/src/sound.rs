@@ -217,8 +217,8 @@ impl AudioState {
         let failed = &self.failed;
         let warned = |entity: Entity| failed.iter().any(|&(warned, _)| warned == entity);
         let holds = |entity: Entity, area: &MusicArea| {
-            at(entity).is_some_and(|centre| {
-                let offset = (listener - centre).abs();
+            at(entity).is_some_and(|center| {
+                let offset = (listener - center).abs();
                 offset.x <= area.half.x && offset.y <= area.half.y
             })
         };
@@ -1211,10 +1211,10 @@ mod tests {
         /// How many emitters move about.
         const EMITTERS: usize = 40;
 
-        /// A path: `centre + swing · sin(phase + 2π · tick / PERIOD)`.
+        /// A path: `center + swing · sin(phase + 2π · tick / PERIOD)`.
         #[derive(Clone, Copy)]
         struct Path {
-            centre: Vec2,
+            center: Vec2,
             swing: Vec2,
             phase: f32,
         }
@@ -1228,7 +1228,7 @@ mod tests {
             let mut transforms = world.write::<Transform>();
             for (entity, path) in paths.iter() {
                 if let Some(transform) = transforms.get_mut(entity) {
-                    transform.position = path.centre + path.swing * (path.phase + turn).sin();
+                    transform.position = path.center + path.swing * (path.phase + turn).sin();
                 }
             }
         }
@@ -1248,11 +1248,11 @@ mod tests {
             // The listener crosses from the west's area to the east's and
             // back.
             let listener = Path {
-                centre: Vec2::ZERO,
+                center: Vec2::ZERO,
                 swing: Vec2::new(300.0, 0.0),
                 phase: 0.0,
             };
-            let start = |path: Path| path.centre + path.swing * path.phase.sin();
+            let start = |path: Path| path.center + path.swing * path.phase.sin();
             let world = game.app.world_mut();
             world
                 .spawn()
@@ -1269,7 +1269,7 @@ mod tests {
             for index in 0..EMITTERS {
                 let way = Vec2::from_angle(TAU * index as f32 / EMITTERS as f32);
                 let path = Path {
-                    centre: way * 800.0,
+                    center: way * 800.0,
                     swing: way * 250.0,
                     phase: index as f32,
                 };

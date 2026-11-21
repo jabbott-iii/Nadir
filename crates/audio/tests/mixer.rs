@@ -44,7 +44,7 @@ const FADE_IN: usize = 96;
 const FADE_IN_44_1: usize = 89;
 
 /// `cos(π/4)`: each side's gain for a mono sound at the center.
-const CENTRE: f32 = std::f32::consts::FRAC_1_SQRT_2;
+const CENTER: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
 fn fresh() -> (Audio, Mixer) {
     mixer_with(AudioConfig::default())
@@ -216,7 +216,7 @@ fn a_voice_at_a_position_that_is_not_finite_is_silent() {
         let voice = audio.play_at(&lib.server, sound, Vec2::ZERO, looped());
         audio.set_listener(Vec2::new(f32::NAN, 0.0));
         let out = render(&mut mixer, 300);
-        assert!(close(out[299 * 2], level * CENTRE, 1e-6), "{position:?}");
+        assert!(close(out[299 * 2], level * CENTER, 1e-6), "{position:?}");
         audio.set_voice(voice, VoiceChange::Position(position));
         let out = render(&mut mixer, 2000);
         assert!(out[1500 * 2..].iter().all(|&x| x == 0.0), "{position:?}");
@@ -232,14 +232,14 @@ fn a_move_reaches_the_voice_over_16_ms_whatever_the_callback() {
         let (audio, mut mixer) = fresh();
         let voice = audio.play_at(&lib.server, sound, Vec2::ZERO, looped());
         let before = render_at(&mut mixer, 1024, RATE, callback);
-        assert!(close(before[1023 * 2], level * CENTRE, 1e-6));
+        assert!(close(before[1023 * 2], level * CENTER, 1e-6));
         // Fully right, 480 px away: left silent.
         audio.set_voice(voice, VoiceChange::Position(Vec2::new(480.0, 0.0)));
         let after = left(&render_at(&mut mixer, 2000, RATE, callback));
         // 16 ms at 48 kHz.
         let smooth = 768;
         for (k, &l) in after.iter().enumerate().take(smooth) {
-            let expected = level * CENTRE * (1.0 - (k + 1) as f32 / smooth as f32);
+            let expected = level * CENTER * (1.0 - (k + 1) as f32 / smooth as f32);
             assert!(
                 close(l, expected, 1e-5),
                 "callback {callback}, {k}: {l} not {expected}"
@@ -260,7 +260,7 @@ fn a_voice_fades_in_over_2_ms_and_out_over_its_fade_and_then_ends() {
     for (k, frame) in start.chunks(2).enumerate() {
         let fade = ((k + 1) as f32 / FADE_IN as f32).min(1.0);
         for &x in frame {
-            assert!(close(x, level * CENTRE * fade, 1e-6), "{k}: {frame:?}");
+            assert!(close(x, level * CENTER * fade, 1e-6), "{k}: {frame:?}");
         }
     }
     // 100 ms: 4,800 samples.
@@ -269,7 +269,7 @@ fn a_voice_fades_in_over_2_ms_and_out_over_its_fade_and_then_ends() {
     for (k, frame) in out.chunks(2).enumerate() {
         let fade = (1.0 - (k + 1) as f32 / 4800.0).max(0.0);
         for &x in frame {
-            assert!(close(x, level * CENTRE * fade, 1e-6), "{k}: {frame:?}");
+            assert!(close(x, level * CENTER * fade, 1e-6), "{k}: {frame:?}");
         }
     }
     let stop = left(&out);
@@ -282,7 +282,7 @@ fn a_voice_fades_in_over_2_ms_and_out_over_its_fade_and_then_ends() {
     let stop = left(&render(&mut mixer, 200));
     for (k, &l) in stop.iter().enumerate() {
         let fade = (1.0 - (k + 1) as f32 / FADE_IN as f32).max(0.0);
-        assert!(close(l, level * CENTRE * fade, 1e-6), "{k}: {l}");
+        assert!(close(l, level * CENTER * fade, 1e-6), "{k}: {l}");
     }
 }
 
@@ -318,13 +318,13 @@ fn a_bus_s_volume_ramps_and_multiplies_each_voice_s() {
         let bus = 1.0 - 0.6 * ((k + 1) as f32 / 2400.0).min(1.0);
         let (l, r) = (out[k * 2], out[k * 2 + 1]);
         // The Sfx voice is all on the left; the Ui voice at the center.
-        assert!(close(r, level * 0.5 * CENTRE * bus, 1e-6), "{k}: {r}");
+        assert!(close(r, level * 0.5 * CENTER * bus, 1e-6), "{k}: {r}");
         assert!(
-            close(l, level + level * 0.5 * CENTRE * bus, 1e-6),
+            close(l, level + level * 0.5 * CENTER * bus, 1e-6),
             "{k}: {l}"
         );
     }
-    assert!(close(out[2999 * 2 + 1], level * 0.5 * 0.4 * CENTRE, 1e-7));
+    assert!(close(out[2999 * 2 + 1], level * 0.5 * 0.4 * CENTER, 1e-7));
 }
 
 /// Plays sounds whose levels are powers of two, so that the mix says which

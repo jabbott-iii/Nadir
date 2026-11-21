@@ -127,7 +127,7 @@ fn an_export_s_frames_are_placed_in_its_canvas_and_its_tags_are_clips() {
     assert_eq!(
         sprite.kind,
         atlas::SpriteKind::Pivot([6.0, 12.0]),
-        "the default pivot: the canvas's bottom centre"
+        "the default pivot: the canvas's bottom center"
     );
     let clips = clips(&sprite);
     assert_eq!(

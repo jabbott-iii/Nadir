@@ -78,12 +78,12 @@ nadir_scene::reflect_struct! {
 
 let data = Value::Object(vec![
     ("max".to_string(), Value::Int(12)),
-    ("armour".to_string(), Value::Int(3)),
+    ("armor".to_string(), Value::Int(3)),
 ]);
 let mut cx = ReflectContext::new("slime.jsonc");
 let health = Health::from_value(&data, &mut cx).expect("a Health");
 assert_eq!(health, Health { current: 0, max: 12 });
-assert_eq!(cx.warnings()[0].field, "armour");
+assert_eq!(cx.warnings()[0].field, "armor");
 
 // And back: every field, in order.
 let written = health.to_value(&mut cx);

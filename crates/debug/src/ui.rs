@@ -447,7 +447,7 @@ impl DebugUi {
         self.release = self
             .input
             .release
-            .map(|(at, cancelled)| (space.to_ui(at), cancelled));
+            .map(|(at, canceled)| (space.to_ui(at), canceled));
         self.down = self.input.down;
         self.cmds.clear();
         self.text.clear();
@@ -568,9 +568,9 @@ impl DebugUi {
         }
         if self.active.is_some_and(|active| active.id == id) {
             out.held = true;
-            if let Some((at, cancelled)) = self.release {
+            if let Some((at, canceled)) = self.release {
                 out.released = true;
-                out.clicked = !cancelled && inside(at);
+                out.clicked = !canceled && inside(at);
             }
         }
         out

@@ -490,7 +490,7 @@ fn a_color_is_a_hash_and_six_or_eight_hex_digits() {
 fn an_unknown_field_is_a_warning_naming_the_file_the_type_and_the_field() {
     let data = object(&[
         ("count", Value::Int(4)),
-        ("colour", string("#ffffff")),
+        ("color", string("#ffffff")),
         (
             "inner",
             object(&[("a", Value::Int(1)), ("c", Value::Int(2))]),
@@ -515,7 +515,7 @@ fn an_unknown_field_is_a_warning_naming_the_file_the_type_and_the_field() {
     assert_eq!(
         warnings,
         [
-            "prefabs/thing.jsonc: `Thing` has no field `colour`, so it was left out",
+            "prefabs/thing.jsonc: `Thing` has no field `color`, so it was left out",
             "prefabs/thing.jsonc: `Inner` has no field `c`, so it was left out (at `inner`)",
             "prefabs/thing.jsonc: `Rect` has no field `middle`, so it was left out (at `area`)",
             "prefabs/thing.jsonc: `Inner` has no field `x`, so it was left out (at `parts[1]`)",

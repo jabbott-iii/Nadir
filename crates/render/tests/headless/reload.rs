@@ -170,7 +170,7 @@ fn sources_that_do_not_build_are_refused_and_the_last_program_stays() {
     let broken_fragment = fragment.replace("out_color = texture(", "out_color = = texture(");
     let broken_vertex = vertex.replace("v_color = color;", "v_color = color");
     // A fragment shader without `main` compiles, and does not link.
-    let unlinked = fragment.replace("void main()", "void colour()");
+    let unlinked = fragment.replace("void main()", "void color()");
     for (edited_vertex, edited_fragment, failed) in [
         (&vertex, &broken_fragment, ShaderStage::Fragment),
         (&broken_vertex, &fragment, ShaderStage::Vertex),

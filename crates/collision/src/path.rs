@@ -34,7 +34,7 @@ pub const DIAGONAL_COST: u32 = 1_414;
 
 /// The eight neighbors of a cell, in the order searches try them: the
 /// four sides (right, down, left, up), then the four corners.
-pub(crate) const NEIGHBOURS: [IVec2; 8] = [
+pub(crate) const NEIGHBORS: [IVec2; 8] = [
     IVec2::new(1, 0),
     IVec2::new(0, 1),
     IVec2::new(-1, 0),
@@ -79,7 +79,7 @@ pub(crate) fn is_open(grid: &TileGrid, cell: IVec2) -> bool {
 /// to a corner has both cells beside it open, so that no path cuts a
 /// solid cell's corner.
 pub(crate) fn step(grid: &TileGrid, cell: IVec2, direction: usize) -> Option<(IVec2, u32)> {
-    let offset = NEIGHBOURS[direction];
+    let offset = NEIGHBORS[direction];
     let to = IVec2::new(cell.x.checked_add(offset.x)?, cell.y.checked_add(offset.y)?);
     if !is_open(grid, to) {
         return None;
@@ -106,7 +106,7 @@ pub(crate) fn octile(a: IVec2, b: IVec2) -> u32 {
 
 /// The open cell a path from or to `point` uses: the one that holds it, or
 /// if that one is solid or outside the grid, the open cell of the eight
-/// around it nearest to `point` (the first in [`NEIGHBOURS`]' order of two
+/// around it nearest to `point` (the first in [`NEIGHBORS`]' order of two
 /// as near). `None` if there is none, or `point` is not a number.
 pub(crate) fn open_cell_near(grid: &TileGrid, point: Vec2) -> Option<IVec2> {
     if !(point.x.is_finite() && point.y.is_finite()) {
@@ -117,7 +117,7 @@ pub(crate) fn open_cell_near(grid: &TileGrid, point: Vec2) -> Option<IVec2> {
         return Some(cell);
     }
     let mut best: Option<(f32, IVec2)> = None;
-    for offset in NEIGHBOURS {
+    for offset in NEIGHBORS {
         let Some(near) = cell
             .x
             .checked_add(offset.x)
@@ -520,7 +520,7 @@ impl Pathfinder {
             }
             let cell = cell_of(at, active.width);
             let cost = self.cost[i];
-            for direction in 0..NEIGHBOURS.len() {
+            for direction in 0..NEIGHBORS.len() {
                 let Some((next, step)) = step(grid, cell, direction) else {
                     continue;
                 };

@@ -596,7 +596,7 @@ fn a_straight_search_expands_only_its_line() {
 }
 
 #[test]
-fn an_end_in_a_solid_cell_takes_the_open_neighbour_nearest_it_and_the_first_of_two() {
+fn an_end_in_a_solid_cell_takes_the_open_neighbor_nearest_it_and_the_first_of_two() {
     let mut field = FlowField::new();
     // Of the four beside, as near: right comes first.
     let (grid, _, _) = drawn(&["...", ".#.", "..."]);

@@ -212,19 +212,19 @@ mod tests {
             "{stopped} of {COLLIDERS} stopped"
         );
         // By walls, and by neighbors: 1,026 and 242 contacts.
-        let (mut walls, mut neighbours) = (0, 0);
+        let (mut walls, mut neighbors) = (0, 0);
         for (index, &(_, at, _, velocity)) in bodies.iter().enumerate() {
             move_and_slide(&world, index as u32, at, velocity, &mut contacts);
             for contact in &contacts {
                 match contact.obstacle {
                     nadir_collision::Obstacle::Tile(_) => walls += 1,
-                    nadir_collision::Obstacle::Collider(_) => neighbours += 1,
+                    nadir_collision::Obstacle::Collider(_) => neighbors += 1,
                 }
             }
         }
         assert!(
-            walls > 600 && neighbours > 120,
-            "{walls} wall and {neighbours} neighbour contacts"
+            walls > 600 && neighbors > 120,
+            "{walls} wall and {neighbors} neighbor contacts"
         );
     }
 

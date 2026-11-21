@@ -88,7 +88,7 @@ fn the_limiter_leaves_the_signal_below_its_knee_and_bends_it_smoothly_above() {
 }
 
 #[test]
-fn the_pan_law_maps_its_ends_and_centre() {
+fn the_pan_law_maps_its_ends_and_center() {
     let [l, r] = pan_gains(0.0, 1);
     assert_eq!(l, r);
     assert!((l - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-7);

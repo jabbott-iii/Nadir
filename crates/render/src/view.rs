@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn the_image_is_the_largest_whole_multiple_that_fits_and_centred() {
+    fn the_image_is_the_largest_whole_multiple_that_fits_and_centered() {
         let virtual_size = UVec2::new(64, 36);
         let cases = [
             // An exact fit: no bars.
