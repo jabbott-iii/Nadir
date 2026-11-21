@@ -2323,7 +2323,14 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0034 — The storm test runs the storm up to five times, 2 s apart; one run must keep to the limit
 
-- **Status:** Accepted
+- **Status:** Accepted; its condition to revisit came on 2026-11-21, when
+  all five runs went over the limit on `windows-latest` alone (CI run
+  44858165058, slowest finishes 4.1 to 19.2 ms, with no change to assets,
+  core, or codec since the last run that passed), and the user chose to
+  keep the test as it is: it had passed in the 10 Windows runs before, and
+  each remedy costs more (the benchmarks would take the 4 ms check out of
+  `cargo test`, and timing CPU needs assets to depend on platform). The
+  next such failure brings it up again.
 - **Date:** 2026-11-01
 - **Context:**
   - ADR-0030 holds every frame's finish in the storm test

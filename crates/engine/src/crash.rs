@@ -171,10 +171,18 @@ fn take_unseen(folder: &Path) -> Option<String> {
 /// engine survives, and on Windows a message box runs the thread's window
 /// messages, the game's window among them, in the middle of the panic.
 pub(crate) fn run_reporting<R>(title: &str, run: impl FnOnce() -> R) -> R {
+    run_reporting_with(show_error_dialog, title, run)
+}
+
+/// [`run_reporting`], which tells the player with `show`, given the title
+/// and the message. The crash test's child process passes a `show` that
+/// only writes to stderr: on Windows, [`show_error_dialog`]'s message box
+/// would wait for a click that never comes on a test machine.
+fn run_reporting_with<R>(show: fn(&str, &str), title: &str, run: impl FnOnce() -> R) -> R {
     match panic::catch_unwind(AssertUnwindSafe(run)) {
         Ok(result) => result,
         Err(payload) => {
-            show_error_dialog(title, &panic_notice());
+            show(title, &panic_notice());
             panic::resume_unwind(payload)
         }
     }
@@ -695,7 +703,8 @@ mod tests {
     /// The hook is the whole process's, so it is set in a child process,
     /// which runs this test alone with [`CHILD`] set: there it panics on a
     /// thread of its own, on the test's, with no folder for the reports, and
-    /// last out of [`run_reporting`], which ends the child.
+    /// last out of [`run_reporting_with`], which ends the child. The child
+    /// shows no dialog, so that nothing waits for a click.
     #[test]
     fn a_panic_writes_a_complete_report() {
         if let Some(folder) = env::var_os(CHILD) {
@@ -871,7 +880,12 @@ mod tests {
                 let _ = writeln!(io::stderr(), "the guard dropped");
             }
         }
-        run_reporting("Test", || {
+        // The player is told as `show_error_dialog` tells them on Linux, on
+        // one line of stderr, with no message box or alert to wait on.
+        fn tell(title: &str, message: &str) {
+            let _ = writeln!(io::stderr(), "{title}: {message}");
+        }
+        run_reporting_with(tell, "Test", || {
             let _guard = Guard;
             panic!("a panic that ends the run");
         });
