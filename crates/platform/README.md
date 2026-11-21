@@ -36,7 +36,8 @@ Built today:
 - Frames while Windows drags or resizes the window, or macOS resizes it
   (`set_modal_frame_callback`).
 - On Linux, an OpenGL 3.3 core context for the window, and one that draws
-  offscreen with no display (`create_headless_gl`).
+  offscreen with no display (`create_headless_gl`), which can wait until
+  the GPU has done the work sent to it (`HeadlessGl::finish`).
 - On Linux, audio output (`open_audio`): an audio thread that feeds ALSA's
   default device from a callback, recovers from underruns, and opens the
   device again when it is lost.

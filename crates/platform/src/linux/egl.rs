@@ -1166,6 +1166,15 @@ mod headless_tests {
     }
 
     #[test]
+    fn a_headless_context_waits_for_its_work() {
+        let gl = create_headless_gl().unwrap();
+        // With nothing sent yet, and after a drawing.
+        assert_eq!(gl.finish(), Ok(()));
+        check_context_and_draw(&gl);
+        assert_eq!(gl.finish(), Ok(()));
+    }
+
+    #[test]
     fn a_headless_context_finds_gl_functions_only() {
         let gl = create_headless_gl().unwrap();
         assert!(!gl.get_proc_address(c"glGetString").is_null());

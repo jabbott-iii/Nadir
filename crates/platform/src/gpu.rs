@@ -23,6 +23,7 @@ use core::num::NonZeroU64;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use nadir_core::UVec2;
+use nadir_sys::gl::PFNGLFINISHPROC;
 
 use crate::PlatformError;
 #[cfg(target_os = "linux")]
@@ -220,6 +221,36 @@ pub struct HeadlessGl {
 impl fmt::Debug for HeadlessGl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("HeadlessGl { .. }")
+    }
+}
+
+impl HeadlessGl {
+    /// Waits until the GPU has carried out all the work sent to this
+    /// context so far (`glFinish`): its drawing is in its render targets,
+    /// and the timer queries around that work (the GPU's own measures of
+    /// how long it took) have their results. A test
+    /// that calls it each frame keeps the GPU from falling behind, however
+    /// busy the machine is.
+    ///
+    /// # Errors
+    ///
+    /// [`PlatformError::GpuCallFailed`] if the driver has no `glFinish`.
+    pub fn finish(&self) -> Result<(), PlatformError> {
+        let finish = self.inner.get_proc_address(c"glFinish");
+        if finish.is_null() {
+            return Err(PlatformError::GpuCallFailed {
+                call: "glFinish",
+                error: "the graphics driver does not have it".to_string(),
+            });
+        }
+        // SAFETY: the pointer is `glFinish`, whose type this is. It is only
+        // converted here.
+        let finish = unsafe { core::mem::transmute::<*const c_void, PFNGLFINISHPROC>(finish) };
+        // SAFETY: this context is current on this thread, which a
+        // `HeadlessGl` never leaves, and every version of GL has `glFinish`,
+        // which takes nothing and returns nothing.
+        unsafe { finish() };
+        Ok(())
     }
 }
 

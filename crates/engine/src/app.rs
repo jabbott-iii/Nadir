@@ -3938,7 +3938,9 @@ mod tests {
         }
 
         /// The window: an offscreen context. It opens the profiler, clicks
-        /// "Write trace" in frame `FRAMES`, and closes.
+        /// "Write trace" in frame `FRAMES`, and closes. At the start of each
+        /// frame it waits for the GPU to finish the frame before, so that
+        /// the GPU never falls behind, however busy the machine is.
         struct Profiling {
             gl: HeadlessGl,
             pumps: u32,
@@ -3947,6 +3949,7 @@ mod tests {
 
         impl EventSource for Profiling {
             fn pump_events(&mut self, out: &mut Vec<Event>) {
+                self.gl.finish().expect("the GPU's work done");
                 self.pumps += 1;
                 if self.pumps == 1 {
                     out.extend(tap(Key::F3));
@@ -4067,18 +4070,20 @@ mod tests {
             // Frames 0 to 38 were pushed when frame 39 wrote the trace.
             assert_eq!(frames.len(), FRAMES as usize - 1);
             let gpu: Vec<&Span> = spans.iter().filter(|span| span.tid == 2).collect();
-            // Each timed frame, then its passes: every frame but the last
-            // few, whose times were not read back yet (two or three renders
-            // later, here), and on llvmpipe the first, which it times at
-            // hours. A render is untimed while the GPU is behind.
+            // Each timed frame, then its passes. The window waited for the
+            // GPU each frame, so each render's times were read back two
+            // renders later: every frame has them but the last two, whose
+            // times were not read back yet, and on llvmpipe the first, which
+            // it times at hours.
             assert!(gpu.len().is_multiple_of(3), "{gpu:?}");
             let untimed: Vec<i64> = frames
                 .iter()
                 .filter_map(|cpu| cpu.index)
                 .filter(|&index| !gpu.iter().any(|span| span.index == Some(index)))
                 .collect();
+            let unread = [i64::from(FRAMES) - 3, i64::from(FRAMES) - 2];
             assert!(
-                untimed.len() <= FRAMES as usize / 4,
+                untimed == unread || untimed == [0, unread[0], unread[1]],
                 "frames without a GPU time: {untimed:?}"
             );
             let mut free = 0;

@@ -517,6 +517,13 @@ pub const GL_LINES: GLenum = 0x0001;
 /// (void);`
 pub type PFNGLGETERRORPROC = unsafe extern "system" fn() -> GLenum;
 
+/// `glFinish`: Returns only once every command sent to the context before it
+/// is complete, its drawing in the framebuffers included. It blocks the
+/// calling thread until then.
+/// `GL/glcorearb.h` (GL 1.0): `typedef void (APIENTRYP PFNGLFINISHPROC)
+/// (void);`
+pub type PFNGLFINISHPROC = unsafe extern "system" fn();
+
 /// `glGetString`: Returns a string about the context, which ends with a NUL and
 /// lives as long as the context: `GL_VENDOR`, `GL_RENDERER` or `GL_VERSION`.
 /// Returns null if the call fails, which must be checked before the string is

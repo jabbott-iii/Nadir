@@ -196,6 +196,9 @@ pub fn show_error_dialog(title: &str, message: &str);
 pub fn os_description() -> String;  // one line, for crash reports: system, its version where known, architecture
 pub fn precise_sleep(until: std::time::Instant);
 pub fn create_headless_gl() -> Result<HeadlessGl, PlatformError>;               // tests/goldens; HeadlessGl: GlContext, !Send, !Sync
+impl HeadlessGl {
+    pub fn finish(&self) -> Result<(), PlatformError>;  // glFinish: waits until the GPU has done the work sent so far
+}
 ```
 
 ### GPU surfaces

@@ -100,6 +100,8 @@
 //! - [`create_headless_gl`] makes a [`HeadlessGl`], an OpenGL 3.3 core
 //!   context that draws only offscreen, into render targets, with no window
 //!   and no display server: for tests and golden images.
+//!   [`HeadlessGl::finish`] waits until the GPU has done the work sent to
+//!   it, so that a test can keep the GPU from falling behind.
 //! - A thread has at most one OpenGL context, the window's or a headless
 //!   one, and it stays current there until it is dropped. A second fails
 //!   with [`PlatformError::GlContextExists`]. Each context this crate makes
