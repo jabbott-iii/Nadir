@@ -287,7 +287,7 @@ mod tests {
         let map = build(set);
         let level = cooked(&app);
         assert_eq!(level.size, [WIDTH * 16, HEIGHT * 16]);
-        // The sandbox's clear colour, which the level gives the frames.
+        // The sandbox's clear color, which the level gives the frames.
         assert_eq!(level.background, [84, 84, 96]);
         assert_eq!(level.assets, ["atlas/sprites.kbj"]);
 

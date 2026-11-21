@@ -103,7 +103,7 @@ fn interleaved_textures_take_a_draw_each() {
 
 #[test]
 fn an_odd_sprite_shows_each_texel_once() {
-    // 13 texels wide, centred on a whole pixel: its corner is at 9.5, which
+    // 13 texels wide, centered on a whole pixel: its corner is at 9.5, which
     // snaps to 10, so each texel covers exactly one pixel.
     let size = UVec2::new(32, 8);
     let Some(mut stage) = Stage::new("odd", size) else {
@@ -228,7 +228,7 @@ fn the_zoom_is_whole_and_shake_moves_the_view() {
     let red = stage.image("red.qoi", 1, 1, &[RED]);
     stage.finish();
     let mut frame = frame(size);
-    // The camera shows world (0, 0) at the top left: at zoom 2, its centre
+    // The camera shows world (0, 0) at the top left: at zoom 2, its center
     // is (4, 4).
     frame.camera.position = Vec2::splat(4.0);
     let mut dot = SpriteDraw::new(red, Vec2::ONE, Vec2::ONE);

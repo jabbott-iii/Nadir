@@ -41,7 +41,7 @@ defaults:
     shell: bash
 
 # A newer push to a pull request's branch cancels its older run. A push to a
-# branch is a group of its own, never cancelled or held back: a group lets
+# branch is a group of its own, never canceled or held back: a group lets
 # only one run wait, so a third push would cancel the second, and every
 # commit of main needs its verdict, which the demo page's workflow waits for.
 concurrency:

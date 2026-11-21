@@ -685,7 +685,7 @@ fn a_thin_mover_passes_the_ends_of_a_wall_and_finds_the_seams_that_round() {
         assert_eq!(end, start + Vec2::new(300.0, 0.0), "at y {y}");
         assert!(contacts.is_empty(), "at y {y}: {contacts:?}");
     }
-    // Cells of 0.7 px from y = -4: neighbouring rows round to the same
+    // Cells of 0.7 px from y = -4: neighboring rows round to the same
     // edge, and a point on it does not slip between them.
     let mut grid = TileGrid::new(64, 256, 0.7, Vec2::new(0.0, -4.0));
     grid.set_solid(IVec2::new(20, 6), true);

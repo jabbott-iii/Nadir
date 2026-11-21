@@ -273,7 +273,7 @@ pub fn load_level(world: &mut World, name: &str) -> Result<(), LevelError> {
         layers: Vec::new(),
         atlases: Vec::new(),
         grid: false,
-        // With no level loaded, the clear colour is the game's.
+        // With no level loaded, the clear color is the game's.
         clear: world.resource::<RenderFrame>().clear,
     };
     match make(world, &path, &mut made) {
@@ -916,7 +916,7 @@ pub(crate) mod tests {
     #[test]
     fn a_second_level_replaces_the_first_whole() {
         let mut app = app(true);
-        // The game's clear colour, which the levels' backgrounds replace.
+        // The game's clear color, which the levels' backgrounds replace.
         let game = Color::rgb(7, 8, 9);
         app.world().resource_mut::<RenderFrame>().clear = game;
         app.load_level("meadow").expect("the meadow");
@@ -949,7 +949,7 @@ pub(crate) mod tests {
         assert!(frame.tile_layers.is_empty());
         assert_eq!(frame.clear, Color::rgb(1, 2, 3));
         drop(frame);
-        // With no level, the game's clear colour is back.
+        // With no level, the game's clear color is back.
         assert!(unload_level(app.world_mut()));
         assert_eq!(app.world().resource::<CurrentLevel>().name(), None);
         assert!(!unload_level(app.world_mut()));

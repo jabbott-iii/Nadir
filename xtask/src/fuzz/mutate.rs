@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn arithmetic_steps_a_number_by_at_most_16() {
-        // Every byte differs from its neighbours, so that the changed bytes
+        // Every byte differs from its neighbors, so that the changed bytes
         // show which number moved.
         let input: Vec<u8> = (0..12).map(|index| 0x40 + 0x0b * index).collect();
         let mut steps = Vec::new();

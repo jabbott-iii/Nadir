@@ -211,7 +211,7 @@ mod tests {
             (900..=1_500).contains(&stopped),
             "{stopped} of {COLLIDERS} stopped"
         );
-        // By walls, and by neighbours: 1,026 and 242 contacts.
+        // By walls, and by neighbors: 1,026 and 242 contacts.
         let (mut walls, mut neighbours) = (0, 0);
         for (index, &(_, at, _, velocity)) in bodies.iter().enumerate() {
             move_and_slide(&world, index as u32, at, velocity, &mut contacts);

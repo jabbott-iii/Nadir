@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn pixel_perfect_sprites_have_their_corner_on_a_whole_pixel() {
-        // 13 wide, centred on x = 100: its corner is at 93.5, and moves to
+        // 13 wide, centered on x = 100: its corner is at 93.5, and moves to
         // 94 (ties go up), so its feet are at 100.5.
         let mut sprite = sprite();
         sprite.size = Vec2::new(13.0, 20.0);

@@ -994,7 +994,7 @@ mod tests {
             checked(dump, "dupm").unwrap_err().to_string(),
             "argument 1: `dupm` is not `dump`: profile dump [path]"
         );
-        // A choice, ignoring case, spelt as the usage spells it.
+        // A choice, ignoring case, spelled as the usage spells it.
         let level = "log level <target> <error|warn|info>";
         assert_eq!(
             checked(level, "level nadir_render WARN").unwrap(),

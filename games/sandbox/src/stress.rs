@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn the_players_steps_pan_to_the_side_of_the_view_they_are_on() {
-        // The camera hears, from the view's centre, where it stays.
+        // The camera hears, from the view's center, where it stays.
         let (mut app, mut mixer) = listening(Scene::StressSprites, Volumes::default());
         let player = player(&app);
         let key = |key, pressed| nadir::Event::Key {

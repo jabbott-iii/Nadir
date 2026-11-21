@@ -33,7 +33,7 @@ sample for sample:
 
 and prints each WAV's size, its peak and loudness, and its seam: the jump
 from its last sample to its first, beside the largest jump between two
-neighbours within it, and the loudness of its first and last 10 ms.
+neighbors within it, and the loudness of its first and last 10 ms.
 
 The WAVs are committed, as the sandbox's other sources are: this script is
 how they were made, and it is run by hand to remake them, never by a build.

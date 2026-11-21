@@ -393,7 +393,7 @@ impl Mover<'_> {
             // than EPSILON when it is on the seam between them, and would
             // slip along it: for it, each tile is one with the solid tiles
             // beside it across the axis, and only the tiles it is across
-            // from count. Neighbouring cells share their edges exactly, so
+            // from count. Neighboring cells share their edges exactly, so
             // some tile of a wall is across from every point along it.
             let thin = axis.across(shape.half_extents()) <= EPSILON;
             let across_unit = axis.with(Vec2::ONE, 0.0);

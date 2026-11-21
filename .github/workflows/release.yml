@@ -45,7 +45,7 @@ defaults:
     # The same shell on all three systems, so each step means the same thing.
     shell: bash
 
-# One release at a time, and none cancelled: a second tag waits.
+# One release at a time, and none canceled: a second tag waits.
 concurrency:
   group: release
   cancel-in-progress: false

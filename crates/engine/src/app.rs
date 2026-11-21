@@ -2903,7 +2903,7 @@ mod tests {
             let stats = *offscreen.app().world().resource::<FrameStats>();
             assert_eq!((stats.sprites, stats.skipped), (0, 1));
 
-            // Then the sprite: 8 pixels square, its feet at the centre,
+            // Then the sprite: 8 pixels square, its feet at the center,
             // (16, 9), 4 pixels right, so rows 1 to 8 and columns 16 to 23.
             let second = offscreen.frame(TICK, &[]).expect("a frame");
             assert_eq!(log.ticks.get(), 1);
@@ -3745,7 +3745,7 @@ mod tests {
             .add_frame_system(FrameStage::Camera, "move_camera", move_camera)
             .add_frame_system(FrameStage::Ui, "probe", probe);
             let walker = app.world().resource_mut::<AssetServer>().load("walker.qoi");
-            // Cell (32, 32), the corner of four chunks, at the view's centre.
+            // Cell (32, 32), the corner of four chunks, at the view's center.
             write_ground(&app.config.assets, VIEW * 0.5 - Vec2::splat(512.0));
             app.load_level("ground").expect("the ground's level");
             // A walk of 4 frames, the quarters of the walker's texture. Clips

@@ -543,7 +543,7 @@ fn a_cancel_or_a_freed_slot_gives_no_key_another_s_path() {
         Pathfinder::new().find(&grid, request, u32::MAX, &mut points);
         points
     };
-    // The search under way cancelled: the next key's own search follows.
+    // The search under way canceled: the next key's own search follows.
     let mut queue = PathQueue::with_budget(3);
     queue.request(1, a);
     queue.request(2, c);

@@ -317,7 +317,7 @@ fn a_bus_s_volume_ramps_and_multiplies_each_voice_s() {
     for k in 0..3000 {
         let bus = 1.0 - 0.6 * ((k + 1) as f32 / 2400.0).min(1.0);
         let (l, r) = (out[k * 2], out[k * 2 + 1]);
-        // The Sfx voice is all on the left; the Ui voice at the centre.
+        // The Sfx voice is all on the left; the Ui voice at the center.
         assert!(close(r, level * 0.5 * CENTRE * bus, 1e-6), "{k}: {r}");
         assert!(
             close(l, level + level * 0.5 * CENTRE * bus, 1e-6),

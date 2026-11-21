@@ -268,7 +268,7 @@ mod tests {
             "{rect:?}"
         );
         assert!(rect.min.x.is_finite() && rect.max.y.is_finite(), "{rect:?}");
-        // Neighbours still share their edges.
+        // Neighbors still share their edges.
         let cell = IVec2::new(-7, 1_000_000);
         assert_eq!(
             grid.cell_rect(cell).max,

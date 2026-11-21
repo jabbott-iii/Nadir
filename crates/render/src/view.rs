@@ -78,7 +78,7 @@ impl View {
     pub(crate) fn new(camera: &Camera2D, virtual_size: UVec2) -> Self {
         let zoom = pixel_zoom(camera.zoom);
         let size = virtual_size.as_vec2();
-        // The top-left corner snaps, not the centre, so that an odd
+        // The top-left corner snaps, not the center, so that an odd
         // virtual size stays on the pixel grid.
         let origin = snap((camera.position + camera.shake) * zoom - size * 0.5);
         Self { origin, zoom, size }
@@ -178,7 +178,7 @@ mod tests {
             ((300, 200), 4, (22, 28, 278, 172)),
             // High enough for 4 only; bars of 38 and 39, and of 1 and 2.
             ((333, 147), 4, (38, 1, 294, 145)),
-            // Smaller than the virtual image: cropped, centred.
+            // Smaller than the virtual image: cropped, centered.
             ((51, 31), 1, (-7, -3, 57, 33)),
             ((0, 0), 1, (-32, -18, 32, 18)),
         ];
