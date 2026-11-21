@@ -526,7 +526,7 @@ fn common_prefix<'a>(first: &'a str, rest: &[&str]) -> &'a str {
 ///   is (`profile dump [path]`), a value (`<x>`, or `[path]` if it may be
 ///   left out), or a choice (`<error|warn|info>`). The console checks a
 ///   line against its command's usage before the command runs: each word
-///   typed, each choice one of its own (ignoring case, then spelt as the
+///   typed, each choice one of its own (ignoring case, then spelled as the
 ///   usage spells it), each required argument there, no more arguments than
 ///   the usage has. [`Args`] gives them, and reads a value as a number.
 /// - **Completion:** Tab completes the line's last word, or the next after

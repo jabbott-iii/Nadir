@@ -603,7 +603,7 @@ fn scene_tabs(recordings: &[Recording]) -> String {
 }
 
 /// Each scene: its video, what it shows, and what its capture saw. Each is
-/// labelled by its title, and becomes a tab panel only when `nadir.js`
+/// labeled by its title, and becomes a tab panel only when `nadir.js`
 /// shows the tabs: without it, the scenes show one under the other.
 /// `version` goes on the media's addresses.
 fn scenes(recordings: &[Recording], version: &str) -> String {

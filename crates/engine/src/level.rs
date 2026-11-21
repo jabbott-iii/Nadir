@@ -17,7 +17,7 @@
 //! prefabs, and makes its tile layers, its collision grid, its tall tiles
 //! and its entities; [`CurrentLevel`] keeps what it made, so that the next
 //! load removes the level whole; and the engine's `nadir::extract_level`
-//! draws its tile layers each frame, its background the clear colour.
+//! draws its tile layers each frame, its background the clear color.
 
 use std::fmt;
 
@@ -56,7 +56,7 @@ struct Loaded {
     atlases: Vec<Vec<Handle<Texture>>>,
     /// Whether it set the collision grid.
     grid: bool,
-    /// The clear colour it replaced, which it puts back when it goes.
+    /// The clear color it replaced, which it puts back when it goes.
     clear: Color,
 }
 
@@ -81,7 +81,7 @@ impl CurrentLevel {
         self.level.as_ref().map(|level| level.name.as_str())
     }
 
-    /// The level's background, the frames' clear colour while it is
+    /// The level's background, the frames' clear color while it is
     /// loaded.
     pub fn background(&self) -> Option<Color> {
         self.level.as_ref().map(|level| level.background)
@@ -238,7 +238,7 @@ fn level_path(name: &str) -> Option<String> {
 ///    feet at its place, then its entities spawn through their prefabs, each
 ///    with its [`Transform`] at its place in the level.
 /// 5. Its tile layers go into [`TileLayers`], and the engine draws them
-///    each frame, in their order, in front of the clear colour, which is the
+///    each frame, in their order, in front of the clear color, which is the
 ///    level's background. Its grid replaces the [`Collisions`]' grid, on
 ///    the collision layer the grid names; a level with none leaves an empty
 ///    grid.
@@ -294,7 +294,7 @@ pub fn load_level(world: &mut World, name: &str) -> Result<(), LevelError> {
 /// one: despawns the entities it spawned, takes its tile layers out of
 /// [`TileLayers`], lets go of its atlases' clips in [`Clips`]
 /// ([`Clips::release_atlas`]), empties the grid it set, puts back the
-/// clear colour it replaced, and unloads [`Scope::Level`]. The prefabs it
+/// clear color it replaced, and unloads [`Scope::Level`]. The prefabs it
 /// read stay in the [`PrefabLibrary`].
 ///
 /// # Panics
@@ -354,7 +354,7 @@ pub(crate) fn failed_texture(world: &World) -> Option<LevelError> {
 ///
 /// Its entities are spawned anew, so their [`Entity`] ids change, and what
 /// happened to them since the level loaded is undone. Its grid and its
-/// background are its new files'; the clear colour it puts back when it
+/// background are its new files'; the clear color it puts back when it
 /// goes is the one from before its load. It logs how long it took.
 ///
 /// # Errors
@@ -710,7 +710,7 @@ fn forget_unloaded_prefabs(world: &World, file: &LevelFile) {
 }
 
 /// Draws the level's tile layers into the [`RenderFrame`], in their order,
-/// before the game's own, and makes its background the clear colour: the
+/// before the game's own, and makes its background the clear color: the
 /// engine's `nadir::extract_level`, in frame `Extract`. It allocates
 /// nothing once the frame's list has room for them.
 pub(crate) fn extract_level(world: &World, _frame: &Frame) {

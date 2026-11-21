@@ -1205,7 +1205,7 @@ by the batched sprite renderer.
       critique showed that `seq` swaps two tied sprites submitted at 255
       and 256, so tied decals would flicker.
     - The view's top-left corner snaps, with halves rounding up, not the
-      centre: a camera step across zero would otherwise move the view by
+      center: a camera step across zero would otherwise move the view by
       two pixels.
     - The unit quad's corner is location 6, after the spec's six instance
       attributes.
@@ -1407,7 +1407,7 @@ by the batched sprite renderer.
       scene.
     - The sandbox's `--scene stress-sprites` adds 10,000 people walking
       about in view, all drawn from `assets/sprites/atlas.qoi`, as are the
-      props and the player. The camera stays on the view's centre.
+      props and the player. The camera stays on the view's center.
   - Note: measured on 2026-10-23 on an i7-11800H.
     - `steady_frames`: over 100 counted frames of 10,192 sprites in 2
       batches through the real loop, 0 allocations and 0 deallocations.
@@ -1569,7 +1569,7 @@ by the batched sprite renderer.
       seams, and long casts missed circles they went through. The circle
       maths now works from the cast's nearest point to the center.
     - Casts now share `EPSILON` with moves (ADR-0021).
-    - Tile seams at cell sizes and origins that round slipped. Neighbouring
+    - Tile seams at cell sizes and origins that round slipped. Neighboring
       cells now share their edges exactly.
     - `aabb` on a rect as wide as f32 allows, and casts too long to
       square, overflowed.
@@ -2564,7 +2564,7 @@ by the batched sprite renderer.
     be stretched to its Sprite's size (ADR-0024). Pack animation frames
     untrimmed, or give `ClipFrame` (`#[non_exhaustive]` for this) a size
     and pivot that `nadir::animate` writes. Then a flip must mirror about
-    the pivot: render's flip mirrors about the quad's centre, for every
+    the pivot: render's flip mirrors about the quad's center, for every
     sprite.
   - Note (from M5.1): `png::decode` logs nothing. It names the color and
     text chunks it ignored in `Image::ignored`, and the cook warns once for
@@ -2763,7 +2763,7 @@ by the batched sprite renderer.
     untrimmed size (`sw`, `sh`), and its sprite's pivot (ADR-0031): give
     `ClipFrame` (`#[non_exhaustive]` for this) a size and pivot that
     `nadir::animate` writes. Then a flip must mirror about the pivot:
-    render's flip mirrors about the quad's centre, for every sprite.
+    render's flip mirrors about the quad's center, for every sprite.
   - Note (from M5.4): an Aseprite sheet joins its folder's atlas group:
     `atlas::cook` takes the group's members, and a sheet's frames would
     come from its JSON rather than a sidecar's `frames`.
@@ -3100,7 +3100,7 @@ by the batched sprite renderer.
       `crates/codec/tests/ldtk/make_vectors.py`; it is not committed, and no
       LDtk editor opened the file. It holds the ground's 3,072 tiles, the
       `Collision` IntGrid, the 40 tall walls on a `Walls` layer, and the 16
-      trees and rocks as entities, with the sandbox's clear colour,
+      trees and rocks as entities, with the sandbox's clear color,
       `#545460`, as the background. `assets/data/prefabs/tree.jsonc` and
       `rock.jsonc` hold an atlas frame's sprite on sort layer 1 and a
       collider at the feet, in M5.11's encodings.
@@ -3189,7 +3189,7 @@ by the batched sprite renderer.
       level's assets load in `Scope::Level`, its tile layers go into
       `TileLayers`, its grid to `Collisions::set_grid`, its tall tiles
       become sprites, its entities spawn through their prefabs, and its
-      background is the clear colour.
+      background is the clear color.
     - An engine system in frame `Extract` that draws the level's tile
       layers with no allocation in a frame.
     - Facade tests on a small level: loading, a second level replacing the
@@ -3232,7 +3232,7 @@ by the batched sprite renderer.
     - Tests:
       - The facade's, on a level in memory:
         - its tiles, grid, tall tile, prefab entities and clips;
-        - a second level replacing the first whole, the game's clear colour
+        - a second level replacing the first whole, the game's clear color
           coming back once none is loaded;
         - the game's atlas, added before the level or after it, keeping its
           clips;
@@ -3245,7 +3245,7 @@ by the batched sprite renderer.
   - As built, where ADR-0038 left room:
     - `LevelError` is an error of its own, so the facade's `Error` is
       unchanged.
-    - A level puts back the clear colour it replaced.
+    - A level puts back the clear color it replaced.
     - Its prefabs stay in the `PrefabLibrary` (see M5.8's note).
     - The clips of an atlas that only a prefab names are not added: the
       cook lists only tile sets' atlases among a level's assets.
@@ -3279,7 +3279,7 @@ by the batched sprite renderer.
     - **Fixed:**
       - A game that added an atlas after a level did lost its clips when
         the level went. Clips are now held per add.
-      - The clear colour stayed the last level's background once none was
+      - The clear color stayed the last level's background once none was
         loaded.
       - Formatting.
       - Docs: what the download and the release files hold, the tables of
@@ -3966,8 +3966,8 @@ by the batched sprite renderer.
     window 1.5 s after each, put the file back byte for byte, and captured
     it again. From each save, by the file's time of change, to the game's
     log line of its reload, which the next frame draws:
-    - `sprites/tree.png`, each colour turned round: 0.28 s, the trees drawn
-      in their new colours; put back, 0.23 s.
+    - `sprites/tree.png`, each color turned round: 0.28 s, the trees drawn
+      in their new colors; put back, 0.23 s.
     - `sprites/person.json`'s `stand` tag on frame 2: 0.17 s, the clips
       found again by name and the field made again; the standing person
       drawn in a walk's pose; put back, 0.37 s.
@@ -4510,7 +4510,7 @@ by the batched sprite renderer.
     workspace test as a fourth package, as ADR-0048's revisit; bus volumes
     in percent, heard as their square (50 is −12 dB); the camera as the
     listener unless an entity has an `AudioListener`, so the player's own
-    steps are centred in the field, where the camera is on them, and pan
+    steps are centered in the field, where the camera is on them, and pan
     in `stress-sprites`, whose camera is fixed; sources of our own at 48 kHz
     mono, 1.9 MB.
   - Built: the `App` makes the mixer and opens the output in `App::run`
@@ -5828,7 +5828,7 @@ by the batched sprite renderer.
       replays then start with a loading frame or two.
     - A pause menu reads its input in tick systems of `StateKind::Paused`:
       the ticks come while paused. A loading screen is a frame system of
-      `StateKind::Loading`, on the clear colour, which it sets; its
+      `StateKind::Loading`, on the clear color, which it sets; its
       frames' `dt` is real, and `RenderFrame::time` stands still.
     - A transition queued by a frame system (a menu clicked) is made at a
       frame boundary, which a replay does not reproduce: queue those that

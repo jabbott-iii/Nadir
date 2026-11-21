@@ -367,7 +367,7 @@ fn classify(enter: f32, exit: f32, normal: Vec2) -> Ray {
     }
 }
 
-/// What a cast is against: a box by its corners, so that neighbouring
+/// What a cast is against: a box by its corners, so that neighboring
 /// tiles share their edges exactly, or a circle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Target {

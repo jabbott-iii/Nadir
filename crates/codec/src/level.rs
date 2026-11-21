@@ -94,7 +94,7 @@ pub const MAX_TILES: u32 = 65535;
 pub struct LevelFile {
     /// Its width and height in pixels.
     pub size: [u32; 2],
-    /// Its background colour: red, green and blue.
+    /// Its background color: red, green and blue.
     pub background: [u8; 3],
     /// The assets it uses, in byte order: each tile set's atlas among them.
     pub assets: Vec<String>,

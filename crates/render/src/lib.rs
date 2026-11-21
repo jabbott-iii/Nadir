@@ -199,7 +199,7 @@
 //!     Font::load_now_in(server, "atlas/fonts/ui.font.kbj", Scope::Global, &mut ctx)
 //! }
 //!
-//! /// The score, centred at the top of a panel 120 wide at (20, 10), in
+//! /// The score, centered at the top of a panel 120 wide at (20, 10), in
 //! /// layer 5, above the world's sprites.
 //! fn score(frame: &mut RenderFrame, font: Handle<Font>, score: u32) {
 //!     let mut text = TextDraw::new(font, Vec2::new(20.0, 10.0));
@@ -338,7 +338,7 @@
 //! The renderer has one mode so far: the world is drawn into an image of
 //! exactly [`RenderConfig::virtual_resolution`], which is then scaled up
 //! into the output by the largest whole factor that fits, at least 1, and
-//! centred, with bars of the clear color around it; an output smaller than
+//! centered, with bars of the clear color around it; an output smaller than
 //! the image crops it. The camera's zoom is rounded to a whole number, at
 //! least 1. The view's top-left corner, the top-left corner of each
 //! unrotated sprite and glyph, and each tile layer's origin are moved to

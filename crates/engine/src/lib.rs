@@ -150,7 +150,7 @@
 //! returns, its assets load in `Scope::Level`, its tall tiles and entities
 //! spawn, its tile layers go into the [`TileLayers`](render::TileLayers)
 //! and its grid into the [`Collisions`], and the engine draws its tile
-//! layers each frame, its background the clear colour. [`CurrentLevel`]
+//! layers each frame, its background the clear color. [`CurrentLevel`]
 //! says what it made, and the next load removes it whole; a
 //! [`LevelError`] says why one did not load (ADR-0038).
 //!
@@ -374,7 +374,7 @@
 //! [`MouseButton`](prelude::MouseButton), [`Pcg32`](prelude::Pcg32) and the
 //! time types [`Tick`](prelude::Tick), [`Frame`](prelude::Frame) and
 //! [`Stopwatch`](prelude::Stopwatch) are in the [`prelude`]; the rest of
-//! `nadir-core`, such as its matrices and linear colours, is a dependency
+//! `nadir-core`, such as its matrices and linear colors, is a dependency
 //! of its own. The OS
 //! layer, the GPU layer and the codecs are the engine's own, and a game
 //! does not use them, except for the window's [`Event`]s, which

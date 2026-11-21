@@ -276,7 +276,7 @@ fn walk(world: &World, _tick: &Tick) {
     }
 }
 
-/// Centres the camera on the hero, where this frame draws them: part of the
+/// Centers the camera on the hero, where this frame draws them: part of the
 /// way from where the last tick started to where it left them.
 fn follow(world: &World, frame: &Frame) {
     let Some(player) = world.read::<Player>().entities().first().copied() else {
@@ -429,7 +429,7 @@ adds its own first in their stages:
 | frame `Animate` | `nadir::animate` | Advances each `Animator`, writes its frame into its `Sprite`, and mirrors the sprites that face left |
 | frame `Extract` | `nadir::sound` | Puts the listener at the `AudioListener` or the camera, plays each `AudioEmitter` at its entity, and sends the track of the `MusicArea` the listener is in |
 | frame `Extract` | `nadir::extract_sprites` | Draws each `Sprite` into the `RenderFrame`, between the last two ticks |
-| frame `Extract` | `nadir::extract_level` | Draws the `CurrentLevel`'s tile layers, with its background as the clear colour |
+| frame `Extract` | `nadir::extract_level` | Draws the `CurrentLevel`'s tile layers, with its background as the clear color |
 
 So a game sets velocities in `Gameplay`, and reacts to the moves after the
 engine's, in `Movement` or `PostMovement`. Gameplay goes in tick systems,
@@ -466,7 +466,7 @@ The world is drawn into an image of `Config::virtual_resolution` pixels,
 scaled up into the window by the largest whole factor that fits, with bars
 of `RenderFrame::clear`'s color around it. The camera is the
 `RenderFrame`'s `camera`: a frame system in the `Camera` stage sets its
-`position`, the world point at the centre of the view, and it keeps it from
+`position`, the world point at the center of the view, and it keeps it from
 one frame to the next.
 
 ### Tile layers

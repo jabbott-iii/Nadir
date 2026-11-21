@@ -50,7 +50,7 @@ const DIRECTIONS: [Vec2; 8] = {
 /// - [`compute`](Self::compute) fills it: a Dijkstra integration field, the
 ///   cost of the shortest path from each cell to the goal's (in
 ///   thousandths of a cell, as [`Pathfinder`](crate::Pathfinder) counts),
-///   then a direction field, from each cell toward its neighbour that
+///   then a direction field, from each cell toward its neighbor that
 ///   leads there soonest (the first in the order right, down, left, up,
 ///   then the corners, of two as soon).
 /// - Its steps are A*'s: 8-connected, across open cells only, and to a
@@ -74,7 +74,7 @@ pub struct FlowField {
     stamp: u64,
     /// The cost from each cell to the goal, or [`UNREACHED`].
     cost: Vec<u32>,
-    /// The neighbour each cell steps to, or [`NONE`].
+    /// The neighbor each cell steps to, or [`NONE`].
     next: Vec<u8>,
     open: BinaryHeap<Reverse<(u32, u32)>>,
     goal: Option<IVec2>,
@@ -210,7 +210,7 @@ impl FlowField {
         Some(self.cost[at]).filter(|&cost| cost != UNREACHED)
     }
 
-    /// The neighbour of `cell` the way to the goal goes through; `None` at
+    /// The neighbor of `cell` the way to the goal goes through; `None` at
     /// the goal, and where the field does not reach.
     pub fn next_cell(&self, cell: IVec2) -> Option<IVec2> {
         let direction = self.next[self.index(cell)?];

@@ -5,7 +5,7 @@ people and systems around it, its containers (the programs and the files
 between them), and the components inside the game and the cook, which are
 the workspace's crates. They reflect the code at commit 0cba65f (version
 0.2). What the roadmap plans but the code does not have yet is drawn
-dashed and labelled "planned".
+dashed and labeled "planned".
 
 ## Legend
 
@@ -13,10 +13,10 @@ dashed and labelled "planned".
 | :- | :- |
 | Dark blue, rounded | A person |
 | Blue box | Part of Nadir: a system, a container or a component |
-| Grey box | A system outside Nadir |
+| Gray box | A system outside Nadir |
 | Cylinder | Files on disk |
 | White box with a dashed border | Planned: not built yet |
-| Solid arrow | Uses, reads, writes or depends on, as labelled |
+| Solid arrow | Uses, reads, writes or depends on, as labeled |
 | Dotted arrow | Planned: not built yet |
 
 ## 1. System context

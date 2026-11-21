@@ -126,7 +126,7 @@ pub enum VoiceChange { Volume(f32), Pitch(f32), Pan(f32), Position(Vec2) }
   position. Good enough for SFX pitch variance (±20%).
 - **Pan:** constant-power for a mono sound: `l = cos(θ)`, `r = sin(θ)`,
   with `θ = (pan + 1) · π/4`. A stereo sound is balanced:
-  `√2 · (cos θ, sin θ)` per channel, capped at 1, so the centre and the
+  `√2 · (cos θ, sin θ)` per channel, capped at 1, so the center and the
   near side stay at unity and no gain lifts a stereo sound past full scale
   (ADR-0046). Music is not panned: a mono track plays on both sides as it
   is.
@@ -379,7 +379,7 @@ and plays them, and re-exports the crate as `nadir::audio`.
   sound): `cargo xtask cook`, then `cargo dev`. The north's tune fades in
   over 1.5 s, and the pond laps from the right. Walking east along the
   path, the steps thud twice a cycle, none when stopped or against a
-  wall, and the pond moves from the right through the centre to the left,
+  wall, and the pond moves from the right through the center to the left,
   fading with distance. Standing for 10 s, no loop clicks. Walking south
   through the gap at column 50 (y 576), the music crossfades to the
   south's over 1.5 s, and back. The report still says 0 allocations, with

@@ -160,7 +160,7 @@ ADR-0029).
   counter (see `docs/04-quality.md`) checks this.
 - **Docs:** every `pub` item has a doc comment (`missing_docs` = warn, `-D` in
   CI). Follow `.claude/rules/documentation.md` when writing docs or doc
-  comments: plain but exact wording, terms explained on first use and
+  comments: plain but exact wording, terms explained on first use, and
   American English. Then reread the draft as a second-year computer
   science student and as a senior engineer.
 - **License headers:** every source file (Rust, GLSL, scripts, the site's

@@ -18,7 +18,7 @@
 //! crossfades, a change of rate, and a main thread that does not take back
 //! what the mixer is done with; and through each place the mixer gives a
 //! sound or a track back: a voice ending beside the one it took the place
-//! of, a music handoff finished, cancelled by a stop or by the track coming
+//! of, a music handoff finished, canceled by a stop or by the track coming
 //! back, and the same track played twice.
 //!
 //! Each test loads its sounds and tracks in an asset server of its own,

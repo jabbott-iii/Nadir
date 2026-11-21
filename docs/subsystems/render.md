@@ -368,14 +368,14 @@ pub struct TileLayerDraw { pub tiles: Handle<TileLayer>, pub layer: u8, pub dept
      letterbox bars in the clear color.
   3. Snap the camera position to whole virtual pixels. As built
      (ADR-0018):
-     - The view's top-left corner snaps, not its centre, so that an odd
+     - The view's top-left corner snaps, not its center, so that an odd
        virtual size stays on the pixel grid.
      - Halves round up, `floor(x + 0.5)`, so each pixel the camera moves
        moves the view by one.
      - Unrotated sprites snap their corners too.
      - The zoom is rounded to a whole number, at least 1.
      - The factor is the largest whole number that fits both sides, at
-       least 1. The image is centred, with the odd pixel of a bar on the
+       least 1. The image is centered, with the odd pixel of a bar on the
        right or at the bottom, and cropped when the output is smaller than
        the virtual resolution.
   4. Optional smooth-camera mode: render with a one-pixel border and offset

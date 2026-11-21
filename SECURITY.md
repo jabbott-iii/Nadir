@@ -52,7 +52,7 @@ you attach.
 Nadir has a single maintainer, so responses are best effort. A report goes
 through these steps:
 
-1. **Acknowledgement.** The maintainer replies in the private report.
+1. **Acknowledgment.** The maintainer replies in the private report.
 2. **Assessment.** The maintainer confirms whether it is a vulnerability,
    which commits it affects and how severe it is, and discusses it with you
    there.

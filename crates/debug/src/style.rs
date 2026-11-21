@@ -33,7 +33,7 @@ pub struct Style {
     pub indent: f32,
     /// How much of a row a control takes, its label after it.
     pub control_share: f32,
-    /// How wide a labelled control is in a row of several
+    /// How wide a labeled control is in a row of several
     /// ([`Ui::horizontal`](crate::Ui::horizontal)).
     pub control_width: f32,
     /// How wide the scrollbar is, and how large the resize grip.

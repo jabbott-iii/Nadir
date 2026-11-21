@@ -252,7 +252,7 @@
 //!   overlap, and a point on an edge is outside. A mover against a wall
 //!   stays put when pushed into it, and leaves it freely.
 //! - **Tiles:** cells outside the grid are not solid, so a level needs
-//!   walls round its edge. Neighbouring cells share their edges exactly
+//!   walls round its edge. Neighboring cells share their edges exactly
 //!   ([`TileGrid::cell_rect`]), so a mover slides along a wall of tiles
 //!   without snagging on the seams.
 //! - **Speed:** a move is split into up to 16 substeps, and each axis is

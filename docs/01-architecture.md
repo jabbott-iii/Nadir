@@ -261,7 +261,7 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
   | frame `Animate` | `nadir::animate` | advances each `Animator` by the clock's step, writes its frame into its `Sprite`, sends `AnimationFinished`, mirrors each Sprite that faces left and unmirrors the rest with a `Facing` (ADR-0024) |
   | frame `Extract` | `nadir::sound` | puts the listener at the first `AudioListener` or the camera, plays each `AudioEmitter` at its entity between the last two ticks, sends the track of the `MusicArea` the listener is in, then calls `Audio::update` (ADR-0051) |
   | frame `Extract` | `nadir::extract_sprites` | draws each `Sprite` between the last two ticks |
-  | frame `Extract` | `nadir::extract_level` | draws the `CurrentLevel`'s tile layers, its background the clear colour |
+  | frame `Extract` | `nadir::extract_level` | draws the `CurrentLevel`'s tile layers, its background the clear color |
 
   `nadir::movement`, `nadir::parent_offsets`, `nadir::triggers` and
   `nadir::navigation` do not run while the game state is `Paused`, and

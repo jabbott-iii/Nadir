@@ -1508,7 +1508,7 @@ symbolic links. Names starting with `.` are left out.
 ```jsonc
 {
   "frames": [12, 20], // a sheet: cells of 12 × 20, row by row; they must divide the image
-  "pivot": [6, 20],   // in a frame's untrimmed pixels (default: its bottom centre)
+  "pivot": [6, 20],   // in a frame's untrimmed pixels (default: its bottom center)
   "trim": false       // keep each frame whole (default: true)
 }
 { "tiles": [16, 16] } // a tile set instead: tiles that divide the image; its own page, as it is

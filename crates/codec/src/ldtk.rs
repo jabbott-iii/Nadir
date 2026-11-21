@@ -57,7 +57,7 @@
 //!   tiles, and its `customData` is of tiles it has. A layer's tile set,
 //!   if it names one, is defined; its IntGrid values are 1 or more.
 //! - **Levels:** a level's size is 1 pixel or more; its background a
-//!   colour `#rrggbb`. A level is external (an `externalRelPath`) exactly
+//!   color `#rrggbb`. A level is external (an `externalRelPath`) exactly
 //!   when its `layerInstances` is `null`, and only in a project that saves
 //!   its levels apart (`externalLevels`).
 //! - **Layers:** each of a layer definition the project has, and of its
@@ -275,7 +275,7 @@ pub struct Level {
     pub width: u32,
     /// Its height in pixels (`pxHei`): 1 or more.
     pub height: u32,
-    /// Its background colour, red, green and blue (`__bgColor`).
+    /// Its background color, red, green and blue (`__bgColor`).
     pub background: [u8; 3],
     /// Its `.ldtkl` file, relative to the project's, for a level saved
     /// apart (`externalRelPath`).
@@ -421,7 +421,7 @@ pub enum ErrorKind {
         /// The string.
         found: String,
     },
-    /// A colour is not `#rrggbb`.
+    /// A color is not `#rrggbb`.
     BadColor,
     /// Two definitions of one kind share a uid.
     DuplicateUid {
@@ -727,7 +727,7 @@ fn pair<'v>(value: &'v Value, at: &At<'_>) -> Result<[&'v Value; 2], CodecError>
     }
 }
 
-/// A colour `#rrggbb`, as red, green and blue.
+/// A color `#rrggbb`, as red, green and blue.
 fn color(value: &Value, at: &At<'_>) -> Result<[u8; 3], CodecError> {
     let text = value.as_str().ok_or_else(|| {
         at.error(ErrorKind::WrongType {

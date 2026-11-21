@@ -433,7 +433,7 @@ impl App { pub fn add_console_command(self, usage: &str, help: &str,
   `profile dump [path]`), a value (`<x>`, or `[path]` if it may be left
   out), or a choice (`<error|warn|info|debug|trace>`). A line is checked
   before its command runs: each word typed, each choice one of its own,
-  ignoring case and then spelt as the usage spells it, each required
+  ignoring case and then spelled as the usage spells it, each required
   argument there, no more than the usage has. `Args::f32` reads a finite
   number. Each error names the argument and the usage: `<y> is missing:
   tp <x> <y>`, ``<scale>: `fast` is not a number: timescale <scale>``.

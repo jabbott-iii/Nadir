@@ -21,14 +21,14 @@
 //!
 //! The grass and everything that stands on it, the player included, are
 //! drawn from one page of the cooked atlas, so that the 10,203 sprites are
-//! 1 batch. The camera stays on the view's centre, and the crowd inside the
+//! 1 batch. The camera stays on the view's center, and the crowd inside the
 //! view. Each walker is an entity, which the engine moves by its velocity
 //! and animates: a walk of four frames from the atlas, each walker at its
 //! own point in it, facing the way it goes. The player is
 //! tinted yellow and drawn over the crowd, one
 //! layer up, to be found in it: the crowd covers each spot about 20 deep.
 //! They walk with WASD inside the view, which stays put, and stop at its
-//! edges. Their steps are heard from the view's centre, the camera, so
+//! edges. Their steps are heard from the view's center, the camera, so
 //! they pan to the side of it the player is on.
 
 use std::time::Duration;
@@ -266,7 +266,7 @@ fn keep_player_in_view(world: &World, _tick: &Tick) {
     }
 }
 
-/// Keeps the camera on the view's centre, where the crowd is.
+/// Keeps the camera on the view's center, where the crowd is.
 fn fix_camera(world: &World, _frame: &Frame) {
     world.resource_mut::<RenderFrame>().camera.position = VIEW * 0.5;
 }

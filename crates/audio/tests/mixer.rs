@@ -43,7 +43,7 @@ const FADE_IN: usize = 96;
 /// rounded up.
 const FADE_IN_44_1: usize = 89;
 
-/// `cos(π/4)`: each side's gain for a mono sound at the centre.
+/// `cos(π/4)`: each side's gain for a mono sound at the center.
 const CENTRE: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
 fn fresh() -> (Audio, Mixer) {

@@ -119,7 +119,7 @@ assets/                          target/cooked/
   ```
 
   Frames are trimmed to their pixels unless `"trim"` is `false`, and their
-  pivot is their bottom centre unless `"pivot"` says otherwise. Beside an
+  pivot is their bottom center unless `"pivot"` says otherwise. Beside an
   Aseprite export, a sidecar takes `trim` and `pivot` only.
 - **A folder's `atlas.jsonc`** puts its images in another group:
   `{ "group": "characters" }`.

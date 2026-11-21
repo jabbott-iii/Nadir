@@ -34,7 +34,7 @@ pub struct Collider {
   size in pixels, and an origin. There are no per-tile colliders.
   - Cells outside the grid are not solid, so a level needs walls round its
     edge.
-  - Neighbouring cells share their edges exactly (`cell_rect`), so a seam
+  - Neighboring cells share their edges exactly (`cell_rect`), so a seam
     between two solid tiles is one line, whatever the cell size and
     origin.
   - The grid has a `layer`, every layer by default (ADR-0021). A level
@@ -107,7 +107,7 @@ pub fn move_and_slide(
    does not stop it. So separating the axes does not snag on tile seams or
    corners.
    - A mover no more than `EPSILON` either side of its center, across its
-     motion, treats a tile and its solid neighbours as one wall, so it
+     motion, treats a tile and its solid neighbors as one wall, so it
      cannot slip along the seam between them.
 4. If `|delta|` exceeds half the smallest collider dimension, split the
    move into substeps, at most 16, each moving X then Y, so a diagonal
@@ -277,7 +277,7 @@ As built in M9.5 (ADR-0069; `crates/collision/src/path.rs` and
     grid of its own when the game gives it one (`set_grid`).
 - **Flow fields** (`FlowField`), for many agents heading to one goal:
   - a Dijkstra integration field from the goal's cell over A*'s steps;
-  - a direction field from it: toward the neighbour that leads to the goal
+  - a direction field from it: toward the neighbor that leads to the goal
     soonest, the first in A*'s order of two as soon;
   - `update(grid, goal, tick)` recomputes it when the goal moves to
     another cell, at most once every `EVERY`, 10, ticks, and at once for a
@@ -306,7 +306,7 @@ As built in M9.5 (ADR-0069; `crates/collision/src/path.rs` and
     - the move goes all the way when nothing is under its swept box;
     - an axis that falls short has a contact, flush against what stopped
       it;
-    - layers, masks and trigger movers are honoured.
+    - layers, masks and trigger movers are honored.
   - the queries and casts against brute force, with colliders moved since
     the rebuild (`queries.rs`). Casts are checked by sampling overlaps
     along them, apart from the ray maths.
@@ -382,7 +382,7 @@ As built in M9.5 (ADR-0069; `crates/collision/src/path.rs` and
     search on; a search starts again when a cell it expanded is set solid;
     a cancel or a freed slot gives no key another's path; a budget of 0
     finishes nothing;
-  - ends in solid cells and the nearest open neighbour, by each cell's
+  - ends in solid cells and the nearest open neighbor, by each cell's
     nearest point, the first of two as near;
   - smoothing: each leg in sight for the box, the cells' own steps at
     either end when it sees past none, a point every 16 cells of a run;

@@ -38,7 +38,7 @@ pub struct Upscale {
     /// at least 1.
     pub factor: u32,
     /// The image's place in the output, in pixels from its top left. It is
-    /// centred, with the odd pixel of a bar on the right or at the bottom.
+    /// centered, with the odd pixel of a bar on the right or at the bottom.
     /// It reaches outside an output smaller than the virtual resolution,
     /// whose image is then cropped.
     pub rect: IRect,

@@ -41,7 +41,7 @@ pub(super) type Body = (u64, Vec2, Collider, Vec2);
 /// A map of [`TILE`] px tiles, one in five solid, and [`COLLIDERS`] boxes
 /// and circles from 10 to 14 px across, each near the middle of a tile
 /// that is not, with a velocity of 2 to 4 px a tick: a crowd among walls,
-/// where a move often meets a neighbour or a wall. The same every time.
+/// where a move often meets a neighbor or a wall. The same every time.
 pub(super) fn scene() -> (TileGrid, Vec<Body>) {
     let mut rng = Pcg32::new(0x636f_6c6c, 0);
     let tiles = (MAP / TILE) as i32;
@@ -130,7 +130,7 @@ fn slide_all(world: &CollisionWorld, bodies: &[Body], contacts: &mut Vec<Contact
 /// `collision_slide_5k`: a tick of movement. Each of the [`scene`]'s
 /// [`COLLIDERS`] colliders moves 2 to 4 px with `move_and_slide`, among
 /// the others and the walls; about one move in four is stopped, mostly by
-/// a wall, sometimes by a neighbour. Positions are not written
+/// a wall, sometimes by a neighbor. Positions are not written
 /// back, so every iteration does the same work. The M4 exit budget is
 /// 4 ms a tick for 5,000 entities on the min-spec machine, everything
 /// included.

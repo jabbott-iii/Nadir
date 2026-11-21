@@ -23,11 +23,11 @@ use nadir_core::{Color, Rect, Vec2};
 
 use crate::{Font, TextLayout, Texture, TileLayerDraw, UiList};
 
-/// The view of the world: what is at the centre of the screen, and how
+/// The view of the world: what is at the center of the screen, and how
 /// large.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera2D {
-    /// The world point at the centre of the view.
+    /// The world point at the center of the view.
     pub position: Vec2,
     /// Virtual pixels per world unit. Pixel-perfect rendering rounds it to
     /// a whole number, at least 1.

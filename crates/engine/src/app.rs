@@ -490,7 +490,7 @@ impl EngineCore {
 /// - `nadir::extract_sprites` (frame `Extract`): draws every [`Sprite`]
 ///   into the [`RenderFrame`], between the last two ticks;
 /// - `nadir::extract_level` (frame `Extract`): draws the tile layers of the
-///   [`CurrentLevel`], with its background as the clear colour.
+///   [`CurrentLevel`], with its background as the clear color.
 ///
 /// While the game is paused ([`StateMachine`]), `nadir::movement`,
 /// `nadir::parent_offsets`, `nadir::triggers` and `nadir::navigation` do
@@ -1144,7 +1144,7 @@ impl App {
     /// the one after the last before it, however long it took; the frame
     /// stages run, with the frame's real `dt`, and the engine does not draw
     /// the world, so that the game's loading screen, its frame systems of
-    /// [`StateKind::Loading`], shows on the clear colour. Once a frame's
+    /// [`StateKind::Loading`], shows on the clear color. Once a frame's
     /// stages have run in the state, the next frame loads its level with
     /// [`load_level`](crate::load_level), in place of the last, whose
     /// `Scope::Level` it unloads; the frames after wait until the asset
@@ -2814,8 +2814,8 @@ mod tests {
         const RED: [u8; 4] = [255, 0, 0, 255];
 
         /// An app of one red sprite, 8 pixels square, its feet 4 pixels
-        /// right of the view's centre, on blue, whose systems count the ticks
-        /// into `log`. It is off the centre so that a frame upside down or
+        /// right of the view's center, on blue, whose systems count the ticks
+        /// into `log`. It is off the center so that a frame upside down or
         /// mirrored shows it elsewhere.
         fn app(test: &str, log: &Shared) -> App {
             let assets = env::temp_dir().join(format!("nadir-engine-{test}-{}", process::id()));
@@ -3541,7 +3541,7 @@ mod tests {
         const CROWD: usize = 10_000;
         /// The ground under them: a tile layer of 64 × 64 cells of 16
         /// pixels, so chunks of 32 × 32 cells, a quarter of them animated.
-        /// Its four chunks meet at the view's centre.
+        /// Its four chunks meet at the view's center.
         const GROUND: u32 = 64;
         /// Frames before the counting starts: the textures are made at the
         /// end of the first frame after the workers decode them (the first

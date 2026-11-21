@@ -532,11 +532,11 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - A sprite's corner is its position less pivot × size. With the default
     pivot (0.5, 1), an odd-width sprite at a whole position has its corner
     on a half pixel. So does any sprite at a `.5` position. Its edges and
-    its texel boundaries then fall on pixel centres. GL leaves both the
+    its texel boundaries then fall on pixel centers. GL leaves both the
     edge coverage and the nearest-texel choice to the vendor there, so a
     13-pixel-wide sprite can draw a texel column twice and drop another,
     differently on each GPU, and moving sprites shimmer.
-  - A non-integer zoom puts texel boundaries on pixel centres whatever is
+  - A non-integer zoom puts texel boundaries on pixel centers whatever is
     snapped: at zoom 1.5, a third of the pixel columns.
   - The design critique of M3.3 found this. The user chose both rules on
     2026-10-19.
@@ -729,7 +729,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       (0.01 px) or less does not block it. This is what keeps seams
       between tiles from snagging.
     - A move longer than half the collider's smallest dimension is split
-      into substeps, at most 16. Each axis is swept, so tunnelling does not
+      into substeps, at most 16. Each axis is swept, so tunneling does not
       depend on the substeps.
   - `CollisionWorld::set_position(index, position)` moves a collider
     between rebuilds:
@@ -756,7 +756,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     - A cast along the seam between two solid tiles, or within `EPSILON`
       of it, is stopped, while one along the outside of a wall passes.
     - A mover no more than `EPSILON` either side of its center, across its
-      motion, treats a tile and its solid neighbours as one wall, so it
+      motion, treats a tile and its solid neighbors as one wall, so it
       cannot slip along a seam.
     - A query whose region spans more cells than hold colliders walks the
       cells that do, so a query never costs more than the colliders'
@@ -1066,7 +1066,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0024 — Clips live in a store the facade owns; an Animator plays one in a frame stage on the simulation clock; Facing mirrors a sprite that faces left
 
-- **Status:** Accepted; what `nadir::animate` writes (a frame's size and pivot too), the flip about the quad's centre, and clips only by handle, are superseded by ADR-0035; ADR-0038 reflects `Animator` as its clip's name (M5.11)
+- **Status:** Accepted; what `nadir::animate` writes (a frame's size and pivot too), the flip about the quad's center, and clips only by handle, are superseded by ADR-0035; ADR-0038 reflects `Animator` as its clip's name (M5.11)
 - **Date:** 2026-10-28
 - **Context:**
   - M4.6 asks for the `Animator` component and clips, hand-defined until
@@ -1153,7 +1153,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     ticks.
   - `Animator` is not reflected: its clip is a handle (M5.6). Its time is
     transient: saves rebuild it (`scene.md`).
-  - `Facing` mirrors only its own entity's Sprite, about the quad's centre
+  - `Facing` mirrors only its own entity's Sprite, about the quad's center
     (render's flip): a `Parent`'s child needs its own `Facing`, and its
     offset is not mirrored.
 - **Alternatives considered:**
@@ -1739,7 +1739,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     - checks the features, and builds the sandbox in release;
     - captures `field`, `stress-sprites` and `stress-entities`;
     - encodes each with GStreamer (`gst-launch-1.0`) into a VP9 WebM, at
-      twice the size with nearest-neighbour scaling, and a PNG poster;
+      twice the size with nearest-neighbor scaling, and a PNG poster;
     - packs the sandbox with `assets/` into a Linux x86_64 `.tar.gz` with
       `tar`, with its SHA-256 from `sha256sum` and the oldest glibc it runs
       on, read from the version names in the executable;
@@ -2045,7 +2045,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     size) and pivot, or tile size for a tile set. A tile set's page is
     `atlas/<sprite>.tiles.qoi`. The pivot is in the untrimmed frame's
     pixels, from (0, 0) at its top-left corner to (sw, sh) at its
-    bottom-right, and is the bottom centre when the sidecar gives none.
+    bottom-right, and is the bottom center when the sidecar gives none.
   - **PNG warning:** once per file that has a color chunk other than
     `sRGB`: `gAMA`, `cHRM`, `iCCP`, `cICP`, `mDCV` or `cLLI`. This
     changes ADR-0027's rule.
@@ -2390,7 +2390,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     a `ClipFrame` has no size or pivot, so a trimmed frame is stretched
     to its sprite's quad (ADR-0024), and the person's sheet was cooked
     whole (`"trim": false`, ADR-0033); render mirrors a sprite about its
-    quad's centre, wrong for a frame trimmed unevenly; a clip never
+    quad's center, wrong for a frame trimmed unevenly; a clip never
     becomes an asset (ADR-0024); and `bmfont::parse` leaves the pages,
     their size, their alpha and the fallback to the cook (M5.2).
   - The spec planned clips in files of their own, `anim/<name>.kbj`,
@@ -2870,7 +2870,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0038 — M5.6 split into four tasks; LDtk 1.5.3 and its conventions; the level file `.klvl` (version 1) and the prefab file; how prefabs, reflection and `load_level` behave
 
-- **Status:** Accepted; as built in M5.11, a handle the asset server does not know, and an `Animator`'s clip with no name, are written as `null` with a warning, since `to_value` cannot fail (ADR-0020), and reading them back is an error; for a hash, a nameless clip is written as its handle; as built in M5.12, the cook's `Counts` is `#[non_exhaustive]`, with `Levels { levels, entities }` (a break), a project's job is `ldtk/<its path>`, without `.ldtk`, only the tile sets of the layers it draws are read, a layer whose tiles are all tall is no tile layer, an entity's field with no value is left out and its overrides are in name order, a level's own fields are not cooked, with a warning, a level's tile layers and grid hold at most 2^23 cells together, and the data job reads each prefab of `data/prefabs/` with `prefab::read` and checks its name; as built in M5.6, `load_level` is `App::load_level`, and `nadir::load_level` on a world, with `unload_level`, the resource `CurrentLevel` and an error of its own, `LevelError`, so the facade's `Error` is unchanged; `Clips` knows an atlas by its pages and holds one added twice once more, until each lets go (`Clips::release_atlas`); a level puts back the clear colour it replaced when it goes, and its prefabs stay in the `PrefabLibrary`; the engine's `nadir::extract_level` draws the level's tile layers; the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` (ADR-0033, ADR-0036); and the sandbox names its collision layers, so the field's world hash changed once more, colliders now written with their layers' names (`8587378f99a52c1a` → `298521738b5650ef` over the capture, its frames the same); that the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` is superseded by ADR-0041: they carry the pack, `assets/game.kpak`, alone
+- **Status:** Accepted; as built in M5.11, a handle the asset server does not know, and an `Animator`'s clip with no name, are written as `null` with a warning, since `to_value` cannot fail (ADR-0020), and reading them back is an error; for a hash, a nameless clip is written as its handle; as built in M5.12, the cook's `Counts` is `#[non_exhaustive]`, with `Levels { levels, entities }` (a break), a project's job is `ldtk/<its path>`, without `.ldtk`, only the tile sets of the layers it draws are read, a layer whose tiles are all tall is no tile layer, an entity's field with no value is left out and its overrides are in name order, a level's own fields are not cooked, with a warning, a level's tile layers and grid hold at most 2^23 cells together, and the data job reads each prefab of `data/prefabs/` with `prefab::read` and checks its name; as built in M5.6, `load_level` is `App::load_level`, and `nadir::load_level` on a world, with `unload_level`, the resource `CurrentLevel` and an error of its own, `LevelError`, so the facade's `Error` is unchanged; `Clips` knows an atlas by its pages and holds one added twice once more, until each lets go (`Clips::release_atlas`); a level puts back the clear color it replaced when it goes, and its prefabs stay in the `PrefabLibrary`; the engine's `nadir::extract_level` draws the level's tile layers; the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` (ADR-0033, ADR-0036); and the sandbox names its collision layers, so the field's world hash changed once more, colliders now written with their layers' names (`8587378f99a52c1a` → `298521738b5650ef` over the capture, its frames the same); that the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` is superseded by ADR-0041: they carry the pack, `assets/game.kpak`, alone
 - **Date:** 2026-11-01
 - **Context:**
   - Roadmap task M5.6 ("cook: LDtk importer; scene: prefabs and level
@@ -3016,7 +3016,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     first adds to them, a break recorded then.
   - **`load_level`** (M5.6): reads the `.klvl` and its prefabs before it
     returns, while textures stream in as they do now; despawns only the
-    entities the previous level spawned; takes its clear colour from the
+    entities the previous level spawned; takes its clear color from the
     level; gives no grid when the level has none; and skips the clips of
     an atlas the game already added (`Clips` tracks them), so the
     sandbox's global atlas is no `NameTaken`. A missing `.klvl` or prefab
@@ -3751,7 +3751,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     than two ramps, and the cook (M6.6) can end sounds at 0.
   - **Pan:** a mono sound by the constant-power law of the spec; a stereo
     sound by a balance law, `√2 · (cos θ, sin θ)` capped at 1, which keeps
-    the centre and the near side at unity. Music is not panned.
+    the center and the near side at unity. Music is not panned.
   - **Music:** two slots, each with a buffer of a QOA frame and a sample
     carried from the frame before, decoded on the audio thread; tracks
     loop. A track sounding in either slot, fading or not, fades back in
@@ -4284,7 +4284,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     pinned its four jobs, the level job at index 3 and a pack of 6 files:
     the sandbox's sounds fail it, and it is nadir-cook's, a fourth package.
   - The sandbox had no sounds, and sounds not ours would need their
-    licences beside them (ADR-0037).
+    licenses beside them (ADR-0037).
 - **Decision:**
   - **Audio opens in `App::run` alone.** `App::new` makes the mixer of
     `AudioConfig::default()`, which is valid, inserts `Audio`, always
@@ -4402,7 +4402,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     range free their voices, and a stolen one comes back when it starts
     again; a game sets volumes in one unit and one curve, which M9.2's
     sliders and M9.3's settings can share; the sounds are ours, under the
-    repository's licence.
+    repository's license.
   - Bad: a looped emitter whose voice is stolen is silent until it leaves
     range and comes back, or changes; a sound played once, as something
     happens, is lost if it has not loaded, so a game loads it first;
@@ -4432,7 +4432,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - Positions sent only when they change: one that the half-full queue
     dropped would not be sent again.
   - The listener on the player: the player's own steps would always be
-    centred.
+    centered.
   - Distant emitters left playing: each holds a slot, silent.
   - The components reflected: `Handle` has no `Default`, nadir-audio's
     types are not `Reflect`, and every game's world hash would change.
@@ -5727,7 +5727,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       know nothing of the world or the app. A usage's words after the name
       are words, values (`<x>`, `[x]` optional) or choices (`<a|b>`), from
       which the console checks a line before it runs (each word as typed,
-      each choice one of its own, ignoring case and then spelt as the usage
+      each choice one of its own, ignoring case and then spelled as the usage
       spells it, required ones there, no more than the usage has), and
       completes;
     - **lines** split at whitespace, double quotes grouping, `\"` and `\\`
@@ -6190,7 +6190,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     and the clock is not told the time; the frame stages run, with the
     frame's real `dt`; `nadir::extract_sprites` and `nadir::extract_level`
     do not run, so the game's frame systems of `StateKind::Loading` draw
-    the screen on the clear colour. Once a frame's stages have run in the
+    the screen on the clear color. Once a frame's stages have run in the
     state, the next frame's start calls `load_level`, which unloads the
     last level and `Scope::Level`; later frames wait until
     `AssetServer::has_pending` is false where the frames finish loads
@@ -6232,7 +6232,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     the enter and exit systems (the main loop logs them at debug level);
     `load_level` blocks the frame it runs in (about 500 ms for the biggest
     level the budget allows), so the screen stands still meanwhile; the
-    clear colour during the loading is the game's or the last level's
+    clear color during the loading is the game's or the last level's
     until the screen sets it; `Error` lost `Eq` and its exhaustiveness, a
     break; a frame of the leftover time of the frame that entered
     `Loading` runs after it, at most a frame's ticks.
@@ -6474,8 +6474,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     - Results keep their buffers, so a steady tick allocates nothing.
   - **Flow fields (`FlowField`):** a Dijkstra from the goal's cell (the
     open one nearest it) over A*'s steps, costs in A*'s units, then a
-    direction toward the neighbour of least cost-through, the first of
-    A*'s neighbour order on a tie. `update(grid, goal, tick)` computes it
+    direction toward the neighbor of least cost-through, the first of
+    A*'s neighbor order on a tie. `update(grid, goal, tick)` computes it
     on its first call, for a grid of another size or place or with a cell
     set since, or when the goal is in another cell and `EVERY`, 10, ticks
     have passed since the last; `direction_at(point)` is a unit vector,

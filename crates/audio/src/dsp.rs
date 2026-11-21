@@ -25,9 +25,9 @@ pub(crate) const KNEE: f32 = 0.891_250_9;
 /// `θ = (pan + 1) · π/4`.
 ///
 /// - A mono source follows the constant-power law: `(cos θ, sin θ)`, so
-///   `l² + r² = 1` at every pan, and each side is at −3 dB at the centre.
+///   `l² + r² = 1` at every pan, and each side is at −3 dB at the center.
 /// - A stereo source follows a balance law: each channel at
-///   `√2 · (cos θ, sin θ)`, capped at 1. The centre leaves both as they
+///   `√2 · (cos θ, sin θ)`, capped at 1. The center leaves both as they
 ///   are, the near side stays at 1, and the far side fades; no gain passes
 ///   1, so a stereo sound never goes past full scale on its own (its
 ///   samples above −1 dBFS still meet the limiter's bend).

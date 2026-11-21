@@ -32,7 +32,7 @@ pub const STRAIGHT_COST: u32 = 1_000;
 /// thousandths.
 pub const DIAGONAL_COST: u32 = 1_414;
 
-/// The eight neighbours of a cell, in the order searches try them: the
+/// The eight neighbors of a cell, in the order searches try them: the
 /// four sides (right, down, left, up), then the four corners.
 pub(crate) const NEIGHBOURS: [IVec2; 8] = [
     IVec2::new(1, 0),
@@ -74,7 +74,7 @@ pub(crate) fn is_open(grid: &TileGrid, cell: IVec2) -> bool {
     index_of(grid, cell).is_some() && !grid.is_solid(cell)
 }
 
-/// The cell that a step from `cell` toward neighbour `direction` reaches,
+/// The cell that a step from `cell` toward neighbor `direction` reaches,
 /// and what it costs, if the step is allowed: the cell is open, and a step
 /// to a corner has both cells beside it open, so that no path cuts a
 /// solid cell's corner.

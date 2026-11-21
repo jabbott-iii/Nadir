@@ -281,7 +281,7 @@ The repository holds no secret, and the workflow names only these:
 
 | Secret | Environment | What it is |
 | :- | :- | :- |
-| `APT_SIGNING_KEY` | `release` | The apt repository's signing key: an ASCII-armoured OpenPGP secret key with no passphrase, made for this repository alone |
+| `APT_SIGNING_KEY` | `release` | The apt repository's signing key: an ASCII-armored OpenPGP secret key with no passphrase, made for this repository alone |
 | `CARGO_REGISTRY_TOKEN` | `crates-io` | A crates.io API token with the scopes `publish-new` and `publish-update` |
 
 1. **Environments** (Settings → Environments): make `release` and

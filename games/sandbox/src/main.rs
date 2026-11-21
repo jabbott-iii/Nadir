@@ -769,7 +769,7 @@ fn drawn_position(world: &World, entity: Entity, alpha: f32) -> Option<Vec2> {
     Some(previous.map_or(current, |previous| previous.0.position.lerp(current, alpha)))
 }
 
-/// Centres the view on the person, where this frame draws them.
+/// Centers the view on the person, where this frame draws them.
 fn follow_camera(world: &World, frame: &Frame) {
     let player = world.read::<Player>().entities().first().copied();
     if let Some(position) = player.and_then(|player| drawn_position(world, player, frame.alpha)) {

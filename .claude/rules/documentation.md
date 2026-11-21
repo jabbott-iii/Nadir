@@ -11,7 +11,7 @@ paths:
 
 These rules apply to everything written for people to read: `docs/`, the
 READMEs, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, the diagrams, the
-demo page, the feature summaries in `docs/features.jsonc` and Rust doc
+demo page, the feature summaries in `docs/features.jsonc`, and Rust doc
 comments (`///` and `//!`, which `cargo doc` turns into the API
 reference). `CONTRIBUTING.md` → "Documentation" says which docs a change
 must update; this file says how to write them.
@@ -41,7 +41,7 @@ to the engine and a senior engineer who needs every detail.
 ## Don't give up meaning
 
 - **Accuracy wins over simplicity.** Keep the exact numbers, limits,
-  terms and caveats.
+  terms, and caveats.
 - **If a simpler sentence would be wrong or misleading,** keep the precise
   wording and add an explanation beside it.
 - **Don't remove details senior engineers need.** Explain them so
@@ -65,24 +65,32 @@ Elsewhere, link to that explanation with an intra-doc link such as
 
 ## Use American English
 
-- **Spelling:** color, behavior, center, honor, gray and catalog; license
-  as both noun and verb; -ize where British English uses -ise
-  (initialize, serialize, normalize).
+- **Spelling:**
+  - -or, not -our: color, behavior, neighbor, honor
+  - -er, not -re: center, centered
+  - -ize, not -ise, where British English uses -ise: initialize,
+    serialize, normalize
+  - one l before -ed and -ing when the word's last syllable isn't
+    stressed: canceled, labeled, modeling, tunneling (but controlled and
+    compelled keep two)
+  - and gray, catalog, spelled (not spelt), acknowledgment, and license
+    as both noun and verb
 - **Grammar:** write complete sentences whose subjects and verbs agree.
   Keep one tense for the same kind of statement.
-- **Punctuation:** follow the house style. Lists don't take a serial
-  comma (a comma before the final "and"), as in "numbers, limits and
-  caveats", unless one prevents a misreading.
+- **Punctuation:** use the serial comma (the comma before the final "and"
+  or "or" in a list of three or more), as in "numbers, limits, and
+  caveats". Most existing pages leave it out; add it in the sentences you
+  write or change.
 - **Quote names exactly:** code identifiers, file names, the fields of
-  APIs and file formats, command output and third-party names keep their
+  APIs and file formats, command output, and third-party names keep their
   own spelling, even when it is British.
 - **Fix only the text you change.** Don't sweep a whole page for spelling
-  as part of another task (`AGENTS.md`, rule 6: the smallest complete
-  change). Mention the ones you notice in your summary instead.
+  or commas as part of another task (`AGENTS.md`, rule 6: the smallest
+  complete change). Mention the ones you notice in your summary instead.
 
 ## Before finishing: the two-reader check
 
 1. Reread the draft as a second-year computer science student. Look for
    undefined terms and skipped steps.
-2. Reread it as a senior engineer. Look for anything vague, oversimplified
+2. Reread it as a senior engineer. Look for anything vague, oversimplified,
    or wrong.

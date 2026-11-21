@@ -39,7 +39,7 @@ const TICK: Duration = Duration::from_nanos(16_666_667);
 const TURN_TICKS: u64 = 120;
 
 /// Ticks run before the harness's own warm-up, so that the crowd has met
-/// its walls and neighbours, as a game's has.
+/// its walls and neighbors, as a game's has.
 const SETTLE_TICKS: usize = 60;
 
 /// A body's number, which says when it turns.

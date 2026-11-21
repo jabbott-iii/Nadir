@@ -228,7 +228,7 @@ As built in M5.11 (ADR-0038):
   1. Removes the previous level (`nadir::unload_level`): it despawns the
      entities it spawned, takes its tile layers out of `TileLayers` and
      the clips it added out of `Clips`, empties the grid, puts back the
-     clear colour it replaced, and unloads `Scope::Level`.
+     clear color it replaced, and unloads `Scope::Level`.
   2. Reads `levels/<name>.klvl` and its prefabs before it returns, the
      prefabs checked against the registry, in `Scope::Level`.
   3. Reads its tile sets' atlases, and adds their clips to `Clips`, but
@@ -239,7 +239,7 @@ As built in M5.11 (ADR-0038):
      through their prefabs, each with its `Transform` at its place.
   5. Adds each tile layer to the facade's `TileLayers`, which the engine's
      `nadir::extract_level` draws each frame, in frame `Extract`, before the
-     game's, its background the clear colour, with no allocation once the
+     game's, its background the clear color, with no allocation once the
      frame's list has room (M4.5, ADR-0023). It sets the grid with
      `Collisions::set_grid`, on the collision layer it names, which the
      game must have named (`App::collision_layers`); a level with none
@@ -413,7 +413,7 @@ As built in M9.1 (ADR-0067):
     frame stages run, with the frame's real `dt`, and the engine's
     `nadir::extract_sprites` and `nadir::extract_level` do not, so the
     game's frame systems of `StateKind::Loading` draw a loading screen on
-    the clear colour. Once a frame's stages have run in the state, the
+    the clear color. Once a frame's stages have run in the state, the
     next frame's start loads the level (`load_level`, which unloads the
     last level and its `Scope::Level`); the frames after wait until the
     asset server has no load pending, where the frames are drawn and so

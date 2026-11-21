@@ -166,7 +166,7 @@ impl TileGrid {
         geometry::floor((point - self.origin) / self.cell_size)
     }
 
-    /// The square that `cell` covers, inside the grid or not. Neighbouring
+    /// The square that `cell` covers, inside the grid or not. Neighboring
     /// cells share their edges exactly.
     pub fn cell_rect(&self, cell: IVec2) -> Rect {
         // The far corner's cell is added in f32, so that the last cell
