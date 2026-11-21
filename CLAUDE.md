@@ -23,6 +23,7 @@ matching files:
 | `dependencies.md` | Cargo manifests and `xtask` |
 | `parsers.md` | `codec`, `assets`, `scene` (saves, prefabs), the cook tool, fuzz corpora |
 | `shaders.md` | GLSL/MSL shader sources |
+| `documentation.md` | Markdown files, `docs/`, `diagrams/`, `site/` and Rust doc comments: plain wording, American English and a two-reader check |
 
 **Permissions:**
 
