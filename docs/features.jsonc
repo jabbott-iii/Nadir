@@ -29,14 +29,14 @@
     {
       "name": "No third-party crates",
       "area": "Quality",
-      "summary": "The game is built from this workspace's crates alone: its OS bindings, OpenGL backend, math, ECS, codecs and tools are written here, and beyond Rust's standard library it calls only the system's own libraries, such as Xlib, EGL and OpenGL. The build fails if the lock file gains a package from outside the workspace, and each crate may use only the crates the architecture's dependency matrix allows.",
+      "summary": "The game is built from this workspace's crates alone: its OS bindings, OpenGL backend, math, entity component system (ECS), codecs, and tools are written here, and beyond Rust's standard library it calls only the system's own libraries, such as Xlib, EGL, and OpenGL. The build fails if the lock file gains a package from outside the workspace, and each crate may use only the crates the architecture's dependency matrix allows.",
       "tasks": ["M0.1", "M0.6"],
       "ticked": ["M0.1", "M0.6"]
     },
     {
       "name": "Guardrails on every push",
       "area": "Quality",
-      "summary": "Each push is formatted, linted with warnings as errors, tested, and checked for dependencies, layering and unsafe code on Windows, macOS and Linux. Unsafe code is allowed in three crates only, and the audit fails any unsafe block without a SAFETY comment.",
+      "summary": "Each push is formatted, linted with warnings as errors, tested, and checked for dependencies, layering, and unsafe code on Windows, macOS, and Linux. Unsafe code, which the compiler cannot check for memory safety, is allowed in three crates only, and the audit fails any unsafe block without a SAFETY comment.",
       "tasks": ["M0.6", "M0.8"],
       "ticked": ["M0.6", "M0.8"]
     },
@@ -57,7 +57,7 @@
     {
       "name": "Handles, hashing and random numbers",
       "area": "Core",
-      "summary": "Generational arenas and typed handles that catch a stale reference, FNV-1a, a fast hasher for maps, CRC-32 and the PCG32 generator, each checked against reference values.",
+      "summary": "Generational arenas and typed handles that catch a stale reference; the FNV-1a hash, a fast hasher for maps, the CRC-32 checksum, and the PCG32 random number generator, each checked against reference values.",
       "tasks": ["M0.3"],
       "ticked": ["M0.3"]
     },
@@ -71,21 +71,21 @@
     {
       "name": "JSON and JSONC",
       "area": "Content",
-      "summary": "A parser and writer for JSON, with comments and trailing commas allowed in JSONC. Bad input gets an error with its line and column, never a panic, and limits on depth, sizes and counts keep a hostile file from exhausting memory.",
+      "summary": "A parser and writer for JSON, with comments and trailing commas allowed in JSONC. Bad input gets an error with its line and column, never a panic, and limits on depth, sizes, and counts keep a hostile file from exhausting memory.",
       "tasks": ["M0.5"],
       "ticked": ["M0.5"]
     },
     {
       "name": "Native windows on every desktop",
       "area": "Platform",
-      "summary": "Windows, keys, mouse, focus, resizing, DPI scaling and borderless fullscreen through each system's own API, declared by hand. Linux, through X11 loaded at run time, is done. The Win32 and Cocoa versions build and pass CI, and will be done once they are checked by hand on Windows and macOS.",
+      "summary": "Windows, keys, mouse, focus, resizing, display scaling (DPI), and borderless fullscreen through each system's own API, declared by hand. Linux, through X11 loaded at run time, is done. The Win32 and Cocoa versions build and pass CI, and will be done once they are checked by hand on Windows and macOS.",
       "tasks": ["M1.1", "M1.2", "M1.5", "M1.6"],
       "ticked": ["M1.1", "M1.2"]
     },
     {
       "name": "Fixed-tick main loop",
       "area": "Simulation",
-      "summary": "The simulation steps exactly 60 times a second whatever the frame rate, and each frame draws between the last two ticks, so motion is smooth at 60, 144 or uncapped frames a second. A tap between two ticks still counts, and a long stall is clamped instead of spiraling into catch-up ticks.",
+      "summary": "The simulation steps exactly 60 times a second whatever the frame rate, and each frame draws between the last two ticks, so motion is smooth at 60, 144, or uncapped frames a second. A tap between two ticks still counts, and a long stall is clamped instead of spiraling into catch-up ticks.",
       "tasks": ["M1.3", "M3.4"],
       "ticked": ["M1.3", "M3.4"]
     },
@@ -106,7 +106,7 @@
     {
       "name": "A small graphics interface",
       "area": "Graphics",
-      "summary": "A thin layer over OpenGL 3.3 core: textures, buffers, render targets, pipelines, instanced draws, scissor and readback, with a state cache. Using a destroyed resource is an error rather than a wrong frame, and a shader that fails to compile reports the driver's log.",
+      "summary": "A thin layer over OpenGL 3.3 core: textures, buffers, render targets, pipelines, instanced draws, scissor, and readback, with a state cache. Using a destroyed resource is an error rather than a wrong frame, and a shader that fails to compile reports the driver's log.",
       "tasks": ["M2.3"],
       "ticked": ["M2.3"]
     },
@@ -141,28 +141,28 @@
     {
       "name": "Asset loading",
       "area": "Content",
-      "summary": "Typed handles to assets loaded from files: the same path gives the same handle, and a development build shows a placeholder for anything missing. Worker threads read and decode the files while the game runs, and each frame makes the decoded ones within a budget of 2 ms: asked for a thousand at once, an optimized build spends under 4 ms of any frame on them. Assets load in scopes, global, level or transient, and unloading a scope frees what no other scope holds, GPU textures included.",
+      "summary": "Typed handles to assets loaded from files: the same path gives the same handle, and a development build shows a placeholder for anything missing. Worker threads read and decode the files while the game runs, and each frame makes the decoded ones within a budget of 2 ms: asked for a thousand at once, an optimized build spends under 4 ms of any frame on them. Assets load in scopes, global, level, or transient, and unloading a scope frees what no other scope holds, GPU textures included.",
       "tasks": ["M3.2", "M5.3"],
       "ticked": ["M3.2", "M5.3"]
     },
     {
       "name": "Entity component system",
       "area": "Simulation",
-      "summary": "Generational entities with sparse-set storage, resources, events, deferred commands and a schedule of stages with run conditions; a borrow conflict names the system that caused it. The engine's own systems move, collide, animate and draw entities.",
+      "summary": "Generational entities with sparse-set storage (each component in a packed array, found by entity), resources, events, deferred commands, and a schedule of stages with run conditions; a borrow conflict names the system that caused it. The engine's own systems move, collide, animate, and draw entities.",
       "tasks": ["M4.1", "M4.4"],
       "ticked": ["M4.1", "M4.4"]
     },
     {
       "name": "Reflection",
       "area": "Simulation",
-      "summary": "Macros describe structs and enums as dynamic values and back, with a registry of types and warnings for unknown fields. Asset handles are written as their files' paths and loaded again when read, and the engine's sprites, colliders and animators are reflected too: a sprite can name a frame of a cooked atlas, a collider its layers by name, an animator its clip. The determinism tests hash worlds through it.",
+      "summary": "Macros describe structs and enums as dynamic values and back, with a registry of types and warnings for unknown fields. Asset handles are written as their files' paths and loaded again when read, and the engine's sprites, colliders, and animators are reflected too: a sprite can name a frame of a cooked atlas, a collider its layers by name, an animator its clip. The determinism tests hash worlds through it.",
       "tasks": ["M4.2"],
       "ticked": ["M4.2"]
     },
     {
       "name": "Collision and sliding movement",
       "area": "Simulation",
-      "summary": "Boxes and circles, tile grids and a spatial hash, with move-and-slide in up to 16 substeps so that movers follow their path and slide along walls without snagging, plus sweeps, triggers and queries. 5,000 colliding entities tick in about 2.4 ms on an i7-11800H.",
+      "summary": "Boxes and circles, tile grids, and a spatial hash (a grid of buckets that finds nearby colliders), with move-and-slide in up to 16 substeps so that movers follow their path and slide along walls without snagging, plus sweeps, triggers, and queries. 5,000 colliding entities tick in about 2.4 ms on an i7-11800H.",
       "tasks": ["M4.3", "M4.8"],
       "ticked": ["M4.3", "M4.8"]
     },
@@ -197,21 +197,21 @@
     {
       "name": "Compression, binary JSON, fonts and WAV",
       "area": "Content",
-      "summary": "KLZ, an LZ4-style block compression, and KBJ, a binary JSON with one encoding per value, both of which round-trip; and readers for BMFont's text format, as AngelCode, Hiero and other tools write it, and for WAV. All four reject malformed input and run under the fuzzer.",
+      "summary": "KLZ, an LZ4-style block compression, and KBJ, a binary JSON with one encoding per value, both of which round-trip; and readers for BMFont's text format, as AngelCode, Hiero, and other tools write it, and for WAV. All four reject malformed input and run under the fuzzer.",
       "tasks": ["M5.2"],
       "ticked": ["M5.2"]
     },
     {
       "name": "Asset cooking",
       "area": "Tools",
-      "summary": "An offline pipeline packs each folder's PNG images, Aseprite sprite sheet exports and bitmap fonts into an atlas: it trims each frame and glyph to its pixels, packs them into square pages with padding and extruded edges, keeps tile sets as pages of their own, and writes QOI pages with a file of where each frame went and the animation clips of the exports' tags, which it checks with the game's own reader, and a file of each font's glyphs. Data files become KBJ. The same files cook to the same bytes, and an incremental cache cooks again only what changed. The game loads an atlas before its first frame and finds its sprites and clips by name, each trimmed frame placed, and mirrored, where its whole cell would be: the demo's walking person comes from an export in Aseprite's format, written by hand, drawn pixel for pixel as before.",
+      "summary": "An offline pipeline packs each folder's PNG images, Aseprite sprite sheet exports, and bitmap fonts into an atlas, a few large textures and an index of where each image went: it trims each frame and glyph to its pixels, packs them into square pages with padding and extruded edges, keeps tile sets as pages of their own, and writes QOI pages with a file of where each frame went and the animation clips of the exports' tags, which it checks with the game's own reader, and a file of each font's glyphs. Data files become KBJ. The same files cook to the same bytes, and an incremental cache cooks again only what changed. The game loads an atlas before its first frame and finds its sprites and clips by name, each trimmed frame placed, and mirrored, where its whole cell would be: the demo's walking person comes from an export in Aseprite's format, written by hand, drawn pixel for pixel as before.",
       "tasks": ["M5.4", "M5.9", "M5.5"],
       "ticked": ["M5.4", "M5.9", "M5.5"]
     },
     {
       "name": "Levels and prefabs",
       "area": "Content",
-      "summary": "Prefabs inherit from one another: a prefab's components apply over its base's, and a level's overrides over both, onto one value, and a cycle, a chain of more than 16, an unknown component or a value that does not fit is refused, naming the file and the field, with no entity left behind. A level's entities spawn through their prefabs. The engine reads LDtk 1.5.3's projects and level files, and its own level and prefab files, strictly and under the fuzzer: a project saved by a version of LDtk other than 1.5.x is refused with the version to save it with, and every refusal names where in the file it is. The cook turns each level of an LDtk project into a level file, by conventions for what LDtk has no notion of: animated and tall tiles from a tile set's custom data, the grid from the Collision layer, and each entity the prefab of its name, its fields overriding the prefab's. What a level file cannot hold, such as a translucent layer or two tiles in one cell, is refused, naming the file and the member. A level loads whole, in place of the last: the engine draws its tile layers over its background, collides with its grid, spawns its tall tiles and its entities, and removes what it made when the next comes. The demo's field is an LDtk project, cooked to the map it was built from, cell for cell, with its trees and rocks as prefabs, and the game now draws it from its level file, frame for frame as it drew the map it built by hand.",
+      "summary": "Prefabs inherit from one another: a prefab's components apply over its base's, and a level's overrides over both, onto one value, and a cycle, a chain of more than 16, an unknown component, or a value that does not fit is refused, naming the file and the field, with no entity left behind. A level's entities spawn through their prefabs. The engine reads LDtk 1.5.3's projects and level files, and its own level and prefab files, strictly and under the fuzzer: a project saved by a version of LDtk other than 1.5.x is refused with the version to save it with, and every refusal names where in the file it is. The cook turns each level of an LDtk project into a level file, by conventions for what LDtk has no notion of: animated and tall tiles from a tile set's custom data, the grid from the Collision layer, and each entity the prefab of its name, its fields overriding the prefab's. What a level file cannot hold, such as a translucent layer or two tiles in one cell, is refused, naming the file and the member. A level loads whole, in place of the last: the engine draws its tile layers over its background, collides with its grid, spawns its tall tiles and its entities, and removes what it made when the next comes. The demo's field is an LDtk project, cooked to the map it was built from, cell for cell, with its trees and rocks as prefabs, and the game now draws it from its level file, frame for frame as it drew the map it built by hand.",
       "tasks": ["M5.10", "M5.11", "M5.12", "M5.6"],
       "ticked": ["M5.10", "M5.11", "M5.12", "M5.6"]
     },
@@ -225,48 +225,48 @@
     {
       "name": "Hot reload",
       "area": "Tools",
-      "summary": "An edit saved while the sandbox runs in a development build, beside the cook's watch, is drawn in its window within half a second: a sprite's pixels, an Aseprite export's clips, a prefab, the LDtk level, or a shader. The cook, built once, cooks the edit again in about a fifth of a second and rewrites only the files whose bytes changed; the game's watchers look at the loaded files and the shaders every 250 ms. Each reload lands behind the handles the game holds: a texture draws its new texels, an atlas's clips are replaced by name, a prefab is replaced in its library, and the level is made again around its tile layers, clips and assets, its props spawned anew. A file that fails to load, or a shader that does not compile or fit its program, is logged, and what it would replace stays. With nothing changed, a frame allocates nothing, and release builds hold none of it. On Windows and macOS it comes with drawing there.",
+      "summary": "An edit saved while the sandbox runs in a development build, beside the cook's watch, is drawn in its window within half a second: a sprite's pixels, an Aseprite export's clips, a prefab, the LDtk level, or a shader. The cook, built once, cooks the edit again in about a fifth of a second and rewrites only the files whose bytes changed; the game's watchers look at the loaded files and the shaders every 250 ms. Each reload lands behind the handles the game holds: a texture draws its new texels, an atlas's clips are replaced by name, a prefab is replaced in its library, and the level is made again around its tile layers, clips, and assets, its props spawned anew. A file that fails to load, or a shader that does not compile or fit its program, is logged, and what it would replace stays. With nothing changed, a frame allocates nothing, and release builds hold none of it. On Windows and macOS it comes with drawing there.",
       "tasks": ["M5.15", "M5.16", "M5.17", "M5.8"],
       "ticked": ["M5.15", "M5.16", "M5.17", "M5.8"]
     },
     {
       "name": "Audio mixer",
       "area": "Audio",
-      "summary": "Sound is compressed as QOA, with an encoder and decoder of our own, to 3.2 bits a sample: a tone keeps 71 dB of signal over its noise, and white noise 16, and a damaged or cut file is refused, not played. The cook turns each WAV below the assets' audio folder into 16-bit PCM in a sound file of our own, or into QOA, as its folder or a sidecar says, with music in QOA and looped. It resamples each to 48 kHz with a windowed sinc of our own, which keeps a tone's error 92 dB below it up to 0.82 of the Nyquist frequency, resamples a loop's seam as any other point, and is built to give the same bits on every system, and it warns of a sound that clips or that ends loud enough to click. The asset server loads them as sounds and music on its workers, a sound converted to 48 kHz by the same sinc unless it may be a loop, a failed one silent where placeholders are on, and the mixer plays each by its handle; a level that loads its music again goes on playing it. A mixer of our own mixes up to 48 voices on four buses, resampled as their rate or pitch asks, with constant-power panning, attenuation by distance from the listener, fades of at least 2 ms at every start and stop, voices stolen by priority, a soft limiter, and music streamed from QOA a frame at a time, crossfading from one track to the next. It allocates nothing as it mixes: 32 voices and a track take 88 µs of a 10.7 ms callback, and it is tested offline, frame by frame. The engine plays the game's sound through it with nothing to set up: sounds that play at their entities, panned and faded as they move about the listener, which is the camera unless an entity is, and music that crossfades as the listener goes from one area to another, each bus at the volume the game's config gives it, while tests, headless runs and captures stay silent. The sandbox has footsteps that follow the player, a lapping pond, and a tune for each half of its field, all sounds of our own. A soak of our own plays 32 random voices and two tracks of music through the audio device for ten minutes, or mixes them all and gives the device silence, and tells of each underrun and each callback later than the device's buffer, the 99th percentile of the time a mix takes, the process's memory, and whether the mixer handed back every sound it played: a minute of it here takes 198 µs at the 99th percentile of a 7.5 ms period, with no underrun and no growth in memory.",
+      "summary": "Sound is compressed as QOA, the Quite OK Audio format, with an encoder and decoder of our own, to 3.2 bits a sample: a tone keeps 71 dB of signal over its noise, and white noise 16, and a damaged or cut file is refused, not played. The cook turns each WAV below the assets' audio folder into uncompressed 16-bit samples in a sound file of our own, or into QOA, as its folder or a sidecar says, with music in QOA and looped. It resamples each to 48 kHz with a windowed sinc of our own, which keeps a tone's error 92 dB below it up to 0.82 of the Nyquist frequency (half the sample rate), resamples a loop's seam as any other point, and is built to give the same bits on every system, and it warns of a sound that clips or that ends loud enough to click. The asset server loads them as sounds and music on its workers, a sound converted to 48 kHz by the same sinc unless it may be a loop, a failed one silent where placeholders are on, and the mixer plays each by its handle; a level that loads its music again goes on playing it. A mixer of our own mixes up to 48 voices on four buses, resampled as their rate or pitch asks, with constant-power panning, attenuation by distance from the listener, fades of at least 2 ms at every start and stop, voices stolen by priority, a soft limiter, and music streamed from QOA a frame at a time, crossfading from one track to the next. It allocates nothing as it mixes: 32 voices and a track take 88 µs of a 10.7 ms callback, and it is tested offline, frame by frame. The engine plays the game's sound through it with nothing to set up: sounds that play at their entities, panned and faded as they move about the listener, which is the camera unless an entity is, and music that crossfades as the listener goes from one area to another, each bus at the volume the game's config gives it, while tests, headless runs and captures stay silent. The sandbox has footsteps that follow the player, a lapping pond, and a tune for each half of its field, all sounds of our own. A soak of our own plays 32 random voices and two tracks of music through the audio device for ten minutes, or mixes them all and gives the device silence, and tells of each underrun and each callback later than the device's buffer, the 99th percentile of the time a mix takes, the process's memory, and whether the mixer handed back every sound it played: a minute of it here takes 198 µs at the 99th percentile of a 7.5 ms period, with no underrun and no growth in memory.",
       "tasks": ["M6.1", "M6.2", "M6.8", "M6.9", "M6.6", "M6.7"],
       "ticked": ["M6.1", "M6.2", "M6.8", "M6.9", "M6.6", "M6.7"]
     },
     {
       "name": "Audio output on every desktop",
       "area": "Platform",
-      "summary": "On Linux, sound goes out through ALSA, which the engine loads while it runs, on an audio thread of its own: about 30 ms from the mix to the device, with each underrun recovered and counted. A device that is unplugged, busy, slow to open or not there yet is logged once and tried again every second, while what plays keeps its time, and the game never waits on the device more than 2 s, to start or to quit. Windows will play through WASAPI and macOS through AudioUnit, behind the same API.",
+      "summary": "On Linux, sound goes out through ALSA, which the engine loads while it runs, on an audio thread of its own: about 30 ms from the mix to the device, with each underrun recovered and counted. A device that is unplugged, busy, slow to open, or not there yet is logged once and tried again every second, while what plays keeps its time, and the game never waits on the device more than 2 s, to start or to quit. Windows will play through WASAPI and macOS through AudioUnit, behind the same API.",
       "tasks": ["M6.3", "M6.4", "M6.5"],
       "ticked": ["M6.3"]
     },
     {
       "name": "Bitmap text",
       "area": "Graphics",
-      "summary": "Text is drawn from bitmap fonts made with BMFont or Hiero: wrapped at a width, aligned left, in the middle or right, kerned, colored in runs with a small markup, and with a fallback glyph for a character a font lacks. Glyphs are a mask in the text's color, or keep their own colors for outlined fonts, and land on whole pixels. Text goes in the world, or on the window in a UI with sprites, drawn after the world at the window's resolution in the order it is pushed: in the game's own pixels or at the settings' UI scale, each window cut to its clip, and the mouse mapped to it. The cook's font files are read by a reader of our own, which checks each one strictly, and the cook reads back every font file it writes; a fuzzer throws about a million damaged files a second at it.",
+      "summary": "Text is drawn from bitmap fonts made with BMFont or Hiero: wrapped at a width, aligned left, in the middle, or right, kerned, colored in runs with a small markup, and with a fallback glyph for a character a font lacks. Glyphs are a mask in the text's color, or keep their own colors for outlined fonts, and land on whole pixels. Text goes in the world, or on the window in a UI with sprites, drawn after the world at the window's resolution in the order it is pushed: in the game's own pixels or at a free scale of the window's pixels, each window cut to its clip, and the mouse mapped to it. The cook's font files are read by a reader of our own, which checks each one strictly, and the cook reads back every font file it writes; a fuzzer throws about a million damaged files a second at it.",
       "tasks": ["M7.7", "M7.1", "M7.8"],
       "ticked": ["M7.7", "M7.1", "M7.8"]
     },
     {
       "name": "Developer tools",
       "area": "Tools",
-      "summary": "Development builds show a debug UI of our own over the game: windows the game adds, each shown by a key of its own, that drag, collapse, resize and scroll, with buttons, checkboxes, sliders, text fields, lists, trees, line graphs and color editors, drawn in the engine's own pixel font, and keeping their places across runs. A click is judged where it was pressed and where it was released at any frame rate, typing reaches it with key repeats and composed characters, and while it has the mouse or a text field the game's actions do not see them. The engine's own windows are a stats overlay of the frame rate, the frame's processor time, its ticks, draw calls, sprites, entities, allocations, voices and underruns, and a profiler of the last 300 frames: a graph of their processor time and, under it on the same scale, one of the GPU's time over their drawing, the scopes of the frame clicked as a tree, from the engine's steps down to each system, with its GPU passes, and a Chrome trace of them all for Perfetto UI, with a track of the GPU's passes. The renderer times its passes on the GPU in development builds, reading each frame's times two frames later so that it never waits for the GPU, and throwing out a reading longer than the time that passed. An inspector lists the entities, a page at a time, filtered by number or component; it outlines the one clicked in the world and edits its components field by field through the engine's reflection (numbers, flags, enums, colors, positions, asset paths), adds and removes components, despawns it, and saves it as a prefab file. A console on the backtick runs commands over the engine's log, with history and Tab completion: the systems in their order, a prefab spawned, the player moved, the game's time scaled, a level loaded, every asset read again, the profiler's trace written, a module's log level set, and the game ended; a game adds its own, each checked against the usage it gives. F4's window ticks overlays drawn over the world, a pixel wide: colliders and triggers where the frame draws them, the collision grid's solid cells, the spatial hash's cells with their counts, tile chunks, and the camera's view. F5 pauses the game's time, F6 steps it a tick, and F7 scales it from a quarter to four times, ticks, animated tiles and clips together, through the same clock a replay steps by, a label in the corner saying so. None of it is in release builds.",
+      "summary": "Development builds show a debug UI of our own over the game: windows the game adds, each shown by a key of its own, that drag, collapse, resize, and scroll, with buttons, checkboxes, sliders, text fields, lists, trees, line graphs, and color editors, drawn in the engine's own pixel font, and keeping their places across runs. A click is judged where it was pressed and where it was released at any frame rate, typing reaches it with key repeats and composed characters, and while it has the mouse or a text field the game's actions do not see them. The engine's own windows are a stats overlay of the frame rate, the frame's processor time, its ticks, draw calls, sprites, entities, allocations, voices, and underruns, and a profiler of the last 300 frames: a graph of their processor time and, under it on the same scale, one of the GPU's time over their drawing, the scopes of the frame clicked as a tree, from the engine's steps down to each system, with its GPU passes, and a Chrome trace of them all for Perfetto UI, with a track of the GPU's passes. The renderer times its passes on the GPU in development builds, reading each frame's times two frames later so that it never waits for the GPU, and throwing out a reading longer than the time that passed. An inspector lists the entities, a page at a time, filtered by number or component; it outlines the one clicked in the world and edits its components field by field through the engine's reflection (numbers, flags, enums, colors, positions, asset paths), adds and removes components, despawns it, and saves it as a prefab file. A console on the backtick runs commands over the engine's log, with history and Tab completion: the systems in their order, a prefab spawned, the player moved, the game's time scaled, a level loaded, every asset read again, the profiler's trace written, a module's log level set, and the game ended; a game adds its own, each checked against the usage it gives. F4's window ticks overlays drawn over the world, a pixel wide: colliders and triggers where the frame draws them, the collision grid's solid cells, the spatial hash's cells with their counts, tile chunks, and the camera's view. F5 pauses the game's time, F6 steps it a tick, and F7 scales it from a quarter to four times, ticks, animated tiles, and clips together, through the same clock a replay steps by, a label in the corner saying so. None of it is in release builds.",
       "tasks": ["M7.2", "M7.9", "M7.10", "M7.3", "M7.11", "M7.12", "M7.4", "M7.5", "M7.6"],
       "ticked": ["M7.2", "M7.9", "M7.10", "M7.3", "M7.11", "M7.12", "M7.4", "M7.5", "M7.6"]
     },
     {
       "name": "Gamepads",
       "area": "Platform",
-      "summary": "Gamepads will work through evdev, XInput and GameController.framework, with hotplugging, deadzones, bindings, and button prompts that follow the device in use.",
+      "summary": "Gamepads will work through evdev on Linux, XInput on Windows, and GameController.framework on macOS, with hotplugging, deadzones, bindings, and button prompts that follow the device in use.",
       "tasks": ["M8.1", "M8.2", "M8.3", "M8.4"]
     },
     {
       "name": "Game states, menus and settings",
       "area": "Simulation",
-      "summary": "A state machine runs the game's states, booting, loading a level, the main menu, playing and paused, and changes them only between ticks, with systems that run in one kind of state or as one is entered or left, so a replay meets each state at the same tick. Loading takes no tick and hides the world behind the game's loading screen while the level, in place of the last, and its textures load, and a level that cannot load ends the game with a dialog; paused, the ticks still come but the world and its animations stand still. Menus will work with keys, mouse or gamepad, and a settings file will keep what it does not understand.",
+      "summary": "A state machine runs the game's states, booting, loading a level, the main menu, playing, and paused, and changes them only between ticks, with systems that run in one kind of state or as one is entered or left, so a replay meets each state at the same tick. Loading takes no tick and hides the world behind the game's loading screen while the level, in place of the last, and its textures load, and a level that cannot load ends the game with a dialog; paused, the ticks still come but the world and its animations stand still. Menus will work with keys, mouse, or gamepad, and a settings file will keep what it does not understand.",
       "tasks": ["M9.1", "M9.2", "M9.3"],
       "ticked": ["M9.1"]
     },
@@ -280,14 +280,14 @@
     {
       "name": "Pathfinding and enemy AI",
       "area": "Simulation",
-      "summary": "A* of our own across the tile grid, 8-connected and cutting no wall's corner, finds the shortest path by exact integer lengths, the same on every run, and smooths it for the agent's size by string-pulling with a line of sight that keeps its box clear of the walls. Agents ask the engine for paths by entity, and it searches them each tick within a budget of expansions shared by all, the oldest first, a long search going on in the next tick and starting again if its grid changes; a game whose props stand in the way gives it a grid with their cells solid. Flow fields give a crowd the way to one goal from every cell, following a moving goal at most every 10 ticks. A search from corner to corner of a 256 × 256 grid, three cells in ten solid, takes 5.3 ms on an i7-11800H. In the sandbox, three guards walk their rounds and chase the person when they see them, and a pack in the south hunts them down a flow field and goes home when they leave; F4 draws the nav grid and the paths.",
+      "summary": "A* of our own across the tile grid, stepping to any of a cell's 8 neighbors and cutting no wall's corner, finds the shortest path by exact integer lengths, the same on every run, and smooths it for the agent's size by pulling it tight around corners, with a line of sight that keeps its box clear of the walls. Agents ask the engine for paths by entity, and it searches them each tick within a budget of expansions shared by all, the oldest first, a long search going on in the next tick and starting again if its grid changes; a game whose props stand in the way gives it a grid with their cells solid. Flow fields give a crowd the way to one goal from every cell, following a moving goal at most every 10 ticks. A search from corner to corner of a 256 × 256 grid, three cells in ten solid, takes 5.3 ms on an i7-11800H. In the sandbox, three guards walk their rounds and chase the person when they see them, and a pack in the south hunts them down a flow field and goes home when they leave; F4 draws the nav grid and the paths.",
       "tasks": ["M9.5"],
       "ticked": ["M9.5"]
     },
     {
       "name": "Crash reports",
       "area": "Release",
-      "summary": "Every panic, on any thread, leaves a report in the game's data folder: the panic and its backtrace, the engine's version, the system, the GPU and the log's last 200 records. A panic that ends the game is shown to the player once its window has closed, and the next launch says where the report is. On Windows a native crash will leave a minidump, with symbols archived to read them.",
+      "summary": "Every panic, on any thread, leaves a report in the game's data folder: the panic and its backtrace, the engine's version, the system, the GPU, and the log's last 200 records. A panic that ends the game is shown to the player once its window has closed, and the next launch says where the report is. On Windows a native crash will leave a minidump, a snapshot of the process, with symbols archived to read it.",
       "tasks": ["M9.6", "M11.3"],
       "ticked": ["M9.6"]
     },
@@ -300,19 +300,19 @@
     {
       "name": "Metal on macOS",
       "area": "Graphics",
-      "summary": "A Metal backend will sit behind the same graphics interface, with every shader in MSL, match the OpenGL golden images, and become the default on macOS.",
+      "summary": "A Metal backend will sit behind the same graphics interface, with every shader in Metal's shading language (MSL), match the OpenGL golden images, and become the default on macOS.",
       "tasks": ["M10.1", "M10.2", "M10.3", "M10.4"]
     },
     {
       "name": "Signed packages for every desktop",
       "area": "Release",
-      "summary": "Packages for Windows, macOS and Linux will be signed and notarized in CI, and smoke-tested from the package before each release.",
+      "summary": "Packages for Windows, macOS, and Linux will be signed and notarized in CI, and smoke-tested from the package before each release.",
       "tasks": ["M11.1", "M11.2", "M11.4"]
     },
     {
       "name": "Release readiness",
       "area": "Release",
-      "summary": "Every performance budget will be measured on a min-spec machine, the parsers will get a security pass, players will get documentation, and a release-candidate dry run will walk the release checklist.",
+      "summary": "Every performance budget will be measured on the slowest machine the engine aims to run on, the parsers will get a security pass, players will get documentation, and a release-candidate dry run will walk the release checklist.",
       "tasks": ["M11.5", "M11.6", "M11.7", "M11.8"]
     }
   ]

@@ -43,7 +43,8 @@
 //! (`nadir::render::Font`, `RenderFrame::texts`), and on the window with
 //! the UI's sprites (`RenderFrame::ui`); development builds show a
 //! [debug UI](#the-debug-ui) of the game's own windows and the engine's
-//! debug tools; gamepads and saves are not built yet. The
+//! debug tools. Gamepads are not built yet, and saves are nadir-scene's
+//! (`nadir::scene`), not yet the `App`'s. The
 //! [README](https://github.com/jabbott-iii/Nadir/blob/main/crates/engine/README.md)
 //! is a guide to how the parts fit together, with a game that walks a hero
 //! about a tile map.

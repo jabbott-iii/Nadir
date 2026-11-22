@@ -3,10 +3,10 @@
 These diagrams follow the game loop through the code: how the sandbox sets
 up and opens its window, what one pass of the main loop does, from the
 window's events through the 60 Hz ticks and the frame stages to the draw
-and the swap, and how the game shuts down. They reflect the code at commit
-`0cba65f` (version 0.2). The simulation and the drawing share the main
-thread: a frame runs its ticks, then its frame stages, then draws. Only the
-asset workers run beside it.
+and the swap, and how the game shuts down. They reflect the code of
+version 0.4, after roadmap task M9.6 (crash reports). The simulation and
+the drawing share the main thread: a frame runs its ticks, then its frame
+stages, then draws. Only the asset workers run beside it.
 
 How to read them:
 
@@ -16,8 +16,8 @@ How to read them:
   thread, without waiting.
 - `nadir::snapshot` and the like are the engine's systems, named as the
   schedule lists them. `move_player`, `count_ticks`, `footsteps`,
-  `follow_camera` and `report` are the sandbox's, in its default scene,
-  the field.
+  `nav_grid`, `guards`, `pack`, `follow_camera`, and `report` are the
+  sandbox's, in its default scene, the field.
 - The other names are types and functions of the code.
 
 ## 1. Setup, before the window opens
@@ -82,7 +82,7 @@ sequenceDiagram
     Lvl->>App: CurrentLevel keeps what it made
     Main->>Srv: load_now the pond's sound and the two tunes
     Main->>App: spawn_player, the two MusicAreas, the pond's AudioEmitter
-    Main->>App: add follow_camera
+    Main->>App: add nav_grid, guards, pack, follow_camera
     opt the record or replay option
         Main->>App: add the recording, or play_replay
     end
@@ -118,7 +118,10 @@ sequenceDiagram
     end
 
     Main->>Run: run()
+    Run->>Run: crash::install: the panic hook, a report for each panic
+    Run->>Run: crash::run_reporting(run_window): a panic that ends it is shown after the window closes
     Run->>Run: log_file::start: nadir.log
+    Run->>Run: crash::tell_of_unseen: the reports since the last launch
     Run->>Plat: Platform::new(config.window())
     Plat->>Plat: XOpenDisplay, scale from Xft.dpi
     Plat->>Egl: WindowGl::open
@@ -702,9 +705,23 @@ move that the half-full queue dropped is sent again the next frame. With no devi
 there yet, the thread renders on in time and tries the device every
 second.
 
-## Not shown, because it is not built yet
+## Not shown
 
-- Gamepads (M8), and the debug tools' insides. With `dev`, the debug UI
+Not built yet:
+
+- Gamepads in games (M8.4: nadir-platform reads them on Linux, M8.1, but
+  nothing in the loop polls them yet).
+- Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).
+  There the loop runs as section 3 shows, with no `Graphics`.
+- Sound on Windows and macOS (M6.4, M6.5): there `open_audio` fails, and
+  the game runs silent.
+
+Built, but left out to keep the diagrams readable:
+
+- The crash hook's work: `crash::set_gpu` after the device is made, and a
+  report written from the panic hook on whichever thread panics (M9.6,
+  ADR-0071).
+- The debug tools' insides. With `dev`, the debug UI
   (M7.2) is in the game (M7.10, ADR-0058): `App::update` holds the game's
   input back for it as it feeds the events, and fills its open windows
   after the frame stages, into the frame's `UiList`. As it starts, it
@@ -716,17 +733,13 @@ second.
   Text in the world, and the UI (M7.8), are the renderer's, from the
   frame's `TextList` and `UiList`, within its draw: the UI planned in the
   order pushed, its instances written after the world's.
-- Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).
-  There the loop runs as section 3 shows, with no `Graphics`.
-- Sound on Windows and macOS (M6.4, M6.5): there `open_audio` fails, and
-  the game runs silent.
 
 ## Sources
 
 - `crates/engine/src/app.rs`, `glue.rs`, `level.rs`, `pack.rs`,
   `limiter.rs`, `replay.rs`, `tick_stats.rs`, `frame_allocs.rs`,
   `collisions.rs`, `animation.rs`, `log_file.rs`, `hot_reload.rs`,
-  `sound.rs`
+  `sound.rs`, `crash.rs`
 - `crates/audio/src/audio.rs`, `mixer.rs`, `shared.rs`
 - `crates/core/src/time.rs`
 - `crates/ecs/src/schedule.rs`, `world.rs`, `events.rs`

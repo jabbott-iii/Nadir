@@ -131,7 +131,9 @@ layer), the ECS world and rendering.
 // condensed: error handling, the modal frames and the `dev` allocation
 // counter are left out.
 pub fn run(mut app: App) -> Result<(), Error> {
+    crash::install(&app.config);                            // the panic hook: a report for each panic
     log_file::start(&app.config.studio, &app.config.game);  // nadir.log, the last three kept
+    crash::tell_of_unseen(&app.config.title);               // the reports since the last launch
     let mut platform = Platform::new(&app.config.window())?;
     let mut gfx = Device::new(platform.gpu_surface())?;     // keeps no borrow (ADR-0016)
     let render = RenderConfig { virtual_resolution: app.config.virtual_resolution };
@@ -247,7 +249,7 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
 
 - Systems run in stage order, then insertion order within a stage. The main
   loop logs the order at debug level when it starts (`Schedule::describe`),
-  and the debug console's `schedule` command will print it (M7.5).
+  and the debug console's `schedule` command prints it (M7.5).
 - `App::new` adds the engine's systems first in their stages (ADR-0022), so a
   game's systems in the same stage run after them:
 
@@ -439,11 +441,13 @@ rule yet: `release-no-dev` looks only for `nadir-debug`.
 
 ## Configuration and user data
 
-- Settings live in `settings.jsonc` in the user config directory (paths per
-  OS are in `docs/03-platforms.md`):
+- Planned (roadmap task M9.3, not built yet): settings will live in
+  `settings.jsonc` in the user config directory (paths per OS are in
+  `docs/03-platforms.md`):
   - display mode, vsync, volume per bus, input bindings, language
-- The file is versioned. Unknown keys are preserved on save; invalid values
-  fall back to defaults with a logged warning, never a crash.
+- The file will be versioned. Unknown keys will be preserved on save, and
+  invalid values will fall back to defaults with a logged warning, never a
+  crash.
 - Development builds (`dev`) keep the debug UI's windows' places in
   `debug_ui.jsonc` beside it, which only `App::run` reads and writes
   (M7.10, ADR-0058).

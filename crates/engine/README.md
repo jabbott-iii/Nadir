@@ -26,7 +26,8 @@ Built:
 - an OpenGL 3.3 renderer: y-sorted sprite batches, tile layers with
   animated tiles, bitmap text in the world, and a pixel-perfect camera;
 - kinematic collision: boxes and circles, a grid of solid tiles,
-  move-and-slide, triggers, and queries;
+  move-and-slide, triggers, and queries; and paths, by A* through
+  `Navigation` within a budget each tick, and flow fields for crowds;
 - sprite animation, from clips made in code or from Aseprite's tags;
 - sound on Linux, through ALSA: a mixer of voices on four buses, sounds
   that play at entities and pan and fade by where they are from the
@@ -63,7 +64,10 @@ Built:
   (colliders, triggers, the collision grid, the nav grid, the paths, the
   spatial hash, tile chunks, the camera); and time controls, F5 to pause,
   F6 to step a tick, F7 to scale the game's time;
-- a world hash, to check that a replay gives the same simulation.
+- a world hash, to check that a replay gives the same simulation;
+- crash reports: from the start of `App::run`, every panic, on any
+  thread, writes a report into the game's data folder, and the next
+  launch tells the player.
 
 Not built yet:
 
@@ -612,6 +616,16 @@ renderer cannot start, a frame cannot be drawn, or the level of the
 shows it to the player first: on standard error on Linux, and in a message
 box on Windows or an alert on macOS.
 
+`App::run` also sets a panic hook as it starts, and keeps the one set
+before it, which runs first. Every panic from then on, on any thread,
+writes a crash report into `crashes` in the game's data folder, on Linux
+`~/.local/share/<game>/crashes`, named after the time: the panic's
+message and place, a backtrace, the engine's version, the system, the
+GPU, and the log's last 200 records. A panic that ends `App::run` is
+shown to the player once the window has closed, with where its report
+is, and the next launch tells the player of the reports written since the
+last. A panic in the game's setup, before `App::run`, gets no report.
+
 ### Replays
 
 `nadir::input::InputRecorder` records the game's `ActionState` tick by
@@ -735,9 +749,10 @@ The repository's sandbox game is the full example, and the one each
 feature is built for. Its
 [`main.rs`](https://github.com/jabbott-iii/Nadir/blob/main/games/sandbox/src/main.rs)
 has a tile map with animated water and flowers, a person cooked from an
-Aseprite export who walks and collides, a camera that follows them, stress
-scenes of thousands of sprites and colliders, recorded and replayed input,
-and frames drawn with no window for the demo page. To run it:
+Aseprite export who walks and collides, a camera that follows them, guards
+who walk their rounds and chase them, a pack that hunts them down a flow
+field, stress scenes of thousands of sprites and colliders, recorded and
+replayed input, and frames drawn with no window for the demo page. To run it:
 
 ```bash
 git clone https://github.com/jabbott-iii/Nadir.git

@@ -30,9 +30,11 @@
 //!    `NOTICE`, into `downloads/`, with `tar`, and takes its SHA-256 with
 //!    `sha256sum`.
 //! 5. Fills `site/index.html` from the commit (`git`), the workspace, the
-//!    roadmap, the features and the captures, and `site/llms.txt`, the
-//!    same as plain text for language models, and copies `site/nadir.css`
-//!    and `site/nadir.js` beside them.
+//!    roadmap, the features and the captures; `site/instructions/index.html`,
+//!    the developer's guide that the page's Instructions button opens, into
+//!    `instructions/`; and `site/llms.txt`, the same as plain text for
+//!    language models. It copies `site/nadir.css` and `site/nadir.js`
+//!    beside them.
 //!
 //! It reads and writes only the workspace and the output directory, and
 //! makes no network calls: the page loads jabbott.dev's stylesheet and
@@ -72,6 +74,7 @@ const WRITTEN: &[&str] = &[
     "media",
     "downloads",
     "index.html",
+    "instructions",
     "llms.txt",
     "nadir.css",
     "nadir.js",
@@ -79,7 +82,35 @@ const WRITTEN: &[&str] = &[
 
 /// The page's own files, relative to the workspace root.
 const TEMPLATE: &str = "site/index.html";
+const GUIDE_TEMPLATE: &str = "site/instructions/index.html";
 const TEXT_TEMPLATE: &str = "site/llms.txt";
+
+/// The folder the guide goes into, beside the page: its address is
+/// `https://jabbott.dev/Nadir/instructions/`.
+const GUIDE: &str = "instructions";
+
+/// The package whose version the guide's `Cargo.toml` names.
+const ENGINE_PACKAGE: &str = "nadir_engine";
+
+/// The guide's examples: each placeholder, and the example of the engine
+/// whose code fills it. `cargo test` and clippy build every one, so the
+/// code on the page is code that compiles.
+const GUIDE_EXAMPLES: &[(&str, &str)] = &[
+    ("example_hello", "crates/engine/examples/guide_hello.rs"),
+    ("example_world", "crates/engine/examples/guide_world.rs"),
+    ("example_reflect", "crates/engine/examples/guide_reflect.rs"),
+    ("example_hero", "crates/engine/examples/guide_hero.rs"),
+    (
+        "example_text_and_sound",
+        "crates/engine/examples/guide_text_and_sound.rs",
+    ),
+    ("example_states", "crates/engine/examples/guide_states.rs"),
+    (
+        "example_dev_tools",
+        "crates/engine/examples/guide_dev_tools.rs",
+    ),
+    ("example_update", "crates/engine/examples/guide_update.rs"),
+];
 const OWN_FILES: &[&str] = &["site/nadir.css", "site/nadir.js"];
 
 /// The cooked assets, relative to the workspace root, where
@@ -100,13 +131,14 @@ const SCENES: &[Scene] = &[
     Scene {
         name: "field",
         title: "The field",
-        caption: "A person walks a field made in LDtk, of tiles, trees and rocks: down to the path and along it \
-                  past the pond, down it past the flowers and through a gap in a row of \
-                  tall walls, then along the face of one until it ends. The camera follows \
-                  them. They walk in four frames, facing the way they go, and are drawn in \
-                  front of the walls they slide along, whose feet are above theirs: sprites \
-                  are y-sorted by their feet. The water ripples and the flowers sway: \
-                  animated tiles.",
+        caption: "A person walks a field of tiles, trees, and rocks, laid out in the LDtk level \
+                  editor: down to the path and along it past the pond, down it past the \
+                  flowers and through a gap in a row of tall walls, then along the face of \
+                  one until it ends. The camera follows them. They walk in four frames, \
+                  facing the way they go, and are drawn in front of the walls they slide \
+                  along, whose feet are above theirs: sprites are y-sorted, drawn in the \
+                  order of their feet down the screen. The water ripples and the flowers \
+                  sway: animated tiles.",
         poster_frame: 470,
     },
     Scene {
@@ -114,9 +146,10 @@ const SCENES: &[Scene] = &[
         title: "10,000 sprites",
         caption: "10,000 people walk about on a lawn of grass sprites, among trees and \
                   rocks, each an entity that the engine moves and animates. The lawn and \
-                  everything on it are one page of the cooked atlas, y-sorted, so a frame is \
-                  one batch: the budget is 10,000 sprites at 60 frames a second in at most 30 \
-                  draw calls, with no allocation in a frame.",
+                  everything on it are on one page of the cooked atlas, the one texture the \
+                  asset cook packed their images into, so a frame draws them, y-sorted, in \
+                  one batch. The budget is 10,000 sprites at 60 frames a second in at most \
+                  30 draw calls, with no memory allocated in a frame.",
         poster_frame: 300,
     },
     Scene {
@@ -124,9 +157,11 @@ const SCENES: &[Scene] = &[
         title: "5,000 entities",
         caption: "5,000 people jostle in a maze of walls 128 tiles square. Each collides at \
                   their feet, and every tick the engine moves them and slides them along the \
-                  walls and one another, through the collision crate's spatial hash; a tenth \
-                  are triggers, which walk through the others and notice them. The budget \
-                  for 5,000 entities with collision is 4 ms a tick on a min-spec machine.",
+                  walls and one another. It finds who is near whom through a spatial hash, a \
+                  grid of buckets that each hold the colliders over their cells. A tenth are \
+                  triggers, which walk through the others and notice them. The budget for \
+                  5,000 entities with collision is 4 ms a tick on the slowest machine the \
+                  engine aims to run on.",
         poster_frame: 300,
     },
 ];
@@ -213,6 +248,14 @@ pub(crate) fn command(mut args: Args, root: &Path, out: &mut dyn Write) -> Resul
     };
     let html = page::render(&read_text(&root.join(TEMPLATE))?, &page).map_err(Error::Internal)?;
     write(&output.join("index.html"), html.as_bytes())?;
+    let mut examples = Vec::new();
+    for (name, path) in GUIDE_EXAMPLES {
+        examples.push((*name, read_text(&root.join(path))?));
+    }
+    let guide = page::render_guide(&read_text(&root.join(GUIDE_TEMPLATE))?, &page, &examples)
+        .map_err(Error::Internal)?;
+    make_dir(&output.join(GUIDE))?;
+    write(&output.join(GUIDE).join("index.html"), guide.as_bytes())?;
     let text = page::render_text(&read_text(&root.join(TEXT_TEMPLATE))?, &page)
         .map_err(Error::Internal)?;
     write(&output.join("llms.txt"), text.as_bytes())?;
@@ -546,6 +589,12 @@ fn build_info(root: &Path) -> Result<Build, Error> {
         .ok_or_else(|| Error::Internal("rust-toolchain.toml names no `channel`".to_string()))?;
     let metadata = metadata::load(root)?;
     let crates = metadata.packages.iter().filter(|p| p.is_member).count();
+    let version = metadata
+        .packages
+        .iter()
+        .find(|package| package.is_member && package.name == ENGINE_PACKAGE)
+        .map(|package| package.version.clone())
+        .ok_or_else(|| Error::Internal(format!("the workspace has no `{ENGINE_PACKAGE}`")))?;
     let repository = match env::var("GITHUB_REPOSITORY") {
         Ok(repository) if !repository.is_empty() => repository,
         _ => REPOSITORY.to_string(),
@@ -558,6 +607,7 @@ fn build_info(root: &Path) -> Result<Build, Error> {
         toolchain,
         crates,
         third_party: metadata.packages.len() - crates,
+        version,
         repository: format!("https://github.com/{repository}"),
     })
 }
@@ -962,6 +1012,20 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[test]
+    fn every_example_of_the_guide_is_in_the_workspace() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let template = fs::read_to_string(root.join(GUIDE_TEMPLATE)).unwrap();
+        for (name, path) in GUIDE_EXAMPLES {
+            let code = fs::read_to_string(root.join(path)).unwrap();
+            assert!(code.contains("fn main()"), "{path}");
+            assert!(template.contains(&format!("{{{{{name}}}}}")), "{name}");
+        }
+        // And the template names no example the list lacks.
+        let named = template.matches("{{example_").count();
+        assert_eq!(named, GUIDE_EXAMPLES.len());
+    }
+
     fn build() -> Build {
         Build {
             commit: "0123456789abcdef".to_string(),
@@ -971,6 +1035,7 @@ mod tests {
             toolchain: "1.99.0".to_string(),
             crates: 18,
             third_party: 0,
+            version: "0.4.0".to_string(),
             repository: "https://github.com/jabbott-iii/Nadir".to_string(),
         }
     }

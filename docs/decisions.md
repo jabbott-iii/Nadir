@@ -1702,7 +1702,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0029 — CI records the sandbox and publishes a demo page at jabbott.dev/Nadir/; a features file covers the roadmap
 
-- **Status:** Accepted; what its download packs, and the sandbox's fallback to the workspace's `assets`, are superseded by ADR-0033
+- **Status:** Accepted; what its download packs, and the sandbox's fallback to the workspace's `assets`, are superseded by ADR-0033; ADR-0072 adds an instructions page, a developer's guide, that the demo page's Instructions button opens
 - **Date:** 2026-10-31
 - **Context:**
   - The user asked for a CI/CD workflow that deploys a working demo of
@@ -6814,3 +6814,86 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     or a player asks to clear them;
   - a game builds with `panic = "abort"`;
   - or the opt-in uploader of `docs/05-release.md` is taken up.
+
+## ADR-0072 — The demo page gains an instructions page, a developer's guide at jabbott.dev/Nadir/instructions/, whose Rust programs are the engine's compiled examples
+
+- **Status:** Accepted: the page, in the demo page's style, and a large
+  Instructions button below the demo that opens it, which the user asked
+  for on 2026-11-20; and its address, its article layout, and its
+  programs taken from the engine's examples, which the user accepted on
+  2026-11-21.
+- **Date:** 2026-11-20
+- **Context:**
+  - The demo page (ADR-0029) shows what the engine draws and lists its
+    features, but nothing on it says how to build a game with the engine.
+    The user asked for a large Instructions button below the demo window,
+    opening a page in the demo page's style with a detailed guide for
+    developers.
+  - The facade's README (`crates/engine/README.md`) describes the API most
+    fully, and its two examples run as doctests (ADR-0039). Code copied by
+    hand into a web page compiles once, then drifts with the API, and
+    nothing would notice.
+  - The page runs no script but jabbott.dev's and its own, and building it
+    makes no network calls (ADR-0029).
+- **Decision:**
+  - `site/instructions/index.html` is a second template. `cargo xtask site`
+    fills it with the same values as the demo page and writes it to
+    `target/site/instructions/index.html`, which Pages serves at
+    `https://jabbott.dev/Nadir/instructions/`.
+    - It has jabbott.dev's article layout: an article (`.article`,
+      `.prose`) and a sidebar of its contents and this build.
+    - It has the demo page's header and footer.
+    - Its head has a description, the canonical address, Open Graph and
+      Twitter cards with the first scene's poster, and a JSON-LD
+      `TechArticle` with its breadcrumbs.
+    - It loads `nadir.css`, which gains the guide's few styles.
+      jabbott.dev's `site.js` gives its code blocks their copy buttons.
+  - Each Rust program on it is an example of the engine,
+    `crates/engine/examples/guide_<name>.rs`. There are 8: hello, world,
+    reflect, hero, text_and_sound, states, dev_tools, and update.
+    - `xtask site` copies each into the template's `{{example_<name>}}`
+      placeholder, escaped, without the comments it starts with.
+    - `cargo test --workspace --all-features` and clippy build examples,
+      so a change that breaks one fails CI.
+    - `GUIDE_EXAMPLES` in `xtask/src/site.rs` lists them, and a test fails
+      if it and the template disagree.
+  - The engine's version comes from `nadir_engine`'s in `cargo metadata`.
+    `{{engine_version}}` is `0.4.0`, and `{{engine_requirement}}` is
+    `0.4`, what a game's `Cargo.toml` asks for. `llms.txt` gives the
+    version too.
+  - The demo page gets a large Instructions button below the demo, and
+    `llms.txt` lists the new page.
+- **Consequences:**
+  - Good:
+    - The guide's code compiles against the commit the page was built from.
+    - Its version and build numbers follow the workspace.
+    - It needs no new tool, dependency, or script.
+  - Bad:
+    - No test checks the guide's prose. An API change must update it by
+      hand, as it must the README.
+    - The engine's package carries 8 more examples, which crates.io gets
+      with it.
+    - CI builds the examples with every feature on. Without `dev`, they
+      are built only by hand.
+    - jabbott.dev's `sitemap.xml` and `llms.txt`, in that site's
+      repository, don't list the new page until they are changed there.
+    - The page depends on more of jabbott.dev's classes than the demo page
+      does: `.article`, `.prose`, `.layout`, `.sidebar`, `.list-rows` and
+      `.read-progress`.
+- **Alternatives considered:**
+  - The guide as a Markdown file in the repository, which the button opens
+    on GitHub: GitHub would show it outside the site's style, which the
+    user asked for.
+  - Code written into the HTML by hand: it would drift with the API,
+    unchecked.
+  - A doctest that includes the guide's code from outside the crate:
+    `include_str!` of a file outside the package breaks its crates.io
+    package.
+  - A package of its own for the examples, such as `games/guide`: one more
+    package, with no gain over examples, which the engine's package already
+    compiles.
+  - The README's sections turned into the page: `xtask` would need a
+    Markdown renderer.
+- **Revisit when:** the API reaches 1.0 and the guide needs a version per
+  release; a second guide page is wanted; or jabbott.dev renames its
+  article classes.

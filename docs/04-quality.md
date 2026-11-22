@@ -187,10 +187,10 @@ pub fn check_sized<T: std::fmt::Debug>(
 - Before each tick, and after the last, it hashes the world
   (`TypeRegistry::hash_world`: reflection, a byte form, FNV-1a 64), whole
   and by type. It compares the sequence with the stored one in
-  `tests/determinism/hashes.txt`:
+  `crates/engine/tests/determinism/hashes.txt`:
   - for a live run of a scripted input in frames of mixed lengths, which
-    must also record `tests/determinism/replay.nrpl` byte for byte, and must
-    match a second live run in the same process;
+    must also record `crates/engine/tests/determinism/replay.nrpl` byte for
+    byte, and must match a second live run in the same process;
   - for that replay, played in frames of one tick, of seven (whose last
     runs live ticks after the replay's end) and of other mixed lengths
     (`App::play_replay`).
@@ -259,8 +259,9 @@ pub fn check_sized<T: std::fmt::Debug>(
   as for property tests, and it is printed. How far a run gets in its time
   still depends on the machine.
 - The exit status is 0 for a clean run and 1 if there is a finding.
-- Every parser in `nadir-codec`, `nadir-assets`, the save loader and the
-  settings loader registers a fuzz target.
+- Every parser in `nadir-codec`, `nadir-assets` and the save loader registers
+  a fuzz target, and so will the settings loader (roadmap task M9.3, not
+  built yet).
   - A target may do more than call its parser. One whose format carries
     checksums repairs a copy of each input, so that mutations get past
     them (`png`, `kpak`, `ksav`). One that can check its own answers asserts them, so that
@@ -570,9 +571,11 @@ understood.
        the oldest glibc it runs on, read from the version names in the
        executable;
      - and fills `site/index.html` from the commit, the workspace, the
-       roadmap, the features and the captures' `capture.json`, and
-       `site/llms.txt`, the same as plain text for language models, beside
-       `site/nadir.css` and `site/nadir.js`.
+       roadmap, the features and the captures' `capture.json`;
+       `site/instructions/index.html`, the developer's guide that the
+       page's Instructions button opens, into `instructions/`; and
+       `site/llms.txt`, the same as plain text for language models,
+       beside `site/nadir.css` and `site/nadir.js`.
   3. `actions/upload-pages-artifact` uploads `target/site`, and the deploy
      job, the only one with `pages: write` and `id-token: write`, publishes
      it with `actions/deploy-pages`.
@@ -595,6 +598,18 @@ understood.
   (`cargo xtask site`, about a minute) needs the same packages. `--out DIR` must be new, empty, or made by an earlier
   run, which leaves the mark `.nadir-site`; a run removes only what an
   earlier one wrote.
+
+  The instructions page (ADR-0072), `https://jabbott.dev/Nadir/instructions/`,
+  is a guide to building a game with the engine, in jabbott.dev's article
+  layout, with the same header and footer as the demo page. Its version
+  comes from `nadir_engine`'s, and each of its Rust programs is one of the
+  engine's examples, `crates/engine/examples/guide_<name>.rs`, which
+  `cargo xtask site` copies into its `{{example_<name>}}` placeholder
+  without the comments it starts with. `cargo test` and clippy build
+  those examples, so the guide's code always compiles; an API change that
+  breaks one fails CI, and its prose, which nothing checks, is updated
+  with it. A test fails if the template and the list of examples
+  (`GUIDE_EXAMPLES` in `xtask/src/site.rs`) disagree.
 
   Between the build and the features, the page draws views 1 and 2 of
   `diagrams/c4-architecture.md`, the system context and the containers.

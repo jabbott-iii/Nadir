@@ -10,7 +10,7 @@ OS calls, no dependencies.
 | `math` | `Vec2`, `IVec2`, `UVec2`, `Mat3` (2D affine), `Affine2`, `Rect`, `IRect`, `lerp`, `approx_eq`, `clamp`, angle helpers. `#[repr(C)]` where used in GPU data |
 | `color` | `Color` (sRGB `u8` RGBA), `LinearColor` (`f32`), conversion with exact sRGB transfer functions, hex parsing |
 | `time` | `FixedClock` (accumulator, hitch clamp, `alpha`), `Tick` (index, dt), `Frame` (dt, alpha), `Stopwatch` |
-| `log` | Macros `error!`, `warn!`, `info!`, `debug!`, `trace!` with a module target; sinks: stderr, rotating file, in-memory ring buffer (last 1000 lines, for console and crash reports: `tail`, or a record at a time from a cursor with `since`, which allocates nothing); level filter per target from settings |
+| `log` | Macros `error!`, `warn!`, `info!`, `debug!`, `trace!` with a module target; sinks: stderr, rotating file, in-memory ring buffer (last 1000 lines, for console and crash reports: `tail`, or a record at a time from a cursor with `since`, which allocates nothing); a level filter per target, set with `set_target_level` (the debug console's `log level` command), and from the settings file once it is built (M9.3) |
 | `rng` | `Pcg32` (seedable, `next_u32`, `next_f32`, `range`, `shuffle`, `choose`); per-system streams derived from a world seed |
 | `hash` | `fnv1a64`; `FxLikeHasher` with `FastHashMap` / `FastHashSet` aliases (deterministic, non-cryptographic); `crc32` (IEEE, table-driven), shared by `codec` (PNG chunks, pack integrity) and `cook` (the pack writer) |
 | `handle` | `GenIndex { index: u32, generation: NonZeroU32 }`, `GenArena<T>` (insert/remove/get/iter, free list), typed `Handle<T>` built on it |

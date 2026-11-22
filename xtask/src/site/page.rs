@@ -41,8 +41,8 @@ const DESCRIPTION: &str = "Nadir, a 2D top-down game engine in Rust with no thir
 
 /// What the engine is, in the structured data.
 const ENGINE: &str = "A 2D top-down game engine for desktop, written in Rust from the ground \
-                      up: its own OS bindings, OpenGL renderer, ECS, collision, codecs and \
-                      tools, with no third-party crates.";
+                      up: its own OS bindings, OpenGL renderer, entity component system \
+                      (ECS), collision, codecs, and tools, with no third-party crates.";
 
 /// The commit the page was built from, and the workspace at it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +62,9 @@ pub(crate) struct Build {
     pub(crate) crates: usize,
     /// The packages from outside the workspace.
     pub(crate) third_party: usize,
+    /// `nadir_engine`'s version, such as `0.4.0`, which every crate of the
+    /// workspace that crates.io gets shares.
+    pub(crate) version: String,
     /// The repository's web address, with no `/` at the end.
     pub(crate) repository: String,
 }
@@ -70,6 +73,17 @@ impl Build {
     /// The commit's first 7 characters.
     pub(crate) fn short(&self) -> &str {
         self.commit.get(..7).unwrap_or(&self.commit)
+    }
+
+    /// The version as a game's `Cargo.toml` asks for it: its major and
+    /// minor parts, such as `0.4`, which Cargo reads as "0.4.0 or any later
+    /// 0.4 release".
+    pub(crate) fn requirement(&self) -> &str {
+        let mut dots = self.version.match_indices('.');
+        match dots.nth(1) {
+            Some((at, _)) => &self.version[..at],
+            None => &self.version,
+        }
     }
 }
 
@@ -154,6 +168,44 @@ pub(crate) fn render(template: &str, page: &Page) -> Result<String, String> {
     fill(template, &values(page))
 }
 
+/// The guide: `template` with each `{{name}}` replaced, as [`render`]
+/// does, and each `{{example_…}}` of `examples` by its source's code,
+/// escaped, without the comments it starts with ([`example_code`]).
+///
+/// # Errors
+///
+/// As [`render`].
+pub(crate) fn render_guide(
+    template: &str,
+    page: &Page,
+    examples: &[(&'static str, String)],
+) -> Result<String, String> {
+    let mut values = values(page);
+    for (name, source) in examples {
+        values.insert(name, escape(example_code(source)));
+    }
+    fill(template, &values)
+}
+
+/// An example's code as the guide shows it: without the license header and
+/// the doc comment it starts with, which are for the repository's readers,
+/// and without the line break after its last line.
+pub(crate) fn example_code(source: &str) -> &str {
+    let mut rest = source;
+    loop {
+        let line_end = rest.find('\n').map_or(rest.len(), |at| at + 1);
+        let line = rest[..line_end].trim();
+        if line.starts_with("//") || line.is_empty() {
+            if line_end == rest.len() {
+                return "";
+            }
+            rest = &rest[line_end..];
+        } else {
+            return rest.trim_end();
+        }
+    }
+}
+
 /// The page as plain text, for language models: `template` with each
 /// `{{name}}` replaced, unescaped.
 ///
@@ -218,8 +270,8 @@ impl Counts {
     /// The sentence above the features.
     fn features_lede(&self, version: &str) -> String {
         format!(
-            "{} shipped, {} in progress and {} planned. Each feature is marked from the \
-             roadmap's ticks at {version}, so the list moves as the tasks land.",
+            "{} shipped, {} in progress, and {} planned. Each feature's status comes from the \
+             roadmap's ticked tasks at commit {version}, so the list changes as tasks are done.",
             self.shipped, self.in_progress, self.planned
         )
     }
@@ -294,10 +346,11 @@ fn values(page: &Page) -> BTreeMap<&'static str, String> {
         "lede",
         escape(
             "A 2D top-down game engine for desktop, written in Rust from the ground up: \
-             its own OS bindings, OpenGL renderer, ECS, collision, codecs and tools, with \
-             no third-party crates. What plays below is the engine itself, drawn frame by \
-             frame in CI from the commit named beside it, published when that commit \
-             passed CI on main.",
+             its own OS bindings, OpenGL renderer, entity component system (ECS), \
+             collision, codecs, and tools, with no third-party crates. What plays below is \
+             the engine itself, drawn frame by frame by continuous integration (CI) from \
+             the commit named beside it, and published once that commit passed CI on the \
+             main branch.",
         ),
     );
     set("commit", escape(&build.commit));
@@ -312,6 +365,8 @@ fn values(page: &Page) -> BTreeMap<&'static str, String> {
     set("toolchain", escape(&build.toolchain));
     set("crates", build.crates.to_string());
     set("third_party", third_party(build));
+    set("engine_version", escape(&build.version));
+    set("engine_requirement", escape(build.requirement()));
     set("tasks_done", counts.done.to_string());
     set("tasks_total", counts.total.to_string());
     set("scene_tabs", scene_tabs(page.recordings));
@@ -349,6 +404,7 @@ fn text_values(page: &Page) -> BTreeMap<&'static str, String> {
         ("toolchain", build.toolchain.clone()),
         ("crates", build.crates.to_string()),
         ("third_party", third_party(build)),
+        ("engine_version", build.version.clone()),
         ("tasks_done", counts.done.to_string()),
         ("tasks_total", counts.total.to_string()),
         ("scenes", scenes_text(page.recordings, version)),
@@ -712,9 +768,10 @@ fn download(download: &Download, version: &str, repository: &str) -> String {
          \x20         <p class=\"nadir-download__meta\">Unpack it and run \
          <code>./sandbox</code>; its README names the scenes and keys. The \
          <a href=\"{repository}/releases\">releases</a> carry the sandbox and the cook of \
-         each tagged version for Windows, macOS and Linux on x86_64 and aarch64; on \
-         Windows and macOS the sandbox's window stays empty until the engine draws there \
-         (roadmap M2.6, M2.7).</p>\n\
+         each tagged version for Windows, macOS, and Linux on x86_64 and aarch64. On \
+         Windows and macOS, the sandbox's window stays empty until the engine can draw \
+         there: its OpenGL contexts on those systems are roadmap tasks M2.6 and \
+         M2.7.</p>\n\
          \x20       </div>",
         repository = escape(repository),
         path = escape(&download_path(download, version)),
@@ -812,9 +869,9 @@ fn download_text(download: &Download, version: &str, repository: &str) -> String
         "- [{file}]({PAGE_URL}{path}): the sandbox as this build drew it, for Linux on x86_64, \
          {requirements}; {size}; SHA-256 {sha}. Unpack it and run `./sandbox`; its README \
          names the scenes and keys. The releases ({repository}/releases) carry the sandbox \
-         and the cook of each tagged version for Windows, macOS and Linux on x86_64 and \
-         aarch64; on Windows and macOS the sandbox's window stays empty until the engine draws \
-         there (roadmap M2.6, M2.7).",
+         and the cook of each tagged version for Windows, macOS, and Linux on x86_64 and \
+         aarch64. On Windows and macOS, the sandbox's window stays empty until the engine can \
+         draw there: its OpenGL contexts on those systems are roadmap tasks M2.6 and M2.7.",
         file = download.file,
         path = download_path(download, version),
         requirements = requirements(download),
@@ -944,6 +1001,7 @@ mod tests {
             toolchain: "1.99.0".to_string(),
             crates: 18,
             third_party: 0,
+            version: "0.4.0".to_string(),
             repository: "https://github.com/jabbott-iii/Nadir".to_string(),
         }
     }
@@ -1094,7 +1152,7 @@ mod tests {
                 "<span class=\"nadir-status nadir-status--planned\">Planned</span>",
                 "data-status-filter=\"shipped\" aria-pressed=\"false\">Shipped <span \
                  class=\"chip__count\">1</span>",
-                "1 shipped, 0 in progress and 1 planned.",
+                "1 shipped, 0 in progress, and 1 planned.",
                 "/blob/0123456789abcdef/docs/roadmap.md",
                 "<span>&copy; 2026 Joseph Abbott III</span>",
                 // jabbott.dev's header and footer since its log moved to /log/.
@@ -1109,6 +1167,9 @@ mod tests {
                 "href=\"https://github.com/jabbott-iii/Nadir/tree/0123456789abcdef/diagrams\"",
                 "<title id=\"c4-context-title\">",
                 "<title id=\"c4-containers-title\">",
+                // The Instructions button, below the demo.
+                "<a class=\"btn btn--teal btn--block nadir-guide-link\" href=\"instructions/\">",
+                "<span class=\"nadir-guide-link__label\">Instructions</span>",
             ] {
                 assert!(html.contains(expected), "missing {expected:?}");
             }
@@ -1218,6 +1279,60 @@ mod tests {
     }
 
     #[test]
+    fn the_guide_template_fills_with_its_examples_escaped_and_without_their_comments() {
+        let template = include_str!("../../../site/instructions/index.html");
+        let source = "// Copyright\n//\n//! An example.\n\nuse nadir::prelude::*;\n\n\
+                      // Within: kept.\nfn main() { assert!(1 < 2 && \"a\" != \"b\"); }\n";
+        let examples: Vec<(&'static str, String)> = crate::site::GUIDE_EXAMPLES
+            .iter()
+            .map(|(name, _)| {
+                // Each example's placeholder is in the template.
+                assert!(template.contains(&format!("{{{{{name}}}}}")), "{name}");
+                (*name, source.to_string())
+            })
+            .collect();
+        with_page(|page| {
+            let html =
+                render_guide(template, page, &examples).expect("every placeholder has a value");
+            assert!(!html.contains("{{"), "a placeholder is left");
+            assert!(!html.contains("Copyright 2026 Joseph Anthony Abbott III\n\n//!"));
+            assert!(!html.contains("An example."));
+            for expected in [
+                "<pre><code class=\"language-rust\">use nadir::prelude::*;\n\n// Within: kept.\n\
+                 fn main() { assert!(1 &lt; 2 &amp;&amp; &quot;a&quot; != &quot;b&quot;); }</code></pre>",
+                "nadir_engine = \"0.4\"",
+                "<dd>nadir_engine 0.4.0</dd>",
+                "<link rel=\"canonical\" href=\"https://jabbott.dev/Nadir/instructions/\">",
+                "<link rel=\"stylesheet\" href=\"../nadir.css?v=0123456\">",
+                "<li><a href=\"../\">Nadir</a></li>",
+                "<a href=\"../llms.txt\">llms.txt</a>",
+                "<a class=\"nadir-mono\" href=\"https://github.com/jabbott-iii/Nadir/commit/\
+                 0123456789abcdef\">0123456</a>",
+                "<time datetime=\"2026-10-31\">2026-10-31</time>",
+                "\"dateModified\": \"2026-10-31\"",
+                "/tree/0123456789abcdef/crates/engine/examples",
+                "<dd>10 of 16 tasks</dd>",
+            ] {
+                assert!(html.contains(expected), "missing {expected:?}");
+            }
+        });
+    }
+
+    #[test]
+    fn an_example_loses_only_the_comments_and_blank_lines_it_starts_with() {
+        assert_eq!(
+            example_code("// a\n//! b\n\nfn main() {}\n\n"),
+            "fn main() {}"
+        );
+        assert_eq!(
+            example_code("fn main() {\n    // kept\n}\n"),
+            "fn main() {\n    // kept\n}"
+        );
+        assert_eq!(example_code("// only\n//! comments\n"), "");
+        assert_eq!(example_code(""), "");
+    }
+
+    #[test]
     fn text_in_a_script_cannot_end_it() {
         let text = "</script><!-- & -->";
         let json = json::to_string_compact(&Value::String(text.to_string()));
@@ -1241,6 +1356,8 @@ mod tests {
                 "10 of 16 roadmap tasks done",
                 "at commit 0123456 of 2026-10-31 (M5.2 codec: KLZ & KBJ)",
                 "third-party crates: None",
+                "- Version: nadir_engine 0.4.0",
+                "- [Instructions](https://jabbott.dev/Nadir/instructions/): a developer's guide",
                 "- [The field](https://jabbott.dev/Nadir/media/field.webm?v=0123456): A person \
                  <walks>. Frames: 600 in 10 s, a tick each. Sprites a frame: 10,203. Sprite \
                  batches: 2. Tiles a frame: 2,210. Mean tick: 0.004 ms, the \
@@ -1251,11 +1368,11 @@ mod tests {
                  for Linux on x86_64, X11 with OpenGL 3.3 and glibc 2.34 or newer; 1.3 MB; \
                  SHA-256 abab",
                 "The releases (https://github.com/jabbott-iii/Nadir/releases) carry the sandbox \
-                 and the cook of each tagged version for Windows, macOS and Linux",
+                 and the cook of each tagged version for Windows, macOS, and Linux",
                 "## Architecture\n\n",
                 "https://github.com/jabbott-iii/Nadir/blob/0123456789abcdef/diagrams/\
                  c4-architecture.md",
-                "1 shipped, 0 in progress and 1 planned.",
+                "1 shipped, 0 in progress, and 1 planned.",
                 "### Shipped\n\n- Tilemaps (Graphics): Draws \"things\". Roadmap tasks: M4.5.\n\n\
                  ### Planned\n\n- Pack files (Graphics): Draws \"things\". Roadmap tasks: M5.7, \
                  M5.8.\n\n## Roadmap",

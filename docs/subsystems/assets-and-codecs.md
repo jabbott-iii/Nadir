@@ -37,7 +37,7 @@ Every decoder:
 | `kpcm` | The sound file, version 1, below | ✓ | ✓ | yes | 16-bit samples of 1 or 2 channels as they are, for short sounds (M6.8, ADR-0049). See below |
 | `pcm` | Below | — | — | yes (a sound's conversion as it loads, M6.9) | `resample`, a windowed sinc the same bits on every system, and `to_i16`. See below |
 | `klz` | Below | ✓ | ✓ | yes | Pack entry compression. See below |
-| `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (settings, dev data) | Order-preserving objects: `Vec<(String, Value)>` |
+| `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (a prefab's source JSON, development data; the settings file, roadmap task M9.3, once it is built) | Order-preserving objects: `Vec<(String, Value)>` |
 | `kbj` | Below | ✓ | ✓ | yes | Binary form of the JSON value tree for cooked data. See below |
 | `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines. See subset below |
 | `aseprite` | Aseprite's `--format json-array` sprite sheet data | — | ✓ | no (cook only) | Frames, sheet, tags expanded to clips (ADR-0035). See subset below |
@@ -47,6 +47,7 @@ Every decoder:
 | `level` | The cook's level file, version 1, below | — | ✓ | yes | KBJ, then checked strictly (ADR-0038). See below |
 | `prefab` | The prefab file, below | — | ✓ | yes | KBJ, or its source's JSON, then checked strictly (ADR-0038). See below |
 | `kpak` | The pack file, version 1, below | — | ✓ | yes | Header, TOC and string table checked strictly; each entry's CRC before its KLZ (ADR-0041). See below |
+| `ksav` | The save file, version 1, below | ✓ | ✓ | yes | A 24-byte header with a CRC-32 over the whole file, then a KBJ payload, checked strictly (M9.4, ADR-0068). See "Save file reader and writer" |
 
 ### Inflate (documented, tested)
 
@@ -1296,8 +1297,11 @@ toc (toc_size bytes at toc_offset, a multiple of 16, to the end of the file; toc
   nothing leaves it as it was. A file larger than the game reads, more
   files than it reads, or a TOC larger, is `CookError::Encode`, as is a
   pack the reader refuses; a path longer than 65,535 bytes is
-  `CookError::BadPath`. The sandbox's six cooked files, 19,030 bytes,
-  pack into 5,304, each smaller as KLZ.
+  `CookError::BadPath`. When M5.14 was built, the sandbox's six cooked
+  files, 19,030 bytes, packed into 5,304, each smaller as KLZ. At version
+  0.4, with its sounds and its level cooked too, its 10 files, 721,558
+  bytes, pack into 697,109, 3% smaller: most of those bytes are sound,
+  which KLZ barely shrinks.
 - At runtime, each read of an entry checks the CRC-32 of its stored bytes
   before it decompresses them. A mismatch is a corruption error naming the
   path, from the string table, which the cook always writes (ADR-0041), or

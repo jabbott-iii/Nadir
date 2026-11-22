@@ -42,7 +42,9 @@ The UI core is nadir-debug's alone (ADR-0056): the engine feeds it, draws
 it, holds the game's input off and saves its windows' places in M7.10. The
 window's typed text and the keys' repeats reach it through
 `nadir_input::UiEvents`, and `nadir_input::Input::set_capture` holds the
-game's actions off (M7.9, ADR-0057). It depends on core and render.
+game's actions off (M7.9, ADR-0057). It depended on core and render at
+M7.2; it now depends on codec, core, ecs, render, and scene, for the
+trace's JSON and the inspector (M7.3, M7.4).
 
 ```rust
 pub struct DebugInput;   // pointer_moved, button, wheel, key(key, pressed, repeat), text, focus_lost, clear
@@ -122,8 +124,10 @@ pub struct WindowPlace<'a> { title, rect, collapsed }; pub struct Style { scale,
   style's scale, text with no markup; the list's view is put back.
 - **Not built yet:** a scroll area inside a window, rows called back only
   when in view, tooltips, window options (no title bar, a close box),
-  wider integers, copy and paste. They are additive, for the tools that
-  need them (M7.3 to M7.5). The golden of a debug window is M7.10's.
+  wider integers, copy and paste. They are additive, for a tool that
+  needs them: the stats overlay, the profiler, the inspector, and the
+  console (M7.3 to M7.5) were built without them. The golden of a debug
+  window is M7.10's.
 
 ### As built (M7.10): the debug UI in the game
 
@@ -143,8 +147,8 @@ pub struct WindowSize(pub UVec2);   // a resource: the window's inside, physical
   hidden at start; they are filled in the order added, after the frame
   stages, inside `App::update`, so over the game's UI. The sandbox's is on
   F8 (`cargo dev`): a note to type, what the last frame drew, every
-  entity's place. The tools below will be windows of the engine's, on
-  their keys.
+  entity's place. The tools below are windows of the engine's, on their
+  keys.
 - **The UI** is made the first time a window is open, in the engine's
   font, and then runs every frame; before that its input is fed and
   cleared. It reads the window's events from a `nadir_input::UiEvents`,

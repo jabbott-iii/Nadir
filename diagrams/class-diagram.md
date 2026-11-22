@@ -101,6 +101,7 @@ classDiagram
     AssetServer ..> Handle : load returns
     Asset <|.. Texture
     Asset <|.. Atlas
+    Asset <|.. Font
     Asset <|.. Level
     Asset <|.. PrefabAsset
     Texture *-- TextureId
@@ -579,8 +580,13 @@ classDiagram
         +finish_completed_loads(ctx)
         +finish_all_loads(ctx)
         +reload(path) usize
+        +reload_all() usize
         +start_watcher() Result
         +reload_changed() usize
+        +error~T~(handle) Option~AssetError~
+        +path~T~(handle) Option~str~
+        +has_pending() bool
+        +set_finish_budget(budget)
         +drain_swapped~T~() Iterator~Handle~T~~
     }
     class Watch {
@@ -755,12 +761,14 @@ classDiagram
     }
     class Texture["render::Texture"]
     class Atlas["render::Atlas"]
+    class Font["render::Font"]
     class Level["scene::Level"]
     class PrefabAsset["scene::PrefabAsset"]
     class Sound["audio::Sound"]
     class Music["audio::Music"]
     Asset <|.. Texture : qoi
     Asset <|.. Atlas : kbj
+    Asset <|.. Font : font.kbj
     Asset <|.. Level : klvl
     Asset <|.. PrefabAsset : kbj
     Asset <|.. Sound : kpcm, qoa
@@ -791,6 +799,7 @@ classDiagram
         +type_name() str
         +kind() ReflectKind
         +fields() FieldInfo[]
+        +variants() str[]
         +field(index) Option~Reflect~
         +field_mut(index) Option~Reflect~
         +to_value(cx) Value
@@ -897,6 +906,8 @@ classDiagram
         +insert(commands, entity, value, cx) Result
         +insert_layers(commands, entity, layers, cx) Result
         +inspect(world, entity, f) bool
+        +inspect_mut(world, entity, f) bool
+        +remove(commands, entity)
         +each(world, f)
     }
     class ResourceRegistration {
@@ -941,10 +952,12 @@ classDiagram
         +new() PrefabLibrary
         +path(name) String
         +get(name) Option~Prefab~
+        +iter() Iterator~Prefab~
         +insert(source, file)
         +remove(name) Option~Prefab~
         +load(server, registry, name, scope) Result
         +load_level(server, registry, level, scope) Result
+        +load_save(server, registry, data, scope) Result
         +chain(name) Result~Vec~Prefab~~
         +check(name, registry) Result
         +spawn(name, overrides, registry, commands, cx) Result~Entity~
@@ -981,6 +994,8 @@ classDiagram
         +tall Vec~TallEntry~
         +entities Vec~EntityEntry~
         +camera Option~Bounds~
+        +music Option~String~
+        +ambience Option~String~
     }
     class TilesetEntry {
         +atlas String
@@ -2397,6 +2412,8 @@ classDiagram
         -profile Vec~ScopeRecord~
         -shader_dir PathBuf, dev
         -mixer Option~Mixer~
+        -debug DebugTools, dev
+        -states States
         +new(config) App
         +insert_resource(resource) App
         +add_event~T~() App
@@ -2406,9 +2423,16 @@ classDiagram
         +play_replay(replay) App
         +add_fixed_system(stage, name, system) App
         +add_frame_system(stage, name, system) App
+        +add_fixed_system_in(state, stage, name, system) App
+        +add_frame_system_in(state, stage, name, system) App
+        +on_enter(state, name, system) App
+        +on_exit(state, name, system) App
+        +add_debug_window(toggle, title, first, window) App, dev
+        +add_console_command(usage, help, command) App, dev
         +load_level(name) Result
         +world() World
         +world_mut() World
+        +schedule() Schedule
         +take_mixer() Option~Mixer~
         +update(elapsed, events)
         +world_hash() u64
@@ -2420,6 +2444,7 @@ classDiagram
         +studio String
         +game String
         +window_size UVec2
+        +min_window_size UVec2
         +resizable bool
         +fullscreen bool
         +frame_rate_limit Option~u32~
@@ -2574,8 +2599,11 @@ classDiagram
     World o-- CollisionLayers
     World o-- PrefabLibrary
     World o-- CurrentLevel
+    World o-- StateMachine
     World o-- AnimationClock
     World o-- FrameAllocs
+    World o-- Reloads
+    World o-- WindowSize
     World o-- TypeRegistry
     World o-- Audio
     World o-- AudioState
@@ -2584,6 +2612,8 @@ classDiagram
     Events ..> TriggerExit
     Events ..> AnimationFinished
     note for FrameAllocs "Only with the dev feature."
+    note for Reloads "Only with the dev feature: what hot reload did, for the tests (crate-private)."
+    note for WindowSize "Only with the dev feature: the window's size, which maps the pointer to a UI's units."
 ```
 
 ## engine: collision and level resources

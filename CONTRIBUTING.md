@@ -103,9 +103,11 @@ held up on:
 | Windows 10+ (x64 or Arm) | The MSVC build tools and the Windows SDK (Visual Studio Build Tools). |
 | macOS 12+ | The Xcode command-line tools (`xcode-select --install`). Full Xcode is not needed. |
 
-Only Linux runs the engine so far: the Windows and macOS windows and
-OpenGL contexts are roadmap tasks M1.5, M1.6, M2.6 and M2.7. Everything
-else builds and tests on all three.
+Only Linux draws and plays sound so far. The Windows and macOS windows are
+written but still wait to be checked by hand there (roadmap tasks M1.5 and
+M1.6), and they stay empty and silent until the OpenGL contexts (M2.6 and
+M2.7) and the audio output (M6.4 and M6.5) on those systems are built.
+Everything else builds and tests on all three.
 
 Optional:
 
@@ -127,8 +129,10 @@ cargo dev
 ```
 
 `cargo dev` runs the sandbox with the `dev` feature: a development build,
-where a missing asset shows a placeholder, and where the debug tools will
-go (`nadir-debug`). WASD or the arrow keys walk. With
+where a missing asset shows a placeholder, with the debug tools
+(`nadir-debug`): the stats overlay on F1, the inspector on F2, the
+profiler on F3, debug drawing on F4, the console on the backtick, and the
+game's time on F5 to F7. WASD or the arrow keys walk. With
 `cargo xtask cook --watch` running beside it, an edit to `assets/`, or to
 the shaders in `crates/render/shaders/`, shows in the running game within
 a second, but for what the game copied at setup (the sandbox's crate
@@ -142,6 +146,7 @@ Windows and macOS, and the same commands CI runs:
 | Command | What it does |
 | :- | :- |
 | `cargo xtask ci` | The whole pull request gate: fmt check, clippy with `-D warnings`, `cook`, tests, `deps`, `layers`, `crates`, `unsafe-audit`, `headers`, `workflows`, `release-no-dev`, `features` |
+| `cargo xtask fmt`, `clippy`, `test` | Runs one of the gate's cargo checks alone, as `ci` runs it; any other check's name below runs that check alone too |
 | `cargo xtask deps` | Fails if `Cargo.lock` holds a package from outside the workspace that the policy does not approve |
 | `cargo xtask layers` | Fails if a crate depends on one the dependency matrix forbids |
 | `cargo xtask crates` | Fails if a crate for crates.io lacks what crates.io shows or copies of `LICENSE` and `NOTICE`, is at another version, or depends on a crate crates.io does not get |
@@ -155,7 +160,7 @@ Windows and macOS, and the same commands CI runs:
 | `cargo xtask bench [filter]` | Runs the benchmarks in release, against the recorded baseline |
 | `cargo xtask soak --audio [--minutes N] [--silent]` | Plays 32 random voices and music through the audio device for `N` minutes (10), and reports underruns, the mix's time and the memory; `--silent` mixes but plays nothing |
 | `cargo xtask cook [--force] [--watch]` | Cooks `assets/` into `target/cooked/`; `--watch` again whenever they change, until stopped |
-| `cargo xtask site [--out DIR]` | Builds the demo page into `target/site` (needs EGL and GStreamer) |
+| `cargo xtask site [--out DIR]` | Builds the demo page and its instructions page into `target/site` (needs EGL and GStreamer) |
 | `cargo xtask dist [--out DIR]` | Builds this machine's release files into `target/dist`: the archive and, on Linux, the `.deb`s (needs `dpkg-dev`) |
 
 ### The Makefile
@@ -274,8 +279,10 @@ Update the docs in the same pull request when the change affects them:
 
 ## Commits and pull requests
 
-- A commit for a roadmap task starts with its ID and title, as in
-  `M5.4 — cook: CLI, cache, textures, atlas packer`. Any other commit
+- A commit for a roadmap task starts with its ID and the crates it
+  changes, then what it does, as in
+  `M8.1 core, sys and platform: Linux gamepads from evdev, with inotify hotplug`.
+  Any other commit
   starts with the area it changes, as in
   `bench: qoi_decode_2048 and inflate_10mb`.
 - Keep a pull request to one issue or task. Split unrelated work into

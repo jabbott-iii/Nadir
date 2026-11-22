@@ -138,7 +138,9 @@ fn main() -> Result<(), PlatformError> {
 ## Platforms
 
 - **Linux** (X11): all of the above works, and was checked by hand on
-  XWayland. Xlib (`libX11.so.6`) and EGL (`libEGL.so.1`) are
+  XWayland, but for gamepads, which were checked with virtual pads made
+  through the kernel's uinput: the check with a real pad is still due
+  (roadmap task M8.1). Xlib (`libX11.so.6`) and EGL (`libEGL.so.1`) are
   loaded while the program runs, not linked, so a machine without them
   gets an error that says which library or function is missing. A Wayland
   session runs the window through XWayland; without XWayland, the error

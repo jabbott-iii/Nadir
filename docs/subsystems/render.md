@@ -457,8 +457,8 @@ impl Program {
   last did. It is `RenderError::Gfx`, with `GfxError::Interface` saying
   what differs, with the attribute or the blocks the program has (the
   check's, or the device's for a block's size), or `GfxError::Shader`
-  with the stage and the driver's log. `RenderError` is exhaustive in
-  0.2, so a refusal has no variant of its own; its message reads "the
+  with the stage and the driver's log. `RenderError` is exhaustive (as
+  of 0.4), so a refusal has no variant of its own; its message reads "the
   shaders do not fit their pipeline" for an `Interface` one.
 - **A success:** the next `render` draws with the new program, and the
   old one is destroyed at once; OpenGL deletes a program in use once it is
@@ -696,7 +696,8 @@ As built (M7.11, ADR-0060), for the profiler (M7.12):
   - sort-key monotonicity (property test over random floats, including
     negatives and `-0.0`)
   - batching boundaries
-  - chunk dirty tracking
+  - chunk revisions (a chunk repacked only when its revision differs from
+    the one it packed)
   - text layout (wrapping, alignment, kerning; M7.1: also markup, the
     fallback, and a property test that layout and measure agree)
   - `screen_to_world` round-trip
@@ -716,7 +717,8 @@ As built (M7.11, ADR-0060), for the profiler (M7.12):
     odd bars, a clip through a glyph, a sprite cut at the image's corner,
     a later view at a free scale over it and the bars)
   - pixel-perfect upscale at 3 window sizes
-  - debug draw primitives
+  - debug draw primitives, once render's own debug draw is built (it is
+    not yet)
 - **Benchmarks:** sort+batch for 10k sprites; chunk rebuild
   (`tile_chunk_rebuild`, M4.5).
 - As built (M5.17), the interface check has unit tests:

@@ -3,9 +3,9 @@
 These diagrams show Nadir in the C4 model's views: the system and the
 people and systems around it, its containers (the programs and the files
 between them), and the components inside the game and the cook, which are
-the workspace's crates. They reflect the code at commit 0cba65f (version
-0.2). What the roadmap plans but the code does not have yet is drawn
-dashed and labeled "planned".
+the workspace's crates. They reflect the code of version 0.4, after
+roadmap task M9.6 (crash reports). What the roadmap plans but the code
+does not have yet is drawn dashed and labeled "planned".
 
 ## Legend
 
@@ -22,10 +22,13 @@ dashed and labeled "planned".
 ## 1. System context
 
 The game built on Nadir and Nadir's own tools, with the people, editors,
-OS interfaces and services they deal with. The Windows and macOS windows
-are written but still wait on checks on those systems (roadmap M1.5, M1.6),
-and there the game runs without drawing until their OpenGL contexts land,
-and without sound until their audio output does (M6.4, M6.5).
+OS interfaces, and services they deal with. The Windows and macOS windows
+are written but still wait to be checked by hand on those systems (roadmap
+tasks M1.5 and M1.6). There the game runs without drawing until their
+OpenGL contexts are built (M2.6 and M2.7), and without sound until their
+audio output is (M6.4 and M6.5). On Linux, nadir-platform reads gamepads
+(M8.1, which still waits for a check with a real pad), but a game cannot
+use them until they can be bound to its actions (M8.4).
 
 ```mermaid
 flowchart TB
@@ -40,15 +43,15 @@ flowchart TB
     aseprite["Aseprite<br/>sprite sheets: PNG and JSON exports"]
     ldtk["LDtk<br/>level projects: .ldtk and .ldtkl files"]
     editors["Image editors and font generators<br/>PNG images, BMFont .fnt fonts"]
-    fs[("Filesystem<br/>assets/ sources, target/cooked/ files and game.kpak, the game's log files")]
+    fs[("Filesystem<br/>assets/ sources, target/cooked/ files and game.kpak, the game's logs and crash reports")]
     os["OS window and input APIs<br/>X11 on Linux, Win32 on Windows, AppKit on macOS"]
     gpu["GPU driver<br/>OpenGL 3.3 core through EGL, on Linux"]
     gpu_planned["GPU on Windows and macOS<br/>WGL and NSOpenGL contexts, then Metal: planned"]
     audio["OS audio API<br/>ALSA, through libasound, on Linux"]
     audio_planned["Audio on Windows and macOS<br/>WASAPI and CoreAudio: planned"]
-    pad_api["Gamepad APIs<br/>evdev, XInput, GameController: planned"]
+    pad_api["Gamepad APIs<br/>evdev, read on Linux but not yet by games; XInput, GameController: planned"]
     gha["GitHub Actions<br/>workflows CI, CodeQL, Pages and Release"]
-    pages["GitHub Pages<br/>the demo page at jabbott.dev/Nadir"]
+    pages["GitHub Pages<br/>the demo page and its instructions, at jabbott.dev/Nadir"]
     channels["Release channels<br/>GitHub release and apt repository, the cook's image on ghcr.io, the crates on crates.io"]
 
     developer -->|"draws sprites"| aseprite
@@ -60,14 +63,14 @@ flowchart TB
     developer -->|"writes and runs"| game
     developer -->|"runs cargo xtask"| tools
     tools -->|"reads assets/, writes target/cooked/ and game.kpak"| fs
-    game -->|"reads the cooked files or game.kpak, writes nadir.log"| fs
+    game -->|"reads the cooked files or game.kpak, writes nadir.log and crash reports"| fs
     player -->|"plays with keyboard and mouse"| game
     game -->|"opens a window, reads its events"| os
     game -->|"draws through OpenGL 3.3 core"| gpu
     game -.->|"planned M2.6, M2.7, M10"| gpu_planned
     game -->|"plays sound through ALSA"| audio
     game -.->|"planned M6.4, M6.5"| audio_planned
-    game -.->|"planned M8"| pad_api
+    game -.->|"planned M8.4"| pad_api
     gha -->|"runs cargo xtask"| tools
     gha -->|"deploys the demo page"| pages
     gha -->|"publishes a tagged release"| channels
@@ -96,7 +99,7 @@ flowchart LR
     developer(["Game developer"])
     gha["GitHub Actions<br/>workflows CI, Pages and Release"]
     os["OS and GPU driver<br/>window, events, OpenGL, sound"]
-    logs[("The user's logs folder<br/>nadir.log and the logs of the three runs before")]
+    logs[("The user's folders<br/>nadir.log and the three runs' logs before, crash reports, and with dev, the debug UI's files")]
 
     subgraph ws["Nadir workspace"]
         xtask["xtask<br/>Rust binary, run as cargo xtask: the checks, cook, golden, fuzz-smoke, bench, soak, site, dist"]
@@ -107,7 +110,7 @@ flowchart LR
         loose[("target/cooked/ loose files<br/>atlas QOI pages, KBJ and font files, sounds, data KBJ, levels .klvl, the cache .cache.kbj")]
         pack[("target/cooked/game.kpak<br/>the pack: every cooked file, KLZ where that is smaller")]
         dist[("target/dist/<br/>nadir-VERSION-TARGET: sandbox, nadir-cook, assets/game.kpak, as .zip or .tar.gz, and .debs on Linux")]
-        site[("target/site/<br/>the demo page, its videos and posters, the Linux download")]
+        site[("target/site/<br/>the demo page and its instructions, videos, posters, and the Linux download")]
     end
 
     developer -->|"runs"| xtask
@@ -117,7 +120,8 @@ flowchart LR
     cook -->|"reads"| src
     cook -->|"writes, skipping jobs and files that did not change"| loose
     cook -->|"packs every output into"| pack
-    game -->|"with dev: reads the loose files, and reloads those that change"| loose
+    game -->|"with dev: reads the loose files"| loose
+    game -->|"with dev: reloads those that change"| loose
     game -->|"without dev: reads the pack when it is there, else the loose files"| pack
     game -->|"writes"| logs
     game -->|"window, events, OpenGL, sound"| os
@@ -148,9 +152,8 @@ flowchart LR
 The crates of the game executable by layer, with an arrow for each entry
 in a crate's `[dependencies]` table. The facade's arrows to debug and to
 codec are behind its `dev` feature (M7.10, ADR-0058): the sandbox reaches
-the debug UI through the facade's `nadir::debug`. The edges the matrix
-allows out of debug but it does not take (ecs, scene, input) are not
-drawn.
+the debug UI through the facade's `nadir::debug`. The edge the matrix
+allows out of debug but it does not take, to input, is not drawn.
 
 ```mermaid
 flowchart TB
@@ -158,30 +161,30 @@ flowchart TB
         n_sandbox["sandbox<br/>games/sandbox: the demo game. Field and stress scenes, replays, offscreen capture"]
     end
     subgraph L5["Layer 5: facade"]
-        n_engine["nadir_engine, nadir in code<br/>App and the main loop, Config, the engine's components and systems, load_level, re-exports"]
+        n_engine["nadir_engine, nadir in code<br/>App and the main loop, Config, the engine's components and systems, load_level, game states, navigation, hot reload, crash reports, re-exports"]
     end
     subgraph L4["Layer 4: tooling inside the engine"]
-        n_debug["nadir-debug<br/>the debug UI: windows, widgets, capture, places; the stats overlay, the profiler and its trace. Planned M7: inspector, console"]
+        n_debug["nadir-debug<br/>the debug UI: windows, widgets, capture, places; the stats overlay, the profiler and its trace, the inspector, the console"]
     end
     subgraph L3["Layer 3: composed subsystems"]
-        n_render["nadir-render<br/>sprite batching, y-sort, tilemap chunks, camera, texture and atlas assets"]
-        n_scene["nadir-scene<br/>reflection macros, type registry, world hash, prefabs, a level's entities"]
+        n_render["nadir-render<br/>sprite batching, y-sort, tilemap chunks, camera, bitmap text, the UI pass, texture, atlas and font assets"]
+        n_scene["nadir-scene<br/>reflection macros, type registry, world hash, prefabs, a level's entities, game states, saves"]
         n_audio["nadir-audio<br/>the mixer: voices, buses, resampling, positional sound, QOA music streamed a frame at a time, the command and return queues; the Sound and Music assets, played by handle"]
     end
     subgraph L2["Layer 2: base subsystems"]
         n_gfx["nadir-gfx<br/>RHI over OpenGL 3.3 core: device, textures, buffers, render targets, pipelines, passes"]
         n_ecs["nadir-ecs<br/>generational entities, sparse sets, resources, events, commands, schedule"]
-        n_assets["nadir-assets<br/>handles, typed storage, loose and pack sources, worker threads, scopes"]
+        n_assets["nadir-assets<br/>handles, typed storage, loose and pack sources, worker threads, scopes, reload behind handles, the file watcher"]
         n_input["nadir-input<br/>physical keys, action maps, bindings, per-tick latching, replays"]
-        n_collision["nadir-collision<br/>shapes, tile grids, spatial hash, move-and-slide, sweeps, queries, triggers"]
+        n_collision["nadir-collision<br/>shapes, tile grids, spatial hash, move-and-slide, sweeps, queries, triggers, A* paths, flow fields"]
     end
     subgraph L1["Layer 1: OS behavior and formats"]
-        n_platform["nadir-platform<br/>window and events, GL context through EGL on Linux, audio output through ALSA on Linux, user folders, error dialog, precise sleep, dev allocation counter"]
-        n_codec["nadir-codec<br/>inflate, PNG behind the png feature, QOI, QOA, WAV, the sound file and resampling, KLZ, JSON and JSONC, KBJ, BMFont, Aseprite, LDtk, atlas, level, prefab and pack files"]
+        n_platform["nadir-platform<br/>window and events, GL context through EGL on Linux, audio output through ALSA on Linux, gamepads through evdev on Linux, user folders, error dialog, precise sleep, dev allocation counter"]
+        n_codec["nadir-codec<br/>inflate, PNG behind the png feature, QOI, QOA, WAV, the sound file and resampling, KLZ, JSON and JSONC, KBJ, BMFont, Aseprite, LDtk, atlas, font, level, prefab, pack and save files"]
     end
     subgraph L0["Layer 0: foundations"]
         n_core["nadir-core<br/>math, color, rects, time, logging, RNG, hashing, handles, keys, profile scopes, CLI parser"]
-        n_sys["nadir-sys<br/>raw FFI: Win32, Cocoa and objc, X11, EGL, ALSA, evdev key codes, OpenGL types, dynamic loading"]
+        n_sys["nadir-sys<br/>raw FFI: Win32, Cocoa and objc, X11, EGL, ALSA, evdev and inotify, OpenGL types, dynamic loading"]
     end
 
     n_sandbox --> n_engine
@@ -222,7 +225,9 @@ flowchart TB
     n_engine -->|"dev"| n_codec
     n_debug --> n_core
     n_debug --> n_codec
+    n_debug --> n_ecs
     n_debug --> n_render
+    n_debug --> n_scene
 
     classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
     classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
@@ -234,12 +239,13 @@ flowchart TB
 - The game reaches the subsystems through the facade, which re-exports
   assets, audio, collision, ecs, input, render and scene as modules of
   `nadir`.
-- `nadir_engine` uses `nadir-codec` only in its tests, as a
-  dev-dependency, which the diagram leaves out; `nadir-audio`'s tests use
-  `nadir-platform`'s allocation counter the same way.
+- `nadir_engine`'s tests use `nadir-codec` too, as a dev-dependency, and
+  `nadir-audio`'s tests use `nadir-platform`'s allocation counter the
+  same way; the diagram leaves dev-dependencies out.
 - Features along these edges: the sandbox's `dev` turns on `nadir/dev`,
-  which turns on `nadir-platform/dev`, the allocation counter. No
-  dependency is optional.
+  which turns on `nadir-platform/dev` (the allocation counter),
+  `nadir-core/profile` (the profiler's scopes), and the facade's two
+  optional dependencies, `nadir-codec` and `nadir-debug`.
 
 ## 4. Components of the cook tool
 
@@ -352,7 +358,7 @@ that no other crate allows it.
 | `nadir-render` | `crates/render` | 3, composed subsystems | deny | assets, codec, core, gfx |
 | `nadir-scene` | `crates/scene` | 3, composed subsystems | deny | assets, codec, core, ecs |
 | `nadir-audio` | `crates/audio` | 3, composed subsystems | deny | assets, codec, core |
-| `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | codec, core, render (the debug UI, M7.2, shown in the game by M7.10; the stats overlay and the profiler, M7.3, whose trace codec's JSON writes, ADR-0059; the other tools are planned) |
+| `nadir-debug` | `crates/debug` | 4, tooling inside the engine | deny | codec, core, ecs, render, scene (the debug UI, M7.2, shown in the game by M7.10; the stats overlay and the profiler, M7.3, whose trace codec's JSON writes, ADR-0059; the inspector, M7.4, which reads the world through ecs and edits it through scene's reflection; the console, M7.5) |
 | `nadir_engine` (`nadir` in code) | `crates/engine` | 5, facade | deny | assets, audio, collision, core, ecs, gfx, input, platform, render, scene; with `dev`, codec and debug (ADR-0058) |
 | `nadir-cook` | `tools/cook` | 6, applications | deny | assets, codec with `png`, core |
 | `xtask` | `xtask` | 6, applications | deny | codec with `png`, core |

@@ -1,0 +1,515 @@
+<!doctype html>
+<!--
+  Copyright 2026 Joseph Anthony Abbott III
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+<!--
+  The instructions page's template: a developer's guide to the engine,
+  which the demo page's Instructions button opens. `cargo xtask site`
+  fills each placeholder in double braces from the same build as the demo
+  page, and each one named example_<name> with the code of the engine's
+  example guide_<name> (crates/engine/examples, which every build
+  compiles), and writes the page into target/site/instructions/. The
+  header and footer repeat the demo page's, which repeat jabbott.dev's:
+  keep them in step with it.
+-->
+<html lang="en-US" data-site-url="https://jabbott.dev" data-github="jabbott-iii">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0c0d">
+<script>document.documentElement.classList.add('js')</script>
+<title>Nadir instructions | Joseph Abbott III</title>
+<meta name="description" content="How to build a 2D top-down game with Nadir, a Rust game engine with no third-party crates: a project of your own, the game loop, assets, drawing, collision, sound, the development tools, testing, and shipping.">
+<meta name="author" content="Joseph Abbott III">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<link rel="canonical" href="https://jabbott.dev/Nadir/instructions/">
+<link rel="author" href="https://jabbott.dev/resume/">
+<meta property="og:site_name" content="Joseph Abbott III">
+<meta property="og:locale" content="en_US">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Nadir instructions">
+<meta property="og:description" content="How to build a 2D top-down game with Nadir, step by step.">
+<meta property="og:url" content="https://jabbott.dev/Nadir/instructions/">
+<meta property="og:image" content="https://jabbott.dev/Nadir/{{poster}}">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="{{media_width}}">
+<meta property="og:image:height" content="{{media_height}}">
+<meta property="og:image:alt" content="A frame of the Nadir sandbox, drawn by the engine">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@jabbottiii">
+<meta name="twitter:creator" content="@jabbottiii">
+<meta name="twitter:title" content="Nadir instructions">
+<meta name="twitter:description" content="How to build a 2D top-down game with Nadir, step by step.">
+<meta name="twitter:image" content="https://jabbott.dev/Nadir/{{poster}}">
+<meta name="twitter:image:alt" content="A frame of the Nadir sandbox, drawn by the engine">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "@id": "https://jabbott.dev/Nadir/instructions/#article",
+      "headline": "Nadir instructions",
+      "description": "How to build a 2D top-down game with Nadir, step by step.",
+      "url": "https://jabbott.dev/Nadir/instructions/",
+      "inLanguage": "en-US",
+      "dateModified": "{{commit_date}}",
+      "proficiencyLevel": "Beginner",
+      "about": { "@id": "https://jabbott.dev/Nadir/#engine" },
+      "isPartOf": { "@id": "https://jabbott.dev/#website" },
+      "author": { "@id": "https://jabbott.dev/#person" },
+      "publisher": { "@id": "https://jabbott.dev/#person" },
+      "breadcrumb": { "@id": "https://jabbott.dev/Nadir/instructions/#breadcrumb" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://jabbott.dev/Nadir/instructions/#breadcrumb",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://jabbott.dev/" },
+        { "@type": "ListItem", "position": 2, "name": "Deployments", "item": "https://jabbott.dev/deployments/" },
+        { "@type": "ListItem", "position": 3, "name": "Nadir", "item": "https://jabbott.dev/Nadir/" },
+        { "@type": "ListItem", "position": 4, "name": "Instructions", "item": "https://jabbott.dev/Nadir/instructions/" }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="icon" href="https://jabbott.dev/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Saira:wght@300;400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://jabbott.dev/assets/css/style.css">
+<link rel="stylesheet" href="../nadir.css?v={{commit_short}}">
+<script src="https://jabbott.dev/assets/js/site.js" defer></script>
+</head>
+<body class="page--default">
+<div class="space" aria-hidden="true">
+  <div class="space__planet"></div>
+  <div class="space__stars"></div>
+  <div class="space__stars space__stars--far"></div>
+  <div class="space__grid"></div>
+</div>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="https://jabbott.dev/" aria-label="Joseph Abbott III, home">
+      <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32 4 56 18v28L32 60 8 46V18Z" fill="none" stroke="currentColor" stroke-width="2.5" class="mark__hex"/><path d="M32 12 50 22.5v19L32 52 14 41.5v-19Z" fill="currentColor" opacity=".08"/><path d="M32 17 45 42h-7.2L32 30.6 26.2 42H19Z" fill="#eef2f3"/><path d="M28.6 46h6.8L32 52Z" fill="#f2c200"/></svg>
+      <span class="brand__text">
+        <span class="brand__name">JABBOTT<span class="brand__tld">.DEV</span></span>
+        <span class="brand__sub">Engineering Log</span>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" data-nav-toggle>
+      <span class="sr-only">Menu</span>
+      <span class="nav-toggle__bars" aria-hidden="true"></span>
+    </button>
+    <nav class="site-nav" id="site-nav" aria-label="Primary">
+      <div class="deploy" data-deploy>
+        <a class="btn btn--ghost deploy__toggle is-current" href="https://jabbott.dev/deployments/" aria-controls="deploy-panel" data-deploy-toggle>
+          <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><circle cx="12" cy="12" r="2"/><path d="M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14M8 16a5.5 5.5 0 0 1 0-8M16 8a5.5 5.5 0 0 1 0 8"/></svg>
+          <span>Deployments</span>
+          <svg class="icon deploy__chevron" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M6 9l6 6 6-6"/></svg>
+        </a>
+        <div class="deploy__panel panel panel--brackets" id="deploy-panel" data-deploy-panel hidden>
+          <p class="deploy__heading">Deployed from repositories</p>
+          <ul class="deploy-list" data-deploy-list>
+            <li class="deploy-item" data-deploy-repo="jabbott-iii/nadir">
+              <a class="deploy-item__link" href="https://jabbott.dev/Nadir/">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span class="deploy-item__name">Nadir</span>
+                <span class="deploy-item__host">jabbott.dev/Nadir/</span>
+              </a>
+              <a class="deploy-item__repo" href="{{repository_url}}" target="_blank" rel="noopener" aria-label="Nadir repository on GitHub"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></a>
+            </li>
+          </ul>
+          <p class="deploy__status" data-deploy-status hidden></p>
+          <a class="link-arrow link-arrow--sm" href="https://jabbott.dev/deployments/">All deployments <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 12h16M13 6l6 6-6 6"/></svg></a>
+        </div>
+      </div>
+      <a class="btn btn--amber" href="https://jabbott.dev/">
+        <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5M10 20v-5.5h4V20"/></svg>
+        <span>Home</span>
+      </a>
+      <a class="btn btn--amber" href="https://jabbott.dev/log/">
+        <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M4 6h2M9 6h11M4 12h2M9 12h11M4 18h2M9 18h7"/></svg>
+        <span>Log</span>
+      </a>
+      <a class="btn btn--amber" href="https://jabbott.dev/resume/">
+        <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 5h18v14H3z"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.6-1.3 1.6-2 3-2s2.4.7 3 2M14 10h4M14 13.5h4"/></svg>
+        <span>Resume</span>
+      </a>
+      <a class="btn btn--teal" href="https://github.com/jabbott-iii" rel="me noopener" target="_blank">
+        <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        <span>GitHub</span>
+        <span class="sr-only">(opens in a new tab)</span>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="site-main">
+  <div class="read-progress" aria-hidden="true"><span data-progress></span></div>
+  <div class="container">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="https://jabbott.dev/">Home</a></li>
+        <li><a href="https://jabbott.dev/deployments/">Deployments</a></li>
+        <li><a href="../">Nadir</a></li>
+        <li aria-current="page">Instructions</li>
+      </ol>
+    </nav>
+
+    <div class="layout nadir-guide">
+      <article class="article">
+        <header class="article__header panel panel--brackets">
+          <p class="kicker">Nadir {{engine_version}} <span class="kicker__sep">//</span> Developer guide</p>
+          <h1 class="article__title">Instructions</h1>
+          <p class="article__dek">How to build a 2D top-down game with Nadir, step by step: a project of your own, the game loop, the world and its systems, input, assets, drawing, collision, text, sound, game states, the development tools, testing, and shipping.</p>
+          <div class="meta-row">
+            <span>Updated <time datetime="{{commit_date}}">{{commit_date}}</time></span>
+            <span>Commit <a class="nadir-mono" href="{{commit_url}}">{{commit_short}}</a></span>
+            <span>Rust {{toolchain}}</span>
+          </div>
+        </header>
+
+        <div class="article__body panel prose">
+<h2 id="what-nadir-is">What Nadir is</h2>
+<p>Nadir is a game engine for 2D games seen from above, such as action adventures and dungeon crawlers. You write the game in Rust, as a program that depends on one crate, <code>nadir_engine</code>, which your code calls <code>nadir</code>. The engine opens the window, runs the game loop, draws, plays sound, and loads files. Your game adds its data, and <em>systems</em>: plain functions that the loop calls.</p>
+<p>Nadir is built from the ground up, with no third-party crates. It has its own bindings to each operating system, its own OpenGL renderer, its own entity component system (ECS, explained below), and its own collision, file formats, and tools. So building a game downloads nothing but Nadir's own crates.</p>
+<p>This guide describes the engine at commit <a class="nadir-mono" href="{{commit_url}}">{{commit_short}}</a>, version {{engine_version}}. Each Rust program on this page is one of the engine's examples, in <a href="{{repository_url}}/tree/{{commit}}/crates/engine/examples">crates/engine/examples</a>, which every build of the engine compiles, so the code here compiles against that commit. Version {{engine_version}} is still in development: its API will change before 1.0.</p>
+
+<h3 id="what-works">What works today</h3>
+<ul>
+  <li><strong>Linux</strong>, under X11 or under Wayland through XWayland: everything in this guide.</li>
+  <li><strong>Windows 10 and later, and macOS 12 and later:</strong> a game builds and opens its window, but the window stays empty and the game is silent. The engine cannot draw or play sound there until its OpenGL contexts (roadmap tasks M2.6 and M2.7) and its audio output (M6.4 and M6.5) on those systems are built. The window code there also still waits to be checked by hand.</li>
+  <li><strong>Not built yet:</strong> gamepads in games (the Linux reader is written, but binding a pad to your actions is roadmap task M8.4), a settings file (M9.3), a kit for menus (M9.2), and packages and installers for players (M11).</li>
+</ul>
+
+<h2 id="what-you-need">What you need</h2>
+<ul>
+  <li><strong>Rust</strong>, from <a href="https://rustup.rs">rustup</a>, at edition 2024. The engine is built and tested with the stable toolchain its repository pins, {{toolchain}} at this commit; older versions are not tested.</li>
+  <li><strong>On Linux:</strong> an X11 session, or Wayland with XWayland, and a graphics driver with OpenGL 3.3. The engine loads <code>libX11</code>, <code>libEGL</code>, and OpenGL while the game runs, and ALSA's <code>libasound</code> for sound, so building needs no development packages. Without <code>libasound</code>, the game runs, silent.</li>
+  <li><strong>On Windows:</strong> the MSVC build tools and the Windows SDK. <strong>On macOS:</strong> the Xcode command-line tools.</li>
+  <li><strong>For art and sound:</strong> any image editor that saves PNG; <a href="https://www.aseprite.org">Aseprite</a> for animated sprites; <a href="https://ldtk.io">LDtk</a> 1.5.3, a level editor, for levels; a BMFont generator for bitmap fonts; and WAV files for sound. Nadir's asset cook turns all of these into the engine's own formats (see <a href="#assets">Assets and the cook</a>).</li>
+</ul>
+
+<h2 id="make-a-project">Make a project</h2>
+<p>Make a binary crate, and depend on the engine:</p>
+<pre><code class="language-bash">cargo new my-game
+cd my-game</code></pre>
+<pre><code class="language-toml">[package]
+name = "my-game"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nadir_engine = "{{engine_requirement}}"
+
+[features]
+dev = ["nadir_engine/dev"]</code></pre>
+<p>The package is <code>nadir_engine</code>, since the name <code>nadir</code> was taken on crates.io, and its library is <code>nadir</code>. The requirement <code>"{{engine_requirement}}"</code> means {{engine_version}} or any later {{engine_requirement}} release. The <code>dev</code> feature is for development builds: they reload what you change while the game runs, and show the debug tools (see <a href="#development-builds">Development builds</a>). Making it a feature of your own game, rather than turning it on in <code>[dependencies]</code>, keeps it out of release builds.</p>
+<p>Then a first game, in <code>src/main.rs</code>:</p>
+<pre><code class="language-rust">{{example_hello}}</code></pre>
+<p><code>cargo run</code> opens a window and runs the game until you close it. The log prints <code>the first tick</code> to the terminal, and to a log file (see <a href="#logs-and-crashes">Logs, errors, and crash reports</a>). <code>cargo run --features dev</code> runs a development build.</p>
+
+<h2 id="game-loop">How the game loop runs</h2>
+<p>A Nadir game keeps two clocks:</p>
+<ul>
+  <li><strong>Ticks</strong> are the simulation's steps, exactly 60 a second, each 1/60 s of game time. Gameplay runs in ticks, so it behaves the same however fast the computer is.</li>
+  <li><strong>Frames</strong> are what the screen shows, as often as the display allows (60 a second by default). A frame draws each moving thing part of the way from where it was at the start of the last tick to where that tick left it. This <em>interpolation</em> keeps motion smooth when frames and ticks do not line up.</li>
+</ul>
+<p>Each frame, <code>App::run</code>:</p>
+<ol>
+  <li>hands the window's events, keys and mouse, to the input;</li>
+  <li>runs the ticks that are due, none or several; each tick first reads the game's actions from the input, then runs the tick's stages;</li>
+  <li>runs the frame's stages once, which fill the <code>RenderFrame</code>, the list of what to draw;</li>
+  <li>draws it, and finishes the files that worker threads have loaded.</li>
+</ol>
+<p>A frame counts for at most 250 ms of game time, so after a long pause the game falls behind instead of running a burst of ticks to catch up.</p>
+
+<h3 id="stages">Stages, and the engine's own systems</h3>
+<p>Systems run in <em>stages</em>, in a fixed order. A tick's stages are <code>Input</code>, <code>Gameplay</code>, <code>Movement</code>, <code>PostMovement</code>, and <code>Cleanup</code>; a frame's are <code>Animate</code>, <code>Camera</code>, <code>Ui</code>, and <code>Extract</code>. Within a stage, systems run in the order they were added, and the engine adds its own first:</p>
+<table>
+  <thead><tr><th>Stage</th><th>Engine system</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td>tick <code>Input</code></td><td><code>nadir::snapshot</code></td><td>Keeps each entity's position from the start of the tick, for interpolation</td></tr>
+    <tr><td>tick <code>Movement</code></td><td><code>nadir::movement</code></td><td>Moves each entity by its <code>Velocity</code>; one with a <code>Collider</code> slides along what it meets</td></tr>
+    <tr><td>tick <code>PostMovement</code></td><td><code>nadir::parent_offsets</code></td><td>Puts each entity with a <code>Parent</code> at its parent's position, plus its offset</td></tr>
+    <tr><td>tick <code>PostMovement</code></td><td><code>nadir::triggers</code></td><td>Sends <code>TriggerEnter</code> and <code>TriggerExit</code> events</td></tr>
+    <tr><td>tick <code>PostMovement</code></td><td><code>nadir::navigation</code></td><td>Finds the paths asked of <code>Navigation</code>, within a budget a tick</td></tr>
+    <tr><td>frame <code>Animate</code></td><td><code>nadir::animate</code></td><td>Advances each <code>Animator</code>, and mirrors the sprites that face left</td></tr>
+    <tr><td>frame <code>Extract</code></td><td><code>nadir::sound</code></td><td>Plays each <code>AudioEmitter</code> at its entity, and the music of the area the listener is in</td></tr>
+    <tr><td>frame <code>Extract</code></td><td><code>nadir::extract_sprites</code></td><td>Draws each <code>Sprite</code>, between the last two ticks</td></tr>
+    <tr><td>frame <code>Extract</code></td><td><code>nadir::extract_level</code></td><td>Draws the current level's tile layers, with its background color</td></tr>
+  </tbody>
+</table>
+<p>So a game sets velocities in <code>Gameplay</code>, and reacts to the moves after the engine's, in <code>Movement</code> or <code>PostMovement</code>. Put gameplay in tick systems, and what only shows, such as the camera and the interface, in frame systems. A tick system must not decide anything by what a frame system set: frames come at no fixed rate, so the game would play differently on another computer.</p>
+
+<h3 id="config">The configuration</h3>
+<p><code>Config</code> sets the window (<code>title</code>, <code>window_size</code>, <code>min_window_size</code>, <code>resizable</code>, <code>fullscreen</code>), the pacing (<code>frame_rate_limit</code>, 60 by default, and <code>vsync</code>), the size of the image the world is drawn into (<code>virtual_resolution</code>, 480 × 270 by default), the folder the assets load from (<code>assets</code>), and each sound bus's starting volume (<code>volumes</code>). <code>studio</code> and <code>game</code> name the folders the game writes into: its log, its crash reports, and the debug tools' settings.</p>
+
+<h2 id="world">The world: entities, components, resources, and events</h2>
+<p>Nadir keeps the game's state in a <code>World</code>, organized as an entity component system:</p>
+<ul>
+  <li>An <strong>entity</strong> is an ID, a thing in the game, with no data of its own.</li>
+  <li>A <strong>component</strong> is data an entity has, such as a <code>Transform</code> (its position) or a <code>Sprite</code>. Any type is a component once it has <code>impl Component for MyType {}</code> and is registered with <code>world.register::&lt;MyType&gt;()</code>.</li>
+  <li>A <strong>resource</strong> is a value the world holds one of, such as the score or the asset server.</li>
+  <li>An <strong>event</strong> is a message one system sends and others read. <code>App::add_event::&lt;T&gt;()</code> adds its queue, the resource <code>Events&lt;T&gt;</code>. A tick system reads <code>tick_events()</code>, the tick's own; a frame system reads <code>frame_events()</code>, all those sent since the last frame.</li>
+</ul>
+<p>A system is a function <code>fn(&amp;World, &amp;Tick)</code> for a tick's stage, or <code>fn(&amp;World, &amp;Frame)</code> for a frame's. It reads and writes through the world: <code>world.read::&lt;T&gt;()</code> and <code>world.write::&lt;T&gt;()</code> for a component's storage, and <code>world.resource::&lt;R&gt;()</code> and <code>world.resource_mut::&lt;R&gt;()</code> for a resource. These are borrowed while the game runs, so borrowing one storage mutably twice at once panics, naming the system and the type. A system keeps its state in resources, never in globals.</p>
+<p>Inside a system, spawn and despawn through <code>world.commands()</code>: commands apply after the tick's stages, or the frame's, so no system sees the world change under it. During setup, <code>world.spawn()</code> spawns at once.</p>
+<pre><code class="language-rust">{{example_world}}</code></pre>
+
+<h3 id="reflection">Reflected components</h3>
+<p>A component that prefabs and levels set, that saves keep, and that the inspector edits must be <em>reflected</em>: its fields readable and writable by name. Define it with <code>nadir::scene::reflect_struct!</code> (or <code>reflect_enum!</code> and <code>reflect_newtype!</code>), and register it with <code>App::register_component</code> instead of <code>world.register</code>. The world hash, which checks that two runs simulated the same thing (see <a href="#testing">Testing a game</a>), covers the reflected components.</p>
+<pre><code class="language-rust">{{example_reflect}}</code></pre>
+
+<h2 id="input">Input actions</h2>
+<p>Gameplay reads <em>actions</em>, never keys, so that players can rebind them and replays can play them back:</p>
+<ol>
+  <li>Name the actions with an enum that implements <code>ActionSet</code>. Each has a kind: <code>Button</code>, <code>Axis1</code> (one value from −1 to 1), or <code>Axis2</code> (a direction).</li>
+  <li>Bind keys and mouse buttons to them in an <code>ActionMap</code>, up to four bindings an action: <code>Binding::Key</code>, <code>Binding::MouseButton</code>, or <code>Binding::KeyComposite2</code>, four keys that make a direction.</li>
+  <li>Add the map with <code>App::add_actions</code>.</li>
+</ol>
+<p>Each tick, before its stages, the input is <em>latched</em> into the resource <code>ActionState&lt;A&gt;</code>: copied once, so every system of the tick sees the same state. It answers <code>pressed</code>, <code>just_pressed</code>, <code>just_released</code>, <code>value</code>, and <code>axis2</code>. A key pressed and released between two ticks is still seen. Read edges such as <code>just_pressed</code> in tick systems: a frame system sees only the last tick's. The resource <code>Input</code> also holds the pointer and the mouse wheel. <a href="#hero">A walking hero</a> and <a href="#states">Game states</a> below show actions in use.</p>
+
+<h2 id="assets">Assets and the cook</h2>
+<p>The engine does not read PNG, Aseprite, LDtk, or WAV files while the game runs. Its asset <em>cook</em>, <code>nadir-cook</code>, turns them into the engine's own formats ahead of time: fast to load, checked once, and packed into one file for release. Install it and cook a folder:</p>
+<pre><code class="language-bash">cargo install nadir-cook
+nadir-cook assets cooked</code></pre>
+<p><code>nadir-cook [--force] SOURCE OUT</code> cooks the files below <code>SOURCE</code> into <code>OUT</code>, and skips each job whose files did not change since the last cook into <code>OUT</code>, unless <code>--force</code>.</p>
+<table>
+  <thead><tr><th>Source</th><th>What it makes</th></tr></thead>
+  <tbody>
+    <tr><td>A folder's PNG images, Aseprite exports, and BMFont fonts</td><td>An <em>atlas</em> named after the folder: its images packed into a few large textures, its pages (<code>atlas/&lt;folder&gt;_&lt;n&gt;.qoi</code>), and an index of where each went (<code>atlas/&lt;folder&gt;.kbj</code>). <code>sprites/hero.png</code> becomes the sprite <code>sprites/hero</code>.</td></tr>
+    <tr><td>An image's sidecar, <code>&lt;name&gt;.sprite.jsonc</code></td><td>Cuts the image into frames and sets their pivot, <code>{ "frames": [12, 20], "pivot": [6, 20] }</code>, or makes it a tile set, <code>{ "tiles": [16, 16] }</code></td></tr>
+    <tr><td>An Aseprite export: the JSON of <code>aseprite -b hero.aseprite --sheet hero.png --data hero.json --format json-array --list-tags</code></td><td>A sprite of its frames, each of its tags a clip, such as <code>sprites/hero/walk</code></td></tr>
+    <tr><td>A BMFont font in the text format, <code>.fnt</code>, and its pages</td><td>The font's glyphs in its folder's atlas, and its font file, <code>atlas/&lt;folder&gt;/&lt;name&gt;.font.kbj</code></td></tr>
+    <tr><td>A WAV file below <code>audio/</code></td><td>A sound, <code>audio/&lt;path&gt;.kpcm</code>; below <code>audio/music/</code>, a music track, <code>audio/music/&lt;name&gt;.qoa</code>, compressed. A sidecar <code>&lt;name&gt;.sound.jsonc</code> can set its format, its rate, and whether it loops.</td></tr>
+    <tr><td>A JSONC file below <code>data/</code> (JSON with comments)</td><td>The same data in the engine's binary JSON, <code>data/&lt;path&gt;.kbj</code>; one below <code>data/prefabs/</code> is checked as a prefab</td></tr>
+    <tr><td>An LDtk 1.5.3 project, <code>.ldtk</code>, and its level files</td><td>A level file of each level, <code>levels/&lt;name&gt;.klvl</code> (see <a href="#levels">Levels and prefabs</a>)</td></tr>
+  </tbody>
+</table>
+<p>Every file the cook writes also goes into one <em>pack</em>, <code>game.kpak</code>: each file found by its path, checked as it is read, and compressed where that makes it smaller. Asset paths are lowercase.</p>
+<p>Point <code>Config::assets</code> at the cooked folder. A relative path is found from the folder the game runs in. A build without <code>dev</code> reads the pack there when there is one, and the loose files otherwise; a build with <code>dev</code> reads the loose files, so that it can reload them.</p>
+
+<h3 id="loading">Loading assets</h3>
+<p>The resource <code>AssetServer</code> loads them:</p>
+<ul>
+  <li><code>server.load::&lt;Texture&gt;(path)</code> returns a <em>handle</em> at once: a small ID that stands for the asset. A worker thread reads and decodes the file, and the main loop finishes it, a couple of milliseconds' worth each frame. A sprite whose texture has not loaded yet is not drawn.</li>
+  <li><code>server.load_now</code> makes the asset before it returns, for what the game needs to set up. Before the window opens there is no GPU, so only an asset that needs none, such as an <code>Atlas</code> but not a <code>Texture</code>, can be made then.</li>
+  <li>The asset types are <code>Texture</code> (a QOI image), <code>Atlas</code>, <code>nadir::render::Font</code>, <code>Sound</code> and <code>Music</code>, and <code>nadir::scene</code>'s <code>Level</code> and <code>PrefabAsset</code>.</li>
+  <li>Assets load in a <code>Scope</code>, <code>Global</code>, <code>Level</code>, or <code>Transient</code>, and <code>unload_scope</code> frees those of one: a level's assets go when the next level replaces it.</li>
+</ul>
+<p>Loads finish only in drawn frames, at no frame known in advance, so a tick system must not depend on whether an asset has loaded yet.</p>
+
+<h2 id="sprites">Sprites, the camera, and animation</h2>
+<p>An entity with a <code>Transform</code> and a <code>Sprite</code> is drawn. Its position is the sprite's <em>pivot</em>, the middle of its bottom edge unless the sidecar sets another: its feet. Sprites are sorted by layer, higher in front, and within a layer they are <em>y-sorted</em>: drawn in the order of their pivots down the screen, so that a character lower on the screen covers one above it, as in a scene seen from above. <code>Sprite::new(texture, size)</code> shows a whole texture, and <code>Sprite::from_atlas</code> a frame of a cooked atlas.</p>
+<p>The world is drawn into an image of <code>Config::virtual_resolution</code> pixels, scaled up into the window by the largest whole factor that fits, with bars of <code>RenderFrame::clear</code>'s color around it, so pixel art stays sharp. The camera is the <code>RenderFrame</code>'s <code>camera</code>: a frame system in the <code>Camera</code> stage sets its <code>position</code>, the world point at the middle of the view. World space has +x to the right and +y down, in pixels, as tile editors have it.</p>
+<p>To move an entity at once, with nothing drawn on the way, write both its <code>Transform</code> and its <code>PrevTransform</code>, the position the engine interpolates from.</p>
+<p>A <code>Clip</code> is a list of frames, each shown for a time, that loops or plays once. The resource <code>Clips</code> keeps them: <code>add_atlas</code> adds every clip of a cooked atlas, named after the sprite and the Aseprite tag. An <code>Animator</code> plays a clip on its entity's sprite. <code>Animator::play</code> does nothing if that clip is already playing, so a tick system can call it every tick. An entity whose <code>Facing</code> is <code>Left</code> has its sprite mirrored, and a clip that plays once sends <code>AnimationFinished</code> when it ends.</p>
+
+<h3 id="hero">A walking hero</h3>
+<p>This game has a hero who walks with WASD or the arrow keys, animated and facing the way they go, on a field of grass walled in by stone that they collide with, and a camera that follows them. Its art is cooked from these files:</p>
+<pre><code class="language-text">assets/sprites/hero.png      the hero's sheet, exported from Aseprite
+assets/sprites/hero.json     its frames and its tags, `stand` and `walk`
+assets/sprites/tiles.png     a tile set: grass is tile 0, stone tile 1
+assets/sprites/tiles.sprite.jsonc
+                             { "tiles": [16, 16] }: cut it into 16-pixel tiles</code></pre>
+<pre><code class="language-rust">{{example_hero}}</code></pre>
+
+<h2 id="levels">Tile layers, levels, and prefabs</h2>
+<p>A <code>TileLayer</code> is a grid of cells that show tiles of a <code>TileSet</code>, a texture cut into equal cells. <code>Tile::animated</code> cycles through tiles with no work on the CPU. Add the layer to the resource <code>TileLayers</code>, and push a <code>TileLayerDraw</code> of its handle into <code>RenderFrame::tile_layers</code> each frame, in the <code>Extract</code> stage, as the hero's game does. Tiles do not collide by themselves: the collision grid is a separate <code>TileGrid</code>, set with <code>Collisions::set_grid</code>.</p>
+<p>A level made in LDtk does all of this for you. The cook turns each level of a project into a level file, by these conventions:</p>
+<ul>
+  <li>The IntGrid layer named <code>Collision</code> is the collision grid.</li>
+  <li>A tile's custom data <code>{"frames": 4, "ms": 250}</code> animates it, and <code>{"tall": [1, 2]}</code> marks the top of a tall sprite, such as a tree, which is drawn y-sorted with the characters instead of flat on the ground.</li>
+  <li>Each entity spawns the prefab of its name, in snake_case, and its fields named <code>Component__field</code> set that component's field.</li>
+</ul>
+<p>A <em>prefab</em> is a template for an entity: its components and their values, in <code>data/prefabs/&lt;name&gt;.jsonc</code>. A prefab can <code>"extends"</code> another and change only what differs. This rock stands on its feet, y-sorted among the characters, with a box at its feet that stops what walks into it:</p>
+<pre><code class="language-json">{
+  "name": "rock",
+  "components": {
+    "Sprite": { "atlas": "atlas/sprites.kbj", "sprite": "sprites/rock", "frame": 0, "layer": 1 },
+    "Collider": {
+      "shape": { "Aabb": { "half": [7, 4] } },
+      "offset": [0, -4],
+      "layer": ["World"],
+      "mask": ["World"]
+    }
+  }
+}</code></pre>
+<p>The collision layers' names, <code>"World"</code> here, are the game's: <code>App::collision_layers(&amp;["World", "People"])</code> names bit 0, then bit 1. <code>app.load_level("field")</code> loads <code>levels/field.klvl</code> during setup, in place of the last level: its tile layers drawn, its grid collided with, and its tall tiles and entities spawned. During play, the <code>Loading</code> game state loads one behind a loading screen (see <a href="#states">Game states</a>).</p>
+
+<h2 id="collision">Collision and paths</h2>
+<p>Collision is <em>kinematic</em>: things move where the game says, with no forces or bouncing bodies. A <code>Collider</code> is a box or a circle (<code>Shape</code>) on collision layers (<code>LayerMask</code>), offset from its entity's position. <code>Collider::solid</code> stops what moves into it; <code>Collider::trigger</code> only notices it, and the engine sends <code>TriggerEnter</code> and <code>TriggerExit</code> events when something starts and stops overlapping it.</p>
+<p>The resource <code>Collisions</code> holds the colliders, rebuilt each tick. Its <code>world()</code> answers queries, <code>point</code>, <code>aabb</code>, <code>circle</code>, <code>nearest</code>, and the casts <code>segment</code>, <code>sweep_aabb</code>, and <code>sweep_circle</code>, with collider indices, which <code>Collisions::entity</code> turns into entities.</p>
+<p>The resource <code>Navigation</code> finds paths across the tile grid with A*, a search that tries the most promising cells first. A system asks for one with <code>request(entity, PathRequest::new(from, to))</code>, adding <code>with_clearance(half)</code> for the entity's size. The engine searches within a budget of steps each tick, shared by every request, oldest first, and <code>path(entity)</code> gives the result from the next tick on, or later if the budget ran out: the points to walk through, smoothed where the entity can see past a corner. A crowd heading for one place follows a <code>nadir::collision::FlowField</code> instead: the way to it from every cell. The sandbox's guards and pack of enemies use both.</p>
+
+<h2 id="text-and-sound">Text and sound</h2>
+<p>A cooked font is a <code>nadir::render::Font</code>. <code>Font::load_now_in</code> loads it with its atlas, and a system pushes a <code>TextDraw</code> and its text into <code>RenderFrame::texts</code>, drawn in the world among the sprites, or into <code>RenderFrame::ui</code>, drawn on the window after the world, for the interface. Their <code>write</code> formats a text without allocating memory once the list has held as much.</p>
+<p>The resource <code>Audio</code> is the game's handle on the mixer, which runs on the audio output's own thread. <code>play</code> plays a <code>Sound</code> on a <em>bus</em>, a group with its own volume: music, sound effects, the interface, or ambience. <code>play_at</code> plays one at a place in the world, panned and faded by where it is from the listener, and <code>play_music</code> crossfades from one <code>Music</code> track to another. <code>Config::volumes</code> sets each bus's starting volume in percent, heard as its square: 50 is −12 dB.</p>
+<p>Entities make sound too, through the engine's <code>nadir::sound</code>: an <code>AudioEmitter</code> plays its sound at its entity, following it, while it is within 800 pixels of the listener; the listener is the first entity with an <code>AudioListener</code>, or else the camera; and a <code>MusicArea</code> is a box whose track plays while the listener is in it. A sound played once, as something happens, plays only if it has loaded, so load it with <code>load_now</code> during setup.</p>
+<pre><code class="language-rust">{{example_text_and_sound}}</code></pre>
+
+<h2 id="states">Game states</h2>
+<p>The resource <code>StateMachine</code> holds the game's <code>GameState</code>: <code>Boot</code> as it starts, <code>Loading(level)</code>, <code>MainMenu</code>, <code>InGame</code>, or <code>Paused</code>. A system queues a change with <code>StateMachine::set</code>, and the engine makes it after the tick, or the frame stages, that queued it, so a tick always runs to its end in the state it started in.</p>
+<ul>
+  <li><code>App::add_fixed_system_in</code> and <code>App::add_frame_system_in</code> add a system that runs in one kind of state only. Systems added without one run in every state.</li>
+  <li><code>App::on_exit</code> and <code>App::on_enter</code> add systems that run once as a kind of state is left or entered, given the <code>Transition</code>, from where to where.</li>
+  <li>In <code>Loading(level)</code>, no tick runs and the world is not drawn: the game's frame systems of <code>StateKind::Loading</code> draw its loading screen. The level loads a frame after that screen first shows, and once no asset is still loading, the game goes on to <code>InGame</code> by itself. A level that does not load ends <code>App::run</code> with <code>nadir::Error::Level</code>, after telling the player.</li>
+  <li>In <code>Paused</code>, ticks still come, so that a pause menu's systems see the input, but the engine moves nothing, fires no trigger, finds no path, and holds the animations still.</li>
+</ul>
+<pre><code class="language-rust">{{example_states}}</code></pre>
+
+<h2 id="development-builds">Development builds</h2>
+<p><code>cargo run --features dev</code> builds your game with the engine's <code>dev</code> feature, through the feature your <code>Cargo.toml</code> forwards. A development build:</p>
+<ul>
+  <li>reads the loose cooked files, not the pack;</li>
+  <li><strong>reloads what changes while it runs</strong>: cook again, and a texture draws its new pixels behind the handle the game holds, an atlas's clips are replaced by name, a prefab is replaced, the current level is rebuilt with its entities spawned anew, and the engine's shaders are rebuilt. Whatever fails to reload is logged, and what it would replace stays. What the game copied out of an asset itself does not change;</li>
+  <li>shows a magenta and black checkerboard in place of a texture that failed to load, instead of nothing;</li>
+  <li>counts memory allocations each frame: the resource <code>FrameAllocs</code>;</li>
+  <li>and shows the <strong>debug tools</strong>, windows drawn over the game in the engine's own pixel font, which keep their places across runs:</li>
+</ul>
+<table>
+  <thead><tr><th>Key</th><th>Tool</th></tr></thead>
+  <tbody>
+    <tr><td>F1</td><td>The stats overlay: the frame rate, the frame's and the ticks' times, draw calls, sprites, entities, memory allocated, and sound voices</td></tr>
+    <tr><td>F2</td><td>The inspector: the world's entities and their components, each reflected field editable; components added and removed, an entity despawned or written out as a prefab</td></tr>
+    <tr><td>F3</td><td>The profiler: graphs of the last 300 frames' CPU and GPU times, each frame's timed scopes as a tree, and a button that writes them as a trace file for the Perfetto UI, <code>trace-&lt;time&gt;.json</code> beside the log</td></tr>
+    <tr><td>F4</td><td>Debug drawing: colliders, triggers, the collision grid, the navigation grid, paths, the spatial hash, tile chunks, and the camera</td></tr>
+    <tr><td><code>`</code> (backtick)</td><td>The console, over the log, with history and Tab completion. Its commands are <code>help</code>, <code>schedule</code>, <code>spawn</code>, <code>tp</code>, <code>timescale</code>, <code>level</code>, <code>reload</code>, <code>profile dump</code>, <code>log level</code>, and <code>quit</code>, and the game's own</td></tr>
+    <tr><td>F5, F6, F7</td><td>Time: pause, step one tick, and scale the game's time up (with Shift, down)</td></tr>
+  </tbody>
+</table>
+<p>A game adds windows of its own with <code>App::add_debug_window</code>, built from the widgets of <code>nadir::debug</code>, and console commands with <code>App::add_console_command</code>. These, and <code>nadir::debug</code> itself, exist only with <code>dev</code>, so put that code behind <code>#[cfg(feature = "dev")]</code>, as here:</p>
+<pre><code class="language-rust">{{example_dev_tools}}</code></pre>
+
+<h2 id="logs-and-crashes">Logs, errors, and crash reports</h2>
+<p>Log with <code>nadir::log::{error, warn, info, debug, trace}</code>. Records go to the terminal, and <code>App::run</code> also writes them to <code>nadir.log</code> in the game's logs folder, keeping the last three runs' files beside it: on Linux <code>~/.local/share/&lt;game&gt;</code>, on Windows <code>%LOCALAPPDATA%\&lt;studio&gt;\&lt;game&gt;</code>, and on macOS <code>~/Library/Logs/&lt;game&gt;</code>.</p>
+<p><code>App::run</code> returns a <code>nadir::Error</code> when the window cannot open, the renderer cannot start, a frame cannot be drawn, or a level cannot load. It logs the error and shows it to the player first: in the terminal on Linux, in a message box on Windows, and in an alert on macOS.</p>
+<p>From the start of <code>App::run</code>, every panic, on any thread, writes a <strong>crash report</strong> into the folder <code>crashes</code> of the game's data folder, on Linux <code>~/.local/share/&lt;game&gt;/crashes</code>, named after the time, such as <code>2026-11-19_12-34-56.txt</code>. It holds the panic's message and place, a backtrace, the engine's version, the system, the GPU, and the log's last 200 records. A panic that ends <code>App::run</code> is shown to the player once the window has closed, with where its report is, and the next launch tells the player of the reports written since the last one. A panic hook the game set before <code>App::run</code> still runs, first. A panic during the game's own setup, before <code>App::run</code>, gets no report.</p>
+
+<h2 id="testing">Testing a game</h2>
+<p><code>App::update</code> runs one frame, with the window events you give it, and draws nothing: a test drives the game tick by tick, with no window or GPU.</p>
+<pre><code class="language-rust">{{example_update}}</code></pre>
+<p><code>App::offscreen(size)</code> draws frames with no window, and <code>Offscreen::frame</code> returns each one's pixels. It needs an OpenGL context, which Linux has without a display through EGL. The recordings on <a href="../">the demo page</a> are made this way, on a CI server with no GPU.</p>
+<p>Replays check that the game is <em>deterministic</em>, the same input giving the same simulation. <code>nadir::input::InputRecorder</code> records the game's <code>ActionState</code> tick by tick, and <code>App::play_replay</code> plays a recording in place of the live input. <code>App::world_hash</code> hashes the reflected components: after the same ticks of the same replay, from the same start, it is the same however the frames fell, as long as frame systems change no reflected component and spawn or despawn nothing, and tick systems decide nothing by what frames set, by whether an asset has loaded, or by the pointer or the wheel.</p>
+
+<h2 id="shipping">Shipping a game</h2>
+<ol>
+  <li>Cook the assets, and build without <code>dev</code>: <code>cargo build --release</code>.</li>
+  <li>Ship the executable with the pack, <code>game.kpak</code>, in the folder <code>Config::assets</code> names. A release build needs nothing else of the cooked folder. The sandbox looks for its <code>assets</code> folder beside its executable first, which is what its download does.</li>
+  <li>Ship the engine's <code>LICENSE</code> and <code>NOTICE</code> with it: Nadir is under the Apache License 2.0, which asks that copies of the engine carry them.</li>
+</ol>
+<p>For now a game draws only on Linux. Packages, installers, and signing for all three systems are roadmap tasks M11.1 and M11.2, not built yet.</p>
+
+<h2 id="read-more">Where to read more</h2>
+<ul>
+  <li><a href="https://docs.rs/nadir_engine">The API reference</a>, on docs.rs, with the <code>dev</code> feature's items.</li>
+  <li><a href="{{repository_url}}/blob/{{commit}}/crates/engine/README.md">The engine crate's README</a>, the reference this guide follows.</li>
+  <li><a href="{{repository_url}}/blob/{{commit}}/games/sandbox/src/main.rs">The sandbox</a>, the full example, which every feature is built for: the field, its enemies, its sound, and the stress scenes on the demo page.</li>
+  <li><a href="{{repository_url}}/blob/{{commit}}/tools/cook/README.md">The cook's README</a>: every source format, and the cache.</li>
+  <li><a href="{{repository_url}}/blob/{{commit}}/docs/01-architecture.md">The architecture</a>: the crates, the main loop, and its threads; and <a href="{{repository_url}}/tree/{{commit}}/docs/subsystems">each subsystem's design</a>.</li>
+  <li><a href="{{repository_url}}/blob/{{commit}}/docs/roadmap.md">The roadmap</a>, every task with its acceptance criteria, and <a href="{{repository_url}}/blob/{{commit}}/docs/decisions.md">the decisions</a> behind the design.</li>
+</ul>
+        </div>
+      </article>
+
+      <aside class="sidebar" aria-label="About this guide">
+        <section class="side-panel panel nadir-guide__contents" aria-labelledby="contents-title">
+          <h2 class="side-panel__title" id="contents-title">On this page</h2>
+          <ul class="list-rows">
+            <li><a href="#what-nadir-is">What Nadir is</a></li>
+            <li><a href="#what-you-need">What you need</a></li>
+            <li><a href="#make-a-project">Make a project</a></li>
+            <li><a href="#game-loop">How the game loop runs</a></li>
+            <li><a href="#world">The world</a></li>
+            <li><a href="#input">Input actions</a></li>
+            <li><a href="#assets">Assets and the cook</a></li>
+            <li><a href="#sprites">Sprites, the camera, and animation</a></li>
+            <li><a href="#levels">Tile layers, levels, and prefabs</a></li>
+            <li><a href="#collision">Collision and paths</a></li>
+            <li><a href="#text-and-sound">Text and sound</a></li>
+            <li><a href="#states">Game states</a></li>
+            <li><a href="#development-builds">Development builds</a></li>
+            <li><a href="#logs-and-crashes">Logs, errors, and crash reports</a></li>
+            <li><a href="#testing">Testing a game</a></li>
+            <li><a href="#shipping">Shipping a game</a></li>
+            <li><a href="#read-more">Where to read more</a></li>
+          </ul>
+        </section>
+        <section class="side-panel panel" aria-labelledby="guide-build-title">
+          <h2 class="side-panel__title" id="guide-build-title">This guide's build</h2>
+          <dl class="spec nadir-spec">
+            <div><dt>Engine</dt><dd>nadir_engine {{engine_version}}</dd></div>
+            <div><dt>Commit</dt><dd><a class="nadir-mono" href="{{commit_url}}">{{commit_short}}</a></dd></div>
+            <div><dt>Date</dt><dd>{{commit_date}}</dd></div>
+            <div><dt>Rust</dt><dd>{{toolchain}}</dd></div>
+            <div><dt>Roadmap</dt><dd>{{tasks_done}} of {{tasks_total}} tasks</dd></div>
+          </dl>
+          <div class="btn-row">
+            <a class="btn btn--amber btn--sm" href="../"><svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M21 12H5M11 6l-6 6 6 6"/></svg><span>The demo</span></a>
+            <a class="btn btn--ghost btn--sm" href="https://docs.rs/nadir_engine" target="_blank" rel="noopener"><span>API reference</span></a>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="https://jabbott.dev/">
+          <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32 4 56 18v28L32 60 8 46V18Z" fill="none" stroke="currentColor" stroke-width="2.5" class="mark__hex"/><path d="M32 12 50 22.5v19L32 52 14 41.5v-19Z" fill="currentColor" opacity=".08"/><path d="M32 17 45 42h-7.2L32 30.6 26.2 42H19Z" fill="#eef2f3"/><path d="M28.6 46h6.8L32 52Z" fill="#f2c200"/></svg>
+          <span class="brand__text">
+            <span class="brand__name">JABBOTT<span class="brand__tld">.DEV</span></span>
+            <span class="brand__sub">Engineering Log</span>
+          </span>
+        </a>
+        <p>Engineering log of Joseph Abbott III, software engineer and U.S. Marine Corps veteran: release notes and project updates.</p>
+      </div>
+      <div>
+        <p class="footer-title">Navigate</p>
+        <ul class="footer-links">
+          <li><a href="https://jabbott.dev/">Home</a></li>
+          <li><a href="https://jabbott.dev/resume/">Resume</a></li>
+          <li><a href="https://jabbott.dev/log/">Engineering log</a></li>
+          <li><a href="https://jabbott.dev/deployments/">Deployments</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="footer-title">Elsewhere</p>
+        <ul class="footer-links">
+          <li><a href="https://github.com/jabbott-iii" rel="me noopener">GitHub</a></li>
+          <li><a href="https://www.linkedin.com/in/josephabbottiii/" rel="me noopener">LinkedIn</a></li>
+          <li><a href="https://x.com/jabbottiii" rel="me noopener">X</a></li>
+          <li><a href="https://jabbott.dev/llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>&copy; {{year}} Joseph Abbott III</span>
+      <span>Built from <a class="nadir-mono" href="{{commit_url}}">{{commit_short}}</a> by Nadir's own CI &middot; <a href="../llms.txt">llms.txt</a></span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

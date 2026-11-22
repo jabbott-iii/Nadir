@@ -176,8 +176,8 @@ impl<T: Clone> Events<T> {
   the frame stages. The schedule's `run_fixed` and `run_frame` do both,
   through clear functions that `add_event` records for each type.
 - Writers must be ordered before readers, either by stage or by insertion
-  order. Use `Schedule::describe` to check, as the debug console (M7.5)
-  will.
+  order. Use `Schedule::describe` to check, as the debug console's
+  `schedule` command does (M7.5).
 
 ## Schedule
 

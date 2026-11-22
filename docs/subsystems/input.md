@@ -112,9 +112,10 @@ impl<A: ActionSet> ActionState<A> {
 - **The game defines actions** as an enum implementing `ActionSet`.
   - The name, kind and `ui_allowed` of an action belong to the code, so
     they are on the trait.
-  - Bindings are data, in the `ActionMap`. Their default table goes in
-    `input.jsonc`, which a crate that can read JSON loads: `input` depends
-    on `core` and `platform` only.
+  - Bindings are data, in the `ActionMap`. For now a game binds them in
+    code. A default table in a file, which a crate that can read JSON
+    would load (`input` depends on `core` and `platform` only), comes with
+    the settings file (roadmap task M9.3), which is not built yet.
 - **Bindings and kinds:** a key or mouse button drives a `Button` or an
   `Axis1`, which it holds at 1. A composite drives an `Axis2`. Anything else
   is refused.
@@ -140,7 +141,8 @@ impl<A: ActionSet> ActionState<A> {
   showing "A" versus "Space".
 - **Aim:** for twin-stick, the mouse world position (via
   `Renderer::screen_to_world`) or the right stick, chosen by active device.
-  The facade exposes this as `AimState`.
+  The facade will expose this as `AimState`, with the active device
+  (M8.4); neither is built yet.
   - The pointer and the wheel are not actions: `Input::pointer()` and
     `Input::wheel()` (the last tick's total) are for the UI and for aiming.
   - Text mode does not hide them, and replays do not hold them.

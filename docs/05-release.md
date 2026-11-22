@@ -56,8 +56,9 @@ opt-level = 3                  # the fuzzer tries more inputs; overflow checks a
   crates` checks they agree). Its release is the tag `v<version>`
   ("Engine releases" below).
 - **Game builds:** the version comes from the workspace version, plus the git
-  short hash, which `xtask` injects through an environment variable read with
-  `env!`.
+  short hash, which packaging will set in the environment variable
+  `NADIR_BUILD_HASH` (roadmap task M11.1, not built yet), read with
+  `option_env!`. Until then, crash reports say `build unknown`.
 - **On-disk formats** (pack, level, save, settings): each has a format
   version: a `u16` in a binary header, such as the pack's, or a
   whole-number `version` member in a KBJ file, such as the level file's.

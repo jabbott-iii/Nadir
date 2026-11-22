@@ -27,8 +27,15 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
     - animation;
     - a pixel-perfect camera;
     - bitmap text, in the world and in a UI drawn on the window;
-  - an ECS, collision with move-and-slide, and replays checked for
+  - an entity component system (ECS), collision with move-and-slide,
+    A* paths and flow fields for enemies, and replays checked for
     determinism;
+  - game states: a loading screen while a level loads, a main menu, play,
+    and a pause;
+  - saves in nadir-scene, written atomically with a backup, and read back
+    strictly (a game calls them itself: `App` does not save yet);
+  - crash reports: every panic writes a report into the game's data
+    folder, and the next launch tells the player;
   - assets loaded on worker threads;
   - an offline cook that packs PNG images, Aseprite exports and bitmap fonts
     into atlases, and turns LDtk levels into level files, which the game
@@ -48,7 +55,9 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   The cook turns WAVs into the game's sound files and QOA, resampled to
   48 kHz, which the asset server loads. Windows and macOS have no audio
   output yet (roadmap M6.4, M6.5), so there the game is silent.
-- **Not built yet:** gamepads, saves and the Metal backend.
+- **Not built yet:** gamepads in games (nadir-platform reads them on
+  Linux, roadmap task M8.1, but binding them to a game's actions is M8.4),
+  a settings file (M9.3), menus (M9.2), and the Metal backend (M10).
 
 ## Build and run
 
@@ -111,8 +120,10 @@ It has:
 - a walking character that collides;
 - a camera that follows them;
 - sprites cooked from an Aseprite export;
-- footsteps, a pond and music that crossfades between two areas, from
-  sounds that `games/sandbox/make_sounds.py` makes.
+- footsteps, a pond, and music that crossfades between two areas, from
+  sounds that `games/sandbox/make_sounds.py` makes;
+- three guards who walk their rounds and chase the character when they see
+  them, and a pack that hunts them down a flow field.
 
 ## Repository layout
 

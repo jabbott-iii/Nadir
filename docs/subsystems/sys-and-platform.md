@@ -19,18 +19,19 @@ crates/sys/src/
 ├── dynlib.rs             # dynlib! macro: struct of fn pointers + load(&dyn Library) -> Result<Self, MissingSymbols>
 ├── windows/
 │   ├── types.rs          # HWND, HRESULT, GUID, RECT, POINT, ...
-│   ├── kernel32.rs user32.rs gdi32.rs shell32.rs winmm.rs ole32.rs
-│   ├── wgl.rs            # WGL + ARB extension enums
-│   ├── com.rs            # IUnknown vtable, GUID consts
-│   ├── wasapi.rs         # IMMDeviceEnumerator, IMMDevice, IAudioClient, IAudioRenderClient vtables
-│   ├── xinput.rs dbghelp.rs avrt.rs   # dynlib! tables
+│   ├── kernel32.rs user32.rs gdi32.rs shell32.rs ole32.rs
+│   ├── winmm.rs          # not written yet
+│   ├── wgl.rs            # planned (M2.6): WGL + ARB extension enums
+│   ├── com.rs            # planned (M6.4): IUnknown vtable, GUID consts
+│   ├── wasapi.rs         # planned (M6.4): IMMDeviceEnumerator, IMMDevice, IAudioClient, IAudioRenderClient vtables
+│   ├── xinput.rs dbghelp.rs avrt.rs   # planned (M8.2, M11.3, M6.4): dynlib! tables
 ├── macos/
 │   ├── objc.rs           # objc_* runtime fns, Class/Sel/Id/BOOL types, msg_send! macro
-│   ├── foundation.rs appkit.rs quartzcore.rs   # NSRect/NSPoint/NSSize, enum constants
+│   ├── foundation.rs appkit.rs   # NSRect/NSPoint/NSSize, enum constants
 │   ├── hitoolbox.rs      # kVK_* virtual key codes
-│   ├── opengl.rs metal.rs audiotoolbox.rs gamecontroller.rs
+│   ├── quartzcore.rs opengl.rs metal.rs audiotoolbox.rs gamecontroller.rs   # planned (M2.7, M6.5, M8.3, M10.1)
 ├── linux/
-│   ├── libc.rs           # dlopen/dlsym/dlerror, ioctl, inotify_*, poll, errno
+│   ├── libc.rs           # dlopen/dlsym/dlerror, setlocale, ioctl, inotify_*, errno constants
 │   ├── x11.rs            # Display, Window, XEvent (192-byte union), XVisualInfo, ... (dynlib!)
 │   ├── egl.rs alsa.rs    # dynlib! tables
 │   └── evdev.rs          # input_event, input_absinfo, EVIOC* ioctl numbers, KEY_*/BTN_*/ABS_* codes
@@ -99,11 +100,11 @@ impl Platform {
     pub fn pump_events(&mut self, out: &mut Vec<Event>);        // non-blocking; appends
     pub fn window_size(&self) -> UVec2;                          // physical pixels
     pub fn scale_factor(&self) -> f32;
-    pub fn is_minimized(&self) -> bool;
+    pub fn is_minimized(&self) -> bool;                         // not built yet
     pub fn set_fullscreen(&mut self, on: bool);
     pub fn set_title(&mut self, title: &str);
     pub fn set_cursor_visible(&mut self, visible: bool);
-    pub fn set_cursor_grab(&mut self, grab: bool);
+    pub fn set_cursor_grab(&mut self, grab: bool);              // not built yet
     pub fn gpu_surface(&self) -> GpuSurface<'_>;
     pub fn poll_gamepads(&mut self, out: &mut Vec<Event>);       // connect/disconnect + state changes
     pub fn gamepad_state(&self, id: GamepadId) -> Option<&GamepadState>;
@@ -115,7 +116,7 @@ pub enum Event {
     Resized(UVec2),
     ScaleFactorChanged(f32),
     Focused(bool),
-    Minimized(bool),
+    Minimized(bool),             // not built yet
     Key { key: Key, pressed: bool, repeat: bool },
     Text(char),
     MouseMoved(Vec2),            // physical px, top-left origin
@@ -145,7 +146,7 @@ impl GamepadState {
 pub enum GpuSurface<'a> {
     Gl(&'a dyn GlContext),
     #[cfg(target_os = "macos")]
-    Metal(MetalLayerRef<'a>),
+    Metal(MetalLayerRef<'a>),    // not built yet: comes with the Metal backend (M10.1)
 }
 
 /// # Safety: the promises of ADR-0015 (real functions, a 3.3 core context

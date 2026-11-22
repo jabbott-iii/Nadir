@@ -287,9 +287,10 @@ pub struct ShaderSource<'a> {
   As built (M5.17), the GLSL half is in nadir-render itself: the tests run
   it on the included sources, and `Renderer::reload_program` on sources
   given while the game runs, before the device builds them.
-- As built (M3.3), `sprite` and `blit` exist, in `crates/render`, and
-  since M4.5 `tile_chunk` (ADR-0023), whose `TileLayer` uniform block has
-  a `uvec4` that Rust fills as `u32`s. Render's parity test runs the
+- As built (M3.3), `sprite` and `blit` exist, in `crates/render`; since
+  M4.5 `tile_chunk` (ADR-0023), whose `TileLayer` uniform block has a
+  `uvec4` that Rust fills as `u32`s; and since M7.1 `text`. Render's
+  parity test runs the
   check on their GLSL (since M5.17; it read each `layout(location = N)
   in` line before), and checks that they declare each attribute, uniform
   block and sampler of the constant. MSL comes with M10.3.
@@ -340,4 +341,7 @@ pub struct ShaderSource<'a> {
   timer; and, inside the crate, that a result is read from GL once, and
   only after GL says it is there. llvmpipe (Mesa 26.1) times a context's
   first drawing at hours, so the test times its second.
-- **Benchmark:** 10k instanced sprites, upload plus draw time.
+- **Benchmark:** planned, not written yet: 10k instanced sprites, upload
+  plus draw time on a GPU. Today's benches have no GPU part:
+  `sprite_sort_batch` sorts and batches on the CPU, and `facade_frame_10k`
+  draws nothing.

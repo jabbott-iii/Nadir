@@ -41,6 +41,9 @@ Formats made for the game, which reads them at run time:
   sounds. The cook writes them.
 - **The sound file**, `.kpcm`: 16-bit samples of 1 or 2 channels as they
   are, for short sounds, decoded and encoded. The cook writes it.
+- **The save file**, `.ksav`, decoded and encoded (`ksav`): a 24-byte
+  header with a CRC-32 over the whole file, then the save as KBJ.
+  nadir-scene's saves read and write it.
 - **A resampler** (`pcm`), a windowed sinc that gives the same bits on every
   system and keeps a looped sound's seam: the cook resamples sounds to 48
   kHz with it, and nadir-audio's `Sound` converts a sound cooked at another

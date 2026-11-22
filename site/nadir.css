@@ -15,9 +15,10 @@
 */
 
 /*
-  The demo page's own styles (ADR-0029). They sit on jabbott.dev's
-  stylesheet, which the page loads first, and use its tokens (--teal,
-  --panel, --font...) so the page follows that site's look.
+  The demo page's own styles (ADR-0029), and its instructions page's.
+  They sit on jabbott.dev's stylesheet, which each page loads first, and
+  use its tokens (--teal, --panel, --font...) so the pages follow that
+  site's look.
 */
 
 .nadir-sep { color: var(--text-3); letter-spacing: 0; }
@@ -32,6 +33,8 @@
   align-items: start;
   margin-bottom: 56px;
 }
+
+.nadir-demo__main { display: grid; gap: 16px; min-width: 0; }
 
 .nadir-player { padding: clamp(16px, 2.4vw, 26px); }
 .nadir-player__head {
@@ -117,6 +120,24 @@
   border: 1px solid rgba(92, 203, 203, 0.16);
 }
 .nadir-hash { overflow-wrap: anywhere; font-size: 11px; }
+
+/* The Instructions button, below the demo: larger than the site's buttons,
+   with a line of what it opens under its label. */
+.btn.nadir-guide-link {
+  height: auto; min-height: 72px;
+  padding: 14px 22px;
+  justify-content: flex-start; gap: 16px;
+  white-space: normal; text-align: left;
+}
+.nadir-guide-link__text { display: grid; gap: 6px; flex: 1; }
+.nadir-guide-link__label { font-size: 18px; letter-spacing: 0.14em; }
+.nadir-guide-link__note {
+  font-weight: 400; font-size: 13px; line-height: 1.35;
+  letter-spacing: 0.02em; text-transform: none;
+  opacity: 0.85;
+}
+.nadir-guide-link__arrow { transition: transform 0.2s ease; }
+.nadir-guide-link:hover .nadir-guide-link__arrow { transform: translateX(4px); }
 
 /* ---------- Features ---------- */
 
@@ -220,6 +241,26 @@
 .c4-label text { font-size: 11.5px; fill: var(--text-2); }
 .c4-label--planned text { fill: var(--text-3); }
 
+/* ---------- Instructions ---------- */
+
+/* The guide is jabbott.dev's article layout: an article and a sidebar. */
+.nadir-guide .meta-row a { color: var(--text-2); }
+.nadir-guide .prose h2 { scroll-margin-top: calc(var(--header-h, 72px) + 16px); }
+.nadir-guide .prose h3 { scroll-margin-top: calc(var(--header-h, 72px) + 16px); }
+.nadir-guide .prose table { display: block; overflow-x: auto; }
+.nadir-guide .prose td code { overflow-wrap: anywhere; }
+.nadir-guide .nadir-spec dd a { color: var(--teal); }
+
+/* Where the sidebar is beside the article, its contents stay in view. */
+@media (min-width: 1081px) {
+  .nadir-guide .sidebar {
+    position: sticky;
+    top: calc(var(--header-h, 72px) + 20px);
+    max-height: calc(100vh - var(--header-h, 72px) - 40px);
+    overflow-y: auto;
+  }
+}
+
 /* ---------- Narrow screens ---------- */
 
 @media (max-width: 960px) {
@@ -236,5 +277,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nadir-feature { transition: none; }
+  .nadir-feature, .nadir-guide-link__arrow { transition: none; }
+  .nadir-guide-link:hover .nadir-guide-link__arrow { transform: none; }
 }

@@ -44,7 +44,7 @@ before its roadmap task is ticked: check before assuming.
 | `crates/collision` | `docs/subsystems/collision.md` |
 | `crates/debug` | `docs/subsystems/debug-tools.md` |
 | Tests, CI, `xtask` | `docs/04-quality.md` |
-| The demo page: `site/`, `docs/features.jsonc`, `.github/workflows/pages.yml` | `docs/04-quality.md` ("Demo page"), ADR-0029 |
+| The demo page and its instructions: `site/`, `docs/features.jsonc`, `.github/workflows/pages.yml`, `crates/engine/examples/guide_*.rs` | `docs/04-quality.md` ("Demo page"), ADR-0029, ADR-0072 |
 | Packaging, signing, crash reports | `docs/05-release.md` |
 | Releases: `.github/workflows/release.yml`, `.github/release/`, `tools/cook/Dockerfile`, `xtask` `dist` and `crates` | `docs/05-release.md` ("Engine releases"), ADR-0036 |
 | Why something is the way it is | `docs/decisions.md` |
@@ -90,10 +90,10 @@ before its roadmap task is ticked: check before assuming.
 | Path | Package | Purpose | `unsafe` |
 | :- | :- | :- | :- |
 | `crates/core` | `nadir-core` | Math, color, rects, time, logging, RNG, hashing/CRC32, generational handles, key enums, profiling scopes, CLI parsing, errors, test helpers | deny |
-| `crates/sys` | `nadir-sys` | Hand-written raw FFI declarations (Win32, Cocoa/objc, X11, EGL, GL, ALSA, CoreAudio, WASAPI, XInput, evdev) | allowed |
+| `crates/sys` | `nadir-sys` | Hand-written raw FFI declarations (Win32, Cocoa/objc, X11, EGL, GL, ALSA, evdev and inotify; CoreAudio, WASAPI and XInput to come) | allowed |
 | `crates/platform` | `nadir-platform` | Windows, event loop, input devices, GL/Metal surfaces, audio device output, paths, dynamic loading | allowed |
 | `crates/gfx` | `nadir-gfx` | Small render hardware interface (RHI) with an OpenGL 3.3 core backend and, from M10, a Metal backend | allowed |
-| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, the sound file (KPCM) and a resampler, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite exports and LDtk projects (cook only), the cook's atlas and level files, prefab files, pack files | deny |
+| `crates/codec` | `nadir-codec` | Adler-32, inflate, PNG (feature `png`, cook only), QOI, QOA, WAV, the sound file (KPCM) and a resampler, KLZ block compression, JSON(C), binary JSON (KBJ), BMFont, Aseprite exports and LDtk projects (cook only), the cook's atlas, font and level files, prefab files, pack files, save files (KSAV) | deny |
 | `crates/ecs` | `nadir-ecs` | Generational entities, sparse-set storage, resources, events, commands, schedule | deny |
 | `crates/input` | `nadir-input` | Physical keys, device state, action maps, per-tick latching, bindings | deny |
 | `crates/render` | `nadir-render` | Sprite batching, y-sort, tilemap chunks, camera, bitmap text, debug draw, passes | deny |
@@ -113,6 +113,7 @@ before its roadmap task is ticked: check before assuming.
 | Command | What it does |
 | :- | :- |
 | `cargo xtask ci` | Runs fmt check, clippy (`-D warnings`), `cook`, tests, `deps`, `layers`, `crates`, `unsafe-audit`, `headers`, `workflows`, `release-no-dev`, `features`: the full PR gate |
+| `cargo xtask fmt`, `clippy`, `test`, `cook` | Runs one of `ci`'s checks alone, as `ci` runs it; so does any other check's name below |
 | `cargo xtask deps` | Fails if `Cargo.lock` contains any non-workspace package not approved in the policy |
 | `cargo xtask layers` | Fails if a crate depends on a crate the dependency matrix forbids |
 | `cargo xtask crates` | Fails if a crate that crates.io gets lacks a description, license or repository, or copies of the root's `LICENSE` and `NOTICE` in its folder; is at another version than `nadir_engine`; or depends on a workspace crate crates.io does not get or by another version (ADR-0036, ADR-0037) |
@@ -127,7 +128,7 @@ before its roadmap task is ticked: check before assuming.
 | `cargo xtask bench [filter]` | Runs the benchmark harness in release mode |
 | `cargo xtask soak --audio [--minutes N] [--silent]` | Plays 32 random voices and music through the audio device for `N` minutes (10), in release mode, and reports underruns, late callbacks, the mix's p99 and the memory; fails on an underrun, a late callback, a lost device or a sound not handed back. It plays sound: `--silent` gives the device silence, and `NADIR_ALSA_DEVICE=null` plays nothing on Linux (ADR-0052) |
 | `cargo xtask dist [--out DIR]` | Builds this machine's release files into `target/dist`: runs the laid-out programs, then packs the archive and, on Linux, the `.deb`s (needs `dpkg-dev`; ADR-0036) |
-| `cargo xtask site [--out DIR]` | Builds the demo page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |
+| `cargo xtask site [--out DIR]` | Builds the demo page and its instructions page into `target/site`, or a new, empty or earlier `DIR`: captures, videos, the Linux download (needs EGL and GStreamer) |
 | `cargo run -p sandbox` | Runs the sandbox game (opens a window, and on Linux the audio output). It draws the cooked sprites: run `cargo xtask cook` first, which `cargo xtask ci` also does, as the sandbox's tests need them too |
 | `cargo dev` | Runs the sandbox with its `dev` feature (an alias in `.cargo/config.toml`): a development build, which reads the loose cooked files, not the pack, reloads those that change, and render's shaders, while it runs (with `cargo xtask cook --watch` beside it), shows a missing asset's placeholder, and logs how often the frames allocate |
 | `make release VERSION=v<version> [DRY_RUN=1]` | For maintainers, never agents (rule 7): checks that HEAD is on `main` at that version, then tags it and pushes the tag, which starts the release workflow (`docs/05-release.md`) |

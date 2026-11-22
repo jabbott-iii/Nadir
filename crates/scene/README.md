@@ -2,7 +2,8 @@
 
 Reflection for Nadir: macros that define a type together with the code that
 walks its fields by name and turns it into a JSON value and back, a registry
-of reflected component types, and a hash of a world's components.
+of reflected component types, and a hash of a world's components. On it are
+built prefabs, a level's entities, game states, and saves.
 
 It is part of [Nadir](https://github.com/jabbott-iii/Nadir), a 2D engine for
 top-down games on Windows, macOS and Linux, written in Rust with no
