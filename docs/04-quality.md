@@ -530,7 +530,9 @@ understood.
      (`workflow_run`), or by hand from `main`. A first job, `gate`, which
      waits for nothing, stops there if `main` has moved past the commit:
      that commit's own run publishes, so the page never goes back to an
-     older commit. A run by hand also stops there unless CI has a
+     older commit. It also stops there if the run's own commit
+     (`GITHUB_SHA`, `main`'s when the run started), which the build checks
+     out, is not that commit. A run by hand also stops there unless CI has a
      successful run of a push of that commit to `main` (`actions: read`).
      Only then does a run join the queues below, so a run that will not
      publish never displaces one that will.
@@ -550,7 +552,10 @@ understood.
      - When the newest commit fails CI, the page waits for the next one
        that passes.
   2. On `ubuntu-latest`, with `contents: read`, the build checks out the
-     commit CI passed, installs EGL, Mesa and GStreamer
+     commit CI passed: the run's own commit, with no `ref:` taken from the
+     event, so what it runs never comes from the event's payload (and
+     CodeQL, which reports any such `ref:` as a checkout of untrusted
+     code, has nothing to report). It installs EGL, Mesa and GStreamer
      (`gstreamer1.0-tools`, `-plugins-base`, `-plugins-good`), and no
      libasound, as a capture opens no audio output (ADR-0051), and runs
      `cargo xtask site` with `LIBGL_ALWAYS_SOFTWARE=1`:

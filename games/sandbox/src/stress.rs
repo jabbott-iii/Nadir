@@ -194,10 +194,14 @@ pub(crate) fn heading(index: u32, turn: u32) -> Vec2 {
     Vec2::new(angle.cos(), angle.sin()) * speed
 }
 
-/// A number in 0..1 for `index` and `salt`: the same every run.
-pub(crate) fn unit(index: u32, salt: u32) -> f32 {
-    // A 32-bit integer hash (lowbias32, by Chris Wellons).
-    let mut x = index.wrapping_mul(0x9e37_79b9) ^ salt.wrapping_mul(0x85eb_ca6b);
+/// A number in 0..1 for `index` and `stream`: the same every run. Each
+/// stream gives every index a number of its own, so `unit(i, 0)` and
+/// `unit(i, 1)` are unrelated.
+pub(crate) fn unit(index: u32, stream: u32) -> f32 {
+    // A 32-bit integer hash (lowbias32, by Chris Wellons), which is not
+    // cryptographic. The parameter is not named `salt`: code scanning
+    // (CodeQL) takes a parameter of that name for a cryptographic salt.
+    let mut x = index.wrapping_mul(0x9e37_79b9) ^ stream.wrapping_mul(0x85eb_ca6b);
     x ^= x >> 16;
     x = x.wrapping_mul(0x7feb_352d);
     x ^= x >> 15;

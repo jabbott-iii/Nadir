@@ -78,6 +78,12 @@ jobs:
       # When main has moved on, the run for the newer commit publishes the
       # page, so this one does not put an older page over it. A run by hand
       # publishes only a commit that CI passed, as the page says.
+      #
+      # The build checks out this run's own commit, GITHUB_SHA (main's when
+      # the run started), and no commit that the event names, so what it
+      # runs never comes from the event's payload. That commit must be the
+      # one CI passed. (Code scanning, CodeQL, reports any `ref:` on that
+      # checkout as a checkout of untrusted code.)
       - name: Check that the commit is still main's, and passed CI
         id: current
         env:
@@ -94,6 +100,9 @@ jobs:
           if [ "$main" != "$COMMIT" ]; then
             echo "current=false" >> "$GITHUB_OUTPUT"
             echo "::notice::main is at $main, past $COMMIT: its own run publishes the page."
+          elif [ "$GITHUB_SHA" != "$COMMIT" ]; then
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::This run is for $GITHUB_SHA, which the build would check out, not $COMMIT: run this workflow by hand from main to publish $COMMIT."
           elif [ "$passed" = 0 ]; then
             echo "current=false" >> "$GITHUB_OUTPUT"
             echo "::notice::CI has not passed on main's $COMMIT, so the page stays as it is."
@@ -133,12 +142,13 @@ jobs:
             echo "::notice::main is at $main, past $COMMIT: its own run publishes the page."
           fi
 
-      # The commit CI passed, not whatever main is by now.
+      # This run's own commit, GITHUB_SHA, which the gate found to be the
+      # commit CI passed, not whatever main is by now. No `ref:`: see the
+      # gate.
       - name: Check out
         if: steps.current.outputs.current == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.gate.outputs.commit }}
           persist-credentials: false
 
       - name: Install the pinned toolchain

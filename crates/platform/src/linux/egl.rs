@@ -975,18 +975,25 @@ pub(super) mod gl_test {
 
     use crate::GlContext;
 
-    /// Looks a GL function up and converts it to its type.
+    /// Looks the GL function `$name` up in `$gl` and converts its address
+    /// to the function pointer type that the caller's `let` names. Panics
+    /// if the context has no such function.
     ///
-    /// # Safety
-    ///
-    /// `T` is the type that `nadir_sys::gl` declares for `name`.
-    unsafe fn function<T: Copy>(gl: &dyn GlContext, name: &CStr) -> T {
-        let address = gl.get_proc_address(name);
-        assert!(!address.is_null(), "no {name:?}");
-        assert_eq!(size_of::<T>(), size_of::<*const c_void>());
-        // SAFETY: `T` is the type of the function (the caller), a function
-        // pointer, which has the size of an address.
-        unsafe { core::mem::transmute_copy::<*const c_void, T>(&address) }
+    /// The conversion is `unsafe`, so the macro is used inside an `unsafe`
+    /// block, whose `SAFETY:` comment says that the type is the one
+    /// `nadir_sys::gl` declares for `$name`. It is a macro, not a generic
+    /// function, so that `transmute` takes the address by value and checks
+    /// at compile time that the type is the size of an address. A generic
+    /// function would need `transmute_copy`, which reads the address
+    /// through a reference, and which code scanning (CodeQL) reports as a
+    /// read through a pointer that may be null.
+    macro_rules! function {
+        ($gl:expr, $name:expr) => {{
+            let name: &CStr = $name;
+            let address = $gl.get_proc_address(name);
+            assert!(!address.is_null(), "no {name:?}");
+            core::mem::transmute::<*const c_void, _>(address)
+        }};
     }
 
     /// Checks that the context of `gl` is OpenGL 3.3 or later with the core
@@ -994,40 +1001,41 @@ pub(super) mod gl_test {
     /// color and reads every pixel back. Returns `GL_RENDERER`.
     pub(in crate::linux) fn check_context_and_draw(gl: &dyn GlContext) -> String {
         // SAFETY: each type below is the one declared for its name.
-        let get_string: PFNGLGETSTRINGPROC = unsafe { function(gl, c"glGetString") };
+        let get_string: PFNGLGETSTRINGPROC = unsafe { function!(gl, c"glGetString") };
         // SAFETY: as above.
-        let get_integer: PFNGLGETINTEGERVPROC = unsafe { function(gl, c"glGetIntegerv") };
+        let get_integer: PFNGLGETINTEGERVPROC = unsafe { function!(gl, c"glGetIntegerv") };
         // SAFETY: as above.
-        let get_error: PFNGLGETERRORPROC = unsafe { function(gl, c"glGetError") };
+        let get_error: PFNGLGETERRORPROC = unsafe { function!(gl, c"glGetError") };
         // SAFETY: as above.
-        let gen_textures: PFNGLGENTEXTURESPROC = unsafe { function(gl, c"glGenTextures") };
+        let gen_textures: PFNGLGENTEXTURESPROC = unsafe { function!(gl, c"glGenTextures") };
         // SAFETY: as above.
-        let bind_texture: PFNGLBINDTEXTUREPROC = unsafe { function(gl, c"glBindTexture") };
+        let bind_texture: PFNGLBINDTEXTUREPROC = unsafe { function!(gl, c"glBindTexture") };
         // SAFETY: as above.
-        let tex_image: PFNGLTEXIMAGE2DPROC = unsafe { function(gl, c"glTexImage2D") };
+        let tex_image: PFNGLTEXIMAGE2DPROC = unsafe { function!(gl, c"glTexImage2D") };
         // SAFETY: as above.
-        let delete_textures: PFNGLDELETETEXTURESPROC = unsafe { function(gl, c"glDeleteTextures") };
+        let delete_textures: PFNGLDELETETEXTURESPROC =
+            unsafe { function!(gl, c"glDeleteTextures") };
         // SAFETY: as above.
         let gen_framebuffers: PFNGLGENFRAMEBUFFERSPROC =
-            unsafe { function(gl, c"glGenFramebuffers") };
+            unsafe { function!(gl, c"glGenFramebuffers") };
         // SAFETY: as above.
         let bind_framebuffer: PFNGLBINDFRAMEBUFFERPROC =
-            unsafe { function(gl, c"glBindFramebuffer") };
+            unsafe { function!(gl, c"glBindFramebuffer") };
         // SAFETY: as above.
         let framebuffer_texture: PFNGLFRAMEBUFFERTEXTURE2DPROC =
-            unsafe { function(gl, c"glFramebufferTexture2D") };
+            unsafe { function!(gl, c"glFramebufferTexture2D") };
         // SAFETY: as above.
         let check_framebuffer: PFNGLCHECKFRAMEBUFFERSTATUSPROC =
-            unsafe { function(gl, c"glCheckFramebufferStatus") };
+            unsafe { function!(gl, c"glCheckFramebufferStatus") };
         // SAFETY: as above.
         let delete_framebuffers: PFNGLDELETEFRAMEBUFFERSPROC =
-            unsafe { function(gl, c"glDeleteFramebuffers") };
+            unsafe { function!(gl, c"glDeleteFramebuffers") };
         // SAFETY: as above.
-        let clear_color: PFNGLCLEARCOLORPROC = unsafe { function(gl, c"glClearColor") };
+        let clear_color: PFNGLCLEARCOLORPROC = unsafe { function!(gl, c"glClearColor") };
         // SAFETY: as above.
-        let clear: PFNGLCLEARPROC = unsafe { function(gl, c"glClear") };
+        let clear: PFNGLCLEARPROC = unsafe { function!(gl, c"glClear") };
         // SAFETY: as above.
-        let read_pixels: PFNGLREADPIXELSPROC = unsafe { function(gl, c"glReadPixels") };
+        let read_pixels: PFNGLREADPIXELSPROC = unsafe { function!(gl, c"glReadPixels") };
 
         // In what follows, the context of `gl` is current on this thread,
         // and it is OpenGL 3.3 or later, which has every one of these
