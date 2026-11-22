@@ -147,7 +147,7 @@ pub fn run(mut app: App) -> Result<(), Error> {
 
     loop {
         platform.pump_events(&mut events);                   // non-blocking
-        platform.poll_gamepads(&mut events);                 // the pads' (ADR-0065); the facade calls it from M8.4
+        platform.poll_gamepads(&mut events);                 // the pads' (ADR-0065), after the window's (ADR-0073)
         if events.contains(&Event::CloseRequested) { break; }
 
         // App::update(elapsed, events): everything a frame does but draw.

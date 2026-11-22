@@ -5692,8 +5692,8 @@ by the batched sprite renderer.
     1023) gave its right stick, both triggers and no trigger at rest above 0.
     And it found a stick of two values that never reached 1: its property
     test, which failed with `NADIR_SEED` 81, 694 and 1271, passes with them.
-  - Note: the facade does not call `poll_gamepads` yet, and `nadir-input`
-    ignores the pads' events: both are M8.4's (its note).
+  - Note: the facade did not call `poll_gamepads` yet, and `nadir-input`
+    ignored the pads' events: both were M8.4's, done on 2026-11-21.
   - Depends: M3.1, M1.2
   - Do: the evdev declarations (`/add-ffi-binding`); device detection via
     `EVIOCGBIT`; axis ranges via `EVIOCGABS`; non-blocking reads; `inotify`
@@ -5721,7 +5721,38 @@ by the batched sprite renderer.
   - Verify: on macOS: `cargo test -p nadir-platform`; the events example
     (manual)
 
-- [ ] **M8.4 — input: pad bindings, deadzones, active device, prompt data**
+- [x] **M8.4 — input: pad bindings, deadzones, active device, prompt data**
+  - Note: built and checked on Linux (x86_64, COSMIC with XWayland) on
+    2026-11-21 (ADR-0073). The user chose that day to move the prompt
+    table to a new task, M8.5, with the pad families it needs, and the
+    design shown with that choice:
+    - nadir-input: `Binding::PadButton`, `PadAxis` and `PadStick`, with
+      `Stick` and `AxisSign`; `Deadzones` (a stick's radial, 0.2 to 0.95;
+      a trigger's, 0.1; a half of an axis as a button pressing at 0.5 and
+      letting go below 0.4) and `Input::set_deadzones`; `Device` and
+      `Input::active_device`; `BindErrorKind::NoNegativeHalf` and
+      `InputError::Deadzones`. Every connected pad drives the bindings as
+      one. The pads' buttons, halves of axes and sticks are codes in the
+      change log, so taps, text mode and the bound on changes work for
+      them as for keys. While the window lacks the focus, the pads are
+      held back from every action, and what they hold when it comes back
+      stays hidden until let go.
+    - The facade calls `poll_gamepads` after `pump_events`, once a frame;
+      the prelude has `GamepadButton`, `GamepadAxis`, `Stick` and
+      `AxisSign`. The sandbox walks with the left stick too.
+    - Replays stay at version 1: analog values reach them only through
+      `Axis1` and `Axis2`. The determinism test's fixtures did not change.
+    - Tests: the spec's deadzone property test (2000 cases); 10 unit tests
+      of pads in `input.rs`, the active device's switching among them, 2 in
+      `binding.rs`, 4 more in `pad.rs` and 1 in `state.rs`; the property
+      tests of latching and replays now bind pads and send their events,
+      focus changes and disconnections; and 2 in the facade, a stick moving
+      as the keys do and the loop polling the pads.
+    - By hand, with M8.1's wired Xbox pad: the sandbox recorded with
+      `--record` while the pad walked it, 10,396 ticks, 742 of them moving
+      at less than full length (as little as 0.013), and none moving with
+      the stick at rest; replayed with `--headless`, the recording reached
+      the same world hash, c06094982e583452.
   - Note (from M8.1, ADR-0065):
     - The facade's loop must call `Platform::poll_gamepads` beside
       `pump_events` (`docs/01-architecture.md`), or no pad is heard.
@@ -5735,16 +5766,6 @@ by the batched sprite renderer.
     - Pads are read whether or not the window has the focus. SDL holds them
       at rest in the background by default: decide here, beside
       `Focused(false)`'s releases.
-    - `A` is the bottom face button on every pad. The prompt table maps
-      places to each family's labels, but the platform gives only the pad's
-      name (`GamepadState::name`) yet: a family, or the vendor and product
-      ids it comes from on Linux, needs adding to `GamepadState`.
-    - Under Steam Input, a PlayStation or Switch pad comes twice: its own
-      node and Steam's virtual Xbox pad. Steam lists the ids to skip, as
-      `0xVVVV/0xPPPP` pairs, in `SDL_GAMECONTROLLER_IGNORE_DEVICES` (and
-      `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT`), which SDL games read:
-      the platform's Linux backend should skip them, before a game ships on
-      Steam.
   - Note (from M4.7): a pad's analog values go into replays as the keys'
     do. If the recorder moves to a version 2, bless the determinism test's
     fixtures again: its live run compares its recording with `replay.nrpl`
@@ -5765,9 +5786,36 @@ by the batched sprite renderer.
     - The spec's deadzone property test is this task's.
   - Do: `PadButton`/`PadAxis`/`PadStick` bindings; radial and trigger
     deadzones; active-device tracking; prompt-glyph data table (per device
-    family) in `assets/data/`.
+    family) in `assets/data/` (moved to M8.5, ADR-0073).
   - Accept: deadzone property tests; active-device switching tests.
   - Verify: `cargo test -p nadir-input`
+
+- [ ] **M8.5 — platform and facade: pad families and button prompts**
+  - Note (from M8.4, ADR-0073): split off M8.4 at the user's choice on
+    2026-11-21, with M8.4's prompt table.
+    - `A` is the bottom face button on every pad. The prompt table maps
+      places to each family's labels, but the platform gives only the pad's
+      name (`GamepadState::name`) yet: a family, or the vendor and product
+      ids it comes from on Linux, needs adding to `GamepadState`.
+    - Under Steam Input, a PlayStation or Switch pad comes twice: its own
+      node and Steam's virtual Xbox pad. Steam lists the ids to skip, as
+      `0xVVVV/0xPPPP` pairs, in `SDL_GAMECONTROLLER_IGNORE_DEVICES` (and
+      `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT`), which SDL games read:
+      the platform's Linux backend should skip them, before a game ships on
+      Steam.
+    - `Input::active_device` gives the pad last used as a `GamepadId`: the
+      facade can keep each pad's family as it connects, from the
+      platform's `gamepad_state`.
+  - Depends: M8.4
+  - Do: a pad's family (Xbox, PlayStation, Nintendo, other) in
+    `GamepadState`, from its vendor id and, on Linux, its driver; the
+    facade keeps each connected pad's family for the game; a prompt table
+    per family in `assets/data/`, cooked and loaded; on Linux, skip the
+    pads Steam lists.
+  - Accept: unit tests for the family from vendor ids and drivers and for
+    reading Steam's list; the table gives each family's label for every
+    `GamepadButton`; manual: the wired Xbox pad is of the Xbox family.
+  - Verify: `cargo test -p nadir-platform -p nadir_engine`
 
 **Exit criteria (M8):**
 
@@ -5845,7 +5893,7 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-scene -p nadir_engine`
 
 - [ ] **M9.2 — menu kit and game UI**
-  - Depends: M7.1, M7.8, M8.4
+  - Depends: M7.1, M7.8, M8.4, M8.5
   - Note (from M9.1, ADR-0067):
     - The sandbox still loads its field at setup (`App::load_level`): move
       it onto `Boot` → `MainMenu` → `Loading("field")` → `InGame` ⇄

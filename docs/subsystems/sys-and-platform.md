@@ -291,9 +291,10 @@ impl HeadlessGl {
   are exact, and the rest too in a range of three values or more; a
   trigger from 0 to 1, or 0 or 1 if the pad's trigger is only a button;
   the d-pad as four buttons. No dead zone: that
-  is `nadir-input`'s (M8.4).
-- Pads are read whether or not the window has the focus. Whether a game
-  hears them in the background is the input layer's call (M8.4).
+  is `nadir-input`'s (M8.4, ADR-0073).
+- Pads are read whether or not the window has the focus. The input layer
+  holds them back from the game while the window lacks it (M8.4,
+  ADR-0073).
 - Windows (M8.2) and macOS (M8.3) report no pads yet: the backend is a
   stand-in, `no_gamepads`.
 - **Linux** (`linux/evdev.rs`), following `docs/03-platforms.md`:

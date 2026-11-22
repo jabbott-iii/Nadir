@@ -196,8 +196,8 @@
 <h3 id="what-works">What works today</h3>
 <ul>
   <li><strong>Linux</strong>, under X11 or under Wayland through XWayland: everything in this guide.</li>
-  <li><strong>Windows 10 and later, and macOS 12 and later:</strong> a game builds and opens its window, but the window stays empty and the game is silent. The engine cannot draw or play sound there until its OpenGL contexts (roadmap tasks M2.6 and M2.7) and its audio output (M6.4 and M6.5) on those systems are built. The window code there also still waits to be checked by hand.</li>
-  <li><strong>Not built yet:</strong> gamepads in games (the Linux reader is written, but binding a pad to your actions is roadmap task M8.4), a settings file (M9.3), a kit for menus (M9.2), and packages and installers for players (M11).</li>
+  <li><strong>Windows 10 and later, and macOS 12 and later:</strong> a game builds and opens its window, but the window stays empty, the game is silent, and it reads no gamepads. The engine cannot draw, play sound, or read pads there until its OpenGL contexts (roadmap tasks M2.6 and M2.7), its audio output (M6.4 and M6.5), and its gamepad readers (M8.2 and M8.3) on those systems are built. The window code there also still waits to be checked by hand.</li>
+  <li><strong>Not built yet:</strong> button prompts for each family of gamepad, such as A on an Xbox pad and ✕ on a PlayStation one (roadmap task M8.5), a settings file (M9.3), a kit for menus (M9.2), and packages and installers for players (M11).</li>
 </ul>
 
 <h2 id="what-you-need">What you need</h2>
@@ -282,11 +282,12 @@ dev = ["nadir_engine/dev"]</code></pre>
 <h2 id="input">Input actions</h2>
 <p>Gameplay reads <em>actions</em>, never keys, so that players can rebind them and replays can play them back:</p>
 <ol>
-  <li>Name the actions with an enum that implements <code>ActionSet</code>. Each has a kind: <code>Button</code>, <code>Axis1</code> (one value from −1 to 1), or <code>Axis2</code> (a direction).</li>
-  <li>Bind keys and mouse buttons to them in an <code>ActionMap</code>, up to four bindings an action: <code>Binding::Key</code>, <code>Binding::MouseButton</code>, or <code>Binding::KeyComposite2</code>, four keys that make a direction.</li>
+  <li>Name the actions with an enum that implements <code>ActionSet</code>. Each has a kind: <code>Button</code>, <code>Axis1</code> (one value from 0 to 1), or <code>Axis2</code> (a direction no longer than 1).</li>
+  <li>Bind keys, mouse buttons, and gamepads to them in an <code>ActionMap</code>, up to four bindings an action: <code>Binding::Key</code>, <code>Binding::MouseButton</code>, or <code>Binding::KeyComposite2</code>, four keys that make a direction; and a pad's <code>Binding::PadButton(GamepadButton::A)</code>, <code>Binding::PadStick(Stick::Left)</code> for a direction, or <code>Binding::PadAxis { axis, sign }</code>, half of a stick's axis or a trigger, for a button or a value from 0 to 1.</li>
   <li>Add the map with <code>App::add_actions</code>.</li>
 </ol>
 <p>Each tick, before its stages, the input is <em>latched</em> into the resource <code>ActionState&lt;A&gt;</code>: copied once, so every system of the tick sees the same state. It answers <code>pressed</code>, <code>just_pressed</code>, <code>just_released</code>, <code>value</code>, and <code>axis2</code>. A key pressed and released between two ticks is still seen. Read edges such as <code>just_pressed</code> in tick systems: a frame system sees only the last tick's. The resource <code>Input</code> also holds the pointer and the mouse wheel. <a href="#hero">A walking hero</a> and <a href="#states">Game states</a> below show actions in use.</p>
+<p>Gamepads work on Linux. Every connected pad drives the bindings, so a player can pick up any of them. A pad's face buttons are named by their place, so <code>GamepadButton::A</code> is the bottom one on every pad. Its sticks and triggers have <em>deadzones</em>, the part of their travel that reads as 0, so that a stick at rest moves nothing: a stick counts from 0.2 of the way out and reads full length from 0.95, the length rescaled in between, and a trigger counts from 0.1. A half of an axis bound to a button presses at 0.5 and lets go below 0.4, so it does not flicker. <code>Input::set_deadzones</code> changes them. While the window is in the background, the pads are held at rest. <code>Input::active_device</code> says whether the keyboard and mouse or a pad was used last, so a game can show the right prompts.</p>
 
 <h2 id="assets">Assets and the cook</h2>
 <p>The engine does not read PNG, Aseprite, LDtk, or WAV files while the game runs. Its asset <em>cook</em>, <code>nadir-cook</code>, turns them into the engine's own formats ahead of time: fast to load, checked once, and packed into one file for release. Install it and cook a folder:</p>

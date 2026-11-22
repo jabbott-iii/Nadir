@@ -15,12 +15,15 @@
 //! The keys and buttons that are down, and latching them into the state of
 //! the actions once a tick.
 
-use nadir_core::Vec2;
+use nadir_core::{GamepadAxis, GamepadButton, Vec2};
 use nadir_platform::Event;
 
 use crate::code::{Code, CodeSet};
+use crate::pad::{self, Pads};
 use crate::state::{self, HELD, JUST_PRESSED, JUST_RELEASED, Latched, ONE};
-use crate::{ActionKind, ActionMap, ActionSet, ActionState, Binding};
+use crate::{
+    ActionKind, ActionMap, ActionSet, ActionState, AxisSign, Binding, Deadzones, Device, InputError,
+};
 
 /// What a UI holds back from gameplay actions, while it has them: the keys,
 /// the mouse, both or neither. See [`Input::set_capture`].
@@ -78,6 +81,9 @@ enum Change {
     Release(Code),
     TextMode(bool),
     Capture(Capture),
+    /// The window lost the focus (`true`) or got it back (`false`): the
+    /// pads are held back from the game while it is in the background.
+    PadsHidden(bool),
 }
 
 /// The keys and buttons that are down, and which of those actions cannot
@@ -91,10 +97,13 @@ struct Devices {
     hidden: CodeSet,
     /// Down, but hidden from every action, `ui_allowed` ones too: whatever
     /// was held when the capture of its device began or was pressed during
-    /// it, until it is released. Always part of `down`.
+    /// it, until it is released. Always part of `down`. The pads' codes
+    /// too, held when the window lost the focus or pressed while it lacked
+    /// it.
     captured: CodeSet,
     text_mode: bool,
     capture: Capture,
+    pads_hidden: bool,
 }
 
 impl Devices {
@@ -105,7 +114,7 @@ impl Devices {
                 if self.text_mode {
                     self.hidden.insert(code);
                 }
-                if self.capture.codes().contains(code) {
+                if self.held_back().contains(code) {
                     self.captured.insert(code);
                 }
             }
@@ -125,6 +134,24 @@ impl Devices {
                 self.captured = self.captured.union(held);
                 self.capture = capture;
             }
+            Change::PadsHidden(hidden) => {
+                if hidden {
+                    let held = self.down.intersection(CodeSet::PADS);
+                    self.captured = self.captured.union(held);
+                }
+                self.pads_hidden = hidden;
+            }
+        }
+    }
+
+    /// The codes whose presses go into `captured`: a capture's, and the
+    /// pads' while the window lacks the focus.
+    fn held_back(&self) -> CodeSet {
+        let codes = self.capture.codes();
+        if self.pads_hidden {
+            codes.union(CodeSet::PADS)
+        } else {
+            codes
         }
     }
 
@@ -142,13 +169,15 @@ impl Devices {
 /// [`Input`] that is never latched still uses bounded memory.
 const MAX_CHANGES: usize = 1024;
 
-/// The keys and mouse buttons, fed with window events, and latched into an
-/// [`ActionState`] once a tick.
+/// The keys, the mouse buttons and the gamepads, fed with window events,
+/// and latched into an [`ActionState`] once a tick.
 ///
 /// It keeps every change since the last latch in order, so that a tap
 /// between two ticks is not lost, and so that an action with several
 /// bindings goes down when the first goes down and up when the last goes
-/// up.
+/// up. A gamepad's stick or trigger counts as a button for this: it goes
+/// down when it passes its deadzone, or its press point for an
+/// [`ActionKind::Button`], and up when it comes back (see [`Deadzones`]).
 pub struct Input {
     /// As the changes so far left it.
     now: Devices,
@@ -160,6 +189,11 @@ pub struct Input {
     pending_wheel: Vec2,
     /// Turned in the last latched tick.
     wheel: Vec2,
+    pads: Pads,
+    /// Whether the window has the focus, as its events last said. It is
+    /// taken to have it until they say otherwise.
+    focused: bool,
+    active: Device,
 }
 
 impl Input {
@@ -172,20 +206,33 @@ impl Input {
             pointer: Vec2::ZERO,
             pending_wheel: Vec2::ZERO,
             wheel: Vec2::ZERO,
+            pads: Pads::new(),
+            focused: true,
+            active: Device::KeyboardMouse,
         }
     }
 
-    /// Takes in a window event.
+    /// Takes in a window event, or a gamepad's.
     ///
     /// - Key repeats are ignored, and so are a press of a key that is down
     ///   and a release of one that is up.
     /// - When the window loses the focus, everything still down is
-    ///   released. (The platform releases them right after anyway.)
+    ///   released. (The platform releases them right after anyway.) The
+    ///   gamepads, which the platform reads in the background too, are held
+    ///   back from every action until the window has the focus again: what
+    ///   is held when it loses the focus, and what is pressed while it
+    ///   lacks it, stays hidden until it is let go, so that getting the
+    ///   focus back presses nothing.
     /// - The wheel's turns while the mouse is captured
     ///   ([`Input::set_capture`]) are not counted.
-    /// - Other events than keys, mouse buttons, the pointer, the wheel and
-    ///   the focus are ignored, typed text among them: a UI reads it, with
-    ///   the keys' repeats, from [`UiEvents`](crate::UiEvents).
+    /// - A gamepad's button or axis whose pad has not connected adds the
+    ///   pad.
+    /// - Other events than keys, mouse buttons, the pointer, the wheel, the
+    ///   focus and the gamepads are ignored, typed text among them: a UI
+    ///   reads it, with the keys' repeats, from
+    ///   [`UiEvents`](crate::UiEvents).
+    ///
+    /// It also keeps the [`Input::active_device`].
     pub fn handle(&mut self, event: &Event) {
         match *event {
             Event::Key {
@@ -193,21 +240,111 @@ impl Input {
                 pressed,
                 repeat,
             } => {
+                if pressed && !repeat {
+                    self.active = Device::KeyboardMouse;
+                }
                 if !repeat {
                     self.set_down(Code::key(key), pressed);
                 }
             }
-            Event::MouseButton { button, pressed } => self.set_down(Code::mouse(button), pressed),
+            Event::MouseButton { button, pressed } => {
+                if pressed {
+                    self.active = Device::KeyboardMouse;
+                }
+                self.set_down(Code::mouse(button), pressed);
+            }
             Event::Focused(false) => {
-                let down = self.now.down;
+                let keys_and_mouse = CodeSet::KEYS.union(CodeSet::MOUSE);
+                let down = self.now.down.intersection(keys_and_mouse);
                 for code in down.iter() {
                     self.change(Change::Release(code));
                 }
+                if self.focused {
+                    self.focused = false;
+                    self.change(Change::PadsHidden(true));
+                }
+            }
+            Event::Focused(true) => {
+                if !self.focused {
+                    self.focused = true;
+                    self.change(Change::PadsHidden(false));
+                }
             }
             Event::MouseMoved(position) => self.pointer = position,
-            Event::MouseWheel(delta) if !self.now.capture.mouse => self.pending_wheel += delta,
+            Event::MouseWheel(delta) => {
+                self.active = Device::KeyboardMouse;
+                if !self.now.capture.mouse {
+                    self.pending_wheel += delta;
+                }
+            }
+            Event::GamepadConnected(id) => self.pads.connect(id),
+            Event::GamepadDisconnected(id) => {
+                self.pads.disconnect(id);
+                // Its events let go of what it held before this one, but a
+                // stream that lost them must not leave it held.
+                self.refresh_pads();
+                if self.active == Device::Gamepad(id) {
+                    self.active = Device::KeyboardMouse;
+                }
+            }
+            Event::GamepadButton {
+                id,
+                button,
+                pressed,
+            } => {
+                self.pads.set_button(id, button, pressed);
+                if pressed && self.focused {
+                    self.active = Device::Gamepad(id);
+                }
+                self.set_down(Code::pad_button(button), self.pads.pressed(button));
+            }
+            Event::GamepadAxis { id, axis, value } => {
+                let moved = self.pads.set_axis(id, axis, value);
+                if moved && self.focused {
+                    self.active = Device::Gamepad(id);
+                }
+                self.refresh_axis(axis);
+            }
             _ => {}
         }
+    }
+
+    /// The device the player used last: the keyboard and mouse, or a
+    /// gamepad. A game's prompts follow it, showing "A" or "Space".
+    ///
+    /// A key's or mouse button's press, or a turn of the wheel, makes it
+    /// [`Device::KeyboardMouse`]; moving the pointer does not, so that a
+    /// nudge of the mouse on the desk does not change the prompts. A pad's
+    /// button press, or its stick or trigger moved past its deadzone, makes
+    /// it that [`Device::Gamepad`], while the window has the focus. When
+    /// that pad disconnects, it is the keyboard and mouse again. It starts
+    /// as the keyboard and mouse.
+    ///
+    /// It is live, not latched: it is for what the game shows, and replays
+    /// do not hold it, so a fixed system that is to replay must not read it.
+    pub fn active_device(&self) -> Device {
+        self.active
+    }
+
+    /// The deadzones the gamepads are read with.
+    pub fn deadzones(&self) -> Deadzones {
+        self.pads.deadzones
+    }
+
+    /// Sets the deadzones the gamepads are read with, from this point among
+    /// the events: a stick held past the new deadzone goes down, and one
+    /// inside it goes up.
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`InputError::Deadzones`], and changes nothing, if they
+    /// break a rule: `0 <= stick_inner < stick_outer <= 1`,
+    /// `0 <= trigger < 1` and `0 < release <= press <= 1`.
+    pub fn set_deadzones(&mut self, deadzones: Deadzones) -> Result<(), InputError> {
+        deadzones.check()?;
+        self.pads.deadzones = deadzones;
+        self.refresh_pads();
+        Ok(())
     }
 
     /// Turns text mode on or off, from this point among the events.
@@ -282,13 +419,17 @@ impl Input {
     ///   none.
     /// - It is held if some are down now, or if it was just pressed: a tap
     ///   between ticks is held for one tick.
-    /// - A [`ActionKind::Button`] or [`ActionKind::Axis1`] is worth 1 while
-    ///   held. An [`ActionKind::Axis2`] is the sum of its composites'
-    ///   directions, no longer than 1. In a composite, a key counts if it
-    ///   is down or was pressed during the tick. So an `Axis2` can have a
-    ///   direction in a tick in which it is just released and not held:
-    ///   when W is held, and D is tapped while W goes up, the direction is
-    ///   D's for that tick.
+    /// - A [`ActionKind::Button`] is worth 1 while held. An
+    ///   [`ActionKind::Axis1`] is worth 1 while a key or button holds it,
+    ///   down or tapped, and otherwise the largest of its halves of a
+    ///   gamepad's axes now. An [`ActionKind::Axis2`] is the sum of its
+    ///   composites' directions and its sticks' directions now, no longer
+    ///   than 1. A stick or trigger moved and let go between two ticks is
+    ///   held for that tick, with a value of 0. In a composite, a key counts
+    ///   if it is down or was pressed during the tick. So an `Axis2` can
+    ///   have a direction in a tick in which it is just released and not
+    ///   held: when W is held, and D is tapped while W goes up, the
+    ///   direction is D's for that tick.
     ///
     /// Call it once a tick, with one map: it starts a new tick, so a second
     /// call sees nothing of this one. Bindings changed since the last latch
@@ -315,12 +456,13 @@ impl Input {
 
     fn latch_action<A: ActionSet>(&self, map: &ActionMap<A>, action: A) -> Latched {
         let ui_allowed = action.ui_allowed();
+        let kind = action.kind();
         let bindings = || map.slots(action.index());
         // How many of the action's bound keys and buttons it sees down.
         let count = |devices: &Devices| -> usize {
             bindings()
                 .map(|binding| {
-                    let inputs = binding.inputs();
+                    let inputs = binding.latch_inputs(kind);
                     inputs
                         .as_slice()
                         .iter()
@@ -359,8 +501,34 @@ impl Input {
                 flags |= flag;
             }
         }
-        let axes = match action.kind() {
-            ActionKind::Button | ActionKind::Axis1 => [if held { ONE } else { 0 }, 0],
+        let axes = match kind {
+            ActionKind::Button => [if held { ONE } else { 0 }, 0],
+            ActionKind::Axis1 => {
+                // Keys and buttons hold it at 1, down or tapped; a half of an
+                // axis gives its value now, where the action sees it.
+                let mut digital = false;
+                let mut analog = 0.0f32;
+                for binding in bindings() {
+                    match *binding {
+                        Binding::PadAxis { axis, sign } => {
+                            if devices.sees_down(Code::pad_active(axis, sign), ui_allowed) {
+                                analog = analog.max(self.pads.half(axis, sign));
+                            }
+                        }
+                        _ => {
+                            digital |= binding.latch_inputs(kind).as_slice().iter().any(|&code| {
+                                devices.sees_down(code, ui_allowed) || tapped.contains(code)
+                            });
+                        }
+                    }
+                }
+                let value = match (held, digital) {
+                    (false, _) => 0,
+                    (true, true) => ONE,
+                    (true, false) => state::quantize1(analog),
+                };
+                [value, 0]
+            }
             ActionKind::Axis2 => {
                 let held_now = |code: Code| -> f32 {
                     let down = devices.sees_down(code, ui_allowed) || tapped.contains(code);
@@ -368,19 +536,28 @@ impl Input {
                 };
                 let mut sum = Vec2::ZERO;
                 for binding in bindings() {
-                    if let &Binding::KeyComposite2 {
-                        up,
-                        down,
-                        left,
-                        right,
-                    } = binding
-                    {
-                        let [up, down, left, right] = [up, down, left, right].map(Code::key);
-                        sum += Vec2::new(
-                            held_now(right) - held_now(left),
-                            held_now(down) - held_now(up),
-                        )
-                        .normalize_or_zero();
+                    match *binding {
+                        Binding::KeyComposite2 {
+                            up,
+                            down,
+                            left,
+                            right,
+                        } => {
+                            let [up, down, left, right] = [up, down, left, right].map(Code::key);
+                            sum += Vec2::new(
+                                held_now(right) - held_now(left),
+                                held_now(down) - held_now(up),
+                            )
+                            .normalize_or_zero();
+                        }
+                        // A stick moved and let go between two ticks gives
+                        // no direction: its value is the one at the latch.
+                        Binding::PadStick(stick)
+                            if devices.sees_down(Code::stick(stick), ui_allowed) =>
+                        {
+                            sum += self.pads.stick(stick);
+                        }
+                        _ => {}
                     }
                 }
                 if sum.length() > 1.0 {
@@ -390,6 +567,51 @@ impl Input {
             }
         };
         Latched { flags, axes }
+    }
+
+    /// Brings the codes of every stick and trigger up to date with the pads:
+    /// after a pad leaves, or the deadzones change.
+    fn refresh_pads(&mut self) {
+        for &button in GamepadButton::ALL {
+            self.set_down(Code::pad_button(button), self.pads.pressed(button));
+        }
+        for axis in [
+            GamepadAxis::LeftX,
+            GamepadAxis::RightX,
+            GamepadAxis::LeftTrigger,
+            GamepadAxis::RightTrigger,
+        ] {
+            self.refresh_axis(axis);
+        }
+    }
+
+    /// Brings the codes of the stick or trigger `axis` belongs to up to date
+    /// with the pads: its halves past their deadzone, its halves past the
+    /// press point, and, for a stick, the stick out of its deadzone.
+    fn refresh_axis(&mut self, axis: GamepadAxis) {
+        let deadzones = self.pads.deadzones;
+        let (stick, axes) = pad::group(axis);
+        for &axis in axes {
+            for sign in [AxisSign::Negative, AxisSign::Positive] {
+                if axis.is_trigger() && sign == AxisSign::Negative {
+                    continue;
+                }
+                let value = self.pads.half(axis, sign);
+                self.set_down(Code::pad_active(axis, sign), value > 0.0);
+                // Down from the press point, up below the release point.
+                let press = Code::pad_press(axis, sign);
+                let threshold = if self.now.down.contains(press) {
+                    deadzones.release
+                } else {
+                    deadzones.press
+                };
+                self.set_down(press, value >= threshold);
+            }
+        }
+        if let Some(stick) = stick {
+            let moved = self.pads.stick(stick) != Vec2::ZERO;
+            self.set_down(Code::stick(stick), moved);
+        }
     }
 
     fn set_down(&mut self, code: Code, down: bool) {
@@ -422,8 +644,10 @@ impl Default for Input {
 #[cfg(test)]
 mod tests {
     use nadir_core::{Key, MouseButton};
+    use nadir_platform::GamepadId;
 
     use super::*;
+    use crate::Stick;
     use crate::tests::Act;
 
     fn wasd() -> Binding {
@@ -517,7 +741,64 @@ mod tests {
         fn movement(&self) -> Vec2 {
             self.state.axis2(Act::Move)
         }
+
+        /// The game, with a pad's bindings beside the keys': the left stick
+        /// moves, A and the right stick pushed right jump, Start pauses, and
+        /// the right trigger is the throttle.
+        fn with_pads() -> Self {
+            let mut game = Self::new();
+            let bindings = [
+                (Act::Move, 1, Binding::PadStick(Stick::Left)),
+                (Act::Jump, 2, Binding::PadButton(GamepadButton::A)),
+                (
+                    Act::Jump,
+                    3,
+                    Binding::PadAxis {
+                        axis: GamepadAxis::RightX,
+                        sign: AxisSign::Positive,
+                    },
+                ),
+                (Act::Pause, 1, Binding::PadButton(GamepadButton::Start)),
+                (
+                    Act::Throttle,
+                    1,
+                    Binding::PadAxis {
+                        axis: GamepadAxis::RightTrigger,
+                        sign: AxisSign::Positive,
+                    },
+                ),
+            ];
+            for (action, slot, binding) in bindings {
+                game.map.bind(action, slot, binding).expect("fits");
+            }
+            game
+        }
+
+        fn button(&mut self, pad: u32, button: GamepadButton, pressed: bool) -> &mut Self {
+            self.input.handle(&Event::GamepadButton {
+                id: GamepadId::from_raw(pad),
+                button,
+                pressed,
+            });
+            self
+        }
+
+        fn axis(&mut self, pad: u32, axis: GamepadAxis, value: f32) -> &mut Self {
+            self.input.handle(&Event::GamepadAxis {
+                id: GamepadId::from_raw(pad),
+                axis,
+                value,
+            });
+            self
+        }
+
+        fn focus(&mut self, focused: bool) -> &mut Self {
+            self.input.handle(&Event::Focused(focused));
+            self
+        }
     }
+
+    const PAD: u32 = 1;
 
     const UP: (bool, bool, bool) = (false, false, false);
     const PRESSED: (bool, bool, bool) = (true, true, false);
@@ -978,5 +1259,256 @@ mod tests {
         assert_eq!(game.edges(Act::Jump), TAPPED);
         game.release(Key::Space).tick();
         assert_eq!(game.edges(Act::Jump), RELEASED);
+    }
+
+    #[test]
+    fn a_pad_button_drives_an_action_as_a_key_does() {
+        let mut game = Game::with_pads();
+        game.button(PAD, GamepadButton::A, true)
+            .button(PAD, GamepadButton::A, false)
+            .tick();
+        assert_eq!(game.edges(Act::Jump), TAPPED);
+        game.button(PAD, GamepadButton::A, true).tick();
+        assert_eq!(game.edges(Act::Jump), PRESSED);
+        // Space and A are two bindings of one action.
+        game.press(Key::Space)
+            .button(PAD, GamepadButton::A, false)
+            .tick();
+        assert_eq!(game.edges(Act::Jump), HOLDING);
+        game.release(Key::Space).tick();
+        assert_eq!(game.edges(Act::Jump), RELEASED);
+        // A button nothing is bound to drives nothing.
+        game.button(PAD, GamepadButton::Y, true).tick();
+        assert_eq!(game.state, ActionState::new());
+    }
+
+    #[test]
+    fn a_stick_moves_past_its_deadzone_rescaled() {
+        let mut game = Game::with_pads();
+        game.axis(PAD, GamepadAxis::LeftX, 0.15).tick();
+        assert_eq!(game.movement(), Vec2::ZERO, "inside the deadzone");
+        assert_eq!(game.edges(Act::Move), UP);
+        game.axis(PAD, GamepadAxis::LeftX, 0.575).tick();
+        assert_eq!(game.edges(Act::Move), PRESSED);
+        let half = game.movement();
+        assert!((half.x - 0.5).abs() < 1e-4 && half.y == 0.0, "{half:?}");
+        game.axis(PAD, GamepadAxis::LeftX, 1.0).tick();
+        assert_eq!(game.movement(), Vec2::new(1.0, 0.0));
+        // Up is -Y, as for the keys.
+        game.axis(PAD, GamepadAxis::LeftX, 0.0)
+            .axis(PAD, GamepadAxis::LeftY, -1.0)
+            .tick();
+        assert_eq!(game.movement(), Vec2::new(0.0, -1.0));
+        // With D held, the sum is no longer than 1.
+        game.press(Key::D).tick();
+        let diagonal = game.movement();
+        assert!(diagonal.x > 0.7 && diagonal.y < -0.7, "{diagonal:?}");
+        assert!(diagonal.length() <= 1.0);
+        game.release(Key::D)
+            .axis(PAD, GamepadAxis::LeftY, -0.1)
+            .tick();
+        assert_eq!(game.edges(Act::Move), RELEASED);
+        assert_eq!(game.movement(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn a_half_axis_as_a_button_presses_at_the_press_point_and_lets_go_below_the_release_point() {
+        let mut game = Game::with_pads();
+        // The right stick pushed right: 0.575 raw is 0.5 past the deadzone,
+        // and 0.5 raw is 0.4.
+        game.axis(PAD, GamepadAxis::RightX, 0.55).tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        game.axis(PAD, GamepadAxis::RightX, 0.6).tick();
+        assert_eq!(game.edges(Act::Jump), PRESSED);
+        assert_eq!(game.state.value(Act::Jump), 1.0);
+        // Hovering about the press point neither lets go nor presses again.
+        for raw in [0.52, 0.6, 0.51, 0.58] {
+            game.axis(PAD, GamepadAxis::RightX, raw);
+        }
+        game.tick();
+        assert_eq!(game.edges(Act::Jump), HOLDING);
+        game.axis(PAD, GamepadAxis::RightX, 0.45).tick();
+        assert_eq!(game.edges(Act::Jump), RELEASED);
+        // Pushed left, the other half, it does not jump.
+        game.axis(PAD, GamepadAxis::RightX, -1.0).tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+    }
+
+    #[test]
+    fn a_trigger_gives_an_axis1_its_value_and_a_key_holds_it_at_1() {
+        let mut game = Game::with_pads();
+        game.axis(PAD, GamepadAxis::RightTrigger, 0.05).tick();
+        assert_eq!(game.edges(Act::Throttle), UP);
+        // 0.55 raw is 0.5 past the deadzone of 0.1.
+        game.axis(PAD, GamepadAxis::RightTrigger, 0.55).tick();
+        assert_eq!(game.edges(Act::Throttle), PRESSED);
+        let value = game.state.value(Act::Throttle);
+        assert!((value - 0.5).abs() < 1e-4, "{value}");
+        game.press(Key::LeftShift).tick();
+        assert_eq!(game.state.value(Act::Throttle), 1.0);
+        game.release(Key::LeftShift)
+            .axis(PAD, GamepadAxis::RightTrigger, 1.0)
+            .tick();
+        assert_eq!(game.state.value(Act::Throttle), 1.0);
+        assert_eq!(game.edges(Act::Throttle), HOLDING);
+        game.axis(PAD, GamepadAxis::RightTrigger, 0.0).tick();
+        assert_eq!(game.edges(Act::Throttle), RELEASED);
+        assert_eq!(game.state.value(Act::Throttle), 0.0);
+    }
+
+    #[test]
+    fn every_pad_drives_the_bindings_as_one() {
+        let mut game = Game::with_pads();
+        game.button(1, GamepadButton::A, true)
+            .button(2, GamepadButton::A, true)
+            .tick();
+        assert_eq!(game.edges(Act::Jump), PRESSED);
+        game.button(1, GamepadButton::A, false).tick();
+        assert_eq!(game.edges(Act::Jump), HOLDING, "still down on pad 2");
+        game.button(2, GamepadButton::A, false).tick();
+        assert_eq!(game.edges(Act::Jump), RELEASED);
+        // The stick pushed furthest wins.
+        game.axis(1, GamepadAxis::LeftX, 0.575)
+            .axis(2, GamepadAxis::LeftY, 1.0)
+            .tick();
+        assert_eq!(game.movement(), Vec2::new(0.0, 1.0));
+    }
+
+    #[test]
+    fn a_pad_that_disconnects_lets_go_of_what_it_held() {
+        let mut game = Game::with_pads();
+        game.input
+            .handle(&Event::GamepadConnected(GamepadId::from_raw(PAD)));
+        game.button(PAD, GamepadButton::A, true)
+            .axis(PAD, GamepadAxis::LeftX, 1.0)
+            .tick();
+        // No releases came before it went: a stream that lost them.
+        game.input
+            .handle(&Event::GamepadDisconnected(GamepadId::from_raw(PAD)));
+        game.tick();
+        assert_eq!(game.edges(Act::Jump), RELEASED);
+        assert_eq!(game.edges(Act::Move), RELEASED);
+        assert_eq!(game.movement(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn pads_are_held_back_while_the_window_lacks_the_focus() {
+        let mut game = Game::with_pads();
+        game.button(PAD, GamepadButton::A, true)
+            .axis(PAD, GamepadAxis::LeftX, 1.0)
+            .tick();
+        game.focus(false).tick();
+        assert_eq!(game.edges(Act::Jump), RELEASED);
+        assert_eq!(game.movement(), Vec2::ZERO);
+        // Pressed in the background: nothing.
+        game.button(PAD, GamepadButton::Start, true).tick();
+        assert_eq!(game.edges(Act::Pause), UP, "not even a ui_allowed action");
+        // Back in front, what is still held stays hidden until let go.
+        game.focus(true).tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        assert_eq!(game.edges(Act::Pause), UP);
+        assert_eq!(game.movement(), Vec2::ZERO);
+        game.button(PAD, GamepadButton::A, false)
+            .button(PAD, GamepadButton::A, true)
+            .axis(PAD, GamepadAxis::LeftX, 0.0)
+            .axis(PAD, GamepadAxis::LeftX, 1.0)
+            .tick();
+        assert_eq!(game.edges(Act::Jump), PRESSED);
+        assert_eq!(game.movement(), Vec2::new(1.0, 0.0));
+        // The keys are released as before, and a focus event that changes
+        // nothing changes nothing.
+        game.focus(true).press(Key::Space).focus(false).tick();
+        game.tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+    }
+
+    #[test]
+    fn text_mode_hides_the_pads_from_gameplay_actions() {
+        let mut game = Game::with_pads();
+        game.text_mode(true)
+            .button(PAD, GamepadButton::A, true)
+            .button(PAD, GamepadButton::Start, true)
+            .axis(PAD, GamepadAxis::LeftY, 1.0)
+            .tick();
+        assert_eq!(game.edges(Act::Jump), UP);
+        assert_eq!(game.movement(), Vec2::ZERO);
+        assert_eq!(game.edges(Act::Pause), PRESSED, "a ui_allowed action");
+    }
+
+    #[test]
+    fn the_active_device_follows_the_last_one_used() {
+        let mut game = Game::with_pads();
+        assert_eq!(game.input.active_device(), Device::KeyboardMouse);
+        game.button(PAD, GamepadButton::A, true);
+        assert_eq!(
+            game.input.active_device(),
+            Device::Gamepad(GamepadId::from_raw(PAD))
+        );
+        // Moving the pointer does not count; a key does.
+        game.input.handle(&Event::MouseMoved(Vec2::new(5.0, 5.0)));
+        assert_eq!(
+            game.input.active_device(),
+            Device::Gamepad(GamepadId::from_raw(PAD))
+        );
+        game.press(Key::W);
+        assert_eq!(game.input.active_device(), Device::KeyboardMouse);
+        // A stick inside its deadzone, or a button let go, does not count.
+        game.axis(PAD, GamepadAxis::LeftX, 0.15)
+            .button(PAD, GamepadButton::A, false);
+        assert_eq!(game.input.active_device(), Device::KeyboardMouse);
+        game.axis(2, GamepadAxis::RightTrigger, 0.5);
+        assert_eq!(
+            game.input.active_device(),
+            Device::Gamepad(GamepadId::from_raw(2))
+        );
+        game.wheel(1.0);
+        assert_eq!(game.input.active_device(), Device::KeyboardMouse);
+        game.mouse(MouseButton::Right, true);
+        assert_eq!(game.input.active_device(), Device::KeyboardMouse);
+        // In the background, a pad does not count.
+        game.focus(false).button(PAD, GamepadButton::B, true);
+        assert_eq!(game.input.active_device(), Device::KeyboardMouse);
+        game.focus(true).button(PAD, GamepadButton::X, true);
+        assert_eq!(
+            game.input.active_device(),
+            Device::Gamepad(GamepadId::from_raw(PAD))
+        );
+        // Another pad leaving changes nothing; the active one leaving does.
+        game.input
+            .handle(&Event::GamepadDisconnected(GamepadId::from_raw(2)));
+        assert_eq!(
+            game.input.active_device(),
+            Device::Gamepad(GamepadId::from_raw(PAD))
+        );
+        game.input
+            .handle(&Event::GamepadDisconnected(GamepadId::from_raw(PAD)));
+        assert_eq!(game.input.active_device(), Device::KeyboardMouse);
+    }
+
+    #[test]
+    fn new_deadzones_apply_at_once_and_broken_ones_change_nothing() {
+        let mut game = Game::with_pads();
+        assert_eq!(game.input.deadzones(), Deadzones::DEFAULT);
+        game.axis(PAD, GamepadAxis::LeftX, 0.3).tick();
+        assert_eq!(game.edges(Act::Move), PRESSED);
+        let broken = Deadzones {
+            stick_inner: 0.96,
+            ..Deadzones::DEFAULT
+        };
+        assert_eq!(
+            game.input.set_deadzones(broken),
+            Err(InputError::Deadzones {
+                rule: "0 <= stick_inner < stick_outer <= 1"
+            })
+        );
+        assert_eq!(game.input.deadzones(), Deadzones::DEFAULT);
+        let wider = Deadzones {
+            stick_inner: 0.4,
+            ..Deadzones::DEFAULT
+        };
+        assert_eq!(game.input.set_deadzones(wider), Ok(()));
+        assert_eq!(game.input.deadzones(), wider);
+        game.tick();
+        assert_eq!(game.edges(Act::Move), RELEASED, "now inside it");
     }
 }

@@ -88,9 +88,10 @@
 //! no OS code of its own.
 //!
 //! Built so far: keyboard and mouse bindings, latching, text mode, rebinding
-//! conflicts and replays (roadmap M3.1); a UI's events and capture (M7.9).
-//! Gamepads, deadzones and the active device come with M8.4, the rebinding
-//! capture flow with M9.2, and bindings in the settings file with M9.3.
+//! conflicts and replays (roadmap M3.1); a UI's events and capture (M7.9);
+//! gamepad bindings, deadzones and the active device (M8.4). Button prompts
+//! for each family of pad come with M8.5, the rebinding capture flow with
+//! M9.2, and bindings in the settings file with M9.3.
 //!
 //! # The parts
 //!
@@ -98,8 +99,10 @@
 //!   index, name, [`ActionKind`] and whether it stays live in text mode
 //!   ([`ActionSet::ui_allowed`]). [`ActionSet::from_name`] finds one by
 //!   name.
-//! - **Bindings.** A [`Binding`] is a key, a mouse button or a four-key
-//!   composite. An [`ActionMap`] holds [`SLOTS`] of them per action:
+//! - **Bindings.** A [`Binding`] is a key, a mouse button, a four-key
+//!   composite, or a gamepad's button, half of an axis ([`AxisSign`]) or
+//!   [`Stick`], which every connected pad drives as one. An [`ActionMap`]
+//!   holds [`SLOTS`] of them per action:
 //!   [`ActionMap::bind`], [`ActionMap::unbind`], [`ActionMap::bindings`],
 //!   and [`ActionMap::conflict`] for a rebinding menu.
 //! - **Devices.** [`Input`] takes the window's events with
@@ -108,6 +111,11 @@
 //!   and off, and [`Input::set_capture`] and [`Input::capture`] hold a
 //!   [`Capture`] of the keyboard or the mouse. [`Input::pointer`] and
 //!   [`Input::wheel`] are for the UI and aiming: they are not actions.
+//! - **Gamepads.** [`Input::handle`] takes the pads' events too.
+//!   [`Input::set_deadzones`] sets the [`Deadzones`] their sticks and
+//!   triggers are read with, and [`Input::active_device`] says which
+//!   [`Device`] was used last, for a game's prompts. While the window lacks
+//!   the focus, the pads are held back from every action.
 //! - **A UI's events.** [`UiEvents`] takes the same events with
 //!   [`UiEvents::handle`] and gives a UI each [`UiEvent`], in order, until
 //!   [`UiEvents::clear`], once a frame.
@@ -230,14 +238,16 @@ mod binding;
 mod code;
 mod error;
 mod input;
+mod pad;
 mod replay;
 mod state;
 mod ui;
 
 pub use action::{ActionKind, ActionSet};
-pub use binding::{ActionMap, Binding, SLOTS};
+pub use binding::{ActionMap, AxisSign, Binding, SLOTS, Stick};
 pub use error::{BindErrorKind, InputError, ReplayErrorKind, SetProblem};
 pub use input::{Capture, Input};
+pub use pad::{Deadzones, Device};
 pub use replay::{InputPlayer, InputRecorder};
 pub use state::ActionState;
 pub use ui::{UiEvent, UiEvents};

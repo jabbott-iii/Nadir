@@ -43,8 +43,9 @@
 //! (`nadir::render::Font`, `RenderFrame::texts`), and on the window with
 //! the UI's sprites (`RenderFrame::ui`); development builds show a
 //! [debug UI](#the-debug-ui) of the game's own windows and the engine's
-//! debug tools. Gamepads are not built yet, and saves are nadir-scene's
-//! (`nadir::scene`), not yet the `App`'s. The
+//! debug tools. On Linux, a game binds gamepads to its actions as it binds
+//! keys; Windows and macOS have no pads yet (M8.2 and M8.3). Saves are
+//! nadir-scene's (`nadir::scene`), not yet the `App`'s. The
 //! [README](https://github.com/jabbott-iii/Nadir/blob/main/crates/engine/README.md)
 //! is a guide to how the parts fit together, with a game that walks a hero
 //! about a tile map.
@@ -603,11 +604,15 @@ pub mod prelude {
     pub use nadir_audio::{Audio, Bus, Music, PlayParams, Sound, VoiceChange, VoiceId};
     pub use nadir_collision::{LayerMask, PathRequest, PathResult, Shape, TileGrid};
     pub use nadir_core::time::{Frame, Stopwatch, Tick};
-    pub use nadir_core::{Color, IVec2, Key, MouseButton, Pcg32, Rect, UVec2, Vec2};
+    pub use nadir_core::{
+        Color, GamepadAxis, GamepadButton, IVec2, Key, MouseButton, Pcg32, Rect, UVec2, Vec2,
+    };
     pub use nadir_ecs::{
         Commands, Component, Entity, Events, FixedStage, FrameStage, Res, ResMut, World,
     };
-    pub use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Binding, Input};
+    pub use nadir_input::{
+        ActionKind, ActionMap, ActionSet, ActionState, AxisSign, Binding, Input, Stick,
+    };
     pub use nadir_render::{
         Atlas, AtlasClip, AtlasClipFrame, AtlasFrame, AtlasPage, AtlasSprite, Camera2D, Flip,
         FrameStats, RenderFrame, SortMode, SpriteDraw, Texture, Tile, TileLayer, TileLayerDraw,

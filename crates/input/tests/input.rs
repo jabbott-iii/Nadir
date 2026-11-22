@@ -16,12 +16,12 @@
 //! event streams. The hand-worked cases are beside the code.
 
 use nadir_core::testing::{check, check_sized};
-use nadir_core::{Key, MouseButton, Pcg32};
+use nadir_core::{GamepadAxis, GamepadButton, Key, MouseButton, Pcg32};
 use nadir_input::{
-    ActionKind, ActionMap, ActionSet, ActionState, Binding, Input, InputError, InputPlayer,
-    InputRecorder, ReplayErrorKind, SLOTS,
+    ActionKind, ActionMap, ActionSet, ActionState, AxisSign, Binding, Input, InputError,
+    InputPlayer, InputRecorder, ReplayErrorKind, SLOTS, Stick,
 };
-use nadir_platform::Event;
+use nadir_platform::{Event, GamepadId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Act {
@@ -74,6 +74,13 @@ const KEYS: [Key; 8] = [
     Key::LeftShift,
 ];
 const BUTTONS: [MouseButton; 2] = [MouseButton::Left, MouseButton::Right];
+/// A few of a pad's buttons.
+const PAD_BUTTONS: [GamepadButton; 3] = [GamepadButton::A, GamepadButton::B, GamepadButton::Start];
+/// Values about the deadzones and the press and release points, and the
+/// ends.
+const PAD_VALUES: [f32; 11] = [
+    -1.0, -0.6, -0.45, -0.15, 0.0, 0.15, 0.3, 0.45, 0.55, 0.6, 1.0,
+];
 
 /// One step of a run.
 #[derive(Clone, Copy, Debug)]
@@ -88,7 +95,19 @@ enum Step {
         pressed: bool,
     },
     FocusLost,
+    FocusGained,
     TextMode(bool),
+    PadButton {
+        pad: u32,
+        button: GamepadButton,
+        pressed: bool,
+    },
+    PadAxis {
+        pad: u32,
+        axis: GamepadAxis,
+        value: f32,
+    },
+    PadGone(u32),
     Tick,
 }
 
@@ -98,19 +117,29 @@ fn key(rng: &mut Pcg32) -> Key {
 
 fn random_binding(rng: &mut Pcg32, kind: ActionKind) -> Binding {
     match kind {
+        ActionKind::Axis2 if rng.range(0..4u32) == 0 => {
+            Binding::PadStick(*rng.choose(Stick::ALL).expect("not empty"))
+        }
         ActionKind::Axis2 => Binding::KeyComposite2 {
             up: key(rng),
             down: key(rng),
             left: key(rng),
             right: key(rng),
         },
-        ActionKind::Button | ActionKind::Axis1 => {
-            if rng.range(0..4u32) == 0 {
-                Binding::MouseButton(*rng.choose(&BUTTONS).expect("not empty"))
-            } else {
-                Binding::Key(key(rng))
+        ActionKind::Button | ActionKind::Axis1 => match rng.range(0..8u32) {
+            0 | 1 => Binding::MouseButton(*rng.choose(&BUTTONS).expect("not empty")),
+            2 => Binding::PadButton(*rng.choose(&PAD_BUTTONS).expect("not empty")),
+            3 => {
+                let axis = *rng.choose(GamepadAxis::ALL).expect("not empty");
+                let sign = if axis.is_trigger() || rng.range(0..2u32) == 0 {
+                    AxisSign::Positive
+                } else {
+                    AxisSign::Negative
+                };
+                Binding::PadAxis { axis, sign }
             }
-        }
+            _ => Binding::Key(key(rng)),
+        },
     }
 }
 
@@ -138,7 +167,7 @@ fn build(bindings: &[(Act, usize, Binding)]) -> ActionMap<Act> {
 
 fn random_steps(rng: &mut Pcg32, size: u32, text_mode: bool) -> Vec<Step> {
     (0..size * 4)
-        .map(|_| match rng.range(0..20u32) {
+        .map(|_| match rng.range(0..26u32) {
             0..=9 => Step::Key {
                 key: key(rng),
                 pressed: rng.range(0..2u32) == 0,
@@ -150,6 +179,26 @@ fn random_steps(rng: &mut Pcg32, size: u32, text_mode: bool) -> Vec<Step> {
             },
             12 => Step::FocusLost,
             13 if text_mode => Step::TextMode(rng.range(0..2u32) == 0),
+            14 => Step::FocusGained,
+            15..=16 => Step::PadButton {
+                pad: rng.range(1..3u32),
+                button: *rng.choose(&PAD_BUTTONS).expect("not empty"),
+                pressed: rng.range(0..2u32) == 0,
+            },
+            17..=19 => {
+                let axis = *rng.choose(GamepadAxis::ALL).expect("not empty");
+                let value = *rng.choose(&PAD_VALUES).expect("not empty");
+                Step::PadAxis {
+                    pad: rng.range(1..3u32),
+                    axis,
+                    value: if axis.is_trigger() {
+                        value.abs()
+                    } else {
+                        value
+                    },
+                }
+            }
+            20 => Step::PadGone(rng.range(1..3u32)),
             _ => Step::Tick,
         })
         .collect()
@@ -175,7 +224,25 @@ fn live(map: &ActionMap<Act>, steps: &[Step]) -> Vec<ActionState<Act>> {
                 input.handle(&Event::MouseButton { button, pressed });
             }
             Step::FocusLost => input.handle(&Event::Focused(false)),
+            Step::FocusGained => input.handle(&Event::Focused(true)),
             Step::TextMode(on) => input.set_text_mode(on),
+            Step::PadButton {
+                pad,
+                button,
+                pressed,
+            } => input.handle(&Event::GamepadButton {
+                id: GamepadId::from_raw(pad),
+                button,
+                pressed,
+            }),
+            Step::PadAxis { pad, axis, value } => input.handle(&Event::GamepadAxis {
+                id: GamepadId::from_raw(pad),
+                axis,
+                value,
+            }),
+            Step::PadGone(pad) => {
+                input.handle(&Event::GamepadDisconnected(GamepadId::from_raw(pad)));
+            }
             Step::Tick => {
                 input.latch(map, &mut state);
                 ticks.push(state.clone());
@@ -281,7 +348,13 @@ fn with_one_binding_each_latching_is_the_spec_s_button_track() {
                         }
                         tick += 1;
                     }
-                    Step::Key { repeat: true, .. } | Step::Mouse { .. } | Step::TextMode(_) => {}
+                    Step::Key { repeat: true, .. }
+                    | Step::Mouse { .. }
+                    | Step::TextMode(_)
+                    | Step::FocusGained
+                    | Step::PadButton { .. }
+                    | Step::PadAxis { .. }
+                    | Step::PadGone(_) => {}
                 }
             }
             Ok(())

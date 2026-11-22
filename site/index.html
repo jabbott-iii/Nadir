@@ -213,7 +213,7 @@
         <div class="nadir-c4__scroll" tabindex="0" role="region" aria-labelledby="c4-context-heading">
           <svg class="nadir-c4__svg" viewBox="0 0 1280 1000" width="1280" height="1000" role="img" aria-labelledby="c4-context-title c4-context-desc">
           <title id="c4-context-title">Nadir in its surroundings: a C4 system context diagram</title>
-          <desc id="c4-context-desc">The game developer draws sprites in Aseprite, lays out levels in LDtk, and draws images and makes fonts in image editors and font generators; each saves into assets/ on the filesystem. The developer runs Nadir's tools, nadir-cook and xtask, which read assets/ and write target/cooked/ and game.kpak, and writes and runs the game built on Nadir, which reads the cooked files or game.kpak and writes nadir.log and its crash reports. The player plays the game with keyboard and mouse, watches the demo page, and downloads releases. The demo page links to its instructions, a guide for game developers. The game opens a window and reads its events through the OS window and input APIs, draws through OpenGL 3.3 core, through EGL on Linux, and plays its sound through ALSA on Linux. Planned: OpenGL on Windows and macOS, then Metal (M2.6, M2.7, M10), audio on Windows and macOS (M6.4, M6.5), and gamepads in games (M8.4: nadir-platform reads them through evdev on Linux, but a game cannot bind them to its actions yet). GitHub Actions runs cargo xtask, deploys the demo page to GitHub Pages and publishes each tagged release to the release channels.</desc>
+          <desc id="c4-context-desc">The game developer draws sprites in Aseprite, lays out levels in LDtk, and draws images and makes fonts in image editors and font generators; each saves into assets/ on the filesystem. The developer runs Nadir's tools, nadir-cook and xtask, which read assets/ and write target/cooked/ and game.kpak, and writes and runs the game built on Nadir, which reads the cooked files or game.kpak and writes nadir.log and its crash reports. The player plays the game with keyboard, mouse, or gamepad, watches the demo page, and downloads releases. The demo page links to its instructions, a guide for game developers. The game opens a window and reads its events through the OS window and input APIs, draws through OpenGL 3.3 core, through EGL on Linux, plays its sound through ALSA on Linux, and reads gamepads through evdev on Linux. Planned: OpenGL on Windows and macOS, then Metal (M2.6, M2.7, M10), audio on Windows and macOS (M6.4, M6.5), and gamepads there, through XInput and GameController (M8.2, M8.3). GitHub Actions runs cargo xtask, deploys the demo page to GitHub Pages and publishes each tagged release to the release channels.</desc>
           <defs>
           <marker id="c4-context-arrow" class="c4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z"/></marker>
           <marker id="c4-context-arrow-planned" class="c4-arrow c4-arrow--planned" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z"/></marker>
@@ -241,7 +241,7 @@
           <path class="c4-edge" d="M446 760L535 870" marker-end="url(#c4-context-arrow)"/>
           <path class="c4-edge c4-edge--planned" d="M479 760L745 870" marker-end="url(#c4-context-arrow-planned)"/>
           <path class="c4-edge c4-edge--planned" d="M512 760L955 870" marker-end="url(#c4-context-arrow-planned)"/>
-          <path class="c4-edge c4-edge--planned" d="M545 760L1165 870" marker-end="url(#c4-context-arrow-planned)"/>
+          <path class="c4-edge" d="M545 760L1165 870" marker-end="url(#c4-context-arrow)"/>
           </g>
           <g class="c4-node c4-node--external"><path class="c4-shape" d="M20 50v740a70 10 0 0 0 140 0v-740a70 10 0 0 0 -140 0z"/><path class="c4-shape c4-shape--rim" d="M20 50a70 10 0 0 0 140 0"/><text class="c4-type" text-anchor="middle"><tspan x="90" y="382.14">FILES</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="90" y="399.04">Filesystem</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="90" y="416.7">assets/ sources,</tspan><tspan x="90" y="431.7">target/cooked/</tspan><tspan x="90" y="446.7">files and</tspan><tspan x="90" y="461.7">game.kpak, the</tspan><tspan x="90" y="476.7">game's logs and</tspan><tspan x="90" y="491.7">crash reports</tspan></text></g>
           <g class="c4-node c4-node--external"><rect class="c4-shape" x="350" y="40" width="220" height="86" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="460" y="60.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="460" y="77.54">Aseprite</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="460" y="95.2">sprite sheets: PNG and</tspan><tspan x="460" y="110.2">JSON exports</tspan></text></g>
@@ -259,7 +259,7 @@
           <g class="c4-node c4-node--external"><rect class="c4-shape" x="440" y="870" width="190" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="535" y="901.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="535" y="918.54">OS audio API</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="535" y="936.2">ALSA, through libasound,</tspan><tspan x="535" y="951.2">on Linux</tspan></text></g>
           <g class="c4-node c4-node--planned"><rect class="c4-shape" x="650" y="870" width="190" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="745" y="892.64">PLANNED</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="745" y="909.54">GPU on Windows</tspan><tspan x="745" y="927.54">and macOS</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="745" y="945.2">WGL and NSOpenGL</tspan><tspan x="745" y="960.2">contexts, then Metal</tspan></text></g>
           <g class="c4-node c4-node--planned"><rect class="c4-shape" x="860" y="870" width="190" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="955" y="900.14">PLANNED</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="955" y="917.04">Audio on Windows</tspan><tspan x="955" y="935.04">and macOS</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="955" y="952.7">WASAPI and CoreAudio</tspan></text></g>
-          <g class="c4-node c4-node--planned"><rect class="c4-shape" x="1070" y="870" width="190" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="1165" y="901.64">PLANNED</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="1165" y="918.54">Gamepad APIs</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="1165" y="936.2">evdev, read on Linux</tspan><tspan x="1165" y="951.2">but not yet by games;</tspan><tspan x="1165" y="966.2">XInput, GameController</tspan></text></g>
+          <g class="c4-node c4-node--external"><rect class="c4-shape" x="1070" y="870" width="190" height="108" rx="4"/><text class="c4-type" text-anchor="middle"><tspan x="1165" y="901.64">EXTERNAL SYSTEM</tspan></text><text class="c4-title" text-anchor="middle"><tspan x="1165" y="918.54">Gamepad APIs</tspan></text><text class="c4-desc" text-anchor="middle"><tspan x="1165" y="936.2">evdev, on Linux;</tspan><tspan x="1165" y="951.2">XInput, GameController:</tspan><tspan x="1165" y="966.2">planned</tspan></text></g>
           <g class="c4-labels">
           <g class="c4-label"><rect x="615.4" y="110.0" width="89.3" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="660" y="123.92">draws sprites</tspan></text></g>
           <g class="c4-label"><rect x="609.2" y="197.0" width="101.5" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="660" y="210.92">lays out levels</tspan></text></g>
@@ -274,7 +274,7 @@
           <g class="c4-label"><rect x="601.5" y="517.0" width="77.1" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="640" y="530.92">runs</tspan><tspan x="640" y="544.92">cargo xtask</tspan></text></g>
           <g class="c4-label"><rect x="961.5" y="526.0" width="77.1" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1000" y="539.92">deploys the</tspan><tspan x="1000" y="553.92">demo page</tspan></text></g>
           <g class="c4-label"><rect x="995.7" y="456.0" width="168.6" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1080" y="469.92">publishes a tagged release</tspan></text></g>
-          <g class="c4-label"><rect x="605.0" y="714.0" width="125.9" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="668" y="727.92">plays with keyboard</tspan><tspan x="668" y="741.92">and mouse</tspan></text></g>
+          <g class="c4-label"><rect x="605.0" y="714.0" width="125.9" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="668" y="727.92">plays with keyboard,</tspan><tspan x="668" y="741.92">mouse, or gamepad</tspan></text></g>
           <g class="c4-label"><rect x="959.1" y="598.0" width="113.7" height="48.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1016" y="611.92">watches the demo,</tspan><tspan x="1016" y="625.92">downloads the</tspan><tspan x="1016" y="639.92">Linux build</tspan></text></g>
           <g class="c4-label"><rect x="987.5" y="681.0" width="64.9" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="1020" y="694.92">downloads</tspan><tspan x="1020" y="708.92">a release</tspan></text></g>
           <g class="c4-label"><rect x="143.2" y="819.0" width="107.6" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="197" y="832.92">opens a window,</tspan><tspan x="197" y="846.92">reads its events</tspan></text></g>
@@ -282,7 +282,7 @@
           <g class="c4-label"><rect x="465.4" y="819.0" width="83.2" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="507" y="832.92">plays sound</tspan><tspan x="507" y="846.92">through ALSA</tspan></text></g>
           <g class="c4-label c4-label--planned"><rect x="615.3" y="819.0" width="95.4" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="663" y="832.92">planned: M2.6,</tspan><tspan x="663" y="846.92">M2.7, M10</tspan></text></g>
           <g class="c4-label c4-label--planned"><rect x="770.3" y="819.0" width="95.4" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="818" y="832.92">planned: M6.4,</tspan><tspan x="818" y="846.92">M6.5</tspan></text></g>
-          <g class="c4-label c4-label--planned"><rect x="930.5" y="826.0" width="85.1" height="20.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="973" y="839.92">planned: M8.4</tspan></text></g>
+          <g class="c4-label"><rect x="925.3" y="819.0" width="95.4" height="34.0" rx="3"/><text class="c4-label" text-anchor="middle"><tspan x="973" y="832.92">reads gamepads</tspan><tspan x="973" y="846.92">through evdev</tspan></text></g>
           </g></svg>
         </div>
         <p class="nadir-c4__hint">Scroll sideways to see all of it.</p>
@@ -302,7 +302,7 @@
             <li>GitHub Actions &rarr; Nadir's tools: runs cargo xtask</li>
             <li>GitHub Actions &rarr; GitHub Pages: deploys the demo page</li>
             <li>GitHub Actions &rarr; Release channels: publishes a tagged release</li>
-            <li>Player &rarr; Game built on Nadir: plays with keyboard and mouse</li>
+            <li>Player &rarr; Game built on Nadir: plays with keyboard, mouse, or gamepad</li>
             <li>Player &rarr; GitHub Pages: watches the demo, downloads the Linux build</li>
             <li>Player &rarr; Release channels: downloads a release</li>
             <li>Game built on Nadir &rarr; OS window and input APIs: opens a window, reads its events</li>
@@ -310,7 +310,7 @@
             <li>Game built on Nadir &rarr; GPU on Windows and macOS: planned: M2.6, M2.7, M10</li>
             <li>Game built on Nadir &rarr; OS audio API: plays sound through ALSA</li>
             <li>Game built on Nadir &rarr; Audio on Windows and macOS: planned: M6.4, M6.5</li>
-            <li>Game built on Nadir &rarr; Gamepad APIs: planned: M8.4, pads bound to actions</li>
+            <li>Game built on Nadir &rarr; Gamepad APIs: reads gamepads through evdev on Linux; XInput and GameController planned (M8.2, M8.3)</li>
           </ul>
         </details>
       </figure>

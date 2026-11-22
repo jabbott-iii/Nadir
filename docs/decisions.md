@@ -6899,3 +6899,134 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** the API reaches 1.0 and the guide needs a version per
   release; a second guide page is wanted; or jabbott.dev renames its
   article classes.
+
+## ADR-0073 — M8.4: pads bound to actions through the input crate's change log; any pad drives the bindings; radial deadzones on `Input`, and a press and a release point for a half of an axis bound to a button; pads held back while the window lacks the focus; the active device live, not latched; replays unchanged; prompts and pad families moved to M8.5
+
+- **Status:** Accepted: the user chose, on 2026-11-21, to split prompts and
+  pad families off into a new task, M8.5, and the design of the M8.4 they
+  saw with that choice (pad bindings, deadzones of 0.2 and 0.95 and 0.1, a
+  press point of 0.5 and a release point of 0.4, any pad driving the
+  bindings, pads held at rest in the background, the active device from
+  presses and motion but not the pointer, no replay format change).
+  Proposed, for review: the details below that the choice did not show
+  (the codes, the value rules, the errors, the prelude).
+- **Date:** 2026-11-21
+- **Context:**
+  - M8.4 asked for pad bindings, deadzones, the active device and a table
+    of button prompts in `assets/data/`. A prompt table needs to know
+    which family a pad is of (Xbox, PlayStation, Nintendo), which only
+    the platform can tell, and a loader that can read the data file, which
+    `nadir-input` (core and platform only) cannot. With them the task
+    spread over five crates: input, the facade, the sandbox, the platform
+    and the facade's data loading. `CLAUDE.md` calls a task over three
+    probably mis-scoped.
+  - M8.1 (ADR-0065) left these to the input layer: the deadzones, whether
+    a game hears pads in the background, and the facade's call of
+    `Platform::poll_gamepads`.
+  - Latching (M3.1) works on a log of presses and releases of codes, so
+    that a tap between two ticks is not lost, text mode and captures hide
+    what is held, and replays are bit-identical. Analog input has no
+    presses of its own.
+  - Replays, format version 1, store a `Button`'s held and edges but not
+    its value (1 while held), and an `i16` per `Axis1` and two per `Axis2`
+    (ADR-0025). The determinism test's fixtures compare a live recording
+    with `replay.nrpl` byte for byte.
+  - M8.1's check with a wired Xbox pad found its left stick stopping at
+    -0.97 up and -0.99 left.
+- **Decision:**
+  - **Scope:** M8.4 is `nadir-input`, the facade's polling and the
+    sandbox. A new task, M8.5, takes the pad families
+    (`GamepadState`'s, from the platform), the prompt table in
+    `assets/data/` and its loading, and Steam's list of pads to skip,
+    which needs the same vendor and product ids. M9.2's menus depend on
+    M8.5.
+  - **Bindings:** `Binding::PadButton(GamepadButton)`, for a `Button` or an
+    `Axis1` held at 1; `Binding::PadAxis { axis, sign }`, half of an axis,
+    for a `Button` or an `Axis1`, a trigger's negative half refused
+    (`BindErrorKind::NoNegativeHalf`); `Binding::PadStick(Stick)`, for an
+    `Axis2`. Each reads every connected pad as one: a button is down while
+    any pad holds it, a half of an axis is the largest any pad gives, and
+    a stick is the longest. The game is single-player (overview), so a pad
+    of its own per player is left for when one is not.
+  - **Codes:** a pad's button, each half of an axis past the press point,
+    each half past its deadzone, and each stick out of its deadzone are
+    codes in the log, from `0x140`, down while any pad has them down. So
+    taps, several bindings of one action, text mode and the 1024-change
+    bound work for pads as for keys, and a `ui_allowed` action hears Start
+    in text mode. A stick's half is its direction's x or y after the
+    radial deadzone, so a stick pushed up does not also press left.
+  - **Deadzones** (`Deadzones`, on `Input`, `set_deadzones`): a stick's is
+    radial, inner 0.2 and outer 0.95, the length between rescaled to 0..1;
+    a trigger counts from 0.1, rescaled; a half of an axis bound to a
+    `Button` presses at 0.5 and lets go below 0.4. `set_deadzones` refuses
+    a set out of order or range with `InputError::Deadzones`, and
+    re-reads every stick and trigger at once. The settings file (M9.3)
+    will set them per player.
+  - **Values:** a `Button` is 1 while held, as before. An `Axis1` is 1
+    when a key or button holds it, down or tapped, and otherwise the
+    largest of its halves of axes at the latch. An `Axis2` adds its
+    sticks at the latch to its composites, no longer than 1. A stick or
+    trigger moved and let go between two ticks is held for that tick, with
+    a value of 0: its value is the one at the latch. `Axis1` values are
+    rounded toward zero to the stored steps (`quantize1`), as directions
+    are.
+  - **The focus:** the platform reads pads in the background. On
+    `Focused(false)`, the input releases the keys and the mouse as before,
+    and holds the pads back from every action: what they hold then, and
+    what is pressed while the window lacks the focus, stays hidden until
+    let go, so getting the focus back presses nothing. This is SDL's
+    default.
+  - **The active device** (`Input::active_device`, `Device`): the keyboard
+    and mouse after a key's or mouse button's press or a turn of the wheel,
+    not after a pointer move; a pad after its button's press or its stick
+    or trigger past its deadzone, while the window has the focus; the
+    keyboard and mouse again when that pad disconnects. It is live, not
+    latched, and replays do not hold it.
+  - **Replays:** unchanged, at version 1. A pad's analog values reach them
+    only through `Axis1` and `Axis2`, which version 1 stores; a `Button`
+    stays 0 or 1. The determinism fixtures do not change.
+  - **The facade:** its event source's `poll_gamepads`, after
+    `pump_events`, once a frame; the prelude gains `GamepadButton`,
+    `GamepadAxis`, `Stick` and `AxisSign`.
+  - **API breaks:** `Binding` gains three variants, `BindErrorKind` one and
+    `InputError` one; none of the three is `#[non_exhaustive]`, so a match
+    on them stops compiling (M3.1's note: the point).
+- **Consequences:**
+  - A game binds a pad as it binds keys, and the sandbox walks with the
+    left stick. Checked by hand on Linux on 2026-11-21 with a wired Xbox
+    pad: a recording of 10,396 ticks, 742 of them moving at less than
+    full length (as little as 0.013), replayed headless to the same world
+    hash.
+  - Pads on Windows and macOS need only M8.2 and M8.3: the input layer
+    reads the platform's events, whatever system they come from.
+  - Within a frame, the window's events come before the pads': a key and a
+    pad's button pressed in one frame keep each device's own order, not
+    the order between them.
+  - A game cannot yet show "A" or "✕" by family (M8.5), nor tell one
+    player's pad from another's.
+  - Codes take a sixth word in `CodeSet`, a few bytes more in each
+    `Devices` copy that latching makes per action.
+- **Alternatives considered:**
+  - All of M8.4 at once: five crates in one change, against `CLAUDE.md`'s
+    rule; the user chose the split.
+  - Analog values sampled at the latch only, with no codes: a tap between
+    ticks would be lost, and text mode, captures and the focus would need
+    rules of their own for pads.
+  - One threshold for a half of an axis bound to a button, its deadzone:
+    a stick pushed up, a little to the side, would press left too, and a
+    value at the threshold would flicker. A press point of 0.5 and a
+    release point below it is Unity's default.
+  - Analog values for a `Button`: replay format version 2 and a reader for
+    version 1, and the determinism fixtures blessed again (M8.4's note from
+    M4.7); an `Axis1` gives the same value without them.
+  - Hearing pads in the background: a game in the background would react
+    to a pad used for another program.
+  - The pointer's moves switching to the keyboard and mouse: a nudge of
+    the mouse on the desk would flip the prompts while the player holds a
+    pad.
+  - A trigger's negative half bound and never moving: a binding that can
+    never fire is a mistake to report, not to keep.
+- **Revisit when:** a game has two players at once (a pad of its own per
+  player); a pad's half of an axis needs another press point than every
+  other's; a game must hear pads in the background; or a game needs an
+  analog value from a `Button` action.

@@ -17,14 +17,48 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use nadir_core::{Key, MouseButton};
+use nadir_core::{GamepadAxis, GamepadButton, Key, MouseButton};
 
 use crate::code::{Code, Inputs};
 use crate::{ActionKind, ActionSet, BindErrorKind, InputError, action};
 
+/// One of a gamepad's two sticks, for [`Binding::PadStick`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Stick {
+    /// The left stick: [`GamepadAxis::LeftX`] and [`GamepadAxis::LeftY`].
+    Left,
+    /// The right stick: [`GamepadAxis::RightX`] and [`GamepadAxis::RightY`].
+    Right,
+}
+
+impl Stick {
+    /// Both sticks, in order.
+    pub const ALL: &'static [Stick] = &[Stick::Left, Stick::Right];
+
+    /// The stick's axes: its x, then its y.
+    pub const fn axes(self) -> [GamepadAxis; 2] {
+        match self {
+            Stick::Left => [GamepadAxis::LeftX, GamepadAxis::LeftY],
+            Stick::Right => [GamepadAxis::RightX, GamepadAxis::RightY],
+        }
+    }
+}
+
+/// Which half of a gamepad's axis a [`Binding::PadAxis`] reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AxisSign {
+    /// Toward -1: a stick pushed left or up.
+    Negative,
+    /// Toward 1: a stick pushed right or down, or a trigger pulled.
+    Positive,
+}
+
 /// A key or button, or a group of them, that drives an action.
 ///
-/// Gamepad bindings come with gamepad support (roadmap M8.4).
+/// The gamepad bindings read every pad that is connected, as one: a button
+/// is down while it is down on any pad.
+/// [`Input::set_deadzones`](crate::Input::set_deadzones) sets where a pad's
+/// sticks and triggers start to count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Binding {
     /// A key, for an [`ActionKind::Button`], or for an
@@ -44,10 +78,36 @@ pub enum Binding {
         /// The key for right, which is +X.
         right: Key,
     },
+    /// A gamepad's button, as for [`Binding::Key`].
+    PadButton(GamepadButton),
+    /// One half of a gamepad's axis: a stick pushed one way, or a trigger
+    /// pulled. A trigger has only its positive half.
+    ///
+    /// - For an [`ActionKind::Button`], it presses once its value reaches
+    ///   the deadzones' press point, and lets go once it falls below their
+    ///   release point, a little lower, so that a value that hovers at the
+    ///   press point does not press and release over and over.
+    /// - For an [`ActionKind::Axis1`], its value counts past the deadzone,
+    ///   rescaled to go from 0 to 1.
+    ///
+    /// A stick's half is its direction's x or y, after the stick's radial
+    /// deadzone, so pushing a stick up does not also move it left.
+    PadAxis {
+        /// The axis.
+        axis: GamepadAxis,
+        /// Which half of it.
+        sign: AxisSign,
+    },
+    /// A gamepad's stick, for an [`ActionKind::Axis2`]: its direction past
+    /// the radial deadzone, rescaled so that it goes from length 0 to 1.
+    /// +Y is down, as it is for the pad's axes.
+    PadStick(Stick),
 }
 
 impl Binding {
-    /// The inputs the binding reads. For a composite: up, down, left, right.
+    /// The inputs the binding reads, for finding conflicts: what a player
+    /// would call the same key or button. For a composite: up, down, left,
+    /// right; a stick reads each half of its axes, as buttons.
     pub(crate) fn inputs(&self) -> Inputs {
         match *self {
             Self::Key(key) => Inputs::one(Code::key(key)),
@@ -58,14 +118,39 @@ impl Binding {
                 left,
                 right,
             } => Inputs::four([up, down, left, right].map(Code::key)),
+            Self::PadButton(button) => Inputs::one(Code::pad_button(button)),
+            Self::PadAxis { axis, sign } => Inputs::one(Code::pad_press(axis, sign)),
+            Self::PadStick(stick) => {
+                let [x, y] = stick.axes();
+                Inputs::four([
+                    Code::pad_press(y, AxisSign::Negative),
+                    Code::pad_press(y, AxisSign::Positive),
+                    Code::pad_press(x, AxisSign::Negative),
+                    Code::pad_press(x, AxisSign::Positive),
+                ])
+            }
+        }
+    }
+
+    /// The inputs whose going down and up make an action of this kind go
+    /// down and up, when the binding drives it.
+    pub(crate) fn latch_inputs(&self, kind: ActionKind) -> Inputs {
+        match *self {
+            Self::PadAxis { axis, sign } if kind == ActionKind::Axis1 => {
+                Inputs::one(Code::pad_active(axis, sign))
+            }
+            Self::PadStick(stick) => Inputs::one(Code::stick(stick)),
+            _ => self.inputs(),
         }
     }
 
     /// Whether the binding can drive an action of this kind.
     fn fits(&self, kind: ActionKind) -> bool {
         match self {
-            Self::Key(_) | Self::MouseButton(_) => kind != ActionKind::Axis2,
-            Self::KeyComposite2 { .. } => kind == ActionKind::Axis2,
+            Self::Key(_) | Self::MouseButton(_) | Self::PadButton(_) | Self::PadAxis { .. } => {
+                kind != ActionKind::Axis2
+            }
+            Self::KeyComposite2 { .. } | Self::PadStick(_) => kind == ActionKind::Axis2,
         }
     }
 
@@ -85,10 +170,13 @@ pub const SLOTS: usize = 4;
 
 /// The bindings of every action of the set `A`.
 ///
-/// An action is held while any of its bound keys and buttons is down. A
-/// [`ActionKind::Button`] or [`ActionKind::Axis1`] is worth 1 while held,
-/// and an [`ActionKind::Axis2`] is the sum of its composites' directions,
-/// no longer than 1. [`Input::latch`](crate::Input::latch) has the details.
+/// An action is held while any of its bound keys and buttons is down, or a
+/// bound stick or trigger is past its deadzone (past its press point, for
+/// an [`ActionKind::Button`]). A [`ActionKind::Button`] is worth 1 while
+/// held. An [`ActionKind::Axis1`] is worth 1 while a key or button holds
+/// it, and otherwise what its halves of axes give. An [`ActionKind::Axis2`]
+/// is the sum of its composites' and sticks' directions, no longer than 1.
+/// [`Input::latch`](crate::Input::latch) has the details.
 pub struct ActionMap<A> {
     bindings: Vec<[Option<Binding>; SLOTS]>,
     set: PhantomData<A>,
@@ -120,7 +208,8 @@ impl<A: ActionSet> ActionMap<A> {
     /// # Errors
     ///
     /// Fails with [`InputError::Bind`], and changes nothing, if the slot
-    /// does not exist or the binding cannot drive an action of that kind.
+    /// does not exist, the binding cannot drive an action of that kind, or
+    /// it is the negative half of a trigger, which never moves.
     pub fn bind(
         &mut self,
         action: A,
@@ -142,6 +231,14 @@ impl<A: ActionSet> ActionMap<A> {
                 binding,
                 kind: action.kind(),
             });
+        }
+        if let Binding::PadAxis {
+            axis,
+            sign: AxisSign::Negative,
+        } = binding
+            && axis.is_trigger()
+        {
+            return fail(BindErrorKind::NoNegativeHalf { axis });
         }
         Ok(self.bindings[action.index()][slot].replace(binding))
     }
@@ -336,6 +433,96 @@ mod tests {
         assert_eq!(map.conflict(Act::Jump, 0, &Binding::Key(Key::K)), None);
         assert_eq!(
             map.conflict(Act::Jump, 2, &Binding::MouseButton(MouseButton::Right)),
+            None
+        );
+    }
+
+    #[test]
+    fn pad_bindings_fit_their_kinds() {
+        let mut map = map();
+        let stick = Binding::PadStick(Stick::Left);
+        let up = Binding::PadAxis {
+            axis: GamepadAxis::LeftY,
+            sign: AxisSign::Negative,
+        };
+        let trigger = Binding::PadAxis {
+            axis: GamepadAxis::RightTrigger,
+            sign: AxisSign::Positive,
+        };
+        assert_eq!(map.bind(Act::Move, 1, stick), Ok(None));
+        assert_eq!(
+            map.bind(Act::Jump, 2, Binding::PadButton(GamepadButton::A)),
+            Ok(None)
+        );
+        assert_eq!(map.bind(Act::Jump, 3, up), Ok(None));
+        assert_eq!(map.bind(Act::Throttle, 0, trigger), Ok(None));
+        let refused = |binding, action, slot, kind| {
+            Err(InputError::Bind {
+                action,
+                slot,
+                kind: BindErrorKind::WrongKind { binding, kind },
+            })
+        };
+        assert_eq!(
+            map.bind(Act::Pause, 2, stick),
+            refused(stick, "pause", 2, ActionKind::Button)
+        );
+        assert_eq!(
+            map.bind(Act::Move, 2, up),
+            refused(up, "move", 2, ActionKind::Axis2)
+        );
+        assert_eq!(
+            map.bind(
+                Act::Throttle,
+                1,
+                Binding::PadAxis {
+                    axis: GamepadAxis::LeftTrigger,
+                    sign: AxisSign::Negative,
+                }
+            ),
+            Err(InputError::Bind {
+                action: "throttle",
+                slot: 1,
+                kind: BindErrorKind::NoNegativeHalf {
+                    axis: GamepadAxis::LeftTrigger
+                },
+            })
+        );
+        assert_eq!(map.bindings(Act::Throttle)[1], None, "nothing changed");
+    }
+
+    #[test]
+    fn a_stick_conflicts_with_the_halves_of_its_axes() {
+        let mut map = map();
+        map.bind(Act::Move, 1, Binding::PadStick(Stick::Left))
+            .expect("fits");
+        map.bind(Act::Jump, 2, Binding::PadButton(GamepadButton::A))
+            .expect("fits");
+        let half = |axis, sign| Binding::PadAxis { axis, sign };
+        assert_eq!(
+            map.conflict(Act::Pause, 1, &half(GamepadAxis::LeftX, AxisSign::Positive)),
+            Some((Act::Move, 1))
+        );
+        assert_eq!(
+            map.conflict(
+                Act::Pause,
+                1,
+                &half(GamepadAxis::RightX, AxisSign::Positive)
+            ),
+            None
+        );
+        assert_eq!(
+            map.conflict(Act::Pause, 1, &Binding::PadButton(GamepadButton::A)),
+            Some((Act::Jump, 2))
+        );
+        assert_eq!(
+            map.conflict(Act::Pause, 1, &Binding::PadButton(GamepadButton::B)),
+            None
+        );
+        // A pad's button shares nothing with a key, nor a stick with WASD.
+        assert_eq!(map.conflict(Act::Pause, 1, &Binding::Key(Key::B)), None);
+        assert_eq!(
+            map.conflict(Act::Move, 2, &Binding::PadStick(Stick::Right)),
             None
         );
     }

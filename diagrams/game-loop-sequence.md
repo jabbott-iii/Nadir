@@ -199,6 +199,8 @@ sequenceDiagram
             Core->>Upd: a frame: no events, not drawn
         end
         Plat-->>RL: events
+        RL->>Plat: poll_gamepads(events), no wait
+        Plat-->>RL: the pads' events, after the window's
         break the events hold CloseRequested
             RL->>RL: leave the loop (section 9)
         end
@@ -709,8 +711,8 @@ second.
 
 Not built yet:
 
-- Gamepads in games (M8.4: nadir-platform reads them on Linux, M8.1, but
-  nothing in the loop polls them yet).
+- Gamepads on Windows and macOS (M8.2, M8.3): there `poll_gamepads`
+  appends nothing.
 - Drawing on Windows and macOS (M2.6, M2.7), and the Metal backend (M10).
   There the loop runs as section 3 shows, with no `Graphics`.
 - Sound on Windows and macOS (M6.4, M6.5): there `open_audio` fails, and

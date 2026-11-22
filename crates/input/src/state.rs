@@ -155,6 +155,13 @@ fn to_f32(value: i16) -> f32 {
     f32::from(value) / f32::from(ONE)
 }
 
+/// Rounds a value from 0 to 1 to the steps it is stored in, toward zero.
+/// A value out of range is clamped, and one that is not a number is 0.
+pub(crate) fn quantize1(value: f32) -> i16 {
+    // `as` rounds toward zero, and turns not a number into 0.
+    ((value.clamp(0.0, 1.0) * f32::from(ONE)) as i16).clamp(0, ONE)
+}
+
 /// Rounds a direction no longer than 1 (give or take rounding) to the steps
 /// it is stored in, so that the stored one is no longer than 1.
 pub(crate) fn quantize2(direction: Vec2) -> [i16; 2] {
@@ -243,6 +250,17 @@ mod tests {
         assert_eq!(quantize2(diagonal), [23169, -23169]);
         assert_eq!(quantize2(Vec2::new(0.0, 1.0)), [0, ONE]);
         assert_eq!(quantize2(Vec2::new(f32::NAN, -2.0)), [0, -ONE]);
+    }
+
+    #[test]
+    fn values_round_toward_zero_and_stay_in_0_to_1() {
+        assert_eq!(quantize1(0.0), 0);
+        assert_eq!(quantize1(1.0), ONE);
+        // 32767 / 2 = 16383.5.
+        assert_eq!(quantize1(0.5), 16383);
+        assert_eq!(quantize1(1.5), ONE);
+        assert_eq!(quantize1(-0.25), 0);
+        assert_eq!(quantize1(f32::NAN), 0);
     }
 
     #[test]

@@ -17,8 +17,8 @@
 //! A person walks a field, the LDtk level `assets/levels/field.ldtk`,
 //! cooked to `levels/field.klvl` with its prefabs, which the game loads
 //! (`App::load_level`): grass, paths, flowers and rippling water, walled in
-//! stone, with tall walls, trees and rocks to walk behind and in front of. They are moved with WASD
-//! or the arrow keys, walk in a cycle of four frames facing the way they
+//! stone, with tall walls, trees and rocks to walk behind and in front of. They are moved with WASD,
+//! the arrow keys or a gamepad's left stick, walk in a cycle of four frames facing the way they
 //! go, collide with the walls, the water, the trees and the rocks, and the
 //! camera follows them. Their steps sound where their feet come down, the
 //! pond's water laps, and the music crossfades from the north's tune to
@@ -298,7 +298,7 @@ impl Scene {
 /// What the player does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Act {
-    /// Walk: WASD or the arrow keys.
+    /// Walk: WASD, the arrow keys or a gamepad's left stick.
     Move,
 }
 
@@ -521,6 +521,7 @@ fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
         1,
         keys(Key::Up, Key::Down, Key::Left, Key::Right),
     )?;
+    map.bind(Act::Move, 2, Binding::PadStick(Stick::Left))?;
 
     let app = app
         .add_actions(map)

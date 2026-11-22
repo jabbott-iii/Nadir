@@ -20,8 +20,12 @@ Built today:
 
 - actions that are buttons, axes from 0 to 1, or directions, named by the
   game's own enum;
-- bindings of keys, mouse buttons and four-key composites such as WASD, four
-  slots per action, with a check for conflicts when the player rebinds;
+- bindings of keys, mouse buttons and four-key composites such as WASD, and
+  of a gamepad's buttons, sticks, halves of a stick and triggers, four slots
+  per action, with a check for conflicts when the player rebinds;
+- deadzones for the sticks and triggers, and the device the player used
+  last, for a game's prompts; the pads are held back while the window is in
+  the background;
 - latching once a tick that keeps every change between two ticks, so that
   a tap between them is not lost;
 - text mode, in which only the actions allowed in the UI stay live;
@@ -31,8 +35,8 @@ Built today:
   mouse, in order, a frame at a time;
 - replays of the actions' state, tick by tick, read strictly.
 
-Not yet: gamepads, deadzones and the active device come with roadmap task
-M8.4, the rebinding capture flow with M9.2, and bindings in the settings
+Not yet: button prompts for each family of pad come with roadmap task
+M8.5, the rebinding capture flow with M9.2, and bindings in the settings
 file with M9.3.
 
 ## Usage

@@ -18,11 +18,12 @@ Version 0.4: the API will change before 1.0.
 
 Built:
 
-- a window, with keyboard and mouse input, on Linux (X11);
+- a window, with keyboard, mouse and gamepad input, on Linux (X11);
 - a fixed 60 Hz simulation, which drawing interpolates between ticks;
 - an ECS of entities, components, resources and events, with systems in
   stages;
-- input actions, with bindings, latched once a tick, and replays of them;
+- input actions, with bindings of keys, mouse buttons and gamepads (their
+  sticks with deadzones), latched once a tick, and replays of them;
 - an OpenGL 3.3 renderer: y-sorted sprite batches, tile layers with
   animated tiles, bitmap text in the world, and a pixel-perfect camera;
 - kinematic collision: boxes and circles, a grid of solid tiles,
@@ -74,7 +75,8 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
-- gamepads (M8);
+- gamepads on Windows and macOS (roadmap tasks M8.2 and M8.3), and button
+  prompts for each family of pad (M8.5);
 - settings (M9.3), and saving a game from `App` (M9.7; nadir-scene has
   saves since M9.4);
 - the Metal backend for macOS (M10).
@@ -452,6 +454,17 @@ two ticks is still seen. Read edges such as `just_pressed` in tick systems:
 a frame system sees only the last tick's. The resource `Input` also holds
 the pointer and the wheel.
 
+A gamepad binds the same way: `Binding::PadButton(GamepadButton::A)`, a
+stick for a direction (`Binding::PadStick(Stick::Left)`), or half of a
+stick's axis or a trigger (`Binding::PadAxis { axis, sign }`) for a button
+or a value from 0 to 1. Every connected pad drives the bindings. The
+sticks' and triggers' deadzones (the part of their travel that reads as 0)
+are on `Input`, with `set_deadzones`, and `Input::active_device` says
+whether the keyboard and mouse or a pad was used last, for the game's
+prompts. While the window is in the background, the pads are held at rest.
+Pads work on Linux; Windows and macOS have none yet (roadmap tasks M8.2 and
+M8.3).
+
 ### Sprites and the camera
 
 An entity with a `Transform` and a `Sprite` is drawn. Its position is the
@@ -740,7 +753,7 @@ cargo run --features dev
   M2.6 and M2.7). `App::run` logs the error and runs the game without
   drawing, and so without reloading; `App::offscreen` returns the error.
   Nor is there audio output yet (M6.4 and M6.5): `App::run` logs that, and
-  the game is silent.
+  the game is silent. Gamepads are not read there yet (M8.2 and M8.3).
 - Call `App::run` on the main thread: macOS opens windows only there.
 
 ## The sandbox

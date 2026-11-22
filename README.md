@@ -19,7 +19,9 @@ of the [roadmap](https://github.com/jabbott-iii/Nadir/blob/main/docs/roadmap.md)
 at a time, alongside the game in `games/sandbox`, which pulls each feature in.
 
 - **On Linux (X11),** these work:
-  - a window, with keyboard and mouse input;
+  - a window, with keyboard and mouse input, and gamepads, bound to a
+    game's actions as keys are, with deadzones for their sticks and
+    triggers;
   - a fixed 60 Hz simulation, which rendering interpolates between ticks;
   - an OpenGL 3.3 renderer, with:
     - y-sorted, instanced sprite batches;
@@ -55,9 +57,9 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   The cook turns WAVs into the game's sound files and QOA, resampled to
   48 kHz, which the asset server loads. Windows and macOS have no audio
   output yet (roadmap M6.4, M6.5), so there the game is silent.
-- **Not built yet:** gamepads in games (nadir-platform reads them on
-  Linux, roadmap task M8.1, but binding them to a game's actions is M8.4),
-  a settings file (M9.3), menus (M9.2), and the Metal backend (M10).
+- **Not built yet:** gamepads on Windows and macOS (roadmap tasks M8.2 and
+  M8.3), button prompts for each family of pad (M8.5), a settings file
+  (M9.3), menus (M9.2), and the Metal backend (M10).
 
 ## Build and run
 
@@ -81,7 +83,8 @@ cargo run -p sandbox
 `cargo xtask cook` cooks `assets/` into `target/cooked/`, which the sandbox
 draws from. Run it again after you change the assets.
 
-In the sandbox, WASD or the arrow keys walk. On Linux you hear your steps,
+In the sandbox, WASD, the arrow keys, or a gamepad's left stick walk (a
+pad works on Linux only, for now). On Linux you hear your steps,
 a pond, and the music change as you walk from the north of the field into
 its south. Close the window to quit.
 

@@ -6,15 +6,17 @@ reads keys or buttons directly.
 Built so far: keyboard and mouse bindings, latching, text mode, rebind
 conflict detection, and replays (M3.1); a UI's events, typed text
 (`Event::Text`) among them, and capture of the keyboard or the mouse
-(M7.9, ADR-0057). Gamepads, deadzones and the active device come with
-M8.4, and the rebind capture flow with M9.2.
+(M7.9, ADR-0057); gamepad bindings, deadzones, the pads held back in the
+background, and the active device (M8.4, ADR-0073). Button prompts for each
+family of pad come with M8.5, and the rebind capture flow with M9.2.
 
 ## Layers
 
 1. **Device state.** Fed by `platform::Event` through `Input::handle`:
    - keyboard: a `Key` → down set
    - mouse: position, buttons, wheel accumulator
-   - gamepads (M8): buttons and raw axes per `GamepadId`
+   - gamepads: buttons and raw axes per `GamepadId`, merged into codes
+     that are down while any pad has them down (below)
 2. **Edge accumulation.** Between ticks, every change to a key or button is
    kept in order.
 3. **Latch per fixed tick.** `Input::latch(&map, &mut state)` produces the
@@ -64,7 +66,11 @@ counts per button lose their order:
 
 Focus loss resets every track (`down = false`), using the platform's
 synthetic releases. `Input` also releases anything still down on
-`Focused(false)`.
+`Focused(false)`. The pads, which the platform reads in the background
+too, are held back from every action instead, until `Focused(true)`: what
+they hold then, and what is pressed in the background, stays hidden until
+it is let go, so getting the focus back presses nothing (SDL's default;
+ADR-0073).
 
 ## Actions
 
@@ -93,10 +99,9 @@ pub enum Binding {
     Key(Key),
     MouseButton(MouseButton),
     KeyComposite2 { up: Key, down: Key, left: Key, right: Key },   // WASD -> Axis2, normalized
-    // From M8.4:
-    // PadButton(GamepadButton),
-    // PadAxis { axis: GamepadAxis, sign: AxisSign },   // half-axis as button / Axis1
-    // PadStick { stick: Stick },                       // Axis2 with radial deadzone
+    PadButton(GamepadButton),                         // as a key
+    PadAxis { axis: GamepadAxis, sign: AxisSign },    // half an axis: a Button or an Axis1
+    PadStick(Stick),                                  // Axis2, with a radial deadzone
 }
 
 pub struct ActionState<A> { /* per action: held, just_pressed, just_released, value */ }
@@ -116,15 +121,26 @@ impl<A: ActionSet> ActionState<A> {
     code. A default table in a file, which a crate that can read JSON
     would load (`input` depends on `core` and `platform` only), comes with
     the settings file (roadmap task M9.3), which is not built yet.
-- **Bindings and kinds:** a key or mouse button drives a `Button` or an
-  `Axis1`, which it holds at 1. A composite drives an `Axis2`. Anything else
-  is refused.
+- **Bindings and kinds:** a key, mouse button or pad button drives a
+  `Button` or an `Axis1`, which it holds at 1. A half of a pad's axis drives
+  a `Button` or an `Axis1` too. A composite or a pad's stick drives an
+  `Axis2`. Anything else is refused, and so is a trigger's negative half,
+  which never moves (`BindErrorKind::NoNegativeHalf`).
+- **Every pad as one:** the game is single-player, so a pad binding reads
+  every connected pad. A button is down while any pad holds it, a half of
+  an axis is the largest any pad gives, and a stick is the one pushed
+  furthest.
 - **Slots:** each action has four slots, so that the columns of a controls
   menu keep their places.
 - **Values:**
-  - A `Button` or `Axis1` driven by keys is 1 while held.
-  - An `Axis2` is the sum of its composites' directions, scaled down to
-    length 1 if it is longer. +Y is down.
+  - A `Button` is 1 while held, whatever drives it. An `Axis1` is 1 while a
+    key or button holds it, down or tapped; otherwise it is the largest of
+    its halves of axes at the latch, after their deadzones.
+  - An `Axis2` is the sum of its composites' directions and its sticks'
+    directions at the latch, scaled down to length 1 if it is longer. +Y is
+    down, for the pad's axes too.
+  - A stick or trigger moved and let go between two ticks is held for that
+    tick, with a value of 0: its value is the one at the latch.
   - In a composite, a key counts while it is down, or for the tick in
     which it was tapped. So an `Axis2` can have a direction in a tick in
     which it is just released and not held: W held, then D tapped while W
@@ -132,17 +148,38 @@ impl<A: ActionSet> ActionState<A> {
   - Values are stored as `i16` steps of 1/32767, rounded toward zero. A
     direction is shortened by a step if rounding left it longer than 1.
     Replays store the same steps, so a replayed state equals the live one.
-- **Gamepad deadzones** (M8.4):
-  - Sticks: radial inner deadzone 0.2 and outer 0.95, rescaled to 0..1.
-  - Triggers: a 0.1 threshold.
-  - All are configurable per player in settings.
-- **Active device** (M8.4): whichever device last produced meaningful input
-  (keyboard/mouse or a specific gamepad). It drives UI prompts, e.g.
-  showing "A" versus "Space".
+- **Gamepad deadzones** (`Deadzones`, on `Input`; ADR-0073): a deadzone is
+  the part of a stick's or trigger's travel that reads as 0, so that a stick
+  at rest, rarely at exactly 0, does not move anything.
+  - Sticks: radial (judged by the distance from the center, so a diagonal
+    is cut no more than a straight push), inner 0.2 and outer 0.95, the
+    length between rescaled to 0..1. The outer edge is there because real
+    sticks stop short: M8.1's wired Xbox pad reached -0.97 up.
+  - Triggers: 0 up to 0.1, then rescaled to 0..1.
+  - A half of an axis's value is its stick's direction's x or y after the
+    radial deadzone, or the trigger's value.
+  - Bound to a `Button`, a half of an axis presses at 0.5 and lets go below
+    0.4, so that a value that hovers at the press point does not flicker.
+  - `Input::set_deadzones` sets them, and refuses a set out of order or
+    range (`InputError::Deadzones`). The settings file (M9.3) will set them
+    per player.
+- **The pads' codes:** latching works on presses and releases, so a pad's
+  button, each half of an axis past the press point, each half past its
+  deadzone, and each stick out of its deadzone are codes in the change log,
+  down while any pad has them down. A tap between two ticks, several
+  bindings of one action, text mode and the bound on changes work for pads
+  as they do for keys.
+- **Active device** (`Input::active_device`, `Device`): the keyboard and
+  mouse after a key's or mouse button's press or a turn of the wheel, but
+  not after a pointer move, so a nudge of the mouse does not flip the
+  prompts; a pad after its button's press or its stick or trigger moved
+  past its deadzone, while the window has the focus; the keyboard and mouse
+  again when that pad disconnects. It drives UI prompts, such as showing
+  "A" or "Space". It is live, not latched, and replays do not hold it.
 - **Aim:** for twin-stick, the mouse world position (via
   `Renderer::screen_to_world`) or the right stick, chosen by active device.
-  The facade will expose this as `AimState`, with the active device
-  (M8.4); neither is built yet.
+  The facade does not expose this as an `AimState` yet; a game can read
+  `Input::active_device` and bind the right stick itself.
   - The pointer and the wheel are not actions: `Input::pointer()` and
     `Input::wheel()` (the last tick's total) are for the UI and for aiming.
   - Text mode does not hide them, and replays do not hold them.
@@ -240,6 +277,10 @@ impl UiEvents {
 - `InputRecorder` writes the per-tick stream. `InputPlayer` replaces live
   latching with recorded states.
 - This powers determinism tests and bug reproductions.
+- A pad's analog values reach a replay only through `Axis1` and `Axis2`
+  actions, which format version 1 already stores; a `Button` stays 0 or 1.
+  So pads needed no new version (ADR-0073), and a recording walked with a
+  stick replays to the same world hash.
 - The facade plays one with `App::play_replay` (M4.7, ADR-0025):
   - It reads one tick ahead, so its `Replay` resource is `Ended` as soon
     as the last tick has run; the ticks after it are latched live.
@@ -287,6 +328,10 @@ impl UiEvents {
 - Holding across N ticks gives `just_pressed` only on the first tick.
 - Composite WASD diagonals are normalized to length 1. Opposite keys cancel.
 - Deadzone math (property test, M8.4): output is in 0..1 and monotonic in
-  input magnitude.
+  input magnitude, for random deadzones, directions and lengths.
+- A half of an axis bound to a button presses at the press point and
+  hovers without flickering; pads merge; a pad that disconnects lets go;
+  pads are held back in the background and in text mode; the active device
+  switches as above.
 - Rebind conflicts are detected.
 - Replay round-trip is bit-identical.

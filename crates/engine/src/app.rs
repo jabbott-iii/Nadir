@@ -270,6 +270,11 @@ trait EventSource {
     /// Appends the events that arrived since the last call. Does not wait.
     fn pump_events(&mut self, out: &mut Vec<Event>);
 
+    /// Appends the gamepads' events since the last call: their plugging in
+    /// and out, their buttons and their axes. Does not wait. A source with no
+    /// pads appends nothing.
+    fn poll_gamepads(&mut self, _out: &mut Vec<Event>) {}
+
     /// Sets what to call while the system's own event loop keeps
     /// [`EventSource::pump_events`] from returning.
     fn set_modal_frame_callback(&mut self, callback: Box<dyn FnMut(ModalFrame)>);
@@ -288,6 +293,10 @@ trait EventSource {
 impl EventSource for Platform {
     fn pump_events(&mut self, out: &mut Vec<Event>) {
         Platform::pump_events(self, out);
+    }
+
+    fn poll_gamepads(&mut self, out: &mut Vec<Event>) {
+        Platform::poll_gamepads(self, out);
     }
 
     fn set_modal_frame_callback(&mut self, callback: Box<dyn FnMut(ModalFrame)>) {
@@ -1473,6 +1482,10 @@ impl App {
         let mut events = Vec::with_capacity(256);
         loop {
             window.pump_events(&mut events);
+            // The pads' events follow the window's, so within one frame a key
+            // and a pad's button keep each device's own order, not the order
+            // between the two.
+            window.poll_gamepads(&mut events);
             if events.contains(&Event::CloseRequested) {
                 break;
             }
@@ -1643,9 +1656,10 @@ mod tests {
     use std::thread;
 
     use nadir_core::time::{Frame, Tick};
-    use nadir_core::{Key, Vec2};
+    use nadir_core::{GamepadAxis, Key, Vec2};
     use nadir_ecs::Entity;
-    use nadir_input::{Binding, InputRecorder};
+    use nadir_input::{Binding, InputRecorder, Stick};
+    use nadir_platform::GamepadId;
 
     use super::*;
 
@@ -2358,6 +2372,96 @@ mod tests {
         app.update(Duration::ZERO, &[key(Key::D, false)]);
         app.update(20 * MS, &[]);
         assert!((x(&app) - SPEED).abs() < 1e-3, "it stops: {}", x(&app));
+    }
+
+    /// A pad's event: its left stick's x.
+    fn left_x(value: f32) -> Event {
+        Event::GamepadAxis {
+            id: GamepadId::from_raw(1),
+            axis: GamepadAxis::LeftX,
+            value,
+        }
+    }
+
+    #[test]
+    fn a_pad_s_stick_moves_as_the_keys_do() {
+        let mut app = moving_app(&shared());
+        app.world()
+            .resource_mut::<ActionMap<Act>>()
+            .bind(Act::Move, 1, Binding::PadStick(Stick::Left))
+            .expect("fits");
+        // Inside the deadzone: nothing.
+        app.update(Duration::ZERO, &[left_x(0.1)]);
+        app.update(TICK, &[]);
+        assert_eq!(x(&app), 0.0);
+        // All the way right, for exactly sixty ticks.
+        app.update(Duration::ZERO, &[left_x(1.0)]);
+        for _ in 0..60 {
+            app.update(TICK, &[]);
+        }
+        assert!((x(&app) - SPEED).abs() < 1e-3, "{}", x(&app));
+        assert_eq!(
+            app.world().resource::<Input>().active_device(),
+            nadir_input::Device::Gamepad(GamepadId::from_raw(1))
+        );
+        app.update(Duration::ZERO, &[left_x(0.0)]);
+        app.update(20 * MS, &[]);
+        assert!((x(&app) - SPEED).abs() < 1e-3, "it stops: {}", x(&app));
+    }
+
+    /// A window with a pad that connects with its left stick pushed right,
+    /// and closes on the third pump.
+    #[derive(Default)]
+    struct PadWindow {
+        pumps: u32,
+        polls: u32,
+    }
+
+    impl EventSource for PadWindow {
+        fn pump_events(&mut self, out: &mut Vec<Event>) {
+            self.pumps += 1;
+            if self.pumps == 3 {
+                out.push(Event::CloseRequested);
+            }
+        }
+
+        fn poll_gamepads(&mut self, out: &mut Vec<Event>) {
+            self.polls += 1;
+            if self.polls == 1 {
+                out.push(Event::GamepadConnected(GamepadId::from_raw(1)));
+                out.push(left_x(1.0));
+            }
+        }
+
+        fn set_modal_frame_callback(&mut self, _callback: Box<dyn FnMut(ModalFrame)>) {}
+    }
+
+    #[test]
+    fn the_loop_polls_the_pads_beside_the_window() {
+        let log = shared();
+        let mut app = app().insert_resource(Rc::clone(&log)).add_frame_system(
+            FrameStage::Ui,
+            "device",
+            |world, _| {
+                let device = world.resource::<Input>().active_device();
+                let names = &world.resource::<Shared>().seen;
+                names.borrow_mut().push(format!("{device:?}"));
+            },
+        );
+        app.config.frame_rate_limit = None;
+        let mut window = PadWindow::default();
+        app.run_loop(&mut window, None)
+            .expect("no error without a device");
+        assert_eq!(
+            (window.pumps, window.polls),
+            (3, 3),
+            "a poll after each pump"
+        );
+        // Its events reached the input in the first frame.
+        assert_eq!(
+            *log.seen.borrow(),
+            ["Gamepad(GamepadId(1))", "Gamepad(GamepadId(1))"]
+        );
     }
 
     #[test]

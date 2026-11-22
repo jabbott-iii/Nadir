@@ -402,7 +402,8 @@ directly: no locks that can block, and no allocation.
   - Steam Input reads a PlayStation or Switch pad itself and makes a
     virtual Xbox pad of it, leaving the physical node open: a game is to
     skip the vendor and product ids Steam lists in
-    `SDL_GAMECONTROLLER_IGNORE_DEVICES`. Not done yet (roadmap M8.4).
+    `SDL_GAMECONTROLLER_IGNORE_DEVICES`. Not done yet (roadmap task M8.5,
+    which also tells pad families apart).
   - Device access normally relies on the desktop seat's `uaccess` udev
     rules (`ID_INPUT_JOYSTICK` devices, in systemd's `70-uaccess.rules`).
     If a gamepad the first poll finds, by sysfs, cannot be opened, log a

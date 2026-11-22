@@ -16,6 +16,8 @@
 
 use std::fmt;
 
+use nadir_core::GamepadAxis;
+
 use crate::{ActionKind, Binding};
 
 /// Errors produced by `nadir-input`.
@@ -42,6 +44,13 @@ pub enum InputError {
         /// What is wrong.
         kind: ReplayErrorKind,
     },
+    /// Deadzones out of range or out of order, which
+    /// [`Input::set_deadzones`](crate::Input::set_deadzones) refuses.
+    Deadzones {
+        /// The rule they break, such as
+        /// `0 <= stick_inner < stick_outer <= 1`.
+        rule: &'static str,
+    },
 }
 
 impl fmt::Display for InputError {
@@ -52,6 +61,9 @@ impl fmt::Display for InputError {
                 write!(f, "cannot bind slot {slot} of `{action}`: {kind}")
             }
             Self::Replay { offset, kind } => write!(f, "replay error at byte {offset}: {kind}"),
+            Self::Deadzones { rule } => {
+                write!(f, "the deadzones are not valid: they must keep {rule}")
+            }
         }
     }
 }
@@ -118,8 +130,9 @@ impl fmt::Display for SetProblem {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BindErrorKind {
     /// The binding cannot drive an action of this kind: a key composite
-    /// gives a direction, so it fits only an [`ActionKind::Axis2`] action,
-    /// and a single key or button fits only the other two.
+    /// and a gamepad's stick give a direction, so they fit only an
+    /// [`ActionKind::Axis2`] action, and a single key, button or half of an
+    /// axis fits only the other two.
     WrongKind {
         /// The binding.
         binding: Binding,
@@ -130,6 +143,12 @@ pub enum BindErrorKind {
     NoSuchSlot {
         /// How many slots an action has.
         slots: usize,
+    },
+    /// A [`Binding::PadAxis`] of a trigger's negative half: a trigger goes
+    /// from 0 to 1, so that half never moves.
+    NoNegativeHalf {
+        /// The trigger.
+        axis: GamepadAxis,
     },
 }
 
@@ -142,6 +161,10 @@ impl fmt::Display for BindErrorKind {
             Self::NoSuchSlot { slots } => {
                 write!(f, "an action has {slots} slots, numbered from 0")
             }
+            Self::NoNegativeHalf { axis } => write!(
+                f,
+                "{axis:?} is a trigger, which goes from 0 to 1 and has no negative half"
+            ),
         }
     }
 }

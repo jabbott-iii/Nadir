@@ -26,9 +26,9 @@ OS interfaces, and services they deal with. The Windows and macOS windows
 are written but still wait to be checked by hand on those systems (roadmap
 tasks M1.5 and M1.6). There the game runs without drawing until their
 OpenGL contexts are built (M2.6 and M2.7), and without sound until their
-audio output is (M6.4 and M6.5). On Linux, nadir-platform reads gamepads
-(M8.1), but a game cannot use them until they can be bound to its
-actions (M8.4).
+audio output is (M6.4 and M6.5). On Linux, a game reads gamepads through
+evdev and binds them to its actions (M8.1 and M8.4); Windows and macOS
+have no pads yet (M8.2 and M8.3).
 
 ```mermaid
 flowchart TB
@@ -49,7 +49,7 @@ flowchart TB
     gpu_planned["GPU on Windows and macOS<br/>WGL and NSOpenGL contexts, then Metal: planned"]
     audio["OS audio API<br/>ALSA, through libasound, on Linux"]
     audio_planned["Audio on Windows and macOS<br/>WASAPI and CoreAudio: planned"]
-    pad_api["Gamepad APIs<br/>evdev, read on Linux but not yet by games; XInput, GameController: planned"]
+    pad_api["Gamepad APIs<br/>evdev, on Linux; XInput, GameController: planned"]
     gha["GitHub Actions<br/>workflows CI, CodeQL, Pages and Release"]
     pages["GitHub Pages<br/>the demo page and its instructions, at jabbott.dev/Nadir"]
     channels["Release channels<br/>GitHub release and apt repository, the cook's image on ghcr.io, the crates on crates.io"]
@@ -64,13 +64,13 @@ flowchart TB
     developer -->|"runs cargo xtask"| tools
     tools -->|"reads assets/, writes target/cooked/ and game.kpak"| fs
     game -->|"reads the cooked files or game.kpak, writes nadir.log and crash reports"| fs
-    player -->|"plays with keyboard and mouse"| game
+    player -->|"plays with keyboard, mouse, or gamepad"| game
     game -->|"opens a window, reads its events"| os
     game -->|"draws through OpenGL 3.3 core"| gpu
     game -.->|"planned M2.6, M2.7, M10"| gpu_planned
     game -->|"plays sound through ALSA"| audio
     game -.->|"planned M6.4, M6.5"| audio_planned
-    game -.->|"planned M8.4"| pad_api
+    game -->|"reads gamepads through evdev"| pad_api
     gha -->|"runs cargo xtask"| tools
     gha -->|"deploys the demo page"| pages
     gha -->|"publishes a tagged release"| channels
@@ -83,8 +83,8 @@ flowchart TB
     classDef planned fill:#ffffff,stroke:#888888,stroke-dasharray: 5 5,color:#555555
     class developer,player person
     class game,tools system
-    class aseprite,ldtk,editors,fs,os,gpu,audio,gha,pages,channels external
-    class gpu_planned,audio_planned,pad_api planned
+    class aseprite,ldtk,editors,fs,os,gpu,audio,pad_api,gha,pages,channels external
+    class gpu_planned,audio_planned planned
 ```
 
 ## 2. Containers
@@ -175,7 +175,7 @@ flowchart TB
         n_gfx["nadir-gfx<br/>RHI over OpenGL 3.3 core: device, textures, buffers, render targets, pipelines, passes"]
         n_ecs["nadir-ecs<br/>generational entities, sparse sets, resources, events, commands, schedule"]
         n_assets["nadir-assets<br/>handles, typed storage, loose and pack sources, worker threads, scopes, reload behind handles, the file watcher"]
-        n_input["nadir-input<br/>physical keys, action maps, bindings, per-tick latching, replays"]
+        n_input["nadir-input<br/>physical keys, action maps, bindings of keys, mouse and gamepads, deadzones, the active device, per-tick latching, replays"]
         n_collision["nadir-collision<br/>shapes, tile grids, spatial hash, move-and-slide, sweeps, queries, triggers, A* paths, flow fields"]
     end
     subgraph L1["Layer 1: OS behavior and formats"]

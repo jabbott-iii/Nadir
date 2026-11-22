@@ -27,13 +27,15 @@ shows only a few of its fields and methods: the ones the design rests on.
   error type of a `Result` are left out.
 
 Nothing here is planned work: the diagrams show only what is built. The
-Metal backend, audio's output on Windows and macOS, the inspector, the
-console and the other debug tools, and gamepads are not built yet (see
-`docs/roadmap.md`), so they do not appear; audio's mixer is (M6.2), its
-output on Linux (M6.3), its assets (M6.9), and the game's sound (M6.6);
-bitmap text in the world is (M7.1), the UI pass (M7.8), the debug UI
-(M7.2), which the facade's `dev` shows (M7.10), and its stats overlay and
-profiler (M7.3); saves are (M9.4), and pathfinding (M9.5).
+Metal backend, audio's output on Windows and macOS, and gamepads on
+Windows and macOS are not built yet (see `docs/roadmap.md`), so they do
+not appear; audio's mixer is (M6.2), its output on Linux (M6.3), its
+assets (M6.9), and the game's sound (M6.6); bitmap text in the world is
+(M7.1), the UI pass (M7.8), the debug UI (M7.2), which the facade's `dev`
+shows (M7.10), its stats overlay and profiler (M7.3), and the inspector,
+console and other debug tools (M7.4 to M7.6); saves are (M9.4),
+pathfinding (M9.5), and gamepads on Linux (M8.1, M8.4), whose types are in
+the input crate's docs rather than here.
 The members only the `dev` feature compiles, the facade's hot reload's
 (roadmap M5.8), are marked `dev`. One member that exists in the code for
 planned work, `ShaderSource::msl`, carries a note.

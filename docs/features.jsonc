@@ -260,9 +260,9 @@
     {
       "name": "Gamepads",
       "area": "Platform",
-      "summary": "On Linux, the platform layer reads gamepads straight from the kernel's input devices (evdev) and sees them plugged in and out without a restart. It names the face buttons by their place, so the bottom one is A on every pad; sticks go from -1 to 1, up and left negative, and triggers from 0 to 1. A wired Xbox pad was checked by hand, and virtual pads stood in for other layouts. Games cannot use pads yet: bindings to their actions, deadzones, and button prompts that follow the device in use will come, as will pads on Windows (XInput) and macOS (GameController.framework).",
-      "tasks": ["M8.1", "M8.2", "M8.3", "M8.4"],
-      "ticked": ["M8.1"]
+      "summary": "On Linux, games read gamepads straight from the kernel's input devices (evdev), plugged in and out without a restart. A game binds a pad's buttons, its sticks, half of a stick, or a trigger to its actions as it binds keys, and every connected pad drives them as one. The face buttons are named by their place, so the bottom one is A on every pad. A stick's deadzone (the part of its travel that reads as 0) is radial: the stick counts from a fifth of the way out and reads full length from 95 percent, so a worn stick neither creeps nor falls short. A trigger counts from a tenth. A stick pushed part of the way walks slower than one pushed all the way, and replays play its values back exactly. While the window is in the background, the pads are held at rest, and the game knows whether the keyboard and mouse or a pad was used last. A wired Xbox pad was checked by hand. Button prompts for each family of pad will come, as will pads on Windows (XInput) and macOS (GameController.framework).",
+      "tasks": ["M8.1", "M8.2", "M8.3", "M8.4", "M8.5"],
+      "ticked": ["M8.1", "M8.4"]
     },
     {
       "name": "Game states, menus and settings",
