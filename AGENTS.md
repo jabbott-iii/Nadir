@@ -9,8 +9,9 @@ what is not built yet, such as the Metal backend (and
 `cargo xtask golden --backend`), audio's devices on Windows and macOS
 (its mixer, its assets and its Linux output are built), and gamepads on
 Windows and macOS (XInput, M8.2; GameController, M8.3; Linux's evdev is
-written, M8.1). Some of what it mentions may not exist yet, and some exists
-before its roadmap task is ticked: check before assuming.
+built, M8.1, but games cannot bind pads until M8.4). Some of what it
+mentions may not exist yet, and some exists before its roadmap task is
+ticked: check before assuming.
 
 ## What we are building
 

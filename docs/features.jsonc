@@ -260,8 +260,9 @@
     {
       "name": "Gamepads",
       "area": "Platform",
-      "summary": "Gamepads will work through evdev on Linux, XInput on Windows, and GameController.framework on macOS, with hotplugging, deadzones, bindings, and button prompts that follow the device in use.",
-      "tasks": ["M8.1", "M8.2", "M8.3", "M8.4"]
+      "summary": "On Linux, the platform layer reads gamepads straight from the kernel's input devices (evdev) and sees them plugged in and out without a restart. It names the face buttons by their place, so the bottom one is A on every pad; sticks go from -1 to 1, up and left negative, and triggers from 0 to 1. A wired Xbox pad was checked by hand, and virtual pads stood in for other layouts. Games cannot use pads yet: bindings to their actions, deadzones, and button prompts that follow the device in use will come, as will pads on Windows (XInput) and macOS (GameController.framework).",
+      "tasks": ["M8.1", "M8.2", "M8.3", "M8.4"],
+      "ticked": ["M8.1"]
     },
     {
       "name": "Game states, menus and settings",

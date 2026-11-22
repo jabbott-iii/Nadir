@@ -138,10 +138,12 @@ fn main() -> Result<(), PlatformError> {
 ## Platforms
 
 - **Linux** (X11): all of the above works, and was checked by hand on
-  XWayland, but for gamepads, which were checked with virtual pads made
-  through the kernel's uinput: the check with a real pad is still due
-  (roadmap task M8.1). Xlib (`libX11.so.6`) and EGL (`libEGL.so.1`) are
-  loaded while the program runs, not linked, so a machine without them
+  XWayland. Gamepads were checked with a wired Xbox pad, and with virtual
+  pads, made through the kernel's uinput, for the layouts of Sony's pads
+  and of an Xbox pad over Bluetooth (roadmap task M8.1). A DualSense and
+  a Switch Pro Controller are still to be checked by hand. Xlib
+  (`libX11.so.6`) and EGL (`libEGL.so.1`) are loaded while the program
+  runs, not linked, so a machine without them
   gets an error that says which library or function is missing. A Wayland
   session runs the window through XWayland; without XWayland, the error
   says how to turn it on. The window draws with OpenGL 3.3 core through

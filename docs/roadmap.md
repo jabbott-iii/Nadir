@@ -5630,16 +5630,28 @@ by the batched sprite renderer.
 
 ## M8 — Gamepads
 
-- [ ] **M8.1 — Linux: evdev + inotify hotplug**
-  - ⏳ needs hardware: a real Xbox pad on Linux (`xpad`), USB, while `cargo
-    run -p nadir-platform --example events` runs: A at the bottom, X on the
-    left and Y on top as `GamepadButton`s of those names, the sticks with
-    up and left negative, the triggers 0 to 1, the d-pad, Back, Start and
-    Guide; then unplugged (its held buttons let go, then
-    `GamepadDisconnected`) and plugged in again without a restart (a new
-    id). For M8's exit criteria, a DualSense and a Switch Pro Controller
-    the same way: their face buttons by place (✕ and Nintendo B are `A`),
-    the Switch's ZL and ZR as triggers of 0 or 1.
+- [x] **M8.1 — Linux: evdev + inotify hotplug**
+  - Note: checked by hand with a real pad on 2026-11-21, on Linux (x86_64,
+    COSMIC with XWayland), while `cargo run -p nadir-platform --example
+    events` ran. The pad was a PDP Rematch wired Xbox controller
+    (0e6f:0303, USB), on `xpad`, which names it "Generic X-Box pad"; its
+    face buttons were read by label, as for every vendor but Sony and
+    Nintendo (ADR-0065).
+    - Each button came as the `GamepadButton` of its name, pressed then
+      released: A, B, X and Y, both bumpers, the d-pad's four directions,
+      Back, Start, Guide, and both stick clicks.
+    - Both triggers went from 0 to 1 and back to 0. Both sticks were
+      negative up and left. The left stick stopped short of its ends, at
+      -0.97 up and -0.99 left; the right reached -1 both ways (M8.4's
+      note).
+    - Nothing came from the pad at rest, in the 46 s before the first
+      press.
+    - Unplugged while A was held (and B, pressed as the cable came out), it
+      let both go and set its sticks back to 0, then sent
+      `GamepadDisconnected`. Plugged in again 2.8 s later, without a
+      restart, it came back as gamepad 2, at rest, then A, still held, as
+      an event.
+    - `cargo test -p nadir-platform`: 167 passed, 0 failed, 2 ignored.
   - Note: written and checked on Linux (x86_64, COSMIC with XWayland) on
     2026-11-14 (ADR-0065, accepted the same day):
     - nadir-core: `GamepadButton` (15, by place, Xbox names) and
@@ -5716,6 +5728,10 @@ by the batched sprite renderer.
     - A pad's events add up to its state: it connects at rest, what is held
       then follows as events, and it goes back to rest by events before
       `GamepadDisconnected`. `GamepadId::from_raw` makes ids for tests.
+    - A real stick may stop short of its ends: the wired Xbox pad M8.1
+      was checked with reached -0.97 up and -0.99 left on its left stick.
+      The radial deadzone needs an outer edge as well as an inner one, or
+      such a stick never moves a character at full speed.
     - Pads are read whether or not the window has the focus. SDL holds them
       at rest in the background by default: decide here, beside
       `Focused(false)`'s releases.
@@ -5756,8 +5772,17 @@ by the batched sprite renderer.
 **Exit criteria (M8):**
 
 - An Xbox pad works on all three OSes.
+  - Note (from M8.1): checked on Linux with a wired Xbox pad on `xpad`
+    on 2026-11-21. Windows and macOS are M8.2's and M8.3's.
 - DualSense and Switch Pro work on Linux and macOS.
+  - ⏳ needs hardware: a DualSense and a Switch Pro Controller on Linux,
+    checked as M8.1's Xbox pad was, while `cargo run -p nadir-platform
+    --example events` runs: their face buttons by place (✕ and Nintendo
+    B are `A`), and the Switch's ZL and ZR as triggers of 0 or 1. Before
+    M8.1, virtual pads with Sony's layout stood in on Linux.
 - Hotplug works without restart.
+  - Note (from M8.1): on Linux, checked with the Xbox pad unplugged and
+    plugged in again.
 
 ---
 

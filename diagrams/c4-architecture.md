@@ -27,8 +27,8 @@ are written but still wait to be checked by hand on those systems (roadmap
 tasks M1.5 and M1.6). There the game runs without drawing until their
 OpenGL contexts are built (M2.6 and M2.7), and without sound until their
 audio output is (M6.4 and M6.5). On Linux, nadir-platform reads gamepads
-(M8.1, which still waits for a check with a real pad), but a game cannot
-use them until they can be bound to its actions (M8.4).
+(M8.1), but a game cannot use them until they can be bound to its
+actions (M8.4).
 
 ```mermaid
 flowchart TB

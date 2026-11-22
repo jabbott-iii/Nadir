@@ -5918,7 +5918,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0065 — M8.1: gamepads on Linux read from evdev; `GamepadButton` by place with Xbox names in nadir-core; `GamepadId` never reused; events that add up to the state; face buttons by label for xpad, by place for Sony and Nintendo; `poll_gamepads` apart from `pump_events`, read regardless of focus
 
-- **Status:** Accepted: the user accepted it as written on 2026-11-14
+- **Status:** Accepted: the user accepted it as written on 2026-11-14; a
+  real Xbox pad, wired and on `xpad`, was checked by hand on 2026-11-21
+  and read as this record says (the roadmap's M8.1)
 - **Date:** 2026-11-14
 - **Context:**
   - M8.1 asks for Linux gamepads: the evdev declarations, detection with
