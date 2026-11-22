@@ -1,0 +1,108 @@
+// Button prompts: what each family of gamepad prints on its buttons, its
+// triggers and its sticks, so that a game can tell the player which one to
+// press ("Press A", "Press ✕"). The cook writes it to
+// data/input/prompts.kbj, which nadir::ButtonPrompts loads.
+//
+// The buttons are named by their place on the pad, with the Xbox pad's
+// names (nadir_core::GamepadButton): "A" is the bottom face button on
+// every pad, which a PlayStation pad prints ✕ and a Nintendo pad B. So a
+// Nintendo pad's "A" here is labeled "B", and its "B", the right button,
+// "A". The triggers are named as nadir_core::GamepadAxis names them, and
+// the sticks as nadir_input::Stick does.
+//
+// Every family needs a label for every button, trigger and stick: a table
+// that lacks one, or has a name it does not know, fails to load.
+{
+  // Microsoft's pads and those made for the Xbox, as the Xbox Series pad
+  // prints them.
+  "Xbox": {
+    "buttons": {
+      "A": "A",
+      "B": "B",
+      "X": "X",
+      "Y": "Y",
+      "LeftBumper": "LB",
+      "RightBumper": "RB",
+      "Back": "View",
+      "Start": "Menu",
+      "Guide": "Xbox",
+      "LeftStick": "LS",
+      "RightStick": "RS",
+      "DPadUp": "D-pad up",
+      "DPadDown": "D-pad down",
+      "DPadLeft": "D-pad left",
+      "DPadRight": "D-pad right"
+    },
+    "triggers": { "LeftTrigger": "LT", "RightTrigger": "RT" },
+    "sticks": { "Left": "Left stick", "Right": "Right stick" }
+  },
+  // Sony's pads, as the DualSense prints them (the DualShock 4's Create is
+  // Share).
+  "PlayStation": {
+    "buttons": {
+      "A": "✕",
+      "B": "○",
+      "X": "□",
+      "Y": "△",
+      "LeftBumper": "L1",
+      "RightBumper": "R1",
+      "Back": "Create",
+      "Start": "Options",
+      "Guide": "PS",
+      "LeftStick": "L3",
+      "RightStick": "R3",
+      "DPadUp": "D-pad up",
+      "DPadDown": "D-pad down",
+      "DPadLeft": "D-pad left",
+      "DPadRight": "D-pad right"
+    },
+    "triggers": { "LeftTrigger": "L2", "RightTrigger": "R2" },
+    "sticks": { "Left": "Left stick", "Right": "Right stick" }
+  },
+  // Nintendo's pads and those made for the Switch, as the Switch Pro
+  // Controller prints them: its A is on the right, its B at the bottom.
+  "Nintendo": {
+    "buttons": {
+      "A": "B",
+      "B": "A",
+      "X": "Y",
+      "Y": "X",
+      "LeftBumper": "L",
+      "RightBumper": "R",
+      "Back": "−",
+      "Start": "+",
+      "Guide": "Home",
+      "LeftStick": "LS",
+      "RightStick": "RS",
+      "DPadUp": "D-pad up",
+      "DPadDown": "D-pad down",
+      "DPadLeft": "D-pad left",
+      "DPadRight": "D-pad right"
+    },
+    "triggers": { "LeftTrigger": "ZL", "RightTrigger": "ZR" },
+    "sticks": { "Left": "L Stick", "Right": "R Stick" }
+  },
+  // Any other pad: most copy the Xbox pad's layout, but not its newest
+  // names.
+  "Other": {
+    "buttons": {
+      "A": "A",
+      "B": "B",
+      "X": "X",
+      "Y": "Y",
+      "LeftBumper": "LB",
+      "RightBumper": "RB",
+      "Back": "Back",
+      "Start": "Start",
+      "Guide": "Guide",
+      "LeftStick": "LS",
+      "RightStick": "RS",
+      "DPadUp": "D-pad up",
+      "DPadDown": "D-pad down",
+      "DPadLeft": "D-pad left",
+      "DPadRight": "D-pad right"
+    },
+    "triggers": { "LeftTrigger": "LT", "RightTrigger": "RT" },
+    "sticks": { "Left": "Left stick", "Right": "Right stick" }
+  }
+}

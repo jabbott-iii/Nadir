@@ -5705,6 +5705,9 @@ by the batched sprite renderer.
     `cargo run -p nadir-platform --example events` (manual)
 
 - [ ] **M8.2 — Windows: XInput with throttled probing**
+  - Note (from M8.5, ADR-0074): a backend makes each pad's state with
+    `GamepadState::new(name, family)`. XInput reads Xbox pads, and pads
+    that act as one, so its pads are of the `Xbox` family.
   - Depends: M3.1, M1.5
   - Do: `dynlib!` for `xinput1_4.dll` (fallback `xinput9_1_0.dll`); poll
     connected slots every frame and disconnected slots at most once per
@@ -5714,6 +5717,10 @@ by the batched sprite renderer.
     example (manual)
 
 - [ ] **M8.3 — macOS: GameController.framework**
+  - Note (from M8.5, ADR-0074): a backend makes each pad's state with
+    `GamepadState::new(name, family)`. Take the family from what
+    GameController says the pad is, or from its vendor id with
+    `GamepadFamily::from_vendor`; a DualSense is `PlayStation`.
   - Depends: M3.1, M1.6
   - Do: connect/disconnect notifications; per-frame `extendedGamepad`
     sampling; diff into events.
@@ -5790,7 +5797,50 @@ by the batched sprite renderer.
   - Accept: deadzone property tests; active-device switching tests.
   - Verify: `cargo test -p nadir-input`
 
-- [ ] **M8.5 — platform and facade: pad families and button prompts**
+- [x] **M8.5 — platform and facade: pad families and button prompts**
+  - Note: built and checked on Linux (x86_64, COSMIC with XWayland) on
+    2026-11-22 (ADR-0074). The user chose that day to read the face buttons
+    by place for the PlayStation and Nintendo families however told
+    (amending ADR-0065), to skip Steam's virtual pad as SDL does, and to
+    label the triggers and the sticks as well as the buttons:
+    - nadir-platform: `GamepadFamily` (Xbox, PlayStation, Nintendo, Other)
+      and `GamepadState::family`. On Linux, the family is the driver's, from
+      sysfs (`xpad`, `microsoft`, `playstation`, `sony`, `nintendo`), and
+      else the vendor id's; the face buttons by place for the PlayStation
+      and Nintendo families; `SDL_GAMECONTROLLER_IGNORE_DEVICES`,
+      `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT` (each also as `@` and a
+      file's path) and `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD`,
+      read once as SDL reads them. The events example prints a pad's
+      family.
+    - The facade: the resource `Gamepads`, which the loop keeps after each
+      poll; the asset `ButtonPrompts`, read from `data/input/prompts.kbj`,
+      whose table must label every family's 15 buttons, 2 triggers and 2
+      sticks. `nadir-codec` is now a regular dependency of the facade (the
+      dependency matrix allows it), not one for `dev` and tests alone.
+    - `assets/data/input/prompts.jsonc`, the sandbox's table, which `cargo
+      xtask cook` writes (1230 bytes) and packs. The sandbox shows no
+      prompts yet (M9.2's menus).
+    - Tests: in nadir-platform, 2 in `gamepad.rs` and 7 in
+      `linux/evdev.rs`: the family from drivers and vendor ids, the face
+      buttons by family, the driver from a sysfs tree in a scratch folder,
+      Steam's lists read by hand, by a property test of 500 lists written
+      with any separators and from a file, and decided as SDL decides, and
+      SDL's true and false. In the facade, 5 in `gamepads.rs` (the sandbox's
+      table labels every button, trigger and stick of every family; a table
+      that lacks one, or has a name it does not know, is refused, naming the
+      place; the cooked table loads through the asset server; the resource
+      follows connections) and 1 in `app.rs` (the loop keeps each pad's
+      family).
+    - By hand, with M8.1's wired pad, while the events example ran: it
+      connected as "Generic X-Box pad" (0e6f:0303, PDP's), driver `xpad`,
+      of the Xbox family, read by label; by its vendor id alone it would
+      have been `Other`. Listed in `SDL_GAMECONTROLLER_IGNORE_DEVICES`,
+      directly or in a file named with `@`, or left out of a non-empty
+      `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT`, it was skipped; listed in
+      both, it was read.
+    - Not checked with a real pad: the PlayStation and Nintendo families
+      (the M8 exit criteria's DualSense and Switch Pro), a Hori pad on
+      `hid-nintendo`, and a game started by Steam.
   - Note (from M8.4, ADR-0073): split off M8.4 at the user's choice on
     2026-11-21, with M8.4's prompt table.
     - `A` is the bottom face button on every pad. The prompt table maps
@@ -5826,7 +5876,9 @@ by the batched sprite renderer.
   - ⏳ needs hardware: a DualSense and a Switch Pro Controller on Linux,
     checked as M8.1's Xbox pad was, while `cargo run -p nadir-platform
     --example events` runs: their face buttons by place (✕ and Nintendo
-    B are `A`), and the Switch's ZL and ZR as triggers of 0 or 1. Before
+    B are `A`), the Switch's ZL and ZR as triggers of 0 or 1, and their
+    families, which the example prints: `PlayStation` and `Nintendo`
+    (M8.5). Before
     M8.1, virtual pads with Sony's layout stood in on Linux.
 - Hotplug works without restart.
   - Note (from M8.1): on Linux, checked with the Xbox pad unplugged and
@@ -5894,6 +5946,14 @@ by the batched sprite renderer.
 
 - [ ] **M9.2 — menu kit and game UI**
   - Depends: M7.1, M7.8, M8.4, M8.5
+  - Note (from M8.5, ADR-0074):
+    - A prompt for a pad is `ButtonPrompts::button` (or `trigger`, or
+      `stick`) of the family that `Gamepads::family` gives for the pad in
+      `Input::active_device`. The sandbox loads no table yet: load
+      `ButtonPrompts::PATH` with the menus.
+    - The sandbox's table labels PlayStation's face buttons ✕, ○, □ and △,
+      and Nintendo's middle buttons − and +: the menus' font needs those
+      glyphs, or the table other labels.
   - Note (from M9.1, ADR-0067):
     - The sandbox still loads its field at setup (`App::load_level`): move
       it onto `Boot` → `MainMenu` → `Loading("field")` → `InGame` ⇄

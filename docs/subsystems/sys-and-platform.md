@@ -135,9 +135,18 @@ impl GamepadId {
     pub const fn raw(self) -> u32;
 }
 
+#[non_exhaustive]
+pub enum GamepadFamily { Xbox, PlayStation, Nintendo, Other }   // whose labels its buttons carry (ADR-0074)
+impl GamepadFamily {
+    pub const ALL: &'static [GamepadFamily];
+    pub const fn index(self) -> usize;
+    pub const fn name(self) -> &'static str;   // "Xbox", "PlayStation", "Nintendo", "Other"
+}
+
 pub struct GamepadState { /* … */ }
 impl GamepadState {
     pub fn name(&self) -> &str;
+    pub fn family(&self) -> GamepadFamily;
     pub fn pressed(&self, button: GamepadButton) -> bool;
     pub fn axis(&self, axis: GamepadAxis) -> f32;
 }
@@ -292,6 +301,12 @@ impl HeadlessGl {
   trigger from 0 to 1, or 0 or 1 if the pad's trigger is only a button;
   the d-pad as four buttons. No dead zone: that
   is `nadir-input`'s (M8.4, ADR-0073).
+- **Families** (M8.5, ADR-0074): `GamepadState::family` says whose labels
+  a pad's buttons carry, a `GamepadFamily`: Xbox, PlayStation, Nintendo or
+  `Other`. A game's button prompts need it, because a button is named by
+  its place: `A` is the bottom face button, which a PlayStation pad labels
+  ✕ and a Nintendo pad B. The facade keeps each connected pad's family in
+  its `Gamepads` resource.
 - Pads are read whether or not the window has the focus. The input layer
   holds them back from the game while the window lacks it (M8.4,
   ADR-0073).
@@ -299,12 +314,45 @@ impl HeadlessGl {
   stand-in, `no_gamepads`.
 - **Linux** (`linux/evdev.rs`), following `docs/03-platforms.md`:
   - A device is a pad if it has `EV_KEY`, `EV_ABS` and `BTN_SOUTH`.
-  - The face buttons are read by place (`BTN_NORTH` is the top one) for
-    Sony's and Nintendo's vendor ids, whose drivers follow the kernel's
+  - A pad's family is its driver's, read from sysfs
+    (`/sys/class/input/eventN/device/device/driver`), if that driver is
+    one family's: `xpad` and `microsoft` (`hid-microsoft`) are Xbox's,
+    `playstation` and `sony` PlayStation's, `nintendo` Nintendo's. These
+    drivers also take other makers' pads, whose vendor ids say nothing of
+    their family: PDP's and PowerA's Xbox pads on `xpad` (M8.1's wired pad
+    is PDP's), Hori's Switch pads on `hid-nintendo`. Any other pad's family
+    is its vendor id's: Microsoft's (0x045e), Sony's (0x054c), Nintendo's
+    (0x057e), or `Other`, as Valve's are (ADR-0074).
+  - The face buttons are read by place (`BTN_NORTH` is the top one) for the
+    PlayStation and Nintendo families, whose drivers follow the kernel's
     documentation, and by Xbox label (`BTN_X`, the same code, is X, on the
     left) for every other pad, as `xpad` and an Xbox pad over Bluetooth
-    report them. SDL decides the same way for Sony's id; Nintendo's is
-    added because `hid-nintendo` reports by place too.
+    report them. SDL decides the same way for Sony's id. Before M8.5, the
+    rule went by Sony's and Nintendo's vendor ids alone, which read a Hori
+    pad on `hid-nintendo` with X and Y swapped (ADR-0074 amends ADR-0065).
+  - Steam's pads to skip (ADR-0074): Steam reads a PlayStation or Switch
+    pad itself and gives the game a virtual Xbox pad in its place, leaving
+    the real node open, so a game reading both hears one pad twice. Steam
+    tells a game it starts which pads to skip through variables that SDL
+    reads, and these are read the same way, once, as the gamepads start:
+    - `SDL_GAMECONTROLLER_IGNORE_DEVICES`: the vendor and product ids of
+      the pads to skip, as `0x054c/0x0ce6,0x057e/0x2009`.
+    - `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT`: where it gives any pair,
+      the only pads to read, and the other list is not used.
+    - Steam's own virtual pad (Valve's `0x28de/0x11ff`) is skipped unless
+      `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD` is true, which Steam
+      sets for a game it starts; the lists do not decide for it. Outside
+      Steam, the game reads the real pad.
+    - A list is read as SDL reads one: each `0x` starts a number of the
+      hexadecimal digits after it, two numbers to a pair, and anything
+      between them is skipped. A number keeps its low 16 bits, after one
+      past a 64-bit `long` becomes the largest that is not; `0x` with no
+      digit is 0; a vendor id with no product id after it is dropped. A
+      value of `@` and a path reads the list from that file, at most
+      64 KiB; a longer file, or one that cannot be read, gives no pair and
+      a warning. A true or false value is true unless it is empty, starts
+      with `0`, or is `false` in any case.
+    - A pad skipped is logged and gets no id; nothing is reported of it.
   - The axes' roles come from what the pad has: the right stick on
     `ABS_RX`/`ABS_RY` and analog triggers on `ABS_Z`/`ABS_RZ` (`xpad`,
     `hid-playstation`, `hid-nintendo`); or, on a pad with no `ABS_RX` and
@@ -447,7 +495,11 @@ it requires `unsafe impl GlobalAlloc`.
   inotify events read from bytes; sysfs bitmaps; requests of the wrong size
   refused; and a pad read through a socket pair standing in for its device:
   its records, the records dropped after a lost report, its unplugging
-  and, with `dev`, no allocation. `nadir-sys` tests
+  and, with `dev`, no allocation. The family from drivers and vendor ids,
+  and the face buttons by family; the driver read from a sysfs tree made
+  in a scratch folder; and Steam's lists read as SDL reads them, by hand
+  and by a property test of pairs written with any separators, from a
+  file, and decided as SDL decides (M8.5). `nadir-sys` tests
   `inotify` and `ioctl` on real files. A pad by hand: the events example
   prints the pads' events, which `/dev/uinput` can stand in for when no pad
   is at hand (roadmap M8.1).

@@ -89,9 +89,10 @@
 //!
 //! Built so far: keyboard and mouse bindings, latching, text mode, rebinding
 //! conflicts and replays (roadmap M3.1); a UI's events and capture (M7.9);
-//! gamepad bindings, deadzones and the active device (M8.4). Button prompts
-//! for each family of pad come with M8.5, the rebinding capture flow with
-//! M9.2, and bindings in the settings file with M9.3.
+//! gamepad bindings, deadzones and the active device (M8.4). The facade
+//! keeps each pad's family and reads the button prompts' table (M8.5). The
+//! rebinding capture flow comes with M9.2, and bindings in the settings
+//! file with M9.3.
 //!
 //! # The parts
 //!

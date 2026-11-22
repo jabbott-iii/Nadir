@@ -5920,7 +5920,10 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 - **Status:** Accepted: the user accepted it as written on 2026-11-14; a
   real Xbox pad, wired and on `xpad`, was checked by hand on 2026-11-21
-  and read as this record says (the roadmap's M8.1)
+  and read as this record says (the roadmap's M8.1); its face buttons by
+  place for Sony's and Nintendo's vendor ids alone are superseded by
+  ADR-0074, which reads them by place for the PlayStation and Nintendo
+  families, told by the pad's driver too
 - **Date:** 2026-11-14
 - **Context:**
   - M8.1 asks for Linux gamepads: the evdev declarations, detection with
@@ -6907,9 +6910,10 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   saw with that choice (pad bindings, deadzones of 0.2 and 0.95 and 0.1, a
   press point of 0.5 and a release point of 0.4, any pad driving the
   bindings, pads held at rest in the background, the active device from
-  presses and motion but not the pointer, no replay format change).
-  Proposed, for review: the details below that the choice did not show
-  (the codes, the value rules, the errors, the prelude).
+  presses and motion but not the pointer, no replay format change); and
+  the details below that the choice did not show (the codes, the value
+  rules, the errors, the prelude), which the user accepted on
+  2026-11-22.
 - **Date:** 2026-11-21
 - **Context:**
   - M8.4 asked for pad bindings, deadzones, the active device and a table
@@ -7030,3 +7034,153 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   player); a pad's half of an axis needs another press point than every
   other's; a game must hear pads in the background; or a game needs an
   analog value from a `Button` action.
+
+## ADR-0074 — M8.5: a pad's family from its Linux driver, then its vendor id; face buttons by place for the PlayStation and Nintendo families; Steam's lists and virtual pad skipped as SDL skips them; the facade's `Gamepads` resource and `ButtonPrompts` asset
+
+- **Status:** Accepted: the user chose, on 2026-11-22, three things put to
+  them with the family's rule from the driver, then the vendor id: the face
+  buttons read by place for the PlayStation and Nintendo families, however
+  told (amending ADR-0065); Steam's virtual pad skipped as SDL skips it; and
+  a prompt table, `data/input/prompts.kbj` loaded as an asset, with labels
+  for the triggers and the sticks as well as the 15 buttons; and the
+  details below that the choices did not show (the drivers named,
+  `GamepadFamily`'s place and shape, the `Gamepads` resource and how the
+  loop keeps it, the table's strictness and labels, the 64 KiB bound on a
+  list file, and `nadir-codec` as a regular dependency of the facade),
+  which the user accepted as written the same day.
+- **Date:** 2026-11-22
+- **Context:**
+  - M8.5 asks for a pad's family (Xbox, PlayStation, Nintendo, other) in
+    `GamepadState`, from its vendor id and, on Linux, its driver; the facade
+    keeping each connected pad's family for the game; a prompt table per
+    family in `assets/data/`, cooked and loaded; and, on Linux, skipping the
+    pads Steam lists. ADR-0073 split it off M8.4.
+  - A `GamepadButton` names a place (ADR-0065): `A` is the bottom face
+    button on every pad, which a Nintendo pad labels B.
+  - Vendor ids alone miss many pads. M8.1's wired pad is PDP's
+    (`0e6f:0303`) on `xpad`. On this machine's kernel (7.2), the modules'
+    aliases show that `hid-nintendo` also takes Hori's pads (`0x0f0d`) and
+    `hid-sony` several other makers' devices (Logitech, Mad Catz, PDP,
+    RedOctane, Harmonix and more), and `xpad`'s source lists over fifty
+    other makers' vendor ids (read on GitHub, 2026-11-22). A device's driver
+    is the link `/sys/class/input/eventN/device/device/driver`; for the wired
+    pad it is `xpad`. The bare strings `playstation`, `sony`, `nintendo`
+    and `microsoft` are in those drivers' modules, as their registered names
+    would be; the kernel's sources for them could not be read that day (the
+    site refused, too many requests).
+  - ADR-0065 reads the face buttons by place for Sony's and Nintendo's
+    vendor ids only, so a Hori pad on `hid-nintendo`, which reports by
+    place, gets X and Y swapped, and its prompts, by family, would name the
+    wrong button.
+  - Steam reads a PlayStation or Switch pad itself and gives the game a
+    virtual Xbox pad for it, leaving the real node open. SDL's source
+    (read on GitHub, 2026-11-22: SDL2's `SDL_gamecontroller.c`, SDL3's
+    `SDL_joystick.c` and `usb_ids.h`) skips:
+    - the pads listed in `SDL_GAMECONTROLLER_IGNORE_DEVICES`, or, where
+      `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT` gives any pair, every pad
+      it does not list;
+    - Steam's virtual pad, `0x28de/0x11ff`, unless
+      `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD` is true, before
+      either list.
+    It reads a list by finding each `0x` and reading a number after it with
+    `strtol`, cast to 16 bits, two numbers to a pair, and reads the list
+    from a file for a value of `@` and a path.
+  - The facade's loop has the platform; `App::update` does not. A data
+    file's meaning is checked where the game loads it (the cook's data job),
+    and the facade read KBJ only in `dev` builds.
+- **Decision:**
+  - **nadir-platform:** `GamepadFamily` (`Xbox`, `PlayStation`, `Nintendo`,
+    `Other`; `#[non_exhaustive]`, with `ALL`, `index` and `name`) and
+    `GamepadState::family`. On Linux:
+    - The family is the driver's, if it is `xpad` or `microsoft` (Xbox),
+      `playstation` or `sony` (PlayStation), or `nintendo` (Nintendo);
+      otherwise the vendor id's: Microsoft's `0x045e`, Sony's `0x054c`,
+      Nintendo's `0x057e`, or `Other`. Valve's pads, the Steam Deck's and
+      Steam's virtual pad, are `Other`.
+    - The face buttons are read by place for the PlayStation and Nintendo
+      families, and by label for the others. For Sony's and Nintendo's
+      vendor ids nothing changes.
+    - The three variables are read once, as the gamepads start, as SDL
+      reads them: each `0x` and its hexadecimal digits a number, its low
+      16 bits kept after a number past a 64-bit `long` becomes the largest
+      that is not, `0x` with no digit 0, a vendor id with no product id
+      after it dropped; `@` and a path read from the file, at most 64 KiB,
+      a longer file or one that cannot be read giving no pair and a
+      warning; true unless empty, starting with `0`, or `false` in any
+      case.
+    - A pad skipped is logged and gets no id, and nothing is reported of it.
+      The connection's log line names its driver and family.
+  - **The facade:** the resource `Gamepads` (each connected pad's id and
+    family, in the order they connected; `family`, `iter`), kept by
+    `App::run`'s loop after each poll, from its event source's
+    `gamepad_family`, which asks the platform's `gamepad_state`. A pad gone
+    again within the poll, whose family is no longer known, is left out.
+    `App::update` does not change it.
+  - **The table:** the asset `ButtonPrompts`, read from KBJ at
+    `ButtonPrompts::PATH`, `data/input/prompts.kbj`, cooked from
+    `assets/data/input/prompts.jsonc` by the data job. An object for each
+    family, by `GamepadFamily::name`, holds `buttons` (each `GamepadButton`
+    by its variant's spelling), `triggers` (`LeftTrigger`, `RightTrigger`)
+    and `sticks` (`Left`, `Right`), each label a string. A missing family,
+    part or label, a name it does not know, or a label that is not a string
+    fails the load as `AssetError::Invalid`, naming the place. `button`,
+    `trigger` (`None` for a stick's axis) and `stick` give the labels.
+  - The sandbox's table labels the Xbox family as the Xbox Series pad
+    prints it (View, Menu), PlayStation as the DualSense does (✕, ○, □, △,
+    Create, Options), Nintendo as the Switch Pro Controller does (its `A`
+    labeled B, − and +, ZL and ZR), and `Other` with an Xbox pad's letters
+    and the older Back, Start and Guide.
+  - `nadir-codec` becomes a regular dependency of the facade, which the
+    dependency matrix already allows ("all crates above"), not one for
+    `dev` builds and tests alone.
+  - `GamepadFamily`, `GamepadId`, `Gamepads` and `ButtonPrompts` are at
+    the facade's root; the prelude gains `GamepadFamily`, `Gamepads` and
+    `ButtonPrompts`.
+- **Consequences:**
+  - A game shows the prompt of the pad last used: `Input::active_device`,
+    `Gamepads::family`, then `ButtonPrompts`. M9.2's menus can.
+  - Checked by hand on 2026-11-22 with M8.1's wired pad: it connects as
+    "Generic X-Box pad" (`0e6f:0303`, driver `xpad`), of the Xbox family,
+    read by label; listed in `SDL_GAMECONTROLLER_IGNORE_DEVICES`, directly
+    or in a file named with `@`, or left out of a non-empty
+    `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT`, it is skipped; listed in
+    both, it is read.
+  - A Hori pad on `hid-nintendo`, and another maker's device on
+    `hid-sony`, now have their X and Y by place. Neither was tried on a real
+    pad.
+  - Under Steam, the game reads Steam's virtual pad, which is of the
+    `Other` family, whatever pad it stands for: a DualSense played through
+    Steam Input shows `Other`'s labels. Telling the real pad needs Steam's
+    own interface (Steamworks), which the engine does not use.
+  - A pad's family on Windows and macOS comes with their pads: XInput's
+    are Xbox pads (M8.2), and GameController names a pad's kind (M8.3).
+    `GamepadFamily::from_vendor` is shared.
+  - A game that cooks no table, or a wrong one, gets the asset's failure,
+    as for any asset; a game needs a table only if it shows prompts.
+  - Release builds link `nadir-codec`'s code for KBJ, which the other
+    crates they link (assets, render, audio, scene) already link.
+- **Alternatives considered:**
+  - The family from the vendor id alone, as the task's text could be read:
+    the wired pad checked by hand, PDP's on `xpad`, would be `Other`.
+  - The face buttons still by vendor id: the families' prompts and places
+    would disagree on Hori's Switch pads (the user's choice).
+  - Only the listed ids, not Steam's virtual pad: outside Steam, with
+    Steam running, a game could hear one pad twice (the user's choice).
+  - The family in `Event::GamepadConnected`: a breaking change of the
+    platform's events, and of the input crate's match on them, for what one
+    resource needs.
+  - Keeping families in `App::update` from the events: it has no platform
+    to ask, and would have to guess one.
+  - A table of the 15 buttons only: a prompt for an action bound to a
+    trigger or a stick would need a format change (the user's choice).
+  - The table's reader in `nadir-codec`, fuzzed like the other cooked
+    formats: the family is the platform's, which the codec cannot name, and
+    the data job's rule puts a data file's meaning where the game loads it,
+    as reflection does for prefabs; the KBJ beneath it is fuzzed.
+  - A table built into the engine: the task puts it in `assets/data/`, so
+    that a game's own labels, or a font without ✕, are the game's to set.
+- **Revisit when:** a pad tested on Linux is of another family than its
+  driver or vendor id says here, or reports its face buttons otherwise; a
+  game ships through Steam (check that the virtual pad is read and the real
+  one skipped); M8.2 or M8.3 cannot tell a pad's family; or a game needs a
+  family the four do not cover, such as the Steam Deck's own labels.

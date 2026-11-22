@@ -32,8 +32,8 @@ use nadir_ecs::{Component, FixedStage, FixedSystem, FrameStage, FrameSystem, Sch
 use nadir_gfx::{Device, PassTarget, RenderTargetId, TextureFormat};
 use nadir_input::{ActionKind, ActionMap, ActionSet, ActionState, Input, InputPlayer};
 use nadir_platform::{
-    AudioOutputConfig, AudioStream, Event, GpuSurface, ModalFrame, Platform, WindowConfig,
-    open_audio, precise_sleep, show_error_dialog,
+    AudioOutputConfig, AudioStream, Event, GamepadFamily, GamepadId, GamepadState, GpuSurface,
+    ModalFrame, Platform, WindowConfig, open_audio, precise_sleep, show_error_dialog,
 };
 use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, TileLayers};
 use nadir_scene::{
@@ -46,9 +46,9 @@ use crate::replay::{PlayReplay, ReplayInput};
 use crate::sound::{AudioState, MixerOutput, Tracked};
 use crate::{
     AnimationFinished, Animator, AudioEmitter, AudioListener, Clips, Collider, CollisionLayers,
-    Collisions, CurrentLevel, Error, Facing, LevelError, MusicArea, Parent, Player, PrevTransform,
-    Replay, SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit, Velocity, crash, glue,
-    log_file,
+    Collisions, CurrentLevel, Error, Facing, Gamepads, LevelError, MusicArea, Parent, Player,
+    PrevTransform, Replay, SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit,
+    Velocity, crash, glue, log_file,
 };
 
 /// How many times a second the simulation steps.
@@ -275,6 +275,12 @@ trait EventSource {
     /// pads appends nothing.
     fn poll_gamepads(&mut self, _out: &mut Vec<Event>) {}
 
+    /// The family of the pad `id`, while it is plugged in. A source with no
+    /// pads knows none.
+    fn gamepad_family(&self, _id: GamepadId) -> Option<GamepadFamily> {
+        None
+    }
+
     /// Sets what to call while the system's own event loop keeps
     /// [`EventSource::pump_events`] from returning.
     fn set_modal_frame_callback(&mut self, callback: Box<dyn FnMut(ModalFrame)>);
@@ -297,6 +303,10 @@ impl EventSource for Platform {
 
     fn poll_gamepads(&mut self, out: &mut Vec<Event>) {
         Platform::poll_gamepads(self, out);
+    }
+
+    fn gamepad_family(&self, id: GamepadId) -> Option<GamepadFamily> {
+        self.gamepad_state(id).map(GamepadState::family)
     }
 
     fn set_modal_frame_callback(&mut self, callback: Box<dyn FnMut(ModalFrame)>) {
@@ -627,6 +637,7 @@ impl App {
         };
         let mut world = World::new();
         world.insert_resource(Input::new());
+        world.insert_resource(Gamepads::default());
         #[cfg_attr(not(feature = "dev"), expect(unused_mut))]
         let mut server =
             crate::pack::asset_server(&config.assets, on_failure, !cfg!(feature = "dev"));
@@ -1491,6 +1502,12 @@ impl App {
             }
             {
                 let mut core = core.borrow_mut();
+                // Each pad's family, while the platform still has the pads
+                // this poll reported.
+                core.app
+                    .world
+                    .resource_mut::<Gamepads>()
+                    .handle(&events, |id| window.gamepad_family(id));
                 let surface = window
                     .gpu_surface()
                     .map(|surface| (surface, window.window_size()));
@@ -2462,6 +2479,65 @@ mod tests {
             *log.seen.borrow(),
             ["Gamepad(GamepadId(1))", "Gamepad(GamepadId(1))"]
         );
+    }
+
+    /// A window whose first poll connects a Nintendo pad, 1, and a pad, 2,
+    /// that is gone again within the poll; whose second poll disconnects 1;
+    /// and that closes on the third pump.
+    #[derive(Default)]
+    struct FamilyWindow {
+        pumps: u32,
+        polls: u32,
+    }
+
+    impl EventSource for FamilyWindow {
+        fn pump_events(&mut self, out: &mut Vec<Event>) {
+            self.pumps += 1;
+            if self.pumps == 3 {
+                out.push(Event::CloseRequested);
+            }
+        }
+
+        fn poll_gamepads(&mut self, out: &mut Vec<Event>) {
+            self.polls += 1;
+            let (one, two) = (GamepadId::from_raw(1), GamepadId::from_raw(2));
+            match self.polls {
+                1 => out.extend([
+                    Event::GamepadConnected(one),
+                    Event::GamepadConnected(two),
+                    Event::GamepadDisconnected(two),
+                ]),
+                2 => out.push(Event::GamepadDisconnected(one)),
+                _ => {}
+            }
+        }
+
+        fn gamepad_family(&self, id: GamepadId) -> Option<GamepadFamily> {
+            // As the platform answers after the first poll: 1 plugged in,
+            // 2 gone; and after the second, none.
+            (self.polls == 1 && id.raw() == 1).then_some(GamepadFamily::Nintendo)
+        }
+
+        fn set_modal_frame_callback(&mut self, _callback: Box<dyn FnMut(ModalFrame)>) {}
+    }
+
+    #[test]
+    fn the_loop_keeps_each_pads_family() {
+        let log = shared();
+        let mut app = app().insert_resource(Rc::clone(&log)).add_frame_system(
+            FrameStage::Ui,
+            "families",
+            |world, _| {
+                let pads: Vec<_> = world.resource::<Gamepads>().iter().collect();
+                let seen = &world.resource::<Shared>().seen;
+                seen.borrow_mut().push(format!("{pads:?}"));
+            },
+        );
+        app.config.frame_rate_limit = None;
+        let mut window = FamilyWindow::default();
+        app.run_loop(&mut window, None)
+            .expect("no error without a device");
+        assert_eq!(*log.seen.borrow(), ["[(GamepadId(1), Nintendo)]", "[]"]);
     }
 
     #[test]

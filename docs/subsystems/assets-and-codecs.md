@@ -1718,7 +1718,10 @@ Each `.jsonc` below the source's `data/` is a job of its own,
 `data/<path without .jsonc>`: read as JSONC (UTF-8, duplicate keys
 refused, `CodecError::Json` naming the line and column), written as the
 same value in KBJ at `data/<path>.kbj`. What the value means is checked
-where the game loads it.
+where the game loads it: the button prompts' table, `data/input/prompts.kbj`,
+by the facade's `ButtonPrompts` asset, which refuses a table that lacks a
+family's label for a button, trigger, or stick, or has a name it does not
+know (ADR-0074).
 
 ### LDtk levels
 

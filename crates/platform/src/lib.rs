@@ -85,7 +85,13 @@
 //!   button on every pad. [`Event::GamepadAxis`] gives a stick's axis from
 //!   -1 to 1, with +Y down, and a trigger from 0 to 1, raw: dead zones are
 //!   the input layer's.
+//! - [`GamepadState::family`] says whose labels a pad's buttons carry, a
+//!   [`GamepadFamily`], for a game's button prompts: Xbox, PlayStation,
+//!   Nintendo or another.
 //! - Pads are read whether or not the window has the focus.
+//! - On Linux, a pad that Steam lists for games to skip is not reported,
+//!   as SDL (Simple DirectMedia Layer, the library most games read pads
+//!   through) skips it: Steam gives a game its own copy of such a pad.
 //!
 //! # Drawing
 //!
@@ -356,7 +362,7 @@ pub use audio::{AudioOutputConfig, AudioRender, AudioStream, open_audio};
 pub use dialog::show_error_dialog;
 pub use error::PlatformError;
 pub use event::Event;
-pub use gamepad::{GamepadId, GamepadState};
+pub use gamepad::{GamepadFamily, GamepadId, GamepadState};
 pub use gpu::{GlContext, GlContextId, GpuSurface, HeadlessGl, create_headless_gl};
 pub use paths::{UserDirs, user_dirs};
 pub use sleep::precise_sleep;
@@ -462,8 +468,14 @@ impl Platform {
     ///
     /// Linux reads the kernel's event devices, and needs read access to the
     /// gamepads' nodes in `/dev/input`, which the desktop's udev rules
-    /// normally give the user at the seat. Windows (roadmap task M8.2) and
-    /// macOS (M8.3) report no pads yet.
+    /// normally give the user at the seat. It skips the pads that Steam
+    /// lists for games to skip, as SDL does: the vendor and product ids in
+    /// `SDL_GAMECONTROLLER_IGNORE_DEVICES`, or every pad but those in
+    /// `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT` where that lists any; and
+    /// Steam's own virtual pad, unless
+    /// `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD` is set. Windows
+    /// (roadmap task M8.2, XInput) and macOS (M8.3, GameController) report
+    /// no pads yet.
     pub fn poll_gamepads(&mut self, out: &mut Vec<Event>) {
         self.gamepads.poll(out);
     }

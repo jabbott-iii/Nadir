@@ -29,8 +29,17 @@
 //!   `hid-playstation` and `hid-nintendo` do, while `xpad`, and an Xbox pad
 //!   over Bluetooth, report them by their Xbox labels, which puts X, on the
 //!   left, on the code of the top button. So the codes are read by place for
-//!   Sony's pads, as SDL does, and Nintendo's, whose driver reports by place
-//!   too, and by label for every other.
+//!   the pads of the PlayStation and Nintendo families, whose drivers follow
+//!   the documentation, and by label for every other pad. SDL decides the
+//!   same way for Sony's pads.
+//! - A pad's family comes from its driver, which sysfs names
+//!   (`/sys/class/input/eventN/device/device/driver`), if that driver is one
+//!   family's: `xpad` and `hid-microsoft` are Xbox's, `hid-playstation` and
+//!   `hid-sony` PlayStation's, `hid-nintendo` Nintendo's. These drivers take
+//!   other makers' pads too, such as PDP's Xbox pads (`xpad`) and Hori's
+//!   Switch pads (`hid-nintendo`), whose vendor ids say nothing of their
+//!   family. Any other pad's family comes from its vendor id: Microsoft's,
+//!   Sony's or Nintendo's, or else none of the three.
 //! - The axes differ too. `xpad`, `hid-playstation` and `hid-nintendo` put
 //!   the right stick on `ABS_RX` and `ABS_RY`, and analog triggers on
 //!   `ABS_Z` and `ABS_RZ`. An Xbox pad over Bluetooth, through
@@ -51,6 +60,21 @@
 //!   the kernel's queue: applying an older one after it would leave a
 //!   button stuck.)
 //! - A pad is read whether or not the window has the focus.
+//! - Steam can read a pad itself and give the game a virtual Xbox pad in
+//!   its place, leaving the real pad's node open too: a game that read both
+//!   would hear the pad twice. So Steam tells the games it starts which pads
+//!   to skip, through variables that SDL (Simple DirectMedia Layer, the
+//!   library most games read pads through) reads, and these are read the
+//!   same way, once, as the gamepads start:
+//!   - `SDL_GAMECONTROLLER_IGNORE_DEVICES` lists the vendor and product
+//!     ids of the pads to skip, as `0x054c/0x0ce6,0x057e/0x2009`.
+//!   - `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT`, where it lists any,
+//!     lists the only pads to read, and the other list is not used.
+//!   - Either can be `@` and a file's path, to read the list from the file.
+//!   - Steam's own virtual pad (Valve's `0x28de/0x11ff`) is skipped unless
+//!     `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD` is true, which Steam
+//!     sets for a game it starts; outside Steam, the game reads the real
+//!     pad. The lists do not decide for it.
 //!
 //! Access to the nodes comes from the desktop seat's udev rules (`uaccess`),
 //! which give the user at the seat the gamepads, but not the keyboards and
@@ -62,9 +86,12 @@
 use core::ffi::{CStr, c_int, c_ulong};
 use core::mem::offset_of;
 use core::ptr;
+use std::env;
+use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
@@ -85,7 +112,7 @@ use nadir_sys::linux::libc::{
     inotify_event, inotify_init1, ioctl,
 };
 
-use crate::{Event, GamepadId, GamepadState};
+use crate::{Event, GamepadFamily, GamepadId, GamepadState};
 
 /// The folder of the event devices.
 const INPUT_DIR: &str = "/dev/input";
@@ -97,13 +124,28 @@ const INPUT_DIR_C: &CStr = c"/dev/input";
 /// everyone: `<node>/device/capabilities/{ev,key}`.
 const SYSFS_INPUT_DIR: &str = "/sys/class/input";
 
-/// Sony's USB vendor id. `hid-playstation` and `hid-sony` report the face
-/// buttons by place.
-const SONY: u16 = 0x054c;
+/// Valve's USB vendor id: the Steam Deck's controls, the Steam Controller,
+/// and the virtual pads Steam makes.
+const VALVE: u16 = 0x28de;
 
-/// Nintendo's USB vendor id. `hid-nintendo` reports the face buttons by
-/// place.
-const NINTENDO: u16 = 0x057e;
+/// The product id of the virtual Xbox pad that Steam makes of a pad it reads
+/// itself: SDL's `USB_PRODUCT_STEAM_VIRTUAL_GAMEPAD`, in its `usb_ids.h`.
+const STEAM_VIRTUAL_GAMEPAD: u16 = 0x11ff;
+
+/// The variable that lists the pads a game is to skip.
+const IGNORE_DEVICES: &str = "SDL_GAMECONTROLLER_IGNORE_DEVICES";
+
+/// The variable that, where it lists any pad, lists the only pads a game is
+/// to read.
+const IGNORE_DEVICES_EXCEPT: &str = "SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT";
+
+/// The variable that, true, has a game read Steam's virtual pad.
+const ALLOW_STEAM_VIRTUAL_GAMEPAD: &str = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD";
+
+/// The most bytes read of a file that a list variable names. A pair written
+/// as SDL's documentation writes one, `0x054c/0x0ce6,`, takes 14, so this
+/// holds over 4600.
+const LIST_FILE_MAX: usize = 64 * 1024;
 
 /// The bytes of one record read from an event device.
 const RECORD: usize = size_of::<input_event>();
@@ -588,6 +630,180 @@ fn sysfs_says_gamepad(node: &str) -> bool {
     }
 }
 
+/// The name of the driver of the device behind the node, from sysfs below
+/// `sysfs`: the link `<node>/device/device/driver`, which points to the
+/// driver's folder, such as `/sys/bus/usb/drivers/xpad`. `None` for a device
+/// that no driver holds, such as one made through `/dev/uinput`.
+fn driver_of(sysfs: &Path, node: &str) -> Option<String> {
+    let link = fs::read_link(sysfs.join(node).join("device/device/driver")).ok()?;
+    Some(link.file_name()?.to_str()?.to_string())
+}
+
+/// A pad's family: its driver's, if the driver is one family's, or else its
+/// USB vendor id's.
+fn family_of(driver: Option<&str>, vendor: u16) -> GamepadFamily {
+    match driver {
+        Some("xpad" | "microsoft") => GamepadFamily::Xbox,
+        Some("playstation" | "sony") => GamepadFamily::PlayStation,
+        Some("nintendo") => GamepadFamily::Nintendo,
+        _ => GamepadFamily::from_vendor(vendor),
+    }
+}
+
+/// Whether a pad of the family reports its face buttons by place, as the
+/// kernel's documentation asks: the drivers of PlayStation's and Nintendo's
+/// pads do. The Xbox pads' drivers, and the others', report them by label.
+fn reads_by_place(family: GamepadFamily) -> bool {
+    matches!(family, GamepadFamily::PlayStation | GamepadFamily::Nintendo)
+}
+
+/// The pads that Steam tells a game to skip, read as SDL reads them (the
+/// module's documentation says how).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct SteamLists {
+    /// [`IGNORE_DEVICES`]: the pads to skip, as (vendor, product) pairs.
+    ignore: Vec<(u16, u16)>,
+    /// [`IGNORE_DEVICES_EXCEPT`]: if it holds any, the only pads to read.
+    except: Vec<(u16, u16)>,
+    /// [`ALLOW_STEAM_VIRTUAL_GAMEPAD`]: whether Steam's virtual pad is read.
+    allow_virtual: bool,
+}
+
+impl SteamLists {
+    /// The lists that the process's environment gives.
+    fn from_env() -> Self {
+        let lists = Self::new(
+            env::var_os(IGNORE_DEVICES).as_deref(),
+            env::var_os(IGNORE_DEVICES_EXCEPT).as_deref(),
+            env::var_os(ALLOW_STEAM_VIRTUAL_GAMEPAD).as_deref(),
+        );
+        if !lists.ignore.is_empty() || !lists.except.is_empty() {
+            info!(
+                "gamepads to skip, as Steam or the user listed them: {} by {IGNORE_DEVICES}, {} \
+                 read alone by {IGNORE_DEVICES_EXCEPT}",
+                lists.ignore.len(),
+                lists.except.len()
+            );
+        }
+        lists
+    }
+
+    /// The lists that these values of the three variables give, each `None`
+    /// where its variable is not set.
+    fn new(ignore: Option<&OsStr>, except: Option<&OsStr>, allow: Option<&OsStr>) -> Self {
+        Self {
+            ignore: ignore.map_or_else(Vec::new, |value| list_value(IGNORE_DEVICES, value)),
+            except: except.map_or_else(Vec::new, |value| list_value(IGNORE_DEVICES_EXCEPT, value)),
+            allow_virtual: allow.is_some_and(sdl_true),
+        }
+    }
+
+    /// Why the pad of these ids is to be skipped, or `None` if it is to be
+    /// read. As in SDL, Steam's virtual pad is decided by its own variable,
+    /// before the lists; then a list of pads to read alone, where it holds
+    /// any, decides; and otherwise the list of pads to skip does.
+    fn skip(&self, vendor: u16, product: u16) -> Option<&'static str> {
+        let pad = (vendor, product);
+        if pad == (VALVE, STEAM_VIRTUAL_GAMEPAD) {
+            return (!self.allow_virtual).then_some(
+                "it is Steam's virtual pad, which a game reads only when Steam starts it, with \
+                 SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD set",
+            );
+        }
+        if !self.except.is_empty() {
+            return (!self.except.contains(&pad))
+                .then_some("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT does not list it");
+        }
+        self.ignore
+            .contains(&pad)
+            .then_some("SDL_GAMECONTROLLER_IGNORE_DEVICES lists it")
+    }
+}
+
+/// The pairs that a list variable's value gives: from its text, or, for `@`
+/// and a path, from the text of the file at the path, as SDL reads the
+/// file. A file that cannot be read, or is longer than [`LIST_FILE_MAX`],
+/// gives none, and a warning says so.
+fn list_value(variable: &str, value: &OsStr) -> Vec<(u16, u16)> {
+    let bytes = value.as_bytes();
+    let Some(path) = bytes.strip_prefix(b"@") else {
+        return id_pairs(bytes);
+    };
+    let path = Path::new(OsStr::from_bytes(path));
+    let mut text = Vec::new();
+    // One byte more than the most, to tell a file that is too long.
+    let read = File::open(path)
+        .and_then(|file| file.take(LIST_FILE_MAX as u64 + 1).read_to_end(&mut text));
+    match read {
+        Ok(read) if read <= LIST_FILE_MAX => id_pairs(&text),
+        Ok(_) => {
+            warn!(
+                "{variable} names {}, which is not read: it is longer than {LIST_FILE_MAX} bytes",
+                path.display()
+            );
+            Vec::new()
+        }
+        Err(error) => {
+            warn!(
+                "{variable} names {}, which cannot be read: {error}",
+                path.display()
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// The (vendor, product) id pairs in a list written for SDL, read as SDL
+/// reads one (its `SDL_LoadVIDPIDListFromHint`):
+///
+/// - Each `0x` starts a number, of the hexadecimal digits after it. The
+///   first number of two is a vendor id, the second a product id, and
+///   whatever comes between numbers is skipped: so
+///   `0x045e/0x028e,0x054c/0x0ce6` gives two pairs.
+/// - As in SDL, which reads a number with C's `strtol` and casts it to 16
+///   bits: a number keeps its low 16 bits, after one too large for a
+///   64-bit `long` becomes the largest that is not; `0x` with no digit after
+///   it is 0; a vendor id with no product id after it is dropped; and `0X`
+///   starts no number.
+fn id_pairs(text: &[u8]) -> Vec<(u16, u16)> {
+    let mut rest = text;
+    let mut number = || -> Option<u16> {
+        let start = rest.windows(2).position(|two| two == b"0x")?;
+        let digits = rest.get(start + 2..)?;
+        let count = digits
+            .iter()
+            .take_while(|digit| digit.is_ascii_hexdigit())
+            .count();
+        let (written, after) = digits.split_at(count);
+        rest = after;
+        let value = written.iter().fold(0u64, |value, &digit| {
+            let digit = char::from(digit).to_digit(16).map_or(0, u64::from);
+            value
+                .saturating_mul(16)
+                .saturating_add(digit)
+                .min(i64::MAX as u64)
+        });
+        Some((value & 0xffff) as u16)
+    };
+    let mut pairs = Vec::new();
+    while let Some(vendor) = number() {
+        let Some(product) = number() else {
+            break;
+        };
+        pairs.push((vendor, product));
+    }
+    pairs
+}
+
+/// Whether a variable's value is true, as SDL reads a true or false value
+/// (its `SDL_GetStringBoolean`): an empty value is false, as an unset one
+/// is, and so is one that starts with `0` or is `false` in any case; any
+/// other is true.
+fn sdl_true(value: &OsStr) -> bool {
+    let bytes = value.as_bytes();
+    !(bytes.is_empty() || bytes.starts_with(b"0") || bytes.eq_ignore_ascii_case(b"false"))
+}
+
 /// What one read of a device gave.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Got {
@@ -616,8 +832,14 @@ struct Pad {
 
 impl Pad {
     /// The gamepad that `file`, an event device, is, or `None` if it is
-    /// another kind of device. Its state is at rest: [`Pad::sync`] reads it.
-    fn probe(node: &str, file: File, id: GamepadId) -> io::Result<Option<Self>> {
+    /// another kind of device, or a gamepad that `steam` says to skip. Its
+    /// state is at rest: [`Pad::sync`] reads it.
+    fn probe(
+        node: &str,
+        file: File,
+        id: GamepadId,
+        steam: &SteamLists,
+    ) -> io::Result<Option<Self>> {
         let mut capabilities = Capabilities::none();
         read_request(&file, EVIOCGBIT_EV, &mut capabilities.types)?;
         if !bit(&capabilities.types, EV_KEY) || !bit(&capabilities.types, EV_ABS) {
@@ -642,13 +864,24 @@ impl Pad {
             }
             Err(_) => String::new(),
         };
-        let by_place = matches!(device.vendor, SONY | NINTENDO);
+        if let Some(reason) = steam.skip(device.vendor, device.product) {
+            info!(
+                "the gamepad {name:?} ({:04x}:{:04x}) at {INPUT_DIR}/{node} is skipped: {reason}",
+                device.vendor, device.product,
+            );
+            return Ok(None);
+        }
+        let driver = driver_of(Path::new(SYSFS_INPUT_DIR), node);
+        let family = family_of(driver.as_deref(), device.vendor);
+        let by_place = reads_by_place(family);
         info!(
-            "gamepad {} connected: {name:?} ({:04x}:{:04x}) at {INPUT_DIR}/{node}, its face \
-             buttons read by {}",
+            "gamepad {} connected: {name:?} ({:04x}:{:04x}, driver {}) at {INPUT_DIR}/{node}, of \
+             the {} family, its face buttons read by {}",
             id.raw(),
             device.vendor,
             device.product,
+            driver.as_deref().unwrap_or("none"),
+            family.name(),
             if by_place { "place" } else { "label" },
         );
         Ok(Some(Self {
@@ -659,7 +892,7 @@ impl Pad {
             axes: capabilities.axes,
             layout: Layout::new(by_place, &capabilities.axes),
             decoder: Decoder::default(),
-            state: GamepadState::new(name),
+            state: GamepadState::new(name, family),
         }))
     }
 
@@ -821,6 +1054,8 @@ pub(crate) struct Gamepads {
     /// The inotify instance that watches [`INPUT_DIR`], unless it could not
     /// be made or stopped working.
     watch: Option<File>,
+    /// The pads to skip, read from the environment as the gamepads start.
+    steam: SteamLists,
     pads: Vec<Pad>,
     /// The number of the next pad's id.
     next_id: u32,
@@ -829,12 +1064,14 @@ pub(crate) struct Gamepads {
 }
 
 impl Gamepads {
-    /// Starts watching [`INPUT_DIR`]. The pads already there are opened by
-    /// the first poll, which reports them. Fails never: without a watch, no
-    /// pad plugged in later is seen, and a warning says so.
+    /// Starts watching [`INPUT_DIR`], and reads Steam's lists of pads to
+    /// skip. The pads already there are opened by the first poll, which
+    /// reports them. Fails never: without a watch, no pad plugged in later
+    /// is seen, and a warning says so.
     pub(crate) fn new() -> Self {
         Self {
             watch: watch_input_dir(),
+            steam: SteamLists::from_env(),
             pads: Vec::new(),
             next_id: 1,
             scanned: false,
@@ -925,7 +1162,7 @@ impl Gamepads {
             return;
         };
         let id = GamepadId::from_raw(self.next_id);
-        let mut pad = match Pad::probe(node, file, id) {
+        let mut pad = match Pad::probe(node, file, id, &self.steam) {
             Ok(Some(pad)) => pad,
             Ok(None) => return,
             Err(error) => {
@@ -1230,6 +1467,227 @@ mod tests {
     }
 
     #[test]
+    fn a_pads_family_is_its_drivers_and_else_its_vendors() {
+        use GamepadFamily::{Nintendo, Other, PlayStation, Xbox};
+        let cases = [
+            // M8.1's wired pad, PDP's, on `xpad`.
+            (Some("xpad"), 0x0e6f, Xbox),
+            (Some("xpad"), 0x045e, Xbox),
+            (Some("microsoft"), 0x045e, Xbox),
+            (Some("playstation"), 0x054c, PlayStation),
+            (Some("sony"), 0x054c, PlayStation),
+            // Mad Catz, whose PlayStation 3 devices `hid-sony` takes.
+            (Some("sony"), 0x0738, PlayStation),
+            (Some("nintendo"), 0x057e, Nintendo),
+            // Hori, whose Switch pads `hid-nintendo` takes.
+            (Some("nintendo"), 0x0f0d, Nintendo),
+            // Another driver, or none, as for a virtual pad: the vendor's.
+            (Some("hid-generic"), 0x045e, Xbox),
+            (Some("hid-generic"), 0x054c, PlayStation),
+            (None, 0x057e, Nintendo),
+            (Some("hid-generic"), 0x0e6f, Other),
+            // Steam's virtual pad, made through `/dev/uinput`.
+            (None, VALVE, Other),
+        ];
+        for (driver, vendor, family) in cases {
+            assert_eq!(family_of(driver, vendor), family, "{driver:?} {vendor:04x}");
+        }
+    }
+
+    #[test]
+    fn the_face_buttons_are_read_by_place_for_playstation_and_nintendo_pads() {
+        assert!(!reads_by_place(family_of(Some("xpad"), 0x0e6f)));
+        assert!(!reads_by_place(family_of(Some("hid-generic"), 0x045e)));
+        assert!(!reads_by_place(family_of(Some("hid-generic"), 0x0e6f)));
+        assert!(reads_by_place(family_of(Some("playstation"), 0x054c)));
+        assert!(reads_by_place(family_of(None, 0x057e)));
+        // `hid-nintendo` reports a Hori pad's buttons by place, as it does
+        // Nintendo's; Hori's vendor id alone read them by label, with X and
+        // Y swapped.
+        assert!(reads_by_place(family_of(Some("nintendo"), 0x0f0d)));
+    }
+
+    #[test]
+    fn the_driver_is_read_from_sysfs() {
+        let sysfs = env::temp_dir().join(format!("nadir-platform-sysfs-{}", std::process::id()));
+        // A folder left by an earlier run of this process's id.
+        let _ = fs::remove_dir_all(&sysfs);
+        // As sysfs has it: the input device's parent links to its driver's
+        // folder, by a relative path.
+        let parent = sysfs.join("event7/device/device");
+        fs::create_dir_all(&parent).expect("make the device's folders");
+        fs::create_dir_all(sysfs.join("bus/usb/drivers/xpad")).expect("make the driver's folder");
+        std::os::unix::fs::symlink("../../../bus/usb/drivers/xpad", parent.join("driver"))
+            .expect("link the driver");
+        // A virtual pad's input device has no parent.
+        fs::create_dir_all(sysfs.join("event8/device")).expect("make the virtual pad's folder");
+        assert_eq!(driver_of(&sysfs, "event7").as_deref(), Some("xpad"));
+        assert_eq!(driver_of(&sysfs, "event8"), None);
+        assert_eq!(driver_of(&sysfs, "event9"), None);
+        fs::remove_dir_all(&sysfs).expect("remove the folder");
+    }
+
+    #[test]
+    fn steams_lists_are_read_as_sdl_reads_them() {
+        // SDL's documentation's form.
+        assert_eq!(
+            id_pairs(b"0x045e/0x028e,0x054c/0x0ce6"),
+            [(0x045e, 0x028e), (0x054c, 0x0ce6)]
+        );
+        // Any separator, or none, and capital digits.
+        assert_eq!(
+            id_pairs(b" 0x28DE 0x11FF\n0x057e:0x2009;0x1/0x2"),
+            [(0x28de, 0x11ff), (0x057e, 0x2009), (1, 2)]
+        );
+        // No `0x`, `0X`, or decimal: no number.
+        for text in [
+            &b""[..],
+            b"045e/028e",
+            b"0X045E/0X028E",
+            b"1118/640",
+            b"none",
+        ] {
+            assert!(
+                id_pairs(text).is_empty(),
+                "{:?}",
+                String::from_utf8_lossy(text)
+            );
+        }
+        // A vendor id with no product id after it is dropped.
+        assert_eq!(id_pairs(b"0x045e/0x028e,0x054c/"), [(0x045e, 0x028e)]);
+        // `0x` with no digit is 0.
+        assert_eq!(id_pairs(b"0x/0xz"), [(0, 0)]);
+        // Digits run on to the next `x`: one number, 0x28de0, and no
+        // second.
+        assert!(id_pairs(b"0x28de0x11ff").is_empty());
+        // The low 16 bits; and past the largest 64-bit `long`, its own.
+        assert_eq!(id_pairs(b"0x1045e/0xabc028e"), [(0x045e, 0x028e)]);
+        assert_eq!(
+            id_pairs(b"0x7ffffffffffffffe/0x8000000000000000"),
+            [(0xfffe, 0xffff)]
+        );
+        assert_eq!(id_pairs(b"0x10000000000000000/0x0"), [(0xffff, 0)]);
+    }
+
+    #[test]
+    fn a_list_written_out_reads_back() {
+        const SEPARATORS: [&str; 6] = [",", "/", " ", "\n", ", ", ";"];
+        check(
+            "pairs written with any separators read back",
+            500,
+            |rng| {
+                let pairs: Vec<(u16, u16)> = (0..rng.range(0u32..20))
+                    .map(|_| {
+                        let ids = rng.next_u32();
+                        ((ids >> 16) as u16, ids as u16)
+                    })
+                    .collect();
+                let mut text = String::new();
+                for &(vendor, product) in &pairs {
+                    for id in [vendor, product] {
+                        let separator = rng.choose(&SEPARATORS).expect("separators");
+                        if rng.range(0u32..2) == 0 {
+                            text.push_str(&format!("0x{id:04x}{separator}"));
+                        } else {
+                            text.push_str(&format!("0x{id:X}{separator}"));
+                        }
+                    }
+                }
+                (pairs, text)
+            },
+            |(pairs, text)| {
+                let read = id_pairs(text.as_bytes());
+                if read == *pairs {
+                    Ok(())
+                } else {
+                    Err(format!("{text:?} read as {read:x?}"))
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn a_list_can_be_read_from_a_file() {
+        let path = env::temp_dir().join(format!(
+            "nadir-platform-steam-list-{}.txt",
+            std::process::id()
+        ));
+        let mut value = std::ffi::OsString::from("@");
+        value.push(&path);
+        let read = || list_value(IGNORE_DEVICES, &value);
+        fs::write(&path, "0x054c/0x0ce6,\n0x057e/0x2009\n").expect("write the list");
+        assert_eq!(read(), [(0x054c, 0x0ce6), (0x057e, 0x2009)]);
+        // As long as can be read, then a byte longer.
+        let mut text = b"0x1/0x2".to_vec();
+        text.resize(LIST_FILE_MAX, b' ');
+        fs::write(&path, &text).expect("write the list");
+        assert_eq!(read(), [(1, 2)]);
+        text.push(b' ');
+        fs::write(&path, &text).expect("write the list");
+        assert!(read().is_empty());
+        fs::remove_file(&path).expect("remove the list");
+        assert!(read().is_empty());
+        // `@` names a file only at the start.
+        assert_eq!(
+            list_value(IGNORE_DEVICES, OsStr::new(" @0x1/0x2")),
+            [(1, 2)]
+        );
+    }
+
+    #[test]
+    fn steams_lists_decide_as_sdl_does() {
+        let os = |text: &'static str| Some(OsStr::new(text));
+        let ds4 = (0x054c, 0x09cc);
+        let dualsense = (0x054c, 0x0ce6);
+        let switch_pro = (0x057e, 0x2009);
+        let steam = (VALVE, STEAM_VIRTUAL_GAMEPAD);
+        let skipped = |lists: &SteamLists, (vendor, product): (u16, u16)| {
+            lists.skip(vendor, product).is_some()
+        };
+
+        // No variable set: Steam's virtual pad alone is skipped, so that a
+        // game started outside Steam reads the real pad.
+        let none = SteamLists::new(None, None, None);
+        assert!(!skipped(&none, dualsense));
+        assert!(skipped(&none, steam));
+
+        // As Steam starts a game: the real pad skipped, its copy read.
+        let started = SteamLists::new(os("0x054c/0x0ce6"), None, os("1"));
+        assert!(skipped(&started, dualsense));
+        assert!(!skipped(&started, ds4));
+        assert!(!skipped(&started, steam));
+
+        // A list of pads to read alone decides by itself.
+        let except = SteamLists::new(os("0x054c/0x0ce6"), os("0x054c/0x0ce6,0x057e/0x2009"), None);
+        assert!(!skipped(&except, dualsense));
+        assert!(!skipped(&except, switch_pro));
+        assert!(skipped(&except, ds4));
+        // But not for Steam's virtual pad, which its own variable decides.
+        assert!(skipped(
+            &SteamLists::new(None, os("0x28de/0x11ff"), None),
+            steam
+        ));
+        assert!(!skipped(
+            &SteamLists::new(os("0x28de/0x11ff"), None, os("true")),
+            steam
+        ));
+        // One that gives no pair is no list.
+        let empty = SteamLists::new(os("0x054c/0x0ce6"), os("none"), None);
+        assert!(skipped(&empty, dualsense));
+        assert!(!skipped(&empty, ds4));
+    }
+
+    #[test]
+    fn true_and_false_are_read_as_sdl_reads_them() {
+        for text in ["1", "true", "TRUE", "yes", "2"] {
+            assert!(sdl_true(OsStr::new(text)), "{text:?}");
+        }
+        for text in ["", "0", "00", "0yes", "false", "FALSE", "False"] {
+            assert!(!sdl_true(OsStr::new(text)), "{text:?}");
+        }
+    }
+
+    #[test]
     fn the_other_buttons_have_one_code_each() {
         let expected = [
             (BTN_TL, GamepadButton::LeftBumper),
@@ -1309,7 +1767,7 @@ mod tests {
             Some(Control::Trigger(GamepadAxis::RightTrigger))
         );
 
-        let mut state = GamepadState::new(String::new());
+        let mut state = GamepadState::new(String::new(), GamepadFamily::Xbox);
         let mut out = Vec::new();
         switch.apply_key(BTN_TR2, true, PAD, &mut state, &mut out);
         switch.apply_key(BTN_TR2, false, PAD, &mut state, &mut out);
@@ -1325,7 +1783,7 @@ mod tests {
     #[test]
     fn an_xbox_pad_over_bluetooth_has_its_right_stick_on_z_and_rz() {
         let layout = xbox_bluetooth();
-        let mut state = GamepadState::new(String::new());
+        let mut state = GamepadState::new(String::new(), GamepadFamily::Xbox);
         let mut out = Vec::new();
         // At rest, the middle of 0 to 65535: the stick at 0, not a trigger
         // half pulled.
@@ -1362,7 +1820,7 @@ mod tests {
             layout.key(BTN_TR2),
             Some(Control::Trigger(GamepadAxis::RightTrigger))
         );
-        let mut state = GamepadState::new(String::new());
+        let mut state = GamepadState::new(String::new(), GamepadFamily::Xbox);
         let mut out = Vec::new();
         layout.apply_axis(ABS_RZ, 255, PAD, &mut state, &mut out);
         assert_eq!(out, [axis(GamepadAxis::RightY, 1.0)]);
@@ -1524,7 +1982,7 @@ mod tests {
     #[test]
     fn the_hat_presses_one_side_at_a_time() {
         let layout = xbox();
-        let mut state = GamepadState::new(String::new());
+        let mut state = GamepadState::new(String::new(), GamepadFamily::Xbox);
         let mut out = Vec::new();
         layout.apply_axis(ABS_HAT0X, -1, PAD, &mut state, &mut out);
         layout.apply_axis(ABS_HAT0X, 1, PAD, &mut state, &mut out);
@@ -1547,7 +2005,7 @@ mod tests {
     #[test]
     fn an_axis_the_pad_lacks_or_no_standard_pad_has_is_ignored() {
         let layout = switch_pro();
-        let mut state = GamepadState::new(String::new());
+        let mut state = GamepadState::new(String::new(), GamepadFamily::Xbox);
         let mut out = Vec::new();
         // ABS_Z: this pad has no analog trigger. ABS_MISC (0x28): none has.
         layout.apply_axis(ABS_Z, 200, PAD, &mut state, &mut out);
@@ -1677,7 +2135,7 @@ mod tests {
             axes: [0; AXIS_BYTES],
             layout,
             decoder: Decoder::default(),
-            state: GamepadState::new("fake pad".to_string()),
+            state: GamepadState::new("fake pad".to_string(), GamepadFamily::Xbox),
         };
         (pad, kernel)
     }

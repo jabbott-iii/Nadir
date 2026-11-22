@@ -21,7 +21,8 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
 - **On Linux (X11),** these work:
   - a window, with keyboard and mouse input, and gamepads, bound to a
     game's actions as keys are, with deadzones for their sticks and
-    triggers;
+    triggers, and button prompts for each family of pad (A on an Xbox pad,
+    ✕ on a PlayStation one);
   - a fixed 60 Hz simulation, which rendering interpolates between ticks;
   - an OpenGL 3.3 renderer, with:
     - y-sorted, instanced sprite batches;
@@ -58,8 +59,8 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   48 kHz, which the asset server loads. Windows and macOS have no audio
   output yet (roadmap M6.4, M6.5), so there the game is silent.
 - **Not built yet:** gamepads on Windows and macOS (roadmap tasks M8.2 and
-  M8.3), button prompts for each family of pad (M8.5), a settings file
-  (M9.3), menus (M9.2), and the Metal backend (M10).
+  M8.3), a settings file (M9.3), menus (M9.2), and the Metal backend
+  (M10).
 
 ## Build and run
 

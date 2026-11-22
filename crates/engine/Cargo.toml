@@ -25,9 +25,14 @@ nadir-assets.workspace = true
 nadir-audio.workspace = true
 nadir-collision.workspace = true
 nadir-core.workspace = true
-# The debug UI, and the files of its font, which are made as the cook
-# would write them: development builds only (`dev`, ADR-0058).
-nadir-codec = { workspace = true, optional = true }
+# The button prompts' table, read from KBJ (ADR-0074); in development
+# builds, the files of the debug UI's font too, which are made as the cook
+# would write them (ADR-0058). The tests write QOI textures, and check
+# that a QOI file too short for its size is refused before anything is
+# allocated; and they encode atlas files for `Sprite::from_atlas` and
+# `Clips::add_atlas`.
+nadir-codec.workspace = true
+# The debug UI: development builds only (`dev`, ADR-0058).
 nadir-debug = { workspace = true, optional = true }
 nadir-ecs.workspace = true
 nadir-gfx.workspace = true
@@ -36,12 +41,6 @@ nadir-platform.workspace = true
 nadir-render.workspace = true
 nadir-scene.workspace = true
 
-[dev-dependencies]
-# The tests write QOI textures, and check that a QOI file too short for
-# its size is refused before anything is allocated; and they encode atlas
-# files for `Sprite::from_atlas` and `Clips::add_atlas`.
-nadir-codec.workspace = true
-
 [features]
 # Development builds: a failed asset shows its placeholder rather than
 # nothing, the allocation counter counts each frame's allocations
@@ -49,7 +48,7 @@ nadir-codec.workspace = true
 # game's debug windows and the engine's, the stats overlay and the
 # profiler, whose scopes nadir-core's `profile` records (ADR-0059).
 # `cargo dev` turns it on through the sandbox.
-dev = ["nadir-platform/dev", "nadir-core/profile", "dep:nadir-codec", "dep:nadir-debug"]
+dev = ["nadir-platform/dev", "nadir-core/profile", "dep:nadir-debug"]
 
 [lints]
 workspace = true

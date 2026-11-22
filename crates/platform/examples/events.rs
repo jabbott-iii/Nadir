@@ -37,7 +37,8 @@
 //! the loop is back.
 //!
 //! Gamepads are polled with the window's events: plugging one in or out, its
-//! buttons and its axes are printed too, and a pad's name when it connects.
+//! buttons and its axes are printed too, and a pad's name and family when it
+//! connects.
 
 use std::cell::Cell;
 use std::error::Error;
@@ -116,7 +117,13 @@ fn run(mut args: Args, out: &mut dyn Write) -> Result<(), Box<dyn Error>> {
                 Event::CloseRequested => return Ok(()),
                 Event::GamepadConnected(id) => {
                     if let Some(state) = platform.gamepad_state(id) {
-                        writeln!(out, "           gamepad {}: {:?}", id.raw(), state.name())?;
+                        writeln!(
+                            out,
+                            "           gamepad {}: {:?}, of the {} family",
+                            id.raw(),
+                            state.name(),
+                            state.family().name()
+                        )?;
                     }
                 }
                 Event::Key {

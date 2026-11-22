@@ -28,7 +28,10 @@ Built today:
 - On Linux, gamepads (`poll_gamepads`, `gamepad_state`), read from the
   kernel's event devices: pads plugged in and unplugged while the game
   runs, their buttons by their place on the pad, their sticks from -1 to 1
-  and their triggers from 0 to 1, with no dead zone.
+  and their triggers from 0 to 1, with no dead zone; each pad's family
+  (`GamepadState::family`: Xbox, PlayStation, Nintendo or another), from
+  its driver or its vendor id, for button prompts; and the pads Steam
+  tells a game to skip skipped, as SDL skips them.
 - Typed text (`Event::Text`), a character at a time after the key press
   that typed it, composed characters included: on Linux from an X input
   method, on Windows from `WM_CHAR`, on macOS from a key press's

@@ -265,6 +265,12 @@
 //!   names them, an [`ActionMap`](input::ActionMap) binds keys and mouse
 //!   buttons to them, and [`App::add_actions`] adds both; tick systems read
 //!   the resource [`ActionState`](input::ActionState).
+//! - Button prompts: the resource [`Gamepads`] gives the family of each
+//!   gamepad connected ([`GamepadFamily`]: Xbox, PlayStation, Nintendo or
+//!   another), and the asset [`ButtonPrompts`], from the cooked table
+//!   [`ButtonPrompts::PATH`], what each family prints on each button,
+//!   trigger and stick. With [`Input::active_device`](input::Input::active_device),
+//!   a game shows "A" on an Xbox pad, "✕" on a PlayStation one.
 //! - [`render`]: the resource [`RenderFrame`](render::RenderFrame), with
 //!   its [`Camera2D`](render::Camera2D), which frame systems fill and the
 //!   loop draws; the resource [`TileLayers`](render::TileLayers), whose
@@ -380,7 +386,8 @@
 //! of its own. The OS
 //! layer, the GPU layer and the codecs are the engine's own, and a game
 //! does not use them, except for the window's [`Event`]s, which
-//! [`App::update`] takes.
+//! [`App::update`] takes, and the gamepads' [`GamepadId`] and
+//! [`GamepadFamily`].
 //!
 //! # Examples
 //!
@@ -547,6 +554,7 @@ mod debug_ui;
 mod error;
 #[cfg(feature = "dev")]
 mod frame_allocs;
+mod gamepads;
 mod glue;
 #[cfg(feature = "dev")]
 mod hot_reload;
@@ -566,9 +574,9 @@ mod window_size;
 pub use nadir_core::{cli, log};
 #[cfg(feature = "dev")]
 pub use nadir_debug as debug;
-pub use nadir_platform::Event;
 #[cfg(feature = "dev")]
 pub use nadir_platform::{AllocCounts, process_alloc_counts, thread_alloc_counts};
+pub use nadir_platform::{Event, GamepadFamily, GamepadId};
 pub use {
     nadir_assets as assets, nadir_audio as audio, nadir_collision as collision, nadir_ecs as ecs,
     nadir_input as input, nadir_render as render, nadir_scene as scene,
@@ -588,6 +596,7 @@ pub use debug_ui::{ConsoleCommand, DebugWindow};
 pub use error::Error;
 #[cfg(feature = "dev")]
 pub use frame_allocs::FrameAllocs;
+pub use gamepads::{ButtonPrompts, Gamepads};
 pub use level::{CurrentLevel, LevelError, load_level, unload_level};
 pub use nadir_scene::SaveId;
 pub use navigation::Navigation;
@@ -621,9 +630,9 @@ pub mod prelude {
     pub use nadir_scene::{GameState, LevelId, StateKind, StateMachine, Transition};
 
     pub use crate::{
-        AnimationFinished, Animator, App, AudioEmitter, AudioListener, AudioState, Clip, ClipError,
-        ClipFrame, Clips, Collider, Collisions, Config, Facing, MusicArea, Navigation, Parent,
-        Placement, Playback, Player, PrevTransform, SaveId, Sprite, TickStats, Transform,
-        TriggerEnter, TriggerExit, Velocity, Volumes,
+        AnimationFinished, Animator, App, AudioEmitter, AudioListener, AudioState, ButtonPrompts,
+        Clip, ClipError, ClipFrame, Clips, Collider, Collisions, Config, Facing, GamepadFamily,
+        Gamepads, MusicArea, Navigation, Parent, Placement, Playback, Player, PrevTransform,
+        SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit, Velocity, Volumes,
     };
 }

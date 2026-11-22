@@ -8,7 +8,9 @@ conflict detection, and replays (M3.1); a UI's events, typed text
 (`Event::Text`) among them, and capture of the keyboard or the mouse
 (M7.9, ADR-0057); gamepad bindings, deadzones, the pads held back in the
 background, and the active device (M8.4, ADR-0073). Button prompts for each
-family of pad come with M8.5, and the rebind capture flow with M9.2.
+family of pad are the facade's: its `Gamepads` resource keeps each pad's
+family, and its `ButtonPrompts` asset each family's labels (M8.5,
+ADR-0074). The rebind capture flow comes with M9.2.
 
 ## Layers
 

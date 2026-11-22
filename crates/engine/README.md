@@ -23,7 +23,9 @@ Built:
 - an ECS of entities, components, resources and events, with systems in
   stages;
 - input actions, with bindings of keys, mouse buttons and gamepads (their
-  sticks with deadzones), latched once a tick, and replays of them;
+  sticks with deadzones), latched once a tick, and replays of them; and
+  each pad's family, with a table of what each family prints on its
+  buttons, for button prompts;
 - an OpenGL 3.3 renderer: y-sorted sprite batches, tile layers with
   animated tiles, bitmap text in the world, and a pixel-perfect camera;
 - kinematic collision: boxes and circles, a grid of solid tiles,
@@ -75,8 +77,7 @@ Not built yet:
 - drawing on Windows and macOS: the window stays empty until the OpenGL
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
-- gamepads on Windows and macOS (roadmap tasks M8.2 and M8.3), and button
-  prompts for each family of pad (M8.5);
+- gamepads on Windows and macOS (roadmap tasks M8.2 and M8.3);
 - settings (M9.3), and saving a game from `App` (M9.7; nadir-scene has
   saves since M9.4);
 - the Metal backend for macOS (M10).
@@ -464,6 +465,18 @@ whether the keyboard and mouse or a pad was used last, for the game's
 prompts. While the window is in the background, the pads are held at rest.
 Pads work on Linux; Windows and macOS have none yet (roadmap tasks M8.2 and
 M8.3).
+
+A button prompt names the button as the player's pad prints it. A
+`GamepadButton` names a place, so `A` is the bottom face button on every
+pad: A on an Xbox pad, ✕ on a PlayStation one, B on a Nintendo one. The
+resource `Gamepads` gives each connected pad's `GamepadFamily` (Xbox,
+PlayStation, Nintendo or `Other`), and the asset `ButtonPrompts`, loaded
+from `ButtonPrompts::PATH` (`data/input/prompts.kbj`, which the cook makes
+of `assets/data/input/prompts.jsonc`), each family's label for each button,
+trigger and stick. So, when `Input::active_device` is
+`Device::Gamepad(id)`, `prompts.button(family, GamepadButton::A)` with that
+pad's family is what to show. On Linux, the pads Steam tells a game to skip
+are skipped, as SDL skips them.
 
 ### Sprites and the camera
 

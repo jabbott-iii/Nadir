@@ -35,9 +35,10 @@ Built today:
   mouse, in order, a frame at a time;
 - replays of the actions' state, tick by tick, read strictly.
 
-Not yet: button prompts for each family of pad come with roadmap task
-M8.5, the rebinding capture flow with M9.2, and bindings in the settings
-file with M9.3.
+Button prompts for each family of pad are the facade's (`nadir_engine`'s
+`Gamepads` and `ButtonPrompts`, roadmap task M8.5), which read the active
+device from here. Not yet: the rebinding capture flow comes with roadmap
+task M9.2, and bindings in the settings file with M9.3.
 
 ## Usage
 

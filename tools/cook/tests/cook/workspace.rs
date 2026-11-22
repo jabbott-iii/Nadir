@@ -70,6 +70,7 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
             "audio/music/north",
             "audio/music/south",
             "audio/sfx/step",
+            "data/input/prompts",
             "data/prefabs/rock",
             "data/prefabs/tree",
             "ldtk/levels/field"
@@ -295,7 +296,7 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
 fn the_sandbox_s_pack_reads_as_its_loose_files_do() {
     let out = dir("workspace_pack");
     cook(assets(), &out).expect("a cook");
-    // The atlas file and its two pages, the four sounds, the two prefabs and
-    // the field.
-    assert_eq!(round_trip(&out), 10);
+    // The atlas file and its two pages, the four sounds, the button prompts'
+    // table, the two prefabs and the field.
+    assert_eq!(round_trip(&out), 11);
 }

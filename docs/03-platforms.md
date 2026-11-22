@@ -384,9 +384,18 @@ directly: no locks that can block, and no allocation.
     - `xpad`, and an Xbox pad over Bluetooth, report them by their Xbox
       labels: X, on the left, as `BTN_X`, which is 0x133 too, and Y as
       `BTN_Y`, 0x134.
-    - So read 0x133 and 0x134 by place for Sony's (0x054c) and Nintendo's
-      (0x057e) vendor ids, and by label for every other, as SDL does for
-      Sony's.
+    - So read 0x133 and 0x134 by place for the PlayStation and Nintendo
+      families, and by label for every other pad, as SDL does for Sony's
+      vendor id (ADR-0074, which amends ADR-0065's rule of Sony's and
+      Nintendo's vendor ids alone).
+  - A pad's family is its driver's, the basename of the link
+    `/sys/class/input/eventN/device/device/driver`, if it is `xpad` or
+    `microsoft` (Xbox), `playstation` or `sony` (PlayStation), or
+    `nintendo` (Nintendo), and else its vendor id's: Microsoft's (0x045e),
+    Sony's (0x054c), Nintendo's (0x057e), or none of the three. The drivers
+    tell what the vendor ids cannot: `xpad` takes over fifty other makers'
+    Xbox pads, PDP's (0x0e6f) among them, and `hid-nintendo` Hori's (0x0f0d)
+    Switch pads (ADR-0074).
   - Triggers are `ABS_Z`/`ABS_RZ` on `xpad` (0 to 255, or to 1023 on the
     Xbox One) and `hid-playstation` (0 to 255, which also reports
     `BTN_TL2`/`BTN_TR2`), and only `BTN_TL2`/`BTN_TR2` on the Switch Pro
@@ -402,8 +411,11 @@ directly: no locks that can block, and no allocation.
   - Steam Input reads a PlayStation or Switch pad itself and makes a
     virtual Xbox pad of it, leaving the physical node open: a game is to
     skip the vendor and product ids Steam lists in
-    `SDL_GAMECONTROLLER_IGNORE_DEVICES`. Not done yet (roadmap task M8.5,
-    which also tells pad families apart).
+    `SDL_GAMECONTROLLER_IGNORE_DEVICES`, or every pad but those in
+    `SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT` where that lists any, and
+    Steam's virtual pad (0x28de/0x11ff) unless
+    `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD` is true. Done as SDL
+    does it, in M8.5 (ADR-0074).
   - Device access normally relies on the desktop seat's `uaccess` udev
     rules (`ID_INPUT_JOYSTICK` devices, in systemd's `70-uaccess.rules`).
     If a gamepad the first poll finds, by sysfs, cannot be opened, log a
