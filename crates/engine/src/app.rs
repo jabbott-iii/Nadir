@@ -294,6 +294,16 @@ trait EventSource {
     fn window_size(&self) -> UVec2 {
         UVec2::ZERO
     }
+
+    /// Enters or leaves borderless fullscreen. A source with no window
+    /// does nothing.
+    fn set_fullscreen(&mut self, _on: bool) {}
+
+    /// Turns vsync on or off: whether the driver took it. A source with no
+    /// surface takes nothing.
+    fn set_vsync(&mut self, _on: bool) -> bool {
+        false
+    }
 }
 
 impl EventSource for Platform {
@@ -319,6 +329,17 @@ impl EventSource for Platform {
 
     fn window_size(&self) -> UVec2 {
         Platform::window_size(self)
+    }
+
+    fn set_fullscreen(&mut self, on: bool) {
+        Platform::set_fullscreen(self, on);
+    }
+
+    fn set_vsync(&mut self, on: bool) -> bool {
+        match Platform::gpu_surface(self) {
+            GpuSurface::Gl(gl) => gl.set_swap_interval(i32::from(on)),
+            _ => false,
+        }
     }
 }
 
@@ -428,7 +449,6 @@ impl EngineCore {
     /// came before it. Draws it on `window`'s surface, if there is one.
     fn frame(&mut self, events: &[Event], window: Option<(GpuSurface<'_>, UVec2)>) {
         let elapsed = self.stopwatch.lap();
-        #[cfg(feature = "dev")]
         if let Some((_, size)) = window {
             *self.app.world.resource_mut::<crate::WindowSize>() = crate::WindowSize(size);
         }
@@ -551,9 +571,14 @@ impl EngineCore {
 ///   buses start at [`Config::volumes`], and [`AudioState`], what
 ///   `nadir::sound` plays
 /// - with [`App::play_replay`], [`Replay`], how far the replay got
+/// - [`WindowSize`](crate::WindowSize), the size of the window the frame is
+///   drawn at, and [`VirtualResolution`](crate::VirtualResolution), the
+///   virtual image's, from [`Config::virtual_resolution`]
+/// - [`DisplaySettings`](crate::DisplaySettings), fullscreen and vsync, as
+///   [`Config`] opens the window, which [`App::run`] applies as they change
+/// - [`Quit`](crate::Quit), which ends [`App::run`] once a system asks
 /// - the events [`TriggerEnter`], [`TriggerExit`] and [`AnimationFinished`]
-/// - with the `dev` feature, `FrameAllocs`, what the last frame allocated,
-///   and `WindowSize`, the size of the window the frame is drawn at
+/// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
 ///
 /// ```no_run
 /// use nadir::prelude::*;
@@ -674,8 +699,13 @@ impl App {
         world.insert_resource(crate::FrameAllocs::default());
         #[cfg(feature = "dev")]
         world.insert_resource(crate::hot_reload::Reloads::default());
-        #[cfg(feature = "dev")]
         world.insert_resource(crate::WindowSize::default());
+        world.insert_resource(crate::VirtualResolution(config.virtual_resolution));
+        world.insert_resource(crate::DisplaySettings {
+            fullscreen: config.fullscreen,
+            vsync: config.vsync,
+        });
+        world.insert_resource(crate::Quit::default());
         world.add_event::<TriggerEnter>();
         world.add_event::<TriggerExit>();
         world.add_event::<AnimationFinished>();
@@ -1305,8 +1335,11 @@ impl App {
     }
 
     /// Opens the log file and the window, and runs the main loop until the
-    /// user closes the window, or, with the `dev` feature, until the
-    /// console's `quit`.
+    /// user closes the window, a system asks to [`Quit`](crate::Quit), or,
+    /// with the `dev` feature, the console's `quit` does. After each frame
+    /// it applies the [`DisplaySettings`](crate::DisplaySettings) that
+    /// changed: it enters or leaves fullscreen, and turns vsync on or off,
+    /// putting back the value that holds where the driver refuses it.
     ///
     /// The log file is `nadir.log`, in the game's logs folder: on Linux
     /// `~/.local/share/<game>`. Each run starts a new file and keeps the
@@ -1491,6 +1524,8 @@ impl App {
             }
         }));
         let mut events = Vec::with_capacity(256);
+        // As the window opened.
+        let mut display = *core.borrow().app.world.resource::<crate::DisplaySettings>();
         loop {
             window.pump_events(&mut events);
             // The pads' events follow the window's, so within one frame a key
@@ -1514,6 +1549,16 @@ impl App {
                 core.frame(&events, surface);
                 if let Some(error) = core.error.take() {
                     return Err(error);
+                }
+                if core.app.world.resource::<crate::Quit>().requested() {
+                    info!("the game asked to quit");
+                    break;
+                }
+                let asked = *core.app.world.resource::<crate::DisplaySettings>();
+                if asked != display {
+                    apply_display(window, &mut display, asked);
+                    // What the window took: a vsync it refused shows as it is.
+                    *core.app.world.resource_mut::<crate::DisplaySettings>() = display;
                 }
                 #[cfg(feature = "dev")]
                 if core.app.debug.quit() {
@@ -1589,10 +1634,7 @@ impl Offscreen {
     /// be loaded, as [`App::run`] would end with it: then the frame is not
     /// drawn, and the game stays in the state.
     pub fn frame(&mut self, elapsed: Duration, events: &[Event]) -> Result<Vec<u8>, Error> {
-        #[cfg(feature = "dev")]
-        {
-            *self.app.world.resource_mut::<crate::WindowSize>() = crate::WindowSize(self.size);
-        }
+        *self.app.world.resource_mut::<crate::WindowSize>() = crate::WindowSize(self.size);
         self.app.update(elapsed, events);
         if let Some(error) = self.app.states.take_failure() {
             return Err(error);
@@ -1646,6 +1688,33 @@ fn failed(ticks: u64, error: &nadir_input::InputError) -> Replay {
     Replay::Failed {
         ticks,
         error: error.clone(),
+    }
+}
+
+/// Applies the display settings a frame `asked` for, where they differ from
+/// those `applied` before, and keeps what the window took as applied: a
+/// vsync the driver refused stays as it was.
+fn apply_display(
+    window: &mut dyn EventSource,
+    applied: &mut crate::DisplaySettings,
+    asked: crate::DisplaySettings,
+) {
+    if asked.fullscreen != applied.fullscreen {
+        info!(
+            "the window {} fullscreen",
+            if asked.fullscreen { "enters" } else { "leaves" }
+        );
+        window.set_fullscreen(asked.fullscreen);
+        applied.fullscreen = asked.fullscreen;
+    }
+    if asked.vsync != applied.vsync {
+        let on = if asked.vsync { "on" } else { "off" };
+        if window.set_vsync(asked.vsync) {
+            info!("vsync {on}");
+            applied.vsync = asked.vsync;
+        } else {
+            warn!("vsync cannot be turned {on}: the driver did not take it");
+        }
     }
 }
 
@@ -2539,6 +2608,77 @@ mod tests {
             .expect("no error without a device");
         assert_eq!(*log.seen.borrow(), ["[(GamepadId(1), Nintendo)]", "[]"]);
     }
+
+    /// A window that never asks to close, and keeps what the loop asked of
+    /// it: fullscreen and vsync, in order. Its driver refuses vsync off.
+    #[derive(Default)]
+    struct SettingsWindow {
+        pumps: u32,
+        asked: Vec<String>,
+    }
+
+    impl EventSource for SettingsWindow {
+        fn pump_events(&mut self, _out: &mut Vec<Event>) {
+            self.pumps += 1;
+            assert!(self.pumps < 10, "the game did not quit");
+        }
+
+        fn set_modal_frame_callback(&mut self, _callback: Box<dyn FnMut(ModalFrame)>) {}
+
+        fn set_fullscreen(&mut self, on: bool) {
+            self.asked.push(format!("fullscreen {on}"));
+        }
+
+        fn set_vsync(&mut self, on: bool) -> bool {
+            self.asked.push(format!("vsync {on}"));
+            on
+        }
+    }
+
+    #[test]
+    fn the_loop_applies_the_display_settings_as_they_change_and_ends_on_quit() {
+        // Frame 1 changes nothing; 2 goes fullscreen; 3 turns vsync off and
+        // back on within itself, which is no change; 4 turns it off, which
+        // the window refuses, and 5 sees it on again; 5 quits, after which
+        // no frame runs.
+        let mut app = app().add_frame_system(FrameStage::Ui, "settings", |world, _| {
+            let mut display = world.resource_mut::<crate::DisplaySettings>();
+            let mut count = world.resource_mut::<FrameCount>();
+            count.0 += 1;
+            match count.0 {
+                2 => display.fullscreen = true,
+                3 => {
+                    display.vsync = false;
+                    display.vsync = true;
+                }
+                4 => display.vsync = false,
+                5 => {
+                    assert!(display.vsync, "the refused vsync is put back");
+                    assert!(display.fullscreen);
+                    world.resource_mut::<crate::Quit>().request();
+                }
+                _ => {}
+            }
+        });
+        app = app.insert_resource(FrameCount(0));
+        app.config.frame_rate_limit = None;
+        assert_eq!(
+            *app.world().resource::<crate::DisplaySettings>(),
+            crate::DisplaySettings {
+                fullscreen: false,
+                vsync: true
+            },
+            "as the configuration opens the window"
+        );
+        let mut window = SettingsWindow::default();
+        app.run_loop(&mut window, None)
+            .expect("no error without a device");
+        assert_eq!(window.pumps, 5, "it ended after the frame that quit");
+        assert_eq!(window.asked, ["fullscreen true", "vsync false"]);
+    }
+
+    /// The frames run so far.
+    struct FrameCount(u32);
 
     #[test]
     fn the_wheel_moves_on_each_tick_without_an_action_set() {

@@ -116,7 +116,8 @@ pub(crate) fn add(app: App, sprites: &Sprites) -> App {
     let mut person = sprite(&sprites.person[0]);
     person.color = PLAYER_TINT;
     person.layer = 2;
-    spawn_player(world, person, &gait);
+    spawn_player(&mut world.commands(), person, &gait);
+    world.apply_commands();
     app.insert_resource(Pace(1.0))
         .insert_resource(gait)
         .add_fixed_system(FixedStage::Gameplay, "turn_crowd", turn_crowd)

@@ -65,6 +65,7 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
     assert_eq!(
         names,
         [
+            "atlas/fonts",
             "atlas/sprites",
             "audio/ambience/pond",
             "audio/music/north",
@@ -296,7 +297,8 @@ fn the_sandbox_s_sprites_cook_to_their_sources_pixels() {
 fn the_sandbox_s_pack_reads_as_its_loose_files_do() {
     let out = dir("workspace_pack");
     cook(assets(), &out).expect("a cook");
-    // The atlas file and its two pages, the four sounds, the button prompts'
+    // The sprites' atlas file and its two pages, the menus' atlas file, its
+    // page and their font's file, the four sounds, the button prompts'
     // table, the two prefabs and the field.
-    assert_eq!(round_trip(&out), 11);
+    assert_eq!(round_trip(&out), 14);
 }

@@ -12,20 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`WindowSize`]: the size the frame is drawn at, in development builds.
+//! [`WindowSize`] and [`VirtualResolution`]: the size the frame is drawn
+//! at, and the size of the image the world is drawn into, which map the
+//! pointer to a UI's units.
 
 use nadir_core::UVec2;
 
 /// The size of the inside of the window, in physical pixels: what the
 /// frame is drawn into, and what the UI's views
 /// ([`RenderFrame::ui`](nadir_render::RenderFrame::ui)) cover. A resource
-/// of development builds (feature `dev`).
+/// of every build (development builds alone had it before roadmap M9.2,
+/// ADR-0076).
 ///
 /// [`App::run`](crate::App::run) sets it before each frame, and
 /// [`Offscreen::frame`](crate::Offscreen::frame) to the size of its frames.
 /// [`App::update`](crate::App::update) alone leaves it as it was: zero,
 /// until a test sets it. With [`nadir_input::Input::pointer`] and the
-/// virtual resolution, it maps the pointer to a UI's units
-/// ([`nadir_render::UiSpace::new`]).
+/// [`VirtualResolution`], it maps the pointer to a UI's units
+/// ([`nadir_render::UiSpace::new`]), as the menus do
+/// ([`MenuInput::read`](crate::menu::MenuInput::read)).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WindowSize(pub UVec2);
+
+/// The size of the image the world is drawn into, in pixels:
+/// [`Config::virtual_resolution`](crate::Config::virtual_resolution), as
+/// [`App::new`](crate::App::new) was given it. A resource, so that a system
+/// can place pixel UI ([`nadir_render::UiScale::Pixel`]) and map the pointer
+/// with [`WindowSize`]. The renderer keeps the size it was made with: a
+/// game that inserts another changes only what systems read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VirtualResolution(pub UVec2);

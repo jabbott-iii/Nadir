@@ -10,7 +10,9 @@ conflict detection, and replays (M3.1); a UI's events, typed text
 background, and the active device (M8.4, ADR-0073). Button prompts for each
 family of pad are the facade's: its `Gamepads` resource keeps each pad's
 family, and its `ButtonPrompts` asset each family's labels (M8.5,
-ADR-0074). The rebind capture flow comes with M9.2.
+ADR-0074). Rebinding, where the next press becomes a binding, is
+`Input::begin_rebind` (M9.2, ADR-0076), which the facade's menu kit and the
+sandbox's controls menu use.
 
 ## Layers
 
@@ -190,12 +192,37 @@ impl<A: ActionSet> ActionState<A> {
 
 - Bindings are saved in the `input` section of `settings.jsonc` (M9.3), by
   action name.
-- **Rebind flow:**
-  1. The UI calls `begin_capture(action, slot)` (M9.2).
-  2. The next non-modifier press from the active device becomes the
-     binding. Escape cancels.
-  3. A conflict with another action is reported back to the UI, which
-     decides whether to swap or reject.
+- **Rebind flow** (M9.2, ADR-0076; named `begin_rebind`, not the
+  `begin_capture` planned here, as `set_capture` means something else):
+
+  ```rust
+  pub enum Rebound { Bound(Binding), Canceled }
+  impl Input {
+      pub fn begin_rebind(&mut self, kind: ActionKind);  // listen for the next press
+      pub fn rebound(&mut self) -> Option<Rebound>;      // once heard, taken once
+      pub fn cancel_rebind(&mut self);                   // stop, and forget what was heard
+      pub fn is_rebinding(&self) -> bool;                // listening, nothing heard yet
+  }
+  ```
+
+  1. The UI calls `begin_rebind` with the kind of the action it rebinds,
+     and keeps the action and the slot itself.
+  2. The next press among the events after the call, of any device,
+     becomes the binding: a key, a mouse button or a pad's button going
+     down, or a half of a pad's stick or trigger reaching the press point.
+     Something held when it begins counts once it is let go and pressed
+     again. For a `Button` or an `Axis1` it is a `Key`, `MouseButton`,
+     `PadButton` or `PadAxis`; for an `Axis2`, a stick pushed, as a
+     `PadStick`, and no key or button (a menu rebinds a composite a key at
+     a time, as buttons). Escape cancels. Shift, Control, Alt and Super
+     are passed over, and so is a press a capture holds back, or a pad's
+     while the window lacks the focus.
+  3. The press reaches the actions too: a menu reading its own actions
+     ignores them in the tick it takes the binding. Only the live events
+     are heard, never a replay's.
+  4. The UI looks for a conflict with `ActionMap::conflict`, and decides
+     whether to swap or reject. The sandbox swaps, among its gameplay
+     bindings alone, and rejects a swap the other slot cannot take.
 - `ActionMap::conflict` finds that conflict now. It returns the first other
   slot, of any action or of the same one, whose binding reads a key or
   button the new binding reads. A composite shares each of its four keys.

@@ -261,6 +261,14 @@ mod tests {
         }
     }
 
+    /// A replay's header: 16 bytes, then a kind byte for each of the
+    /// sandbox's nine actions.
+    const HEADER: usize = 16 + 9;
+
+    /// A tick's bytes: three flag bits for each action, 27 in four bytes,
+    /// and the walk's x and y, an `i16` each.
+    const TICK_BYTES: usize = 4 + 2 * 2;
+
     /// A file for a test's replay, which the test removes.
     fn replay_file(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("nadir-sandbox-{name}-{}.nrpl", process::id()))
@@ -351,10 +359,10 @@ mod tests {
         let played = headless(play(scene(Scene::Field), &path).expect("a replay"));
         assert_eq!(played.expect("played"), (120, hashes[120]));
 
-        // The header is 16 bytes and a kind; each tick a flag byte and an
-        // x and a y. Bit 7 of the sixth tick's flags belongs to no action.
+        // Bit 31 of the sixth tick's flags, the top of their fourth byte,
+        // belongs to no action: the nine use 27 bits.
         let mut bytes = fs::read(&path).expect("the replay's file");
-        bytes[17 + 5 * 5] |= 0x80;
+        bytes[HEADER + 5 * TICK_BYTES + 3] |= 0x80;
         fs::write(&path, bytes).expect("damage the replay");
         let failed = headless(play(scene(Scene::Field), &path).expect("a replay"));
         fs::remove_file(&path).expect("remove the replay's file");
@@ -392,7 +400,11 @@ mod tests {
         assert!(recording.0.borrow().file.is_none(), "the file is given up");
         let kept = fs::read(&path).expect("the replay's file");
         fs::remove_file(&path).expect("remove the replay's file");
-        assert_eq!(kept.len(), 17 + 3 * 5, "the header and three ticks");
+        assert_eq!(
+            kept.len(),
+            HEADER + 3 * TICK_BYTES,
+            "the header and three ticks"
+        );
     }
 
     #[test]

@@ -47,6 +47,10 @@ const TICK: Duration = Duration::from_nanos(16_666_667);
 /// The frames, one a tick: 10 seconds.
 pub(crate) const FRAMES: u32 = 600;
 
+/// The most frames with no tick run before the capture, for the field's
+/// loading: it takes three offscreen.
+const LOADING_FRAMES: u32 = 10;
+
 /// The frames' size: the virtual resolution, so each pixel of the game is
 /// one of the frames'.
 pub(crate) const SIZE: UVec2 = UVec2::new(480, 270);
@@ -91,9 +95,22 @@ pub(crate) fn capture(
         scene.name(),
         offscreen.renderer()
     );
-    // A frame with no tick, which makes the textures, so that the first
-    // captured frame shows them.
-    offscreen.frame(Duration::ZERO, &[])?;
+    // Frames with no tick, which make the textures, so that the first
+    // captured frame shows them: one for a stress scene, which is in the
+    // game from the start, and in the field those of its loading, which
+    // loads the level, waits for its assets, and enters the game (ADR-0067).
+    // So every captured frame is a tick of play.
+    for _ in 0..LOADING_FRAMES {
+        offscreen.frame(Duration::ZERO, &[])?;
+        if offscreen
+            .app()
+            .world()
+            .resource::<StateMachine>()
+            .is(StateKind::InGame)
+        {
+            break;
+        }
+    }
 
     let mut frames = BufWriter::new(File::create(dir.join("frames.rgba")).map_err(cannot)?);
     let mut seen = Seen::default();

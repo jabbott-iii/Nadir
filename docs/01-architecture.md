@@ -172,6 +172,8 @@ pub fn run(mut app: App) -> Result<(), Error> {
         if assets.has_pending() {                            // GPU uploads on the main thread, within a budget
             assets.finish_completed_loads(&mut FinalizeCtx::new().with(&mut gfx));
         }
+        if app.world.resource::<Quit>().requested() { break; }  // a main menu's Quit (ADR-0076)
+        apply_display(&mut platform, &mut display, asked);   // DisplaySettings changed: fullscreen, vsync (ADR-0076)
         events.clear();
 
         if let Some(due) = limiter.end_of_frame(Instant::now()) {
@@ -446,6 +448,10 @@ rule yet: `release-no-dev` looks only for `nadir-debug`.
   `settings.jsonc` in the user config directory (paths per OS are in
   `docs/03-platforms.md`):
   - display mode, vsync, volume per bus, input bindings, language
+- Until then, a game's settings menu changes them for the session alone
+  (M9.2, ADR-0076): the resource `DisplaySettings`, which `App::run`
+  applies; the buses' volumes, through `Audio::set_bus_volume`; and the
+  bindings, in the game's `ActionMap`.
 - The file will be versioned. Unknown keys will be preserved on save, and
   invalid values will fall back to defaults with a logged warning, never a
   crash.

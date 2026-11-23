@@ -7322,3 +7322,153 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     engineer-weeks, when the reference C interpreter's case under the
     policy's criterion 1 (a build cost above four engineer-weeks, for a
     capability not central to the engine) would be weighed again.
+
+## ADR-0076 — M9.2: the menu kit in the facade, read from the game's actions in ticks; rebinding capture on `Input` (`begin_rebind`); `WindowSize` and `VirtualResolution` in every build; `DisplaySettings` and `Quit`; the sandbox on the game states, with its menus and font
+
+- **Status:** Accepted: the user chose four points on 2026-11-23: one task
+  across nadir-input, the facade and the sandbox; the rebinding capture on
+  nadir-input's `Input`, renamed from the spec's `begin_capture`; the menus
+  reading the game's own actions in tick systems; and a Display page of
+  fullscreen and vsync. The user accepted the rest, the agent's design, as
+  written the same day.
+- **Date:** 2026-11-23
+- **Context:**
+  - M9.2 asks for focusable buttons, sliders and toggles in the facade,
+    with keyboard, mouse and gamepad navigation; the main menu, the pause
+    menu and settings (display, audio, controls with rebinding); unit
+    tests of the focus navigation; and, by hand, every menu fully usable
+    with a gamepad alone and with a mouse alone.
+  - `input.md` had the UI call `begin_capture(action, slot)` for a
+    rebinding: the next non-modifier press becomes the binding, Escape
+    cancels, and a conflict goes back to the UI. `Input` already has
+    `set_capture` and `capture`, which hold devices back from the actions
+    (ADR-0057), a different thing.
+  - A frame system sees only the last tick's edges, and a transition
+    queued from a frame is not reproduced by a replay (ADR-0067); the
+    pointer is live and not in replays (ADR-0025).
+  - `WindowSize` was a resource of `dev` only (ADR-0058, whose revisit
+    trigger is this task); the virtual resolution was in `Config` alone.
+  - The platform can enter and leave fullscreen and set the GL swap
+    interval while the game runs; a game had no way to ask for either, nor
+    to end `App::run` but by its window closing.
+  - The sandbox loaded its field at setup and had no font; ADR-0067 left
+    moving it onto `Boot` → `MainMenu` → `Loading("field")` → `InGame` ⇄
+    `Paused` to this task, and ADR-0074 its prompts' table, whose
+    PlayStation and Nintendo labels need ✕ ○ □ △ and −.
+- **Decision:**
+  - **nadir-input:** `Input::begin_rebind(kind)`, `rebound()`,
+    `cancel_rebind()` and `is_rebinding()`, and the enum `Rebound` (`Bound`
+    with the binding, or `Canceled`). The next press, among the events
+    after the call, of any device: a key, a mouse button, a pad's button,
+    or a half of a pad's axis reaching the press point; held before, it
+    counts once let go and pressed again. For a `Button` or an `Axis1`, a
+    key, mouse button, pad button or `PadAxis`; for an `Axis2`, a stick
+    (`PadStick`), and no key or button. Escape cancels; Shift, Control,
+    Alt and Super are passed over, and so is a press held back by a
+    capture, or a pad's while the window lacks the focus. The press
+    reaches the actions too. The rebinding takes no action and slot: the
+    caller keeps them, and places the binding with `ActionMap::conflict`
+    and `bind`.
+  - **The facade's menu kit, `nadir::menu`:** immediate mode, in two
+    systems. A tick system reads a `MenuInput` (`MenuInput::read`: the
+    game's actions named by a `MenuActions<A>` (up, down, left, right,
+    confirm, back, and a click bound to the left mouse button), latched as
+    `Press`es, and the pointer in UI units) and lists a page's items on the
+    `MenuPage` that `Menu::begin` gives: `title`, `text`, `space`,
+    `button`, `binding` (a label and a value, acting as a button), `toggle`
+    and `slider` (whole numbers, a step), each returning what the player
+    did to it in the tick; a frame system draws the last tick's items with
+    `Menu::draw`, into `RenderFrame::ui`, in a `MenuStyle` (a font, a white
+    region of a texture for every box, `MenuColors`, the UI scale, the
+    column's alignment, top, width, row height, gap and padding).
+    - Up and down move the focus over the focusable items, wrapping
+      around; held, a direction repeats after `REPEAT_DELAY` (24 ticks),
+      then every `REPEAT_EVERY` (6). A direction in a page's first tick,
+      before it has items, moves on from the first item as the tick ends.
+    - Left and right step the focused slider or flip the focused toggle;
+      confirm activates the focused button or binding row, or flips the
+      toggle.
+    - The mouse: the pointer focuses an item when it moves onto it, not
+      where it rests; a click pressed and released on an item activates
+      it; pressed on a slider and dragged, it sets the slider.
+      `MenuInput::pointer_only` makes a menu of the mouse alone, whose
+      focus is the item under the pointer; `MenuInput::quiet` a tick that
+      acts on nothing.
+    - Rows are a column at the left, middle or right of the UI; the draw is
+      a backdrop over the UI unless clear, a panel, each row's box (the
+      focused one in the focus color with an accent bar) and its text,
+      which is not measured. No allocation once the menu has held as much.
+  - **Resources of every build:** `WindowSize` (no longer `dev` only), set
+    by `App::run` and `Offscreen::frame` as before; `VirtualResolution`,
+    `Config::virtual_resolution` for systems to read; `DisplaySettings`
+    (`fullscreen`, `vsync`), from the `Config`, which `App::run` applies
+    after each frame that changed it, and into which it puts back a vsync
+    the driver refused, with a warning; and `Quit`, whose `request` ends
+    `App::run` after the frame. `App::update` and `App::offscreen` act on
+    neither.
+  - **The sandbox:** a pixel font, `assets/fonts/menu.fnt` and its page,
+    and a 4 × 4 white image, written by `games/sandbox/make_font.py` from
+    the debug font's ASCII glyphs and five symbols; nine actions in place
+    of one (move, pause, the four directions, confirm, back, click, with
+    the bindings `actions` gives), which changes its replays' header and
+    ticks; the field on the game states, from `Boot` to the main menu in its
+    window, and from `Loading("field")` in recordings, replays and
+    captures (the capture runs the loading before its frames, so they are
+    all play); the stress scenes in `InGame` from the start, with no menus.
+    The person, the music's areas, the pond and the enemies spawn as the
+    game enters from the loading, through commands, and despawn as it
+    enters the main menu or the loading; the field's gameplay systems run
+    in `InGame` alone. The menus: main (Play, Settings, Quit), pause
+    (Resume, Settings, Main menu, Quit; the pause action and back resume),
+    Settings, Display (fullscreen, vsync), Audio (each bus from 0 to 100 by
+    10, applied over 50 ms) and Controls (the eleven gameplay bindings,
+    each a row rebound by the next press; a taken key or button swaps with
+    its row, or nothing changes if that row cannot take the old binding;
+    keys of a composite take keys alone; a left click cancels, as Escape
+    does; Defaults), each page with a Back button and a last line naming
+    choose and back for the device last used, from `ButtonPrompts`. A Pause
+    button at the top-right, for the mouse, shows while the pointer has
+    moved in the last 3 s. The settings last for the session.
+- **Consequences:**
+  - Good: every page is usable with the keys, a pad or the mouse alone (the
+    sandbox's tests drive each way through the game's frames; on Linux,
+    the window was driven by synthetic X events and a uinput pad); keyboard
+    and pad menus replay; the kit has 20 unit tests of its focus, widgets,
+    layout and drawing; a steady menu frame allocates nothing (a `dev`
+    test).
+  - Bad: a click does not replay, as the pointer is not recorded; the kit
+    measures no text; the controls page fills the screen at 480 × 270, so
+    a game with more bindings needs scrolling, which the kit lacks; the
+    sandbox's recordings from before are refused (another action set); the
+    rebinding hears the live events alone; a game's actions for its menus
+    share keys with its gameplay on purpose, and the sandbox looks for
+    conflicts among its gameplay rows alone; a change of fullscreen by the
+    window manager is not seen by `DisplaySettings`.
+  - The settings are lost at the end of the game: M9.3's settings file
+    keeps `DisplaySettings`, the bus volumes and the bindings.
+  - The game UI sets no capture, so ADR-0058's combination of the two is
+    still not needed.
+- **Alternatives considered:**
+  - The rebinding in the facade, fed the window's events: the press points
+    of pads' axes repeated outside nadir-input. The spec's `begin_capture`
+    name: beside `set_capture`, which means something else (the user chose
+    `begin_rebind`).
+  - The kit reading raw window events each frame: no actions to add, but
+    frame-queued transitions that replays miss, and menu keys outside the
+    action map and the settings file (the user chose the actions).
+  - A retained menu, declared once with callbacks: systems keep no
+    closures with state here, and immediate mode keeps a page's items next
+    to what they do.
+  - Drawing in the tick: `RenderFrame` is cleared before each frame's
+    stages, and a frame may have no tick.
+  - A frame-rate limit and a UI scale on the Display page (the user chose
+    fullscreen and vsync).
+  - The virtual resolution inside `WindowSize`: a break of its public
+    tuple; or given in `MenuStyle`: a second copy for a game to keep.
+  - Opening the pause menu by the keys and pad alone: a player with a mouse
+    alone could not pause.
+- **Revisit when:** a game's page has more rows than its screen holds (then
+  scrolling); a game needs a menu clicked in a replay to replay (then the
+  pointer in the replay format); M9.3's settings file loads these settings;
+  a driver refuses a vsync change the platform cannot report beforehand;
+  or a game's UI needs a capture beside the debug UI's.

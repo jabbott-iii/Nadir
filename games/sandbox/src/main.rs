@@ -14,9 +14,18 @@
 
 //! The sandbox game. It drives the Nadir engine's requirements.
 //!
+//! It opens at its main menu (`menus.rs`): Play, Settings and Quit. Play
+//! loads the field behind a loading screen. Escape, the pad's Start, or the
+//! Pause button that shows at the top-right while the mouse moves, pauses
+//! it: Resume, Settings, Main menu and Quit. Settings has the display's
+//! fullscreen and vsync, each sound bus's volume, and the controls, whose
+//! rows rebind the walk's keys and stick and the pause to the next press
+//! (`controls.rs`). Every menu works with the keys, a gamepad or the mouse
+//! alone; the settings last until the game ends.
+//!
 //! A person walks a field, the LDtk level `assets/levels/field.ldtk`,
-//! cooked to `levels/field.klvl` with its prefabs, which the game loads
-//! (`App::load_level`): grass, paths, flowers and rippling water, walled in
+//! cooked to `levels/field.klvl` with its prefabs, which the game's loading
+//! state loads: grass, paths, flowers and rippling water, walled in
 //! stone, with tall walls, trees and rocks to walk behind and in front of. They are moved with WASD,
 //! the arrow keys or a gamepad's left stick, walk in a cycle of four frames facing the way they
 //! go, collide with the walls, the water, the trees and the rocks, and the
@@ -40,7 +49,8 @@
 //!   `stress-entities`, where 5,000 people jostle in a maze of walls
 //!   (`stress_entities.rs`)
 //! - `--record FILE`: records the input, tick after tick, into a replay,
-//!   hashing the world each frame, which slows the frames
+//!   hashing the world each frame, which slows the frames; it starts in the
+//!   field's loading, with no main menu, as `--replay` and `--capture` do
 //! - `--replay FILE`: plays a replay in place of the keys, then lets them
 //!   take over; pass the scene it was recorded in
 //! - `--headless`, with `--replay`: plays it with no window and no sound,
@@ -53,6 +63,9 @@
 //!   so that the engine writes a crash report, into `crashes` in the
 //!   game's data folder (on Linux `~/.local/share/Sandbox/crashes`), and
 //!   says where; the next launch says so again
+//!
+//! The menus' pixel font and the white image their boxes are drawn of are
+//! `assets/fonts/`, which `make_font.py`, beside `src/`, made.
 //!
 //! The sprites are cooked (`assets/sprites/`, cooked by `cargo xtask cook`
 //! into one atlas): they are read from `assets` beside the executable, as
@@ -97,8 +110,10 @@
 //! recording does not reach the hashes it logged.
 
 mod capture;
+mod controls;
 mod enemies;
 mod map;
+mod menus;
 mod replay;
 mod stress;
 mod stress_entities;
@@ -139,7 +154,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             if options.vsync { "on" } else { "off" }
         );
     }
-    let mut app = game(App::new(config), options.scene)?;
+    // A recording, a replay and a capture start in the game, with no menu
+    // to play (`Start`).
+    let start = if options.scene == Scene::Field
+        && options.record.is_none()
+        && options.replay.is_none()
+        && options.capture.is_none()
+    {
+        Start::Menu
+    } else {
+        Start::Playing
+    };
+    let mut app = game(App::new(config), options.scene, start)?;
     if options.debug_panic {
         app = app.add_fixed_system(FixedStage::Gameplay, "debug_panic", debug_panic);
     }
@@ -295,27 +321,148 @@ impl Scene {
     }
 }
 
-/// What the player does.
+/// What the player does: the gameplay's actions, which the controls menu
+/// rebinds, then the menus' own (`menus.rs`), which keep their keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Act {
     /// Walk: WASD, the arrow keys or a gamepad's left stick.
     Move,
+    /// Pause, and resume: Escape, or the pad's Start (Menu, Options, +).
+    Pause,
+    /// The menus' focus up, down, left and right: the arrows, WASD, the
+    /// d-pad and the left stick.
+    Up,
+    Down,
+    Left,
+    Right,
+    /// The menus' choice: Enter, Space or the pad's `A` (the bottom face
+    /// button).
+    Confirm,
+    /// Back a menu: Escape, Backspace or the pad's `B` (the right face
+    /// button).
+    Back,
+    /// The menus' click: the left mouse button.
+    Click,
 }
 
 impl ActionSet for Act {
-    const ALL: &'static [Self] = &[Act::Move];
+    const ALL: &'static [Self] = &[
+        Act::Move,
+        Act::Pause,
+        Act::Up,
+        Act::Down,
+        Act::Left,
+        Act::Right,
+        Act::Confirm,
+        Act::Back,
+        Act::Click,
+    ];
 
     fn index(self) -> usize {
         self as usize
     }
 
     fn name(self) -> &'static str {
-        "move"
+        [
+            "move", "pause", "up", "down", "left", "right", "confirm", "back", "click",
+        ][self as usize]
     }
 
     fn kind(self) -> ActionKind {
-        ActionKind::Axis2
+        match self {
+            Act::Move => ActionKind::Axis2,
+            _ => ActionKind::Button,
+        }
     }
+}
+
+/// The sandbox's bindings, as it starts: the controls menu rebinds
+/// [`Act::Move`] and [`Act::Pause`] from these, and "Defaults" brings them
+/// back.
+///
+/// # Errors
+///
+/// None: every binding fits its action. It returns the error a binding
+/// that did not fit would give.
+fn actions() -> Result<ActionMap<Act>, nadir::input::InputError> {
+    let mut map = ActionMap::<Act>::new()?;
+    let keys = |up, down, left, right| Binding::KeyComposite2 {
+        up,
+        down,
+        left,
+        right,
+    };
+    let half = |axis, sign| Binding::PadAxis { axis, sign };
+    let (negative, positive) = (AxisSign::Negative, AxisSign::Positive);
+    map.bind(Act::Move, 0, keys(Key::W, Key::S, Key::A, Key::D))?;
+    map.bind(
+        Act::Move,
+        1,
+        keys(Key::Up, Key::Down, Key::Left, Key::Right),
+    )?;
+    map.bind(Act::Move, 2, Binding::PadStick(Stick::Left))?;
+    map.bind(Act::Pause, 0, Binding::Key(Key::Escape))?;
+    map.bind(Act::Pause, 1, Binding::PadButton(GamepadButton::Start))?;
+    let directions = [
+        (
+            Act::Up,
+            Key::Up,
+            Key::W,
+            GamepadButton::DPadUp,
+            GamepadAxis::LeftY,
+            negative,
+        ),
+        (
+            Act::Down,
+            Key::Down,
+            Key::S,
+            GamepadButton::DPadDown,
+            GamepadAxis::LeftY,
+            positive,
+        ),
+        (
+            Act::Left,
+            Key::Left,
+            Key::A,
+            GamepadButton::DPadLeft,
+            GamepadAxis::LeftX,
+            negative,
+        ),
+        (
+            Act::Right,
+            Key::Right,
+            Key::D,
+            GamepadButton::DPadRight,
+            GamepadAxis::LeftX,
+            positive,
+        ),
+    ];
+    for (action, arrow, letter, pad, axis, sign) in directions {
+        map.bind(action, 0, Binding::Key(arrow))?;
+        map.bind(action, 1, Binding::Key(letter))?;
+        map.bind(action, 2, Binding::PadButton(pad))?;
+        map.bind(action, 3, half(axis, sign))?;
+    }
+    map.bind(Act::Confirm, 0, Binding::Key(Key::Enter))?;
+    map.bind(Act::Confirm, 1, Binding::Key(Key::Space))?;
+    map.bind(Act::Confirm, 2, Binding::PadButton(GamepadButton::A))?;
+    map.bind(Act::Confirm, 3, Binding::Key(Key::NumpadEnter))?;
+    map.bind(Act::Back, 0, Binding::Key(Key::Escape))?;
+    map.bind(Act::Back, 1, Binding::Key(Key::Backspace))?;
+    map.bind(Act::Back, 2, Binding::PadButton(GamepadButton::B))?;
+    map.bind(Act::Click, 0, Binding::MouseButton(MouseButton::Left))?;
+    Ok(map)
+}
+
+/// Where the game starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Start {
+    /// At the main menu, from `Boot`: the field in its window.
+    Menu,
+    /// Playing: loading the field, which recordings, replays and captures
+    /// start in, so that they play no menu; or, in the stress scenes, which
+    /// have no level and no menus, in the game.
+    Playing,
 }
 
 /// How fast the person walks, in pixels a second: two a tick.
@@ -504,27 +651,12 @@ struct Footsteps {
 ///
 /// If the cooked sprites cannot be loaded ([`Sprites::load`]), or the
 /// action map cannot be made.
-fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
+fn game(app: App, scene: Scene, start: Start) -> Result<App, Box<dyn Error>> {
     let sprites = Sprites::load(&app)?;
     let step = load_sound(&app, STEP, "the person's steps are silent");
 
-    let mut map = ActionMap::<Act>::new()?;
-    let keys = |up, down, left, right| Binding::KeyComposite2 {
-        up,
-        down,
-        left,
-        right,
-    };
-    map.bind(Act::Move, 0, keys(Key::W, Key::S, Key::A, Key::D))?;
-    map.bind(
-        Act::Move,
-        1,
-        keys(Key::Up, Key::Down, Key::Left, Key::Right),
-    )?;
-    map.bind(Act::Move, 2, Binding::PadStick(Stick::Left))?;
-
     let app = app
-        .add_actions(map)
+        .add_actions(actions()?)
         .insert_resource(Report {
             stopwatch: Stopwatch::start(),
             rate: TickRate::default(),
@@ -540,7 +672,12 @@ fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
             phase: 0,
             steps: 0,
         })
-        .add_fixed_system(FixedStage::Gameplay, "move_player", move_player)
+        .add_fixed_system_in(
+            StateKind::InGame,
+            FixedStage::Gameplay,
+            "move_player",
+            move_player,
+        )
         .add_fixed_system(FixedStage::Cleanup, "count_ticks", count_ticks)
         .add_fixed_system(FixedStage::Cleanup, "footsteps", footsteps)
         .add_frame_system(FrameStage::Ui, "report", report);
@@ -550,9 +687,17 @@ fn game(app: App, scene: Scene) -> Result<App, Box<dyn Error>> {
         .insert_resource(DebugNote::default())
         .add_debug_window(Key::F8, "Sandbox", DEBUG_WINDOW, debug_window);
     let app = match scene {
-        Scene::Field => field(app, &sprites)?,
+        Scene::Field => field(app, &sprites, start)?,
         Scene::StressSprites => stress::add(app, &sprites),
         Scene::StressEntities => stress_entities::add(app, &sprites),
+    };
+    // The stress scenes have no level and no menus: they play from the
+    // start.
+    let app = match scene {
+        Scene::Field => app,
+        Scene::StressSprites | Scene::StressEntities => {
+            app.insert_resource(StateMachine::new(GameState::InGame))
+        }
     };
     Ok(app.insert_resource(sprites))
 }
@@ -599,68 +744,151 @@ const SOUTH_TOP: f32 = 576.0;
 /// The middle of the pond, where its water is heard from.
 const POND_AT: Vec2 = Vec2::new(560.0, 112.0);
 
-/// The field: the level `field` (`assets/levels/field.ldtk`, cooked to
-/// `levels/field.klvl`), its ground, grid, tall walls, trees and rocks,
-/// then the person, and the camera on them; its sound, the music of the
-/// north and the south, which crossfades from one to the other as the
-/// camera crosses [`SOUTH_TOP`], and the pond's water; and its enemies,
-/// the guards and the pack, and their systems.
+/// The field's level: `assets/levels/field.ldtk`, cooked to
+/// `levels/field.klvl`.
+const FIELD_LEVEL: &str = "field";
+
+/// What the field spawns of its own, beside its level's entities, each
+/// time it is played ([`spawn_field`]), and those it spawned.
+struct Field {
+    /// The person as they are drawn.
+    person: Sprite,
+    /// The pond's water, and the north's and the south's music, unless they
+    /// did not load.
+    pond: Option<Handle<Sound>>,
+    north: Option<Handle<Music>>,
+    south: Option<Handle<Music>>,
+    /// The entities spawned since the field was last cleared.
+    spawned: Vec<Entity>,
+}
+
+/// The field, on the game states: from the main menu (`start`
+/// [`Start::Menu`]) or straight into the loading of the level `field`
+/// ([`FIELD_LEVEL`]). The loading loads the level, its ground, grid, tall
+/// walls, trees and rocks; then the game, as it enters, spawns the person,
+/// the camera on them, the field's sound, the music of the north and the
+/// south, which crossfades from one to the other as the camera crosses
+/// [`SOUTH_TOP`], and the pond's water, and its enemies, the guards and the
+/// pack ([`spawn_field`]). The menus are `menus.rs`'s.
 ///
 /// # Errors
 ///
-/// If the level cannot be loaded: it says to cook the assets.
-fn field(app: App, sprites: &Sprites) -> Result<App, Box<dyn Error>> {
-    let gait = sprites.gait;
-    let mut app = app.collision_layers(&COLLISION_LAYERS);
-    app.load_level("field").map_err(|error| {
-        format!(
-            "the field, `levels/field.klvl`, cannot be loaded: {error}; run `cargo xtask cook` to cook `assets/` into `target/cooked`"
-        )
-    })?;
+/// If the menus' font cannot be loaded: it says to cook the assets. A level
+/// that does not load ends the game with the engine's dialog.
+fn field(app: App, sprites: &Sprites, start: Start) -> Result<App, Box<dyn Error>> {
+    let app = app.collision_layers(&COLLISION_LAYERS);
     let pond = load_sound::<Sound>(&app, POND, "the pond is silent");
     let north = load_sound::<Music>(&app, NORTH, "the north has no music");
     let south = load_sound::<Music>(&app, SOUTH, "the south has no music");
     // A trunk or a rock, which the level spawns, stops the person at its
     // foot, so that they are drawn behind it when they walk into it from
     // above, and in front of it from below.
-    let world = app.world_mut();
     let mut person = sprites.person[0].sprite;
     person.layer = 1;
-    let player = spawn_player(world, person, &gait);
-    world.write::<Collider>().insert(
-        player,
-        at_feet(Vec2::new(5.0, 3.0), map::PEOPLE, map::WORLD),
-    );
-    // Spawned after the person, so that the level's entities and theirs
-    // keep the ids they had before the field had sound.
-    for (music, top, bottom) in [(north, 0.0, SOUTH_TOP), (south, SOUTH_TOP, FIELD.y)] {
+    let first = match start {
+        Start::Menu => GameState::Boot,
+        Start::Playing => GameState::Loading(LevelId::new(FIELD_LEVEL)),
+    };
+    let app = enemies::add(app)
+        .insert_resource(Field {
+            person,
+            pond,
+            north,
+            south,
+            spawned: Vec::new(),
+        })
+        .insert_resource(sprites.gait)
+        .insert_resource(StateMachine::new(first))
+        .on_enter(StateKind::InGame, "spawn_field", spawn_field)
+        .on_enter(StateKind::MainMenu, "clear_field", clear_field)
+        .on_enter(StateKind::Loading, "clear_field", clear_field)
+        .add_fixed_system_in(
+            StateKind::InGame,
+            FixedStage::Gameplay,
+            "nav_grid",
+            enemies::nav_grid,
+        )
+        .add_fixed_system_in(
+            StateKind::InGame,
+            FixedStage::Gameplay,
+            "guards",
+            enemies::guards,
+        )
+        .add_fixed_system_in(
+            StateKind::InGame,
+            FixedStage::Gameplay,
+            "pack",
+            enemies::pack,
+        )
+        .add_frame_system(FrameStage::Camera, "follow_camera", follow_camera);
+    menus::add(app)
+}
+
+/// As the game enters from the loading, with the level loaded: spawns the
+/// person, with their collider at their feet, the music's areas and the
+/// pond's water, then the enemies, in that order, so that the level's
+/// entities and these keep the ids they had when the field was set up
+/// before the game states. Back from the pause, it spawns nothing.
+fn spawn_field(world: &World, transition: &Transition) {
+    if !matches!(transition.from, Some(GameState::Loading(_))) {
+        return;
+    }
+    let gait = *world.resource::<Gait>();
+    let mut field = world.resource_mut::<Field>();
+    let mut commands = world.commands();
+    let player = spawn_player(&mut commands, field.person, &gait)
+        .with(at_feet(Vec2::new(5.0, 3.0), map::PEOPLE, map::WORLD))
+        .id();
+    field.spawned.push(player);
+    for (music, top, bottom) in [
+        (field.north, 0.0, SOUTH_TOP),
+        (field.south, SOUTH_TOP, FIELD.y),
+    ] {
         if let Some(music) = music {
             let half = Vec2::new(FIELD.x, bottom - top) * 0.5;
-            world
+            let area = commands
                 .spawn()
                 .with(Transform::at(Vec2::new(half.x, top + half.y)))
-                .with(MusicArea::new(music, half));
+                .with(MusicArea::new(music, half))
+                .id();
+            field.spawned.push(area);
         }
     }
-    if let Some(pond) = pond {
+    if let Some(pond) = field.pond {
         let mut water = AudioEmitter::looped(pond);
         water.params.volume = 0.5;
-        world.spawn().with(Transform::at(POND_AT)).with(water);
+        let pond = commands
+            .spawn()
+            .with(Transform::at(POND_AT))
+            .with(water)
+            .id();
+        field.spawned.push(pond);
     }
     // Last, so that everything before them keeps its id.
-    enemies::spawn(world, person, &gait);
-    Ok(app
-        .insert_resource(gait)
-        .add_fixed_system(FixedStage::Gameplay, "nav_grid", enemies::nav_grid)
-        .add_fixed_system(FixedStage::Gameplay, "guards", enemies::guards)
-        .add_fixed_system(FixedStage::Gameplay, "pack", enemies::pack)
-        .add_frame_system(FrameStage::Camera, "follow_camera", follow_camera))
+    let person = field.person;
+    enemies::spawn(world, person, &gait, &mut field.spawned);
+}
+
+/// As the game enters the main menu or the loading: despawns what
+/// [`spawn_field`] spawned, so that nothing of the last play walks on
+/// behind the menu, and the next play starts afresh. The level's own
+/// entities stay until the next level replaces them.
+fn clear_field(world: &World, _transition: &Transition) {
+    let mut field = world.resource_mut::<Field>();
+    let mut commands = world.commands();
+    for entity in field.spawned.drain(..) {
+        commands.despawn(entity);
+    }
 }
 
 /// The person, at [`PLAYER_START`], drawn as `sprite`, standing as `gait`
-/// stands, facing right.
-fn spawn_player(world: &mut World, sprite: Sprite, gait: &Gait) -> Entity {
-    world
+/// stands, facing right: spawned with `commands`, to add more to.
+fn spawn_player<'w>(
+    commands: &mut Commands<'w>,
+    sprite: Sprite,
+    gait: &Gait,
+) -> nadir::ecs::EntityCommands<'w> {
+    commands
         .spawn()
         .with(Player)
         .with(Transform::at(PLAYER_START))
@@ -668,7 +896,6 @@ fn spawn_player(world: &mut World, sprite: Sprite, gait: &Gait) -> Entity {
         .with(sprite)
         .with(Animator::new(gait.stand))
         .with(Facing::Right)
-        .id()
 }
 
 /// Walks the person by the `Move` action, faces them the way they go, and
@@ -1047,16 +1274,38 @@ mod tests {
     }
 
     /// A scene, set up as the game sets it, without a window, from the
-    /// workspace's cooked assets.
+    /// workspace's cooked assets, and in the game: the field straight from
+    /// its loading, as a recording starts it ([`Start::Playing`]), after
+    /// the frames with no tick that load it ([`in_game`]).
     pub(crate) fn scene(scene: Scene) -> App {
-        game(
+        let mut app = game(
             App::new(Config {
                 assets: COOKED.into(),
                 ..Config::default()
             }),
             scene,
+            Start::Playing,
         )
-        .unwrap_or_else(|error| panic!("the sandbox does not set up: {error}"))
+        .unwrap_or_else(|error| panic!("the sandbox does not set up: {error}"));
+        in_game(&mut app);
+        app
+    }
+
+    /// Runs frames with no tick until the game is in `InGame`: the field's
+    /// loading takes two, the first showing its screen, the second loading
+    /// the level and entering the game, whose systems spawn the person and
+    /// the rest. A stress scene is in the game from the first.
+    pub(crate) fn in_game(app: &mut App) {
+        for _ in 0..4 {
+            app.update(Duration::ZERO, &[]);
+            if app.world().resource::<StateMachine>().is(StateKind::InGame) {
+                return;
+            }
+        }
+        panic!(
+            "not in the game after 4 frames: {}",
+            app.world().resource::<StateMachine>().state()
+        );
     }
 
     /// Keeps the once-a-second report quiet: it goes by the wall clock, and
@@ -1093,9 +1342,10 @@ mod tests {
             volumes,
             ..Config::default()
         };
-        let mut app = game(App::new(config), scene)
+        let mut app = game(App::new(config), scene, Start::Playing)
             .unwrap_or_else(|error| panic!("the sandbox does not set up: {error}"));
         let mixer = app.take_mixer().expect("no frame has run");
+        in_game(&mut app);
         (app, mixer)
     }
 
@@ -1297,15 +1547,19 @@ mod tests {
             .map(|system| system.to_string())
             .collect();
         // The engine's that move the world wait while paused, and those
-        // that draw it while loading (ADR-0067).
+        // that draw it while loading (ADR-0067); the field's play in the
+        // game alone, and each menu in its state.
         assert_eq!(
             printed,
             [
                 "tick  Input: nadir::snapshot",
-                "tick  Gameplay: move_player",
-                "tick  Gameplay: nav_grid",
-                "tick  Gameplay: guards",
-                "tick  Gameplay: pack",
+                "tick  Gameplay: move_player (conditional)",
+                "tick  Gameplay: nav_grid (conditional)",
+                "tick  Gameplay: guards (conditional)",
+                "tick  Gameplay: pack (conditional)",
+                "tick  Gameplay: main_menu (conditional)",
+                "tick  Gameplay: pause_menu (conditional)",
+                "tick  Gameplay: pause (conditional)",
                 "tick  Movement: nadir::movement (conditional)",
                 "tick  PostMovement: nadir::parent_offsets (conditional)",
                 "tick  PostMovement: nadir::triggers (conditional)",
@@ -1315,6 +1569,10 @@ mod tests {
                 "frame Animate: nadir::animate",
                 "frame Camera: follow_camera",
                 "frame Ui: report",
+                "frame Ui: draw_main_menu (conditional)",
+                "frame Ui: draw_pause_menu (conditional)",
+                "frame Ui: draw_pause_button (conditional)",
+                "frame Ui: loading_screen (conditional)",
                 "frame Extract: nadir::sound",
                 "frame Extract: nadir::extract_sprites (conditional)",
                 "frame Extract: nadir::extract_level (conditional)",
@@ -1789,7 +2047,7 @@ mod tests {
             assets: empty.clone(),
             ..Config::default()
         };
-        let error = match game(App::new(config), Scene::Field) {
+        let error = match game(App::new(config), Scene::Field, Start::Menu) {
             Ok(_) => panic!("the sandbox set up with nothing cooked"),
             Err(error) => error.to_string(),
         };
@@ -1815,7 +2073,12 @@ mod tests {
                 assets: assets.clone(),
                 ..Config::default()
             };
-            game(App::new(config), Scene::Field)
+            // In the game, with the level loaded: from the pack too, without
+            // `dev`.
+            game(App::new(config), Scene::Field, Start::Playing).map(|mut app| {
+                in_game(&mut app);
+                app
+            })
         };
         let from_loose =
             field(&loose).unwrap_or_else(|error| panic!("from the loose files: {error}"));

@@ -39,7 +39,7 @@
 //! grid, and which follows the level when it changes.
 
 use nadir::collision::{ColliderKind, FlowField, line_of_sight};
-use nadir::ecs::SparseSet;
+use nadir::ecs::{EntityCommands, SparseSet};
 use nadir::prelude::*;
 
 use crate::{Gait, at_feet, map};
@@ -324,12 +324,18 @@ fn toward(from: Vec2, to: Vec2, speed: f32, dt: f32) -> Vec2 {
 
 /// An enemy at `cell`, drawn as `sprite` tinted `tint`, standing as `gait`
 /// stands.
-fn spawn_one(world: &mut World, cell: IVec2, sprite: Sprite, tint: Color, gait: &Gait) -> Entity {
+fn spawn_one<'w>(
+    commands: &mut Commands<'w>,
+    cell: IVec2,
+    sprite: Sprite,
+    tint: Color,
+    gait: &Gait,
+) -> EntityCommands<'w> {
     let mut sprite = sprite;
     sprite.color = tint;
     // Feet at the cell's middle, a little down, as the person stands.
     let feet = middle(cell) + Vec2::new(0.0, HALF.y);
-    world
+    commands
         .spawn()
         .with(Transform::at(feet))
         .with(Velocity::default())
@@ -337,49 +343,60 @@ fn spawn_one(world: &mut World, cell: IVec2, sprite: Sprite, tint: Color, gait: 
         .with(Animator::new(gait.stand))
         .with(Facing::Right)
         .with(at_feet(HALF, map::PEOPLE, map::WORLD | map::PEOPLE))
-        .id()
+}
+
+/// Registers the enemies' components, and adds their grid and the pack's
+/// flow fields, empty until [`spawn`] makes them for the level loaded.
+pub(crate) fn add(mut app: App) -> App {
+    let world = app.world_mut();
+    world.register::<Guard>();
+    world.register::<PackMember>();
+    let nav = NavGrid::new(world);
+    app.insert_resource(nav).insert_resource(Pack {
+        hunt: FlowField::new(),
+        home: FlowField::new(),
+    })
 }
 
 /// Spawns the guards at the starts of their rounds, and the pack in its
-/// den, drawn as `sprite`; the pack's flow fields, to compute on the first
-/// tick; and the enemies' grid, made from the level and its props, which
-/// `Navigation` searches.
-pub(crate) fn spawn(world: &mut World, sprite: Sprite, gait: &Gait) {
+/// den, drawn as `sprite`, through the world's commands, adding them to
+/// `spawned`; empties the pack's flow fields, to compute on the first tick;
+/// and makes the enemies' grid from the level and its props, which
+/// `Navigation` searches. For the game's entering, once the level has
+/// loaded.
+pub(crate) fn spawn(world: &World, sprite: Sprite, gait: &Gait, spawned: &mut Vec<Entity>) {
     let nav = NavGrid::new(world);
     world
         .resource_mut::<Navigation>()
         .set_grid(Some(nav.grid.clone()));
-    world.insert_resource(nav);
-    world.register::<Guard>();
-    world.register::<PackMember>();
+    *world.resource_mut::<NavGrid>() = nav;
+    *world.resource_mut::<Pack>() = Pack {
+        hunt: FlowField::new(),
+        home: FlowField::new(),
+    };
+    let mut commands = world.commands();
     for round in ROUNDS {
-        let guard = spawn_one(world, round[0], sprite, GUARD_TINT, gait);
         let walker = Walker::default();
-        world.write::<Guard>().insert(
-            guard,
-            Guard {
+        let guard = spawn_one(&mut commands, round[0], sprite, GUARD_TINT, gait)
+            .with(Guard {
                 round,
                 next: 1,
                 mode: Mode::Round,
                 seen: 0,
                 ask_at: 0,
                 walker,
-            },
-        );
+            })
+            .id();
+        spawned.push(guard);
     }
     for spot in PACK_SPOTS {
-        let member = spawn_one(world, spot, sprite, PACK_TINT, gait);
-        world.write::<PackMember>().insert(
-            member,
-            PackMember {
+        let member = spawn_one(&mut commands, spot, sprite, PACK_TINT, gait)
+            .with(PackMember {
                 spot: center(middle(spot) + Vec2::new(0.0, HALF.y)),
-            },
-        );
+            })
+            .id();
+        spawned.push(member);
     }
-    world.insert_resource(Pack {
-        hunt: FlowField::new(),
-        home: FlowField::new(),
-    });
 }
 
 /// The person's feet, if there is a person.

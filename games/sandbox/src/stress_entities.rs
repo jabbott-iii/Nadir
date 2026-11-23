@@ -86,7 +86,8 @@ pub(crate) fn add(app: App, sprites: &Sprites) -> App {
     let mut person = sprites.person[0].sprite;
     person.layer = 1;
     person.color = PLAYER_TINT;
-    spawn_player(world, person, &gait);
+    spawn_player(&mut world.commands(), person, &gait);
+    world.apply_commands();
     world.resource_mut::<Collisions>().set_grid(grid);
     let walls = world.resource_mut::<TileLayers>().add(walls);
     app.insert_resource(Pace(PACE))

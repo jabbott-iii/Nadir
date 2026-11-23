@@ -5945,6 +5945,53 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir-scene -p nadir_engine`
 
 - [ ] **M9.2 — menu kit and game UI**
+  - Note: built and checked on Linux (x86_64) on 2026-11-23 (ADR-0076,
+    accepted that day; the user chose one task across nadir-input, the
+    facade and the sandbox, the rebinding on `Input` as `begin_rebind`,
+    the menus reading the game's own actions in tick systems, and a
+    Display page of fullscreen and vsync):
+    - nadir-input: `Input::begin_rebind(kind)`, `rebound`,
+      `cancel_rebind`, `is_rebinding` and `Rebound`: the next press of any
+      device, a key, mouse button, pad button, or half of a stick or
+      trigger past the press point, as a binding of the action's kind (a
+      stick for an `Axis2`); Escape cancels; the modifiers, a captured
+      press and the pads in the background are passed over. 12 tests.
+    - The facade: `nadir::menu`, an immediate-mode kit read in tick systems
+      and drawn in frame systems (`Menu`, `MenuPage`, `MenuInput`,
+      `MenuActions`, `Press`, `MenuStyle`, `MenuColors`; titles, text,
+      buttons, binding rows, toggles and sliders in a column; up and down
+      repeat after 24 ticks, then every 6; the pointer focuses what it
+      moves onto, a click activates, a drag sets a slider); `WindowSize` in
+      every build, `VirtualResolution`, `DisplaySettings`, which `App::run`
+      applies after the frame (a vsync the driver refuses is put back), and
+      `Quit`. 20 kit tests (focus navigation, repeat, widgets, the mouse,
+      layout, drawing, the input read from the world) and a loop test.
+    - The sandbox: a pixel font with the prompts' ✕ ○ □ △ − and a white
+      image (`assets/fonts/`, from `make_font.py`); nine actions in place of
+      one, so recordings from before are refused; the field on
+      `Boot` → `MainMenu` → `Loading("field")` → `InGame` ⇄ `Paused`, its
+      person, music, pond and enemies spawned as the game enters from the
+      loading and despawned at the main menu; main, pause, settings,
+      display, audio and controls pages, each with a Back button and a
+      line naming choose and back for the device last used; a Pause button
+      for the mouse while it moves. Recordings, replays and captures start
+      in the loading (the capture runs it before its 600 frames, all play);
+      the stress scenes in the game. 11 tests of the menus played with the
+      keys, a pad and the mouse alone (one, under `dev`, that a steady menu
+      frame allocates nothing), and 6 of the controls' rows and swaps; the
+      replay and schedule tests follow the nine actions.
+    - In the window (`cargo run -p sandbox`, Mesa's llvmpipe, XWayland):
+      every page with synthetic X keys alone; with synthetic mouse moves
+      and clicks alone (Play, the Pause button, the pause menu, the
+      settings, Main menu, Quit, which ended the game); and with a virtual
+      Xbox pad from uinput alone (Settings, Controls, a rebinding of the
+      pad's pause, Play, the pause, Main menu, Quit). Fullscreen entered
+      and left at 1920 × 1080. Vsync off was refused, as llvmpipe offers a
+      swap interval of 1 alone, and the toggle went back on.
+  - ⏳ needs hardware: by hand in `cargo dev`, every menu with a real
+    gamepad alone (the wired Xbox pad of M8.1) and with a real mouse alone,
+    as the acceptance asks; then tick the box and add M9.2 to the game
+    states' feature in `docs/features.jsonc`.
   - Depends: M7.1, M7.8, M8.4, M8.5
   - Note (from M8.5, ADR-0074):
     - A prompt for a pad is `ButtonPrompts::button` (or `trigger`, or
@@ -6012,6 +6059,12 @@ by the batched sprite renderer.
   - Note (from M3.1): bindings are saved by action name
     (`ActionSet::from_name`). `Key` and `MouseButton` have no names to
     read back yet, beyond their `Debug` text.
+  - Note (from M9.2, ADR-0076): the sandbox's settings menus change, for
+    the session alone, the facade's `DisplaySettings` (fullscreen, vsync),
+    the buses' volumes (`Menus::volumes`, sent with
+    `Audio::set_bus_volume`), and the bindings in its `ActionMap<Act>`
+    (rows of `controls.rs`, a composite's keys rebound one at a time). Load
+    them as the game starts, and save them as the menus change them.
   - Do: `settings.jsonc` load, validate and save; unknown keys preserved;
     invalid values fall back to defaults with a warning; fuzz target.
   - Accept: a test for each fallback rule; the fuzz target is registered.

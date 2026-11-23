@@ -90,9 +90,10 @@
 //! Built so far: keyboard and mouse bindings, latching, text mode, rebinding
 //! conflicts and replays (roadmap M3.1); a UI's events and capture (M7.9);
 //! gamepad bindings, deadzones and the active device (M8.4). The facade
-//! keeps each pad's family and reads the button prompts' table (M8.5). The
-//! rebinding capture flow comes with M9.2, and bindings in the settings
-//! file with M9.3.
+//! keeps each pad's family and reads the button prompts' table (M8.5).
+//! Rebinding listens for the next press, which becomes a binding
+//! ([`Input::begin_rebind`], M9.2). Bindings in the settings file come with
+//! M9.3.
 //!
 //! # The parts
 //!
@@ -133,8 +134,12 @@
 //!
 //! # Rebinding
 //!
-//! A binding must fit its action's kind, and a rebinding menu asks
-//! [`ActionMap::conflict`] before it binds:
+//! A controls menu calls [`Input::begin_rebind`] with the kind of the action
+//! it rebinds; the next press of a key or button, or of a pad's stick or
+//! trigger past its press point, becomes a binding, which
+//! [`Input::rebound`] gives once ([`Rebound`]); Escape cancels. A binding
+//! must fit its action's kind, and the menu asks [`ActionMap::conflict`]
+//! before it binds:
 //!
 //! ```
 //! use nadir_core::Key;
@@ -240,6 +245,7 @@ mod code;
 mod error;
 mod input;
 mod pad;
+mod rebind;
 mod replay;
 mod state;
 mod ui;
@@ -249,6 +255,7 @@ pub use binding::{ActionMap, AxisSign, Binding, SLOTS, Stick};
 pub use error::{BindErrorKind, InputError, ReplayErrorKind, SetProblem};
 pub use input::{Capture, Input};
 pub use pad::{Deadzones, Device};
+pub use rebind::Rebound;
 pub use replay::{InputPlayer, InputRecorder};
 pub use state::ActionState;
 pub use ui::{UiEvent, UiEvents};

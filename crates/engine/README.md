@@ -46,6 +46,10 @@ Built:
   or as one is entered or left, a loading state that loads a level behind
   the game's loading screen, and a paused state that holds the world
   still;
+- a kit for menus, `nadir::menu`: pages of buttons, sliders, toggles and
+  rows that rebind an action to the next press, which the keys, a gamepad
+  or the mouse each work alone; and resources a game's settings change
+  while it runs, `DisplaySettings` (fullscreen, vsync) and `Quit`;
 - assets loaded on worker threads, and an offline cook that packs images,
   Aseprite exports and bitmap fonts into atlases, makes level files of
   LDtk projects, turns WAVs into the game's sounds and music, and puts
@@ -478,6 +482,28 @@ trigger and stick. So, when `Input::active_device` is
 pad's family is what to show. On Linux, the pads Steam tells a game to skip
 are skipped, as SDL skips them.
 
+A controls menu rebinds an action to the next press:
+`Input::begin_rebind(kind)` listens, and `Input::rebound()` gives the
+binding once heard, or that Escape canceled it. The game then places it in
+its `ActionMap`, after `ActionMap::conflict` finds another action that has
+its key.
+
+### Menus
+
+`nadir::menu` makes a game's menus: a column of buttons, sliders, toggles
+and rows naming a binding, with a focus that the keys, a gamepad or the
+mouse moves alone. A tick system reads the tick's `MenuInput` from the
+game's own actions, named in a `MenuActions` (up, down, left, right,
+confirm, back, and a click on the left mouse button), and lists the page's
+items on its `Menu`, each call returning what the player did:
+`page.button("Play")` is `true` in the tick it is chosen, and
+`page.slider("Music", &mut percent, 0, 100, 10)` changes `percent`. A
+frame system draws the last tick's items with `Menu::draw`, into
+`RenderFrame::ui`, in a `MenuStyle` of a font and a white texture. Up and
+down move the focus, held they repeat, left and right step a slider or
+flip a toggle, and the mouse focuses what it moves onto, clicks, and drags
+a slider. The sandbox's main menu, pause menu and settings show it whole.
+
 ### Sprites and the camera
 
 An entity with a `Transform` and a `Sprite` is drawn. Its position is the
@@ -774,11 +800,13 @@ cargo run --features dev
 The repository's sandbox game is the full example, and the one each
 feature is built for. Its
 [`main.rs`](https://github.com/jabbott-iii/Nadir/blob/main/games/sandbox/src/main.rs)
-has a tile map with animated water and flowers, a person cooked from an
-Aseprite export who walks and collides, a camera that follows them, guards
-who walk their rounds and chase them, a pack that hunts them down a flow
-field, stress scenes of thousands of sprites and colliders, recorded and
-replayed input, and frames drawn with no window for the demo page. To run it:
+has a main menu, a pause menu and settings, among them controls to rebind;
+a tile map with animated water and flowers, loaded behind a loading
+screen; a person cooked from an Aseprite export who walks and collides, a
+camera that follows them, guards who walk their rounds and chase them, a
+pack that hunts them down a flow field, stress scenes of thousands of
+sprites and colliders, recorded and replayed input, and frames drawn with
+no window for the demo page. To run it:
 
 ```bash
 git clone https://github.com/jabbott-iii/Nadir.git

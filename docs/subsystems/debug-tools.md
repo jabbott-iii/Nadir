@@ -139,7 +139,8 @@ ADR-0058), and re-exports this crate as `nadir::debug`.
 pub type DebugWindow = fn(&World, &mut nadir::debug::Ui<'_>);
 impl App { pub fn add_debug_window(self, toggle: Key, title: &'static str, first: Rect,
                                    window: DebugWindow) -> Self; }
-pub struct WindowSize(pub UVec2);   // a resource: the window's inside, physical pixels
+pub struct WindowSize(pub UVec2);   // a resource: the window's inside, physical pixels;
+                                    // of every build since M9.2's menus (ADR-0076)
 ```
 
 - **Windows:** a game adds its own, each shown and hidden by a key of its

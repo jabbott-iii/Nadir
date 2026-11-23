@@ -73,7 +73,14 @@
 //!   and headless runs call it themselves.
 //! - [`App::offscreen`] draws frames with no window: [`Offscreen::frame`]
 //!   returns each frame's pixels, for recordings.
-//! - [`Error`] is what ends [`App::run`].
+//! - [`Error`] is what ends [`App::run`], besides the window closing and
+//!   the resource [`Quit`], which a system asks to end the game, from a
+//!   main menu's Quit.
+//! - The resource [`DisplaySettings`], fullscreen and vsync, is what a
+//!   settings menu changes: [`App::run`] applies a change after the frame.
+//! - The resources [`WindowSize`] and [`VirtualResolution`] are the
+//!   window's size and the virtual image's, which map the pointer to the
+//!   UI's units.
 //!
 //! # The world, systems and stages
 //!
@@ -284,6 +291,21 @@
 //!   loads from [`Config::assets`] on worker threads, and frees assets by
 //!   [`Scope`](assets::Scope).
 //!
+//! # Menus
+//!
+//! [`menu`] is a kit for a game's menus (roadmap M9.2, ADR-0076): a column
+//! of buttons, sliders, toggles and rows naming a binding, whose focus the
+//! keys, a gamepad or the mouse moves. A tick system reads a
+//! [`MenuInput`](menu::MenuInput) from the game's own actions, named in a
+//! [`MenuActions`](menu::MenuActions), and lists a page's items on the
+//! [`Menu`](menu::Menu) of the page, each call saying what the player did
+//! to it; a frame system draws the last tick's items into
+//! [`RenderFrame::ui`](render::RenderFrame::ui). A controls menu rebinds
+//! an action to the next press with
+//! [`Input::begin_rebind`](input::Input::begin_rebind). The sandbox's
+//! menus, on the game states, are a whole example
+//! (`games/sandbox/src/menus.rs`).
+//!
 //! # Hot reload
 //!
 //! With the `dev` feature, [`App::run`] reloads the files that change while
@@ -322,7 +344,7 @@
 //! font; they drag, collapse, resize and scroll; while one has the
 //! pointer, or one of their text fields the keys, the game's actions do not
 //! see them; and [`App::run`] keeps their places in `debug_ui.jsonc` in the
-//! game's settings folder. The resource `WindowSize` is the window's size.
+//! game's settings folder.
 //! The engine's own windows are the stats overlay (F1), the inspector (F2),
 //! the profiler (F3), the debug drawing (F4), whose overlays draw into the
 //! world, and the console (the backtick), which runs the engine's commands
@@ -371,7 +393,8 @@
 //! | [`audio`] | `nadir-audio` | Sounds, music, the mixer, its buses and voices |
 //! | [`collision`] | `nadir-collision` | Shapes, layers, the tile grid, move-and-slide, triggers, queries |
 //! | [`ecs`] | `nadir-ecs` | The world, components, resources, events, commands, the schedule |
-//! | [`input`] | `nadir-input` | Actions, bindings, their state, replays |
+//! | [`input`] | `nadir-input` | Actions, bindings, their state, rebinding, replays |
+//! | [`menu`] | this crate | The menu kit: pages of buttons, sliders, toggles and bindings |
 //! | [`render`] | `nadir-render` | The frame to draw, sprites, tiles, the camera, textures, atlases |
 //! | [`scene`] | `nadir-scene` | Reflection: the macros that define reflected types, and the type registry; prefabs, levels and game states |
 //! | [`log`] | `nadir-core` | The log macros, `error!` to `trace!` |
@@ -535,8 +558,8 @@
 //!   far, as `AllocCounts`. No other crate in the program may then declare
 //!   a `#[global_allocator]`. [`App::run`] reloads what changes while it
 //!   runs ("Hot reload", above), and the game's debug windows show ("The
-//!   debug UI", above), with `nadir::debug`, `App::add_debug_window`,
-//!   `DebugWindow` and `WindowSize`. Turn it on from a feature of the game,
+//!   debug UI", above), with `nadir::debug`, `App::add_debug_window` and
+//!   `DebugWindow`. Turn it on from a feature of the game,
 //!   never from a normal dependency, so that release builds leave it out.
 
 // The README's examples are compiled as doc tests too.
@@ -551,6 +574,7 @@ mod components;
 mod crash;
 #[cfg(feature = "dev")]
 mod debug_ui;
+mod display;
 mod error;
 #[cfg(feature = "dev")]
 mod frame_allocs;
@@ -561,6 +585,7 @@ mod hot_reload;
 mod level;
 mod limiter;
 mod log_file;
+pub mod menu;
 mod navigation;
 mod pack;
 mod reflected;
@@ -568,7 +593,6 @@ mod replay;
 mod sound;
 mod states;
 mod tick_stats;
-#[cfg(feature = "dev")]
 mod window_size;
 
 pub use nadir_core::{cli, log};
@@ -593,6 +617,7 @@ pub use components::{
 };
 #[cfg(feature = "dev")]
 pub use debug_ui::{ConsoleCommand, DebugWindow};
+pub use display::{DisplaySettings, Quit};
 pub use error::Error;
 #[cfg(feature = "dev")]
 pub use frame_allocs::FrameAllocs;
@@ -604,8 +629,7 @@ pub use reflected::{CollisionLayers, loading_context, reflect_context};
 pub use replay::{Replay, world_hash};
 pub use sound::AudioState;
 pub use tick_stats::TickStats;
-#[cfg(feature = "dev")]
-pub use window_size::WindowSize;
+pub use window_size::{VirtualResolution, WindowSize};
 
 /// What most games use, for one `use nadir::prelude::*`.
 pub mod prelude {

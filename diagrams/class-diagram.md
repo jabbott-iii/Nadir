@@ -2606,6 +2606,9 @@ classDiagram
     World o-- FrameAllocs
     World o-- Reloads
     World o-- WindowSize
+    World o-- VirtualResolution
+    World o-- DisplaySettings
+    World o-- Quit
     World o-- TypeRegistry
     World o-- Audio
     World o-- AudioState
@@ -2615,7 +2618,9 @@ classDiagram
     Events ..> AnimationFinished
     note for FrameAllocs "Only with the dev feature."
     note for Reloads "Only with the dev feature: what hot reload did, for the tests (crate-private)."
-    note for WindowSize "Only with the dev feature: the window's size, which maps the pointer to a UI's units."
+    note for WindowSize "The window's size, which maps the pointer to a UI's units with the VirtualResolution (every build since M9.2, ADR-0076)."
+    note for DisplaySettings "Fullscreen and vsync: App::run applies a change after the frame."
+    note for Quit "Asked for, App::run ends after the frame."
 ```
 
 ## engine: collision and level resources

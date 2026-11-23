@@ -20,6 +20,7 @@ use nadir_platform::Event;
 
 use crate::code::{Code, CodeSet};
 use crate::pad::{self, Pads};
+use crate::rebind::{self, Rebound};
 use crate::state::{self, HELD, JUST_PRESSED, JUST_RELEASED, Latched, ONE};
 use crate::{
     ActionKind, ActionMap, ActionSet, ActionState, AxisSign, Binding, Deadzones, Device, InputError,
@@ -194,6 +195,11 @@ pub struct Input {
     /// taken to have it until they say otherwise.
     focused: bool,
     active: Device,
+    /// The kind of action a rebinding listens for, while it listens
+    /// ([`Input::begin_rebind`]).
+    rebinding: Option<ActionKind>,
+    /// What it heard, until [`Input::rebound`] takes it.
+    rebound: Option<Rebound>,
 }
 
 impl Input {
@@ -209,6 +215,8 @@ impl Input {
             pads: Pads::new(),
             focused: true,
             active: Device::KeyboardMouse,
+            rebinding: None,
+            rebound: None,
         }
     }
 
@@ -244,14 +252,15 @@ impl Input {
                     self.active = Device::KeyboardMouse;
                 }
                 if !repeat {
-                    self.set_down(Code::key(key), pressed);
+                    self.press_or_release(Code::key(key), pressed, Binding::Key(key));
                 }
             }
             Event::MouseButton { button, pressed } => {
                 if pressed {
                     self.active = Device::KeyboardMouse;
                 }
-                self.set_down(Code::mouse(button), pressed);
+                let binding = Binding::MouseButton(button);
+                self.press_or_release(Code::mouse(button), pressed, binding);
             }
             Event::Focused(false) => {
                 let keys_and_mouse = CodeSet::KEYS.union(CodeSet::MOUSE);
@@ -296,14 +305,20 @@ impl Input {
                 if pressed && self.focused {
                     self.active = Device::Gamepad(id);
                 }
-                self.set_down(Code::pad_button(button), self.pads.pressed(button));
+                let binding = Binding::PadButton(button);
+                let down = self.pads.pressed(button);
+                self.press_or_release(Code::pad_button(button), down, binding);
             }
             Event::GamepadAxis { id, axis, value } => {
                 let moved = self.pads.set_axis(id, axis, value);
                 if moved && self.focused {
                     self.active = Device::Gamepad(id);
                 }
+                let before = self.now.down;
                 self.refresh_axis(axis);
+                if self.rebinding.is_some() {
+                    self.hear_axes(axis, before);
+                }
             }
             _ => {}
         }
@@ -324,6 +339,58 @@ impl Input {
     /// do not hold it, so a fixed system that is to replay must not read it.
     pub fn active_device(&self) -> Device {
         self.active
+    }
+
+    /// Listens for the next press, which becomes a binding for an action of
+    /// `kind`, for a controls menu: [`Input::rebound`] gives it once heard.
+    /// Escape cancels. A rebinding begun while another listens replaces it,
+    /// and so does one begun before the last was taken.
+    ///
+    /// What counts is a press from the events after this call, in their
+    /// order, of any device: a key, mouse button or pad's button going down,
+    /// or a half of a pad's stick or trigger reaching the press point of the
+    /// [`Deadzones`]. Something held when it begins counts only once it is
+    /// let go and pressed again.
+    ///
+    /// - For an [`ActionKind::Button`] or [`ActionKind::Axis1`]: a key, a
+    ///   mouse button, a pad's button, or the half of an axis
+    ///   ([`Binding::PadAxis`]).
+    /// - For an [`ActionKind::Axis2`]: a stick pushed, as
+    ///   [`Binding::PadStick`]. Keys and buttons are not heard: a menu
+    ///   rebinds a [`Binding::KeyComposite2`] one key at a time, as
+    ///   buttons.
+    /// - Shift, Control, Alt and Super are never heard, nor the wheel, nor a
+    ///   press that a capture ([`Input::set_capture`]) holds back, or a
+    ///   pad's while the window lacks the focus.
+    ///
+    /// The press reaches the actions too: a menu that reads its own actions
+    /// ignores them in the tick it takes the binding. The live events alone
+    /// are heard, not a replay's.
+    pub fn begin_rebind(&mut self, kind: ActionKind) {
+        self.rebinding = Some(kind);
+        self.rebound = None;
+    }
+
+    /// Stops a rebinding, and forgets what it heard if that was not taken:
+    /// [`Input::rebound`] is `None` until another begins.
+    pub fn cancel_rebind(&mut self) {
+        self.rebinding = None;
+        self.rebound = None;
+    }
+
+    /// Whether a rebinding listens: begun, with nothing heard yet.
+    pub fn is_rebinding(&self) -> bool {
+        self.rebinding.is_some()
+    }
+
+    /// What the rebinding heard, once: then it is done, and this is `None`
+    /// until another begins. `None` while it still listens.
+    ///
+    /// The binding is the game's to place, with
+    /// [`ActionMap::conflict`] to find another action that has the same
+    /// key or button, and [`ActionMap::bind`].
+    pub fn rebound(&mut self) -> Option<Rebound> {
+        self.rebound.take()
     }
 
     /// The deadzones the gamepads are read with.
@@ -614,6 +681,44 @@ impl Input {
         }
     }
 
+    /// Sets `code` down or up, and lets a rebinding hear it go down: it is
+    /// the one key or button `binding` reads.
+    fn press_or_release(&mut self, code: Code, down: bool, binding: Binding) {
+        let pressed = down && !self.now.down.contains(code);
+        self.set_down(code, down);
+        if pressed {
+            self.hear(code, binding);
+        }
+    }
+
+    /// Lets a rebinding hear each half of the stick or trigger of `axis`
+    /// that reached the press point since the codes were `before`.
+    fn hear_axes(&mut self, axis: GamepadAxis, before: CodeSet) {
+        for &axis in pad::group(axis).1 {
+            for sign in [AxisSign::Negative, AxisSign::Positive] {
+                let code = Code::pad_press(axis, sign);
+                if self.now.down.contains(code) && !before.contains(code) {
+                    self.hear(code, Binding::PadAxis { axis, sign });
+                }
+            }
+        }
+    }
+
+    /// Gives a rebinding that listens the press of `code`, which is
+    /// `binding`, unless it is held back from the actions.
+    fn hear(&mut self, code: Code, binding: Binding) {
+        let Some(kind) = self.rebinding else {
+            return;
+        };
+        if self.now.held_back().contains(code) {
+            return;
+        }
+        if let Some(heard) = rebind::heard(kind, binding) {
+            self.rebinding = None;
+            self.rebound = Some(heard);
+        }
+    }
+
     fn set_down(&mut self, code: Code, down: bool) {
         if self.now.down.contains(code) != down {
             self.change(if down {
@@ -794,6 +899,15 @@ mod tests {
 
         fn focus(&mut self, focused: bool) -> &mut Self {
             self.input.handle(&Event::Focused(focused));
+            self
+        }
+
+        fn key_repeat(&mut self, key: Key) -> &mut Self {
+            self.input.handle(&Event::Key {
+                key,
+                pressed: true,
+                repeat: true,
+            });
             self
         }
     }
@@ -1510,5 +1624,136 @@ mod tests {
         assert_eq!(game.input.deadzones(), wider);
         game.tick();
         assert_eq!(game.edges(Act::Move), RELEASED, "now inside it");
+    }
+
+    /// A rebinding of `kind` begun in the game.
+    fn rebinding(kind: ActionKind) -> Game {
+        let mut game = Game::with_pads();
+        game.input.begin_rebind(kind);
+        game
+    }
+
+    fn bound(binding: Binding) -> Option<Rebound> {
+        Some(Rebound::Bound(binding))
+    }
+
+    #[test]
+    fn the_next_press_is_heard_once_and_the_rebinding_is_done() {
+        let mut game = rebinding(ActionKind::Button);
+        assert!(game.input.is_rebinding());
+        assert_eq!(game.input.rebound(), None, "nothing yet");
+        game.press(Key::Q).press(Key::E);
+        assert!(!game.input.is_rebinding());
+        assert_eq!(game.input.rebound(), bound(Binding::Key(Key::Q)));
+        assert_eq!(game.input.rebound(), None, "taken");
+        game.release(Key::Q).press(Key::R);
+        assert_eq!(game.input.rebound(), None, "no longer listening");
+    }
+
+    #[test]
+    fn what_is_held_as_it_begins_counts_once_pressed_again() {
+        let mut game = Game::with_pads();
+        game.press(Key::Q).button(PAD, GamepadButton::A, true);
+        game.input.begin_rebind(ActionKind::Button);
+        game.release(Key::Q).button(PAD, GamepadButton::A, false);
+        game.key_repeat(Key::Q);
+        assert_eq!(game.input.rebound(), None, "releases and repeats");
+        game.button(PAD, GamepadButton::A, true);
+        assert_eq!(
+            game.input.rebound(),
+            bound(Binding::PadButton(GamepadButton::A))
+        );
+    }
+
+    #[test]
+    fn escape_cancels_and_modifiers_are_passed_over() {
+        let mut game = rebinding(ActionKind::Button);
+        game.press(Key::LeftShift).press(Key::RightAlt);
+        assert!(game.input.is_rebinding());
+        game.press(Key::Escape);
+        assert_eq!(game.input.rebound(), Some(Rebound::Canceled));
+        game.input.begin_rebind(ActionKind::Axis1);
+        game.press(Key::LeftControl).press(Key::Tab);
+        assert_eq!(game.input.rebound(), bound(Binding::Key(Key::Tab)));
+    }
+
+    #[test]
+    fn a_mouse_button_or_a_half_of_an_axis_binds_a_button() {
+        let mut game = rebinding(ActionKind::Button);
+        game.input.handle(&Event::MouseWheel(Vec2::new(0.0, 1.0)));
+        game.mouse(MouseButton::Right, true);
+        assert_eq!(
+            game.input.rebound(),
+            bound(Binding::MouseButton(MouseButton::Right))
+        );
+        game.input.begin_rebind(ActionKind::Button);
+        game.axis(PAD, GamepadAxis::RightTrigger, 0.3);
+        assert!(
+            game.input.is_rebinding(),
+            "past the deadzone, short of the press point"
+        );
+        game.axis(PAD, GamepadAxis::RightTrigger, 0.6);
+        assert_eq!(
+            game.input.rebound(),
+            bound(Binding::PadAxis {
+                axis: GamepadAxis::RightTrigger,
+                sign: AxisSign::Positive,
+            })
+        );
+        game.input.begin_rebind(ActionKind::Axis1);
+        game.axis(PAD, GamepadAxis::LeftY, -0.9);
+        assert_eq!(
+            game.input.rebound(),
+            bound(Binding::PadAxis {
+                axis: GamepadAxis::LeftY,
+                sign: AxisSign::Negative,
+            })
+        );
+    }
+
+    #[test]
+    fn a_direction_is_bound_to_a_stick_and_not_to_keys_or_triggers() {
+        let mut game = rebinding(ActionKind::Axis2);
+        game.press(Key::W)
+            .mouse(MouseButton::Left, true)
+            .button(PAD, GamepadButton::DPadUp, true)
+            .axis(PAD, GamepadAxis::LeftTrigger, 1.0)
+            .axis(PAD, GamepadAxis::RightX, 0.3);
+        assert!(game.input.is_rebinding());
+        game.axis(PAD, GamepadAxis::RightX, 0.7);
+        assert_eq!(game.input.rebound(), bound(Binding::PadStick(Stick::Right)));
+    }
+
+    #[test]
+    fn a_held_back_press_is_not_heard() {
+        let mut game = rebinding(ActionKind::Button);
+        game.capture(Capture::KEYBOARD).press(Key::Q);
+        game.focus(false).button(PAD, GamepadButton::B, true);
+        assert!(game.input.is_rebinding(), "captured, and in the background");
+        game.focus(true).capture(Capture::NONE).press(Key::E);
+        assert_eq!(game.input.rebound(), bound(Binding::Key(Key::E)));
+    }
+
+    #[test]
+    fn a_cancel_forgets_and_a_new_rebinding_replaces_the_last() {
+        let mut game = rebinding(ActionKind::Button);
+        game.press(Key::Q);
+        game.input.cancel_rebind();
+        assert_eq!(game.input.rebound(), None);
+        assert!(!game.input.is_rebinding());
+        game.input.begin_rebind(ActionKind::Button);
+        game.press(Key::E);
+        game.input.begin_rebind(ActionKind::Axis2);
+        assert_eq!(game.input.rebound(), None, "the new one forgot E");
+        game.press(Key::R);
+        assert!(game.input.is_rebinding());
+    }
+
+    #[test]
+    fn the_press_heard_reaches_the_actions_too() {
+        let mut game = rebinding(ActionKind::Button);
+        game.press(Key::Space).tick();
+        assert_eq!(game.input.rebound(), bound(Binding::Key(Key::Space)));
+        assert_eq!(game.edges(Act::Jump), (true, true, false));
     }
 }
