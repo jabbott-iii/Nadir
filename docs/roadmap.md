@@ -6341,7 +6341,9 @@ by the batched sprite renderer.
     (`option_env!`), and say `build unknown` without it: set it to the short
     hash in the packages' builds, and in `cargo xtask dist`'s. Cargo
     compiles the facade again when it changes.
-  - Depends: M9.7
+  - Note (ADR-0075): waits for M13.8, Lua scripting's last task, so that
+    the first release can be scripted.
+  - Depends: M9.7, M13.8
   - Do: `xtask package <os>`:
     - Windows: manifest and resources via `rc.exe`
     - macOS: `.app` + `Info.plist` + `.icns` + universal binary via `lipo`
@@ -6636,7 +6638,260 @@ studio.
 
 ---
 
-## Backlog (M13+, each needs a trigger or a decision)
+## M13 — Lua scripting
+
+Games will write gameplay in Lua 5.4 scripts, run by an interpreter of
+our own, in safe Rust, that ships inside the engine, so that nobody
+installs Lua (ADR-0075, accepted on 2026-11-22: the user asked for Lua
+with its interpreter included, chose an interpreter of our own over the
+reference C one and a place before the release, and accepted the ADR as
+written the same day). Its number comes after the studio's, but its work
+comes before the release: M13.1 starts after M9.7, and M11.1 (packaging)
+waits for M13.8.
+
+- **The language** is the one the Lua 5.4 reference manual
+  (<https://www.lua.org/manual/5.4/>) defines, but for what ADR-0075
+  leaves out: finalizers (`__gc`), weak tables (`__mode`), the `io`,
+  `os`, `package`, and `debug` libraries (but `debug.traceback`),
+  `dofile`, `loadfile`, `string.dump`, and binary chunks. That way a
+  script reaches only what the engine gives it.
+- **Deterministic:** a table's keys are visited in the same order in
+  every run, `math.random` draws from a seeded `Pcg32` (the engine's
+  random number generator), and no script reads the clock, so replays and
+  the determinism test hold with scripts.
+- **Bounded:** each state (one running Lua world, with its own globals and
+  heap) has a memory cap, and each call from the engine an instruction
+  budget; Lua calls do not recurse on the Rust stack. A runaway script is
+  a Lua error with a traceback, never a hang or a crash.
+- **In the engine:** scripts are cooked assets, run by a `Script`
+  component's hooks in the tick, and reach components through reflection.
+  State that must last lives in reflected components, so saves, the
+  inspector, and replays see it.
+
+- [ ] **M13.1 — script: the crate, its spec, values, and the lexer**
+  - Depends: M9.7
+  - Do:
+    - `crates/script`, package `nadir-script`, in layer 2 with `core`
+      only: its rows in the layer table and the dependency matrix
+      (`docs/01-architecture.md`), its line in `AGENTS.md`'s workspace
+      map, and what crates.io needs (a description, copies of `LICENSE`
+      and `NOTICE`, a `README.md` whose examples `src/lib.rs` tests;
+      ADR-0039). `xtask`'s row gains `script`, for the fuzz target.
+    - `docs/subsystems/script.md`: the design of ADR-0075, the limits and
+      their defaults, and every difference from the manual, which each
+      task of M13 keeps up to date.
+    - The values: nil, booleans, 64-bit integers and floats, kept apart
+      as Lua 5.4 keeps them, strings of bytes (not always UTF-8), tables,
+      functions (Lua's and the engine's), and coroutines.
+    - The lexer: every token of the manual's section 3.1, including long
+      brackets of any level, the escapes `\z`, `\x`, `\ddd`, and
+      `\u{XXX}`, hexadecimal floats, and decimal integer numerals that
+      overflow, which the manual reads as floats.
+    - The fuzz target `lua`, with seeds in `fuzz/corpus/lua/`, over the
+      lexer for now.
+  - Accept: a test for each rule of section 3.1; a lexical error names
+    the chunk, the line, and the token, as Lua's do
+    (`slime.lua:3: malformed number near '0x'`); no input panics; the
+    crate passes `cargo xtask crates`.
+  - Verify: `cargo test -p nadir-script`;
+    `cargo xtask fuzz-smoke --target lua`; `cargo xtask layers`;
+    `cargo xtask crates`
+
+- [ ] **M13.2 — script: the parser and the compiler**
+  - Depends: M13.1
+  - Do:
+    - A parser for the complete syntax of the manual's section 9, with
+      the precedence of section 3.4.8 and the rules of sections 3.3 and
+      3.5: local scopes, the `<const>` and `<close>` attributes, `goto`
+      and labels (no jump into the scope of a local), varargs, and
+      multiple assignment.
+    - A compiler to a bytecode of our own, kept in memory only: locals in
+      registers or on a stack (the task decides, in the spec), upvalues
+      (an enclosing function's locals that a closure keeps), constants,
+      and line numbers for errors and tracebacks.
+    - Limits, so that no input can overflow the Rust stack: a nesting
+      depth for expressions and blocks, 200 locals and 255 upvalues per
+      function (the reference's limits), and a source size.
+    - The fuzz target compiles each input.
+  - Accept: a test for each rule of section 9; a syntax error names the
+    chunk, the line, and the token, as Lua's do
+    (`slime.lua:7: 'end' expected (to close 'function' at line 2) near <eof>`);
+    an input nested 100,000 levels deep is refused with an error, not a
+    stack overflow; no input panics.
+  - Verify: `cargo test -p nadir-script`;
+    `cargo xtask fuzz-smoke --target lua`
+
+- [ ] **M13.3 — script: the virtual machine and the garbage collector**
+  - Depends: M13.2
+  - Do:
+    - The virtual machine: the arithmetic and bitwise operators with Lua
+      5.4's integer and float rules (integers wrap around; floor division
+      and modulo; the conversions of section 3.4.3), comparison,
+      concatenation, the length operator, tables with an array part and a
+      hash part, every metamethod of section 2.4 but `__gc` and `__mode`,
+      closures, varargs and multiple results, proper tail calls, `error`
+      and `pcall`, and coroutines (section 2.6).
+    - Calls from Lua to Lua run in the machine's own loop, not on the Rust
+      stack, so that a deep recursion is Lua's "stack overflow" error at a
+      cap.
+    - The garbage collector: mark and sweep over the interpreter's arenas,
+      in safe Rust, started by the bytes allocated since the last
+      collection, never by the time. From the bench below, the task
+      decides whether a collection runs whole or in steps across ticks,
+      and records it in the spec.
+    - The limits: a memory cap per state, and an instruction budget per
+      call from the engine. Each unwinds to the engine with a traceback,
+      past any `pcall`, so that a script cannot catch it and go on.
+    - Arenas reused: a loop that makes no new tables or strings allocates
+      nothing from the system after its first run.
+    - The fuzz target runs what compiles, under a small budget and cap.
+    - Benches in `nadir-bench`, named `lua_*`: calls (a recursive
+      Fibonacci), table writes and reads, string building, method calls
+      through metatables, and a collection of a heap of 100,000 small
+      tables.
+  - Accept: a test for each rule of sections 2.4, 2.6, and 3.4; the same
+    program visits a table's keys in the same order in two runs; a
+    runaway loop, a deep recursion, and a table that grows without end
+    each stop at their limit, uncaught by `pcall`; the arenas' reuse
+    checked with the allocation counter (M3.5) from a crate that may link
+    it, such as `nadir-bench`; the benches' numbers recorded in the
+    task's note.
+  - Verify: `cargo test -p nadir-script`;
+    `cargo xtask fuzz-smoke --target lua`; `cargo xtask bench lua`
+
+- [ ] **M13.4 — script: the standard library**
+  - Depends: M13.3
+  - Do:
+    - The basic functions (the manual's section 6.1), but `dofile`,
+      `loadfile`, and `collectgarbage` beyond `"count"`: `load` of text
+      chunks only, with an environment; `print` to the engine's log.
+    - `string` (section 6.4): Lua patterns (section 6.4.1) matched by a
+      matcher of our own, whose steps the instruction budget counts;
+      `string.format` as the manual defines it; `string.pack` and
+      `string.unpack` (section 6.4.2); not `string.dump`.
+    - `coroutine` (6.2), `utf8` (6.5), `table` (6.6), `math` (6.7), whose
+      `math.random` and `math.randomseed` use the state's `Pcg32`, and
+      `debug.traceback`.
+    - `require`, which finds the cooked scripts the engine names (M13.5),
+      and nothing else.
+    - Conformance: ask the user whether to run Lua 5.4's own test suite
+      (MIT license) outside the repository as a check (ADR-0075), and
+      record the answer in the task's note.
+  - Accept: a test for each function, from the manual's text and
+    examples; `tostring` prints a float as the reference does (`%.14g`,
+    with `.0` added to one that looks like an integer); a test walks
+    `_G` and finds no way to a file, a process, the clock, or the
+    environment; a pattern that would backtrack for long stops at the
+    budget.
+  - Verify: `cargo test -p nadir-script`;
+    `cargo xtask fuzz-smoke --target lua`
+
+- [ ] **M13.5 — engine and cook: script assets and the `Script` component**
+  - Depends: M13.4
+  - Do:
+    - The cook's script job: each `assets/scripts/**/*.lua`, under the
+      cook's path rules, is compiled to check it, and one that fails
+      stops the cook with its file, line, and column; the source is
+      packed as `scripts/<path>.lua`. `nadir-cook`'s row in the dependency
+      matrix gains `script`.
+    - A script asset in the facade, compiled when it loads.
+      `require("enemies/slime")` finds `scripts/enemies/slime.lua`. Each
+      module has an environment of its own, so that one script's globals
+      do not leak into another's.
+    - The game's Lua state: one per `App`, with its memory cap and budget
+      in `Config`, and its `Pcg32` seeded from the game's seed, so that
+      replays match.
+    - The `Script` component (reflected, naming its script), and an
+      engine system, `nadir::scripts`, in the tick's `Gameplay` stage. It
+      calls `on_spawn` once for a new scripted entity, `on_tick` each
+      tick, and `on_despawn` before the entity goes. An error stops that
+      entity's script, is logged once with its traceback, and the game
+      goes on.
+    - The determinism test gains scripted entities.
+  - Accept: a planted syntax error fails the cook with its place; a
+    test checks the hooks' order; an entity whose script fails stops
+    alone; the world hashes match across the determinism test's pacings
+    with scripted entities; a steady tick of scripts that make no new
+    tables or strings allocates nothing (the `dev` allocation counter).
+  - Verify: `cargo test -p nadir-cook`; `cargo test -p nadir_engine`;
+    `cargo xtask cook`; `cargo xtask layers`
+
+- [ ] **M13.6 — engine: the script API**
+  - Depends: M13.5
+  - Do:
+    - Entities in Lua: values of their own type, made only by the
+      engine, and compared by id. A script reads a despawned entity as
+      dead (`e:alive()` is false), never as the entity that reused its
+      slot.
+    - Components by field name, through reflection, as in
+      `e.Health.current = e.Health.current - 1`: the reflected types in
+      the `TypeRegistry` only. A number or a boolean field is read and
+      written without allocating. A field or a type that does not fit is
+      a Lua error that names the component and the field.
+    - Spawning a prefab at a place, and despawning, through `Commands`;
+      sending events, and reading the tick's in `on_event`, for the event
+      types a game registers as reflected; input actions by name
+      (pressed, held, released, an axis's value); a sound played at an
+      entity; the collision world's queries.
+    - A game's own functions, added from Rust through the facade.
+    - Script state: a reflected component of plain Lua values (numbers,
+      strings, booleans, and tables of them), so that a script's lasting
+      state is saved, hashed, and shown in the inspector. The task
+      designs its shape and records it in an ADR.
+    - The API documented in `docs/subsystems/script.md` and the facade's
+      docs, and a guide example (`crates/engine/examples/guide_*.rs`)
+      that runs a script, for the instructions page (ADR-0072).
+  - Accept: a test for each function of the API; a script reads a stale
+    entity as dead; saving and loading a scripted entity keeps its
+    script state; a replay with scripted entities matches its live run.
+  - Verify: `cargo test -p nadir_engine`
+
+- [ ] **M13.7 — dev tools: hot reload, the console, and the profiler**
+  - Depends: M13.6
+  - Do:
+    - Hot reload: in `cargo dev`, beside `cargo xtask cook --watch`, a
+      changed script is compiled again and its entities' hooks replaced.
+      State kept in components survives. A script that no longer compiles
+      leaves the old one running, and its error is logged.
+    - The console: `lua <code>` runs a chunk in the game's state and
+      prints its results; `scripts` lists the loaded scripts, and the
+      entities whose scripts stopped, with their errors.
+    - The profiler: a profile scope for each script's hooks, so that the
+      time shows by script.
+    - The inspector shows the `Script` component and the script state.
+  - Accept: tests for the console's commands and for a reload that keeps
+    the state; a reload while `cargo dev` runs (manual, recorded in the
+    task's note).
+  - Verify: `cargo test -p nadir_engine --features dev`;
+    `cargo test -p nadir-debug`; `cargo dev` with a script edited
+    (manual)
+
+- [ ] **M13.8 — sandbox: a behavior in Lua, and the scripting budget**
+  - Depends: M13.7
+  - Do:
+    - Move one of the sandbox's behaviors from Rust into a script, such
+      as the guards' rounds and chase (`games/sandbox/src/enemies.rs`,
+      M9.5), so that the game pulls the feature in.
+    - A bench, `scripted_entities`: 1,000 entities, each running an
+      `on_tick` that reads and writes a few components.
+    - From its numbers, propose a scripting budget for the table in
+      `docs/00-overview.md`, for the user to set. M11.5 measures it on
+      the min-spec machine.
+    - Rewrite the feature in `docs/features.jsonc` for what is built.
+  - Accept: the sandbox plays as before, with the behavior in Lua (its
+    tests pass, its replay matches); the user has set the budget, and the
+    bench meets it on the machine it ran on.
+  - Verify: `cargo xtask ci`; `cargo xtask bench scripted_entities`;
+    `cargo run -p sandbox`, played (manual)
+
+**Exit criteria (M13):** a game's gameplay can be written in Lua scripts
+that ship inside it, with nothing to install; the scripts stay within
+their memory and time limits, replay exactly, and hot reload in
+development builds.
+
+---
+
+## Backlog (M14+, each needs a trigger or a decision)
 
 | Item | Trigger / reason |
 | :- | :- |

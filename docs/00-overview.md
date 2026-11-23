@@ -30,8 +30,10 @@ them.** A subsystem is not "done" until the sandbox uses it.
   (ADR-0070).
 - Networking/multiplayer. Not in scope; it would require a new ADR because it
   changes simulation determinism requirements.
-- Scripting languages. Gameplay is Rust plus data files.
-- Native Wayland before the backlog's M13+ (ADR-0009).
+- Scripting languages other than Lua. Gameplay is Rust, Lua scripts (run
+  by an interpreter of our own that ships inside the engine), and data
+  files (ADR-0075, M13).
+- Native Wayland before the backlog's M14+ (ADR-0009).
 
 ## Performance budgets
 
@@ -87,6 +89,7 @@ S ≈ <1k lines, M ≈ 1–3k, L ≈ 3–6k, XL ≈ 6k+.
 | `assets` | M | Handles, storage, VFS, pack format, hot reload, worker pool |
 | `collision` | M | Shapes, spatial hash, move-and-slide, queries, pathfinding |
 | `scene` | M | Reflection macro, prefabs, level import, saves, states |
+| `script` | XL | Lua 5.4 in safe Rust: lexer, parser, compiler, virtual machine, garbage collector, standard library (ADR-0075) |
 | `debug` | L | Immediate-mode UI, inspector, console, profiler |
 | `cook` | M | Atlas packer, importers, pack writer, incremental cache |
 | `xtask` + harnesses | M | CI checks, golden tests, fuzz smoke, packaging |
@@ -103,7 +106,8 @@ binding gets layout tests.
 | :- | :- |
 | Hand-written FFI has subtle ABI or layout bugs | Bindings only in `sys`; `size_of`/`align_of` asserts against values taken from official headers; safe wrappers in `platform`; `/add-ffi-binding` skill enforces the procedure |
 | Apple removes OpenGL | Metal backend at M10; RHI designed for both from day one; pull M10 earlier if Apple announces removal |
-| Wayland-only systems without XWayland | Rare today on desktop distros; native Wayland in backlog (M13+) with a written trigger condition |
-| Scope creep (editor, render graph, scripting) | Explicit non-goals; anything new needs an ADR |
-| Untrusted file parsing (saves, mods, downloaded content) | Runtime loads only simple formats; every parser fuzzed; size and allocation caps |
+| Wayland-only systems without XWayland | Rare today on desktop distros; native Wayland in backlog (M14+) with a written trigger condition |
+| Scope creep (editor, render graph, a second scripting language) | Explicit non-goals; anything new needs an ADR |
+| Our own Lua interpreter is slower than the reference C one, or differs from it | Tests written from the Lua 5.4 manual; every difference listed in `docs/subsystems/script.md`; a scripting budget set in M13.8 and measured on min-spec in M11.5; the reference C interpreter as the fallback if the budget is missed (ADR-0075) |
+| Untrusted file parsing (saves, mods, downloaded content) | Runtime loads only simple formats; every parser fuzzed; size and allocation caps; Lua scripts, which are code, run with no access to files, the OS or the clock, under memory and time caps, and their compiler is fuzzed (ADR-0075) |
 | Gamepad diversity | XInput, evdev and GameController cover mainstream pads; HID-level support is backlog |

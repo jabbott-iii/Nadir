@@ -124,6 +124,7 @@ The **fallback** column is a pre-evaluated crate we would consider if the
 | 32 | Timestamps | Build | UTC civil date from `SystemTime` (days-to-civil algorithm) | `chrono`, `time` | Not expected |
 | 33 | Error plumbing | Build | Per-crate error enums | `anyhow`, `thiserror` | Not expected |
 | 34 | Byte casting (`Pod`) | Build | `unsafe trait Pod` in `nadir-gfx`, implemented only for primitives and their arrays | `bytemuck` | Not expected |
+| 35 | Scripting language (Lua 5.4) | Build | Own interpreter in `nadir-script`, in safe Rust, shipped inside the game (ADR-0075, M13) | The reference C Lua 5.4 (MIT), vendored; not evaluated yet | The sandbox's scripts miss the scripting budget after optimization, or the interpreter's tasks (M13.1 to M13.4) take more than about 8 engineer-weeks |
 
 ## Enforcement
 

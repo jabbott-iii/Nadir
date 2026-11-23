@@ -7184,3 +7184,141 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   game ships through Steam (check that the virtual pad is read and the real
   one skipped); M8.2 or M8.3 cannot tell a pad's family; or a game needs a
   family the four do not cover, such as the Steam Deck's own labels.
+
+## ADR-0075 — M13: Lua scripting for gameplay, run by an interpreter of our own in Rust (`nadir-script`) that ships inside the engine, before the first release; scripting is no longer a non-goal
+
+- **Status:** Accepted: on 2026-11-22 the user decided that the engine
+  uses Lua as its scripting language, with the interpreter included in the
+  engine so that nobody has to install it, and chose an interpreter of our
+  own over the reference C one, and a milestone before the release; the
+  same day, the user accepted the design points under **Decision** that go
+  beyond those choices (the parts of Lua left out, the limits, where a
+  script's state lives, the crate's place in the layers) as written.
+- **Date:** 2026-11-22
+- **Context:**
+  - The user asked for Lua as the engine's scripting language, with its
+    interpreter included in the engine, so that a game's developers and
+    players install nothing.
+  - `docs/00-overview.md` made scripting languages a non-goal ("Gameplay
+    is Rust plus data files"), and its risk table names scripting as scope
+    creep that needs an ADR.
+  - The dependency policy (ADR-0002) counts vendored source code as a
+    dependency, C included, and its approved set is empty. The reference
+    interpreter (PUC-Rio Lua 5.4, in C, under the MIT license) would need a
+    policy exception, a C compiler on every build machine and CI runner,
+    and its C API bound in `nadir-sys` with `unsafe`.
+  - Replays and the determinism test (ADR-0025) need a tick to give the
+    same world from the same inputs. By default the reference interpreter
+    seeds its string hashes from the time and an address, so the order in
+    which `pairs` visits a table can change from run to run.
+  - The engine's rules apply to scripts too: no `unsafe` outside three
+    crates, no per-frame heap allocation in the hot paths, and a fuzz
+    target for every parser of untrusted input. A mod may carry scripts,
+    and a script is code.
+- **Decision:**
+  - **Lua 5.4, from an interpreter of our own.** A new crate,
+    `nadir-script` (`crates/script`), in layer 2 with `core` as its only
+    dependency, implements the Lua 5.4 language as its reference manual
+    defines it, in safe Rust:
+    - a lexer and a parser;
+    - a compiler to a bytecode of our own (the instructions of a virtual
+      machine, held in memory only: scripts ship as source and are
+      compiled when loaded, so no bytecode is ever read from a file);
+    - the virtual machine that runs it;
+    - a garbage collector (which frees the tables, strings, and functions
+      that nothing refers to any more) over arenas of its own (reused
+      arrays of objects, found by generational handles);
+    - a subset of the standard library.
+    It ships in the game binary, so nothing is installed.
+  - **Left out of Lua:** finalizers (`__gc`) and weak tables (`__mode`),
+    since scripts hold no OS resources for a collector to free; the `io`,
+    `os`, `package`, and `debug` libraries (but `debug.traceback`);
+    `dofile`, `loadfile`, `string.dump`, and binary chunks. That way a
+    script reaches only what the engine gives it. `require` loads the game's
+    cooked scripts, and `print` writes to the engine's log. The spec,
+    `docs/subsystems/script.md`, lists every difference from the manual.
+  - **Deterministic:** no random hash seed, so the same program visits a
+    table's keys in the same order in every run and on every system.
+    `math.random` draws from a `Pcg32` (the engine's seeded generator) of
+    the state's own, which the engine seeds. No script reads the clock,
+    and `tostring` of a table or a function gives an id, not an address.
+    Float functions such as `math.sin` fall under ADR-0025's rules for
+    tick systems, as Rust's do.
+  - **Bounded:** each state has a memory cap, and each call from the
+    engine an instruction budget. Lua calls do not recurse on the Rust
+    stack. A runaway loop, a deep recursion, or an allocation storm in a
+    script is then a Lua error with a traceback, never a hang, a crash, or
+    a stack overflow. The interpreter reuses its arenas, so a script that
+    makes no new tables or strings allocates nothing from the system once
+    warmed up.
+  - **In the engine (the facade):**
+    - Scripts are assets, `assets/scripts/**/*.lua`. The cook checks that
+      each one compiles, and fails with its file, line, and column if not;
+      it packs the source. `nadir-cook` gains `script` in its row of the
+      dependency matrix.
+    - A `Script` component runs an entity's hooks (`on_spawn`, `on_tick`,
+      `on_event`, `on_despawn`: the functions of a script the engine calls
+      at those moments) from an engine system in the tick's `Gameplay`
+      stage.
+    - Scripts read and write reflected components by field name, through
+      nadir-scene's reflection; spawn prefabs and despawn through
+      `Commands`; send and read events; read input actions; play sounds;
+      query collision; and call the functions a game adds.
+    - A script's state that must last lives in reflected components, not
+      in Lua globals, so saves, the inspector, the world hash, and replays
+      see it.
+    - An error stops that entity's script and is logged with its
+      traceback, and the game goes on.
+  - **Dev tools:** scripts hot reload in `cargo dev`, the console gains a
+    `lua` command, and the profiler shows the time of each script's hooks.
+  - **Fuzzing:** `xtask` gains `script` in its row of the dependency
+    matrix, for a fuzz target, `lua`, that compiles each input and runs
+    what compiles under a small budget and memory cap.
+  - **Place:** a milestone, M13, of eight tasks (M13.1 to M13.8), after
+    M9.7, the vertical slice's level. M11.1 (packaging) waits for M13.8,
+    so the first release can be scripted. The backlog becomes M14+.
+  - **Conformance:** tests of our own, written from the manual. Lua's own
+    test suite (MIT) is not committed, as that would bring third-party
+    code into the repository; whether to run it outside the repository as
+    a check is decided with the user in M13.4.
+- **Consequences:**
+  - The largest subsystem yet: XL in the overview's scale (6,000 lines or
+    more). It pushes goal 3's estimate (35,000 to 45,000 lines of Rust at
+    M11) up, and the release waits for it.
+  - Lua code that relies on what is left out, or on behavior the manual
+    leaves to the implementation (the reference interpreter's `pairs`
+    order, or the addresses `tostring` prints), behaves differently here.
+    The spec lists the differences.
+  - Speed: an interpreter in safe Rust, over arenas and handles, is likely
+    slower than the reference C one. M13.8 measures the sandbox's scripts
+    and proposes a scripting budget for the overview, for the user to set;
+    M11.5 measures it on the min-spec machine with the others.
+  - New untrusted input: scripts from mods are code. The defenses are the
+    sandbox (no files, OS, or clock; bounded memory and time) and the
+    fuzz target, and the security pass (M11.6) covers them.
+  - New docs: the spec, the facade's scripting API, a guide example, and
+    nadir-script's README for crates.io.
+  - The studio's diagnostics (M12.4) can report script errors as one of
+    their checks.
+- **Alternatives considered:**
+  - The reference C Lua 5.4, vendored and compiled into the engine: full
+    compatibility and speed, but third-party C code against the
+    dependency policy, a C compiler in every build, `unsafe` bindings, and
+    a random hash seed to turn off for replays. The user chose our own.
+  - A Lua crate written in Rust by others: a third-party crate, against
+    the policy; none was evaluated.
+  - A scripting language of our own: smaller to build, but the user asked
+    for Lua, whose manual, books, editor support, and users already exist.
+  - Data files only, as before: what the overview had; the user asked for
+    scripting.
+  - M13 after the studio (M12): the first release would ship without
+    scripting. The user chose before the release.
+- **Revisit when:**
+  - the sandbox's scripts miss the scripting budget the user sets in M13.8,
+    after optimization;
+  - a game or a mod needs a part of Lua left out here (finalizers, weak
+    tables, a library), or a feature of a Lua release after 5.4;
+  - or the interpreter's tasks (M13.1 to M13.4) take more than about eight
+    engineer-weeks, when the reference C interpreter's case under the
+    policy's criterion 1 (a build cost above four engineer-weeks, for a
+    capability not central to the engine) would be weighed again.
