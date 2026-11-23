@@ -1155,11 +1155,21 @@ mod tests {
                 "1 shipped, 0 in progress, and 1 planned.",
                 "/blob/0123456789abcdef/docs/roadmap.md",
                 "<span>&copy; 2026 Joseph Abbott III</span>",
-                // jabbott.dev's header and footer since its log moved to /log/.
-                "<a class=\"btn btn--amber\" href=\"https://jabbott.dev/\">",
-                "<a class=\"btn btn--amber\" href=\"https://jabbott.dev/log/\">",
+                // jabbott.dev's header and footer: its links as nav tiles,
+                // its log at /log/, and its market.
+                "<a class=\"nav-tile nav-tile--neutral\" href=\"https://jabbott.dev/\">",
+                "<a class=\"nav-tile\" href=\"https://jabbott.dev/log/\">",
+                "<a class=\"nav-tile nav-tile--market\" href=\"https://jabbott.dev/market/\">",
                 "<li><a href=\"https://jabbott.dev/\">Home</a></li>",
                 "<li><a href=\"https://jabbott.dev/log/\">Engineering log</a></li>",
+                "<li><a href=\"https://jabbott.dev/market/\">Market</a></li>",
+                // jabbott.dev's deployments, in its menu.
+                "<a class=\"deploy-item__link\" href=\"https://jabbott.dev/Tidepool/\" \
+                 target=\"_blank\" rel=\"noopener\">",
+                // jabbott.dev's backdrop: circuits on the left, nerve cells
+                // on the right.
+                "<svg class=\"space__art space__art--circuits\"",
+                "<svg class=\"space__art space__art--synapses\"",
                 "<a href=\"https://github.com/jabbott-iii/Nadir/releases\">releases</a> carry the \
                  sandbox and the cook of each tagged version",
                 // The C4 views of diagrams/c4-architecture.md, drawn in SVG.

@@ -18,10 +18,11 @@
 <!--
   The demo page's template (ADR-0029). `cargo xtask site` fills each
   placeholder in double braces and writes the page into target/site,
-  beside nadir.css, nadir.js, llms.txt and the recordings. The header,
-  footer and head metadata repeat jabbott.dev's (its _includes/header.html,
-  footer.html and seo.html), whose stylesheet and script the page loads:
-  keep them in step with that site's. jabbott.dev's robots.txt and
+  beside nadir.css, nadir.js, llms.txt and the recordings. The backdrop,
+  header, footer, and head metadata repeat jabbott.dev's (its
+  _includes/backdrop.html, header.html, footer.html, and seo.html), whose
+  stylesheet and script the page loads: keep them in step with that
+  site's. jabbott.dev's robots.txt and
   sitemap.xml cover this page. The architecture section's two diagrams
   are drawn by hand in SVG after views 1 and 2 of
   diagrams/c4-architecture.md: a change to either view changes them too.
@@ -78,21 +79,426 @@
 </head>
 <body class="page--default">
 <div class="space" aria-hidden="true">
-  <div class="space__planet"></div>
   <div class="space__stars"></div>
   <div class="space__stars space__stars--far"></div>
   <div class="space__grid"></div>
+  <svg class="space__art space__art--circuits" viewBox="0 0 400 1000" preserveAspectRatio="xMinYMid slice" focusable="false">
+    <defs>
+      <radialGradient id="bg-spark-bronze">
+        <stop offset="0" class="space__stop space__stop--core"/>
+        <stop offset=".35" class="space__stop space__stop--hi"/>
+        <stop offset="1" class="space__stop space__stop--clear"/>
+      </radialGradient>
+      <radialGradient id="bg-glow-bronze">
+        <stop offset="0" class="space__stop space__stop--glow"/>
+        <stop offset="1" class="space__stop space__stop--clear"/>
+      </radialGradient>
+    </defs>
+    <g class="space__traces">
+      <path d="M-10 109 L158.7 109 L208.7 159 L300 159"/>
+      <path d="M-10 123 L152.9 123 L202.9 173 L330 173"/>
+      <path d="M-10 137 L147.1 137 L197.1 187 L280 187"/>
+      <path d="M-10 151 L141.3 151 L191.3 201 L315 201"/>
+      <path d="M-10 288 L55 288 L115 228 L255 228 L295 268 L370 268"/>
+      <path d="M-10 300 L60 300 L120 240 L250 240 L290 280 L335 280"/>
+      <path d="M-10 312 L65 312 L125 252 L245 252 L285 292 L355 292"/>
+      <path d="M140 450 L201.7 450 L251.7 400 L360 400"/>
+      <path d="M140 470 L210 470 L260 420 L320 420"/>
+      <path d="M140 490 L218.3 490 L268.3 440 L340 440"/>
+      <path d="M140 520 L238.3 520 L288.3 570 L365 570"/>
+      <path d="M140 540 L230 540 L280 590 L390 590"/>
+      <path d="M140 560 L221.7 560 L271.7 610 L340 610"/>
+      <path d="M-10 739 L101.3 739 L161.3 679 L290 679"/>
+      <path d="M-10 753 L107.1 753 L167.1 693 L255 693"/>
+      <path d="M-10 767 L112.9 767 L172.9 707 L300 707"/>
+      <path d="M-10 781 L118.7 781 L178.7 721 L270 721"/>
+      <path d="M-10 873 L202.9 873 L242.9 913 L340 913"/>
+      <path d="M-10 887 L197.1 887 L237.1 927 L300 927"/>
+      <path d="M-10 450 H30"/>
+      <path d="M-10 472 H30"/>
+      <path d="M-10 494 H30"/>
+      <path d="M-10 516 H30"/>
+      <path d="M-10 538 H30"/>
+      <path d="M-10 560 H30"/>
+    </g>
+    <g class="space__pads">
+      <circle cx="300" cy="159" r="4.5"/>
+      <circle cx="330" cy="173" r="4.5"/>
+      <circle cx="280" cy="187" r="4.5"/>
+      <circle cx="315" cy="201" r="4.5"/>
+      <circle cx="370" cy="268" r="4.5"/>
+      <circle cx="335" cy="280" r="4.5"/>
+      <circle cx="355" cy="292" r="4.5"/>
+      <circle cx="360" cy="400" r="4.5"/>
+      <circle cx="320" cy="420" r="4.5"/>
+      <circle cx="340" cy="440" r="4.5"/>
+      <circle cx="365" cy="570" r="4.5"/>
+      <circle cx="390" cy="590" r="4.5"/>
+      <circle cx="340" cy="610" r="4.5"/>
+      <circle cx="290" cy="679" r="4.5"/>
+      <circle cx="255" cy="693" r="4.5"/>
+      <circle cx="300" cy="707" r="4.5"/>
+      <circle cx="270" cy="721" r="4.5"/>
+      <circle cx="340" cy="913" r="4.5"/>
+      <circle cx="300" cy="927" r="4.5"/>
+      <circle cx="205" cy="330" r="3.5"/>
+      <circle cx="225" cy="352" r="3.5"/>
+      <circle cx="88" cy="640" r="3.5"/>
+      <circle cx="112" cy="662" r="3.5"/>
+      <circle cx="262" cy="808" r="3.5"/>
+      <circle cx="60" cy="962" r="3.5"/>
+      <circle cx="184" cy="990" r="3.5"/>
+      <circle cx="330" cy="80" r="3.5"/>
+      <circle cx="352" cy="102" r="3.5"/>
+    </g>
+    <g class="space__chip">
+      <rect x="30" y="430" width="100" height="150" rx="3"/>
+      <rect x="48" y="452" width="64" height="106" rx="2"/>
+      <circle cx="42" cy="442" r="3"/>
+      <path d="M130 450 H140"/>
+      <path d="M130 470 H140"/>
+      <path d="M130 490 H140"/>
+      <path d="M130 520 H140"/>
+      <path d="M130 540 H140"/>
+      <path d="M130 560 H140"/>
+    </g>
+    <g class="space__pulses">
+      <path id="cp1" class="space__flash" d="M-10 123 L152.9 123 L202.9 173 L330 173" opacity="0">
+        <animate attributeName="opacity" values="0;.7;0" dur="1.7s" begin="cp1m.begin"/>
+      </path>
+      <circle class="space__burst" cx="330" cy="173" r="16" fill="url(#bg-glow-bronze)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".8s" begin="cp1m.end-.1s"/>
+      </circle>
+      <circle r="8" fill="url(#bg-spark-bronze)" opacity="0">
+        <animateMotion id="cp1m" dur="1.7s" begin="1.2s;cp1m.end+7.8s"><mpath href="#cp1"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.5;1;.7;1;0" dur="1.7s" begin="cp1m.begin"/>
+      </circle>
+      <path id="cp2" class="space__flash" d="M140 450 L201.7 450 L251.7 400 L360 400" opacity="0">
+        <animate attributeName="opacity" values="0;.7;0" dur="1.1s" begin="cp2m.begin"/>
+      </path>
+      <circle class="space__burst" cx="360" cy="400" r="16" fill="url(#bg-glow-bronze)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".8s" begin="cp2m.end-.1s"/>
+      </circle>
+      <circle r="8" fill="url(#bg-spark-bronze)" opacity="0">
+        <animateMotion id="cp2m" dur="1.1s" begin="3.6s;cp2m.end+9.4s"><mpath href="#cp2"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.5;1;.7;1;0" dur="1.1s" begin="cp2m.begin"/>
+      </circle>
+      <path id="cp3" class="space__flash" d="M140 540 L230 540 L280 590 L390 590" opacity="0">
+        <animate attributeName="opacity" values="0;.7;0" dur="1.3s" begin="cp3m.begin"/>
+      </path>
+      <circle class="space__burst" cx="390" cy="590" r="16" fill="url(#bg-glow-bronze)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".8s" begin="cp3m.end-.1s"/>
+      </circle>
+      <circle r="8" fill="url(#bg-spark-bronze)" opacity="0">
+        <animateMotion id="cp3m" dur="1.3s" begin="cp2m.begin+.15s"><mpath href="#cp3"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.5;1;.7;1;0" dur="1.3s" begin="cp3m.begin"/>
+      </circle>
+      <path id="cp4" class="space__flash" d="M-10 767 L112.9 767 L172.9 707 L300 707" opacity="0">
+        <animate attributeName="opacity" values="0;.7;0" dur="1.6s" begin="cp4m.begin"/>
+      </path>
+      <circle class="space__burst" cx="300" cy="707" r="16" fill="url(#bg-glow-bronze)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".8s" begin="cp4m.end-.1s"/>
+      </circle>
+      <circle r="8" fill="url(#bg-spark-bronze)" opacity="0">
+        <animateMotion id="cp4m" dur="1.6s" begin="5.5s;cp4m.end+8.5s"><mpath href="#cp4"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.5;1;.7;1;0" dur="1.6s" begin="cp4m.begin"/>
+      </circle>
+      <path id="cp5" class="space__flash" d="M-10 288 L55 288 L115 228 L255 228 L295 268 L370 268" opacity="0">
+        <animate attributeName="opacity" values="0;.7;0" dur="2.0s" begin="cp5m.begin"/>
+      </path>
+      <circle class="space__burst" cx="370" cy="268" r="16" fill="url(#bg-glow-bronze)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".8s" begin="cp5m.end-.1s"/>
+      </circle>
+      <circle r="8" fill="url(#bg-spark-bronze)" opacity="0">
+        <animateMotion id="cp5m" dur="2.0s" begin="8.0s;cp5m.end+10.0s"><mpath href="#cp5"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.5;1;.7;1;0" dur="2.0s" begin="cp5m.begin"/>
+      </circle>
+      <path id="cp6" class="space__flash" d="M-10 873 L202.9 873 L242.9 913 L340 913" opacity="0">
+        <animate attributeName="opacity" values="0;.7;0" dur="1.7s" begin="cp6m.begin"/>
+      </path>
+      <circle class="space__burst" cx="340" cy="913" r="16" fill="url(#bg-glow-bronze)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".8s" begin="cp6m.end-.1s"/>
+      </circle>
+      <circle r="8" fill="url(#bg-spark-bronze)" opacity="0">
+        <animateMotion id="cp6m" dur="1.7s" begin="11.0s;cp6m.end+9.0s"><mpath href="#cp6"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.5;1;.7;1;0" dur="1.7s" begin="cp6m.begin"/>
+      </circle>
+      <rect class="space__burst" x="30" y="430" width="100" height="150" rx="3" fill="url(#bg-glow-bronze)" opacity="0">
+        <animate attributeName="opacity" values="0;.6;0" dur="1s" begin="cp2m.begin-.3s"/>
+      </rect>
+    </g>
+  </svg>
+  <svg class="space__art space__art--synapses" viewBox="160 0 400 1000" preserveAspectRatio="xMaxYMid slice" focusable="false">
+    <defs>
+      <radialGradient id="bg-spark-purple">
+        <stop offset="0" class="space__stop space__stop--core"/>
+        <stop offset=".35" class="space__stop space__stop--hi"/>
+        <stop offset="1" class="space__stop space__stop--clear"/>
+      </radialGradient>
+      <radialGradient id="bg-glow-purple">
+        <stop offset="0" class="space__stop space__stop--glow"/>
+        <stop offset="1" class="space__stop space__stop--clear"/>
+      </radialGradient>
+    </defs>
+    <g class="space__axons">
+      <path d="M470 90 C437 139.5 368.3 129.7 330 170"/>
+      <path d="M470 90 C516.2 133.2 490 203 525 250"/>
+      <path d="M330 170 C375.6 213 367.8 283.1 405 330"/>
+      <path d="M330 170 C327.5 225.7 266.4 249.4 255 300"/>
+      <path d="M525 250 C505.2 306.1 432.7 285.8 405 330"/>
+      <path d="M525 250 C486.1 312.6 513.6 390.4 485 455"/>
+      <path d="M405 330 C453.7 357 445.2 422.3 485 455"/>
+      <path d="M405 330 C357 377.8 368.7 453.2 330 505"/>
+      <path d="M255 300 C306 358 289.5 443.1 330 505"/>
+      <path d="M255 300 C277.7 363.8 198 396.3 205 455"/>
+      <path d="M485 455 C432.7 500.1 468.6 575.5 430 625"/>
+      <path d="M485 455 C534.3 528.9 503.2 623.3 540 700"/>
+      <path d="M330 505 C378.2 531.9 387.9 593 430 625"/>
+      <path d="M330 505 C348.2 571.7 288.7 625.6 295 690"/>
+      <path d="M205 455 C188.7 550.2 292.9 601.9 295 690"/>
+      <path d="M430 625 C481.2 627.9 494.8 688.3 540 700"/>
+      <path d="M430 625 C464.5 686 431 757.7 455 820"/>
+      <path d="M295 690 C370.2 705.4 388.8 793.6 455 820"/>
+      <path d="M295 690 C299.8 750.1 231.4 775.4 225 830"/>
+      <path d="M455 820 C402.6 827.2 391 889.5 345 905"/>
+      <path d="M455 820 C448.4 878.9 519.7 897.5 525 950"/>
+      <path d="M345 905 C320.5 856 255.5 869.3 225 830"/>
+      <path d="M345 905 C412.1 889.1 461 953.6 525 950"/>
+      <path d="M540 700 C592.9 786 495.3 865.4 525 950"/>
+    </g>
+    <g class="space__dendrites">
+      <path d="M470 90 Q458.4 78.8 441.7 75.7 M458.4 78.8 L444.2 78.5"/>
+      <path d="M470 90 Q456.5 100.4 437.2 108.5 M456.5 100.4 L450.7 116.3"/>
+      <path d="M470 90 Q448.4 76.4 433.5 71.9 M448.4 76.4 L436.8 62.1"/>
+      <path d="M330 170 Q346.4 158.2 358.5 159.7"/>
+      <path d="M330 170 Q322.3 154.3 303.6 135 M322.3 154.3 L317.7 135.1"/>
+      <path d="M330 170 Q320 177.8 308.3 175.3"/>
+      <path d="M525 250 Q530.3 234.5 522.9 221.7 M530.3 234.5 L536.9 223.6"/>
+      <path d="M525 250 Q545.2 232.4 554.2 223.7 M545.2 232.4 L562.8 231.3"/>
+      <path d="M525 250 Q519.8 261.8 507.5 266.4"/>
+      <path d="M405 330 Q387.7 340.2 371.8 333.1 M387.7 340.2 L374.9 332.4"/>
+      <path d="M405 330 Q396.7 337.4 396.1 349.3"/>
+      <path d="M405 330 Q410 314.8 403.1 300.2"/>
+      <path d="M255 300 Q247.5 308 232.9 317.8 M247.5 308 L246.3 320.8"/>
+      <path d="M255 300 Q244 308 235.6 307.6 M244 308 L240.1 316.6"/>
+      <path d="M255 300 Q245.1 293.9 240 287"/>
+      <path d="M255 300 Q272.7 288.6 287.4 290.7 M272.7 288.6 L287.1 293.2"/>
+      <path d="M255 300 Q247.9 309.7 246.8 320.1 M247.9 309.7 L250 319.2"/>
+      <path d="M485 455 Q498.8 450.4 515.2 445.4 M498.8 450.4 L511.4 457.1"/>
+      <path d="M485 455 Q494 438.4 508.6 427.7 M494 438.4 L495.7 422.2"/>
+      <path d="M485 455 Q483.6 442.1 489.8 428.9"/>
+      <path d="M330 505 Q342.1 483.5 343.6 468.1 M342.1 483.5 L357.3 474.6"/>
+      <path d="M330 505 Q351.1 497.3 368.5 502.5"/>
+      <path d="M330 505 Q314.4 524.4 308.2 537.4"/>
+      <path d="M205 455 Q211.2 466.7 209.4 478.5"/>
+      <path d="M205 455 Q222.5 445 237.3 431.6"/>
+      <path d="M205 455 Q216.4 469.1 235.3 472.9"/>
+      <path d="M430 625 Q443.6 610.6 452.4 606.2"/>
+      <path d="M430 625 Q431.1 611.3 424.7 595.4 M431.1 611.3 L423.6 600"/>
+      <path d="M430 625 Q417.6 614.6 404.7 608.7 M417.6 614.6 L413.1 601.8"/>
+      <path d="M430 625 Q425.4 642.6 411 651.1"/>
+      <path d="M540 700 Q559.8 718.7 569.9 722.6 M559.8 718.7 L576.2 722.6"/>
+      <path d="M540 700 Q539.5 715.7 547.2 730.2 M539.5 715.7 L548 726.7"/>
+      <path d="M540 700 Q542.3 678 537.4 658.7 M542.3 678 L530.6 663.5"/>
+      <path d="M540 700 Q529.9 701.7 521.7 697.3 M529.9 701.7 L522 704.3"/>
+      <path d="M540 700 Q519.9 706.8 503.7 706.1 M519.9 706.8 L505.7 698.1"/>
+      <path d="M295 690 Q300.4 680 309.5 677 M300.4 680 L309.1 679.1"/>
+      <path d="M295 690 Q295.1 667.4 297.6 648.4 M295.1 667.4 L284.3 652.1"/>
+      <path d="M295 690 Q278.4 687.5 264.6 699.4"/>
+      <path d="M455 820 Q471.1 808.4 491.5 800.8 M471.1 808.4 L489.5 810.1"/>
+      <path d="M455 820 Q468.3 827.8 476.8 830.7"/>
+      <path d="M455 820 Q466 814.3 472.6 806.7 M466 814.3 L467.4 804.5"/>
+      <path d="M455 820 Q461.8 843 463.1 862"/>
+      <path d="M345 905 Q353.3 917.1 360.4 929.8 M353.3 917.1 L354.8 930.2"/>
+      <path d="M345 905 Q335.7 913.8 327.2 925 M335.7 913.8 L323.9 916.6"/>
+      <path d="M345 905 Q363.5 923.4 385.1 922.1 M363.5 923.4 L375.5 938.9"/>
+      <path d="M525 950 Q524.4 960.1 522.3 971.2"/>
+      <path d="M525 950 Q519.5 961.9 523.8 971.9"/>
+      <path d="M525 950 Q532.8 955 541.5 960.4 M532.8 955 L541.6 954.2"/>
+      <path d="M225 830 Q247 847.2 259.8 850.2 M247 847.2 L251.5 864.8"/>
+      <path d="M225 830 Q203.8 849 188.7 850.7"/>
+      <path d="M225 830 Q244.2 814.6 265 813.6"/>
+      <path d="M225 830 Q209.8 818 203 807"/>
+    </g>
+    <g class="space__somas">
+      <circle cx="470" cy="90" r="18" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="470" cy="90" r="6"/>
+      <circle cx="330" cy="170" r="13.5" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="330" cy="170" r="4.5"/>
+      <circle cx="525" cy="250" r="15" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="525" cy="250" r="5"/>
+      <circle cx="405" cy="330" r="19.5" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="405" cy="330" r="6.5"/>
+      <circle cx="255" cy="300" r="12" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="255" cy="300" r="4"/>
+      <circle cx="485" cy="455" r="16.5" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="485" cy="455" r="5.5"/>
+      <circle cx="330" cy="505" r="15" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="330" cy="505" r="5"/>
+      <circle cx="205" cy="455" r="10.5" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="205" cy="455" r="3.5"/>
+      <circle cx="430" cy="625" r="18" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="430" cy="625" r="6"/>
+      <circle cx="540" cy="700" r="13.5" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="540" cy="700" r="4.5"/>
+      <circle cx="295" cy="690" r="15" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="295" cy="690" r="5"/>
+      <circle cx="455" cy="820" r="18" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="455" cy="820" r="6"/>
+      <circle cx="345" cy="905" r="13.5" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="345" cy="905" r="4.5"/>
+      <circle cx="525" cy="950" r="15" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="525" cy="950" r="5"/>
+      <circle cx="225" cy="830" r="12" fill="url(#bg-glow-purple)" class="space__halo"/>
+      <circle cx="225" cy="830" r="4"/>
+    </g>
+    <g class="space__pulses">
+      <path id="sa1" class="space__flash" d="M470 90 C437 139.5 368.3 129.7 330 170" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="0.9s" begin="sa1m.begin"/>
+      </path>
+      <circle class="space__burst" cx="470" cy="90" r="24" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sa1m.begin-.2s"/>
+      </circle>
+      <circle class="space__burst" cx="330" cy="170" r="18" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sa1m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sa1m" dur="0.9s" begin="2.0s;sa3m.end+8.0s"><mpath href="#sa1"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="0.9s" begin="sa1m.begin"/>
+      </circle>
+      <path id="sa2" class="space__flash" d="M330 170 C327.5 225.7 266.4 249.4 255 300" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="0.9s" begin="sa2m.begin"/>
+      </path>
+      <circle class="space__burst" cx="255" cy="300" r="16" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sa2m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sa2m" dur="0.9s" begin="sa1m.end-.05s"><mpath href="#sa2"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="0.9s" begin="sa2m.begin"/>
+      </circle>
+      <path id="sa3" class="space__flash" d="M255 300 C277.7 363.8 198 396.3 205 455" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="1.0s" begin="sa3m.begin"/>
+      </path>
+      <circle class="space__burst" cx="205" cy="455" r="14" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sa3m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sa3m" dur="1.0s" begin="sa2m.end-.05s"><mpath href="#sa3"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="1.0s" begin="sa3m.begin"/>
+      </circle>
+      <path id="sb1" class="space__flash" d="M525 250 C486.1 312.6 513.6 390.4 485 455" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="1.2s" begin="sb1m.begin"/>
+      </path>
+      <circle class="space__burst" cx="525" cy="250" r="20" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sb1m.begin-.2s"/>
+      </circle>
+      <circle class="space__burst" cx="485" cy="455" r="22" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sb1m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sb1m" dur="1.2s" begin="5.0s;sb4m.end+9.0s"><mpath href="#sb1"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="1.2s" begin="sb1m.begin"/>
+      </circle>
+      <path id="sb2" class="space__flash" d="M485 455 C432.7 500.1 468.6 575.5 430 625" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="1.1s" begin="sb2m.begin"/>
+      </path>
+      <circle class="space__burst" cx="430" cy="625" r="24" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sb2m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sb2m" dur="1.1s" begin="sb1m.end-.05s"><mpath href="#sb2"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="1.1s" begin="sb2m.begin"/>
+      </circle>
+      <path id="sb3" class="space__flash" d="M430 625 C464.5 686 431 757.7 455 820" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="1.2s" begin="sb3m.begin"/>
+      </path>
+      <circle class="space__burst" cx="455" cy="820" r="24" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sb3m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sb3m" dur="1.2s" begin="sb2m.end-.05s"><mpath href="#sb3"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="1.2s" begin="sb3m.begin"/>
+      </circle>
+      <path id="sb4" class="space__flash" d="M455 820 C448.4 878.9 519.7 897.5 525 950" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="0.9s" begin="sb4m.begin"/>
+      </path>
+      <circle class="space__burst" cx="525" cy="950" r="20" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sb4m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sb4m" dur="0.9s" begin="sb3m.end-.05s"><mpath href="#sb4"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="0.9s" begin="sb4m.begin"/>
+      </circle>
+      <path id="sc1" class="space__flash" d="M405 330 C357 377.8 368.7 453.2 330 505" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="1.1s" begin="sc1m.begin"/>
+      </path>
+      <circle class="space__burst" cx="405" cy="330" r="26" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sc1m.begin-.2s"/>
+      </circle>
+      <circle class="space__burst" cx="330" cy="505" r="20" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sc1m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sc1m" dur="1.1s" begin="9.5s;sc3m.end+10.5s"><mpath href="#sc1"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="1.1s" begin="sc1m.begin"/>
+      </circle>
+      <path id="sc2" class="space__flash" d="M330 505 C348.2 571.7 288.7 625.6 295 690" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="1.1s" begin="sc2m.begin"/>
+      </path>
+      <circle class="space__burst" cx="295" cy="690" r="20" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sc2m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sc2m" dur="1.1s" begin="sc1m.end-.05s"><mpath href="#sc2"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="1.1s" begin="sc2m.begin"/>
+      </circle>
+      <path id="sc3" class="space__flash" d="M295 690 C299.8 750.1 231.4 775.4 225 830" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="0.9s" begin="sc3m.begin"/>
+      </path>
+      <circle class="space__burst" cx="225" cy="830" r="16" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sc3m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sc3m" dur="0.9s" begin="sc2m.end-.05s"><mpath href="#sc3"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="0.9s" begin="sc3m.begin"/>
+      </circle>
+      <path id="sd1" class="space__flash" d="M540 700 C494.8 688.3 481.2 627.9 430 625" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="0.8s" begin="sd1m.begin"/>
+      </path>
+      <circle class="space__burst" cx="540" cy="700" r="18" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sd1m.begin-.2s"/>
+      </circle>
+      <circle class="space__burst" cx="430" cy="625" r="24" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sd1m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sd1m" dur="0.8s" begin="13.0s;sd2m.end+11.0s"><mpath href="#sd1"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="0.8s" begin="sd1m.begin"/>
+      </circle>
+      <path id="sd2" class="space__flash" d="M430 625 C387.9 593 378.2 531.9 330 505" opacity="0">
+        <animate attributeName="opacity" values="0;.8;0" dur="0.9s" begin="sd2m.begin"/>
+      </path>
+      <circle class="space__burst" cx="330" cy="505" r="20" fill="url(#bg-glow-purple)" opacity="0">
+        <animate attributeName="opacity" values="0;1;0" dur=".7s" begin="sd2m.end-.1s"/>
+      </circle>
+      <circle r="7" fill="url(#bg-spark-purple)" opacity="0">
+        <animateMotion id="sd2m" dur="0.9s" begin="sd1m.end-.05s"><mpath href="#sd2"/></animateMotion>
+        <animate attributeName="opacity" values="0;1;.6;1;.8;1;0" dur="0.9s" begin="sd2m.begin"/>
+      </circle>
+    </g>
+  </svg>
 </div>
 <a class="skip-link" href="#main">Skip to content</a>
 
 <header class="site-header">
   <div class="site-header__inner">
-    <a class="brand" href="https://jabbott.dev/" aria-label="Joseph Abbott III, home">
+    <a class="brand" href="https://jabbott.dev/">
       <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32 4 56 18v28L32 60 8 46V18Z" fill="none" stroke="currentColor" stroke-width="2.5" class="mark__hex"/><path d="M32 12 50 22.5v19L32 52 14 41.5v-19Z" fill="currentColor" opacity=".08"/><path d="M32 17 45 42h-7.2L32 30.6 26.2 42H19Z" fill="#eef2f3"/><path d="M28.6 46h6.8L32 52Z" fill="#f2c200"/></svg>
       <span class="brand__text">
-        <span class="brand__name">JABBOTT<span class="brand__tld">.DEV</span></span>
+        <span class="brand__name">jabbott<span class="brand__tld">.dev</span></span>
         <span class="brand__sub">Engineering Log</span>
       </span>
+      <span class="sr-only">, home</span>
     </a>
     <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" data-nav-toggle>
       <span class="sr-only">Menu</span>
@@ -100,8 +506,9 @@
     </button>
     <nav class="site-nav" id="site-nav" aria-label="Primary">
       <div class="deploy" data-deploy>
-        <a class="btn btn--ghost deploy__toggle is-current" href="https://jabbott.dev/deployments/" aria-controls="deploy-panel" data-deploy-toggle>
-          <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><circle cx="12" cy="12" r="2"/><path d="M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14M8 16a5.5 5.5 0 0 1 0-8M16 8a5.5 5.5 0 0 1 0 8"/></svg>
+        <a class="nav-tile nav-tile--deploy deploy__toggle is-current" href="https://jabbott.dev/deployments/" aria-controls="deploy-panel" data-deploy-toggle>
+          <span class="nav-tile__fx"></span>
+          <span class="nav-tile__icon"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><circle cx="12" cy="12" r="2"/><path d="M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14M8 16a5.5 5.5 0 0 1 0-8M16 8a5.5 5.5 0 0 1 0 8"/></svg></span>
           <span>Deployments</span>
           <svg class="icon deploy__chevron" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M6 9l6 6 6-6"/></svg>
         </a>
@@ -116,25 +523,42 @@
               </a>
               <a class="deploy-item__repo" href="{{repository_url}}" target="_blank" rel="noopener" aria-label="Nadir repository on GitHub"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></a>
             </li>
+            <li class="deploy-item" data-deploy-repo="jabbott-iii/tidepool">
+              <a class="deploy-item__link" href="https://jabbott.dev/Tidepool/" target="_blank" rel="noopener">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span class="deploy-item__name">Tidepool</span>
+                <span class="deploy-item__host">jabbott.dev/Tidepool/</span>
+              </a>
+              <a class="deploy-item__repo" href="https://github.com/jabbott-iii/Tidepool" target="_blank" rel="noopener" aria-label="Tidepool repository on GitHub"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></a>
+            </li>
           </ul>
           <p class="deploy__status" data-deploy-status hidden></p>
           <a class="link-arrow link-arrow--sm" href="https://jabbott.dev/deployments/">All deployments <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 12h16M13 6l6 6-6 6"/></svg></a>
         </div>
       </div>
-      <a class="btn btn--amber" href="https://jabbott.dev/">
-        <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5M10 20v-5.5h4V20"/></svg>
+      <a class="nav-tile nav-tile--neutral" href="https://jabbott.dev/">
+        <span class="nav-tile__fx"></span>
+        <span class="nav-tile__icon"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5M10 20v-5.5h4V20"/></svg></span>
         <span>Home</span>
       </a>
-      <a class="btn btn--amber" href="https://jabbott.dev/log/">
-        <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M4 6h2M9 6h11M4 12h2M9 12h11M4 18h2M9 18h7"/></svg>
+      <a class="nav-tile" href="https://jabbott.dev/log/">
+        <span class="nav-tile__fx"></span>
+        <span class="nav-tile__icon"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M4 6h2M9 6h11M4 12h2M9 12h11M4 18h2M9 18h7"/></svg></span>
         <span>Log</span>
       </a>
-      <a class="btn btn--amber" href="https://jabbott.dev/resume/">
-        <svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 5h18v14H3z"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.6-1.3 1.6-2 3-2s2.4.7 3 2M14 10h4M14 13.5h4"/></svg>
+      <a class="nav-tile nav-tile--resume" href="https://jabbott.dev/resume/">
+        <span class="nav-tile__fx"></span>
+        <span class="nav-tile__icon"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M3 5h18v14H3z"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.6-1.3 1.6-2 3-2s2.4.7 3 2M14 10h4M14 13.5h4"/></svg></span>
         <span>Resume</span>
       </a>
-      <a class="btn btn--teal" href="https://github.com/jabbott-iii" rel="me noopener" target="_blank">
-        <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      <a class="nav-tile nav-tile--market" href="https://jabbott.dev/market/">
+        <span class="nav-tile__fx"></span>
+        <span class="nav-tile__icon"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M4.5 8h15l-1.2 12.5H5.7Z"/><path d="M9 10.5v-4a3 3 0 0 1 6 0v4"/></svg></span>
+        <span>Market</span>
+      </a>
+      <a class="nav-tile nav-tile--neutral" href="https://github.com/jabbott-iii" rel="me noopener" target="_blank">
+        <span class="nav-tile__fx"></span>
+        <span class="nav-tile__icon"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span>
         <span>GitHub</span>
         <span class="sr-only">(opens in a new tab)</span>
       </a>
@@ -432,7 +856,7 @@
         <a class="brand" href="https://jabbott.dev/">
           <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32 4 56 18v28L32 60 8 46V18Z" fill="none" stroke="currentColor" stroke-width="2.5" class="mark__hex"/><path d="M32 12 50 22.5v19L32 52 14 41.5v-19Z" fill="currentColor" opacity=".08"/><path d="M32 17 45 42h-7.2L32 30.6 26.2 42H19Z" fill="#eef2f3"/><path d="M28.6 46h6.8L32 52Z" fill="#f2c200"/></svg>
           <span class="brand__text">
-            <span class="brand__name">JABBOTT<span class="brand__tld">.DEV</span></span>
+            <span class="brand__name">jabbott<span class="brand__tld">.dev</span></span>
             <span class="brand__sub">Engineering Log</span>
           </span>
         </a>
@@ -445,6 +869,7 @@
           <li><a href="https://jabbott.dev/resume/">Resume</a></li>
           <li><a href="https://jabbott.dev/log/">Engineering log</a></li>
           <li><a href="https://jabbott.dev/deployments/">Deployments</a></li>
+          <li><a href="https://jabbott.dev/market/">Market</a></li>
         </ul>
       </div>
       <div>

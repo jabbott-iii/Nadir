@@ -586,8 +586,9 @@ understood.
      it with `actions/deploy-pages`.
 
   The page loads jabbott.dev's own stylesheet and script as that site
-  serves them, and its header and footer repeat that site's: a change to
-  that site's markup may need `site/index.html` to follow. So does its
+  serves them, and its backdrop, header, and footer repeat that site's:
+  a change to that site's markup may need `site/index.html` and
+  `site/instructions/index.html` to follow. So does its
   head, as that site's `_includes/seo.html` writes it for search and answer
   engines: a description, the canonical address, Open Graph and Twitter
   cards with the first scene's poster and video, and one JSON-LD graph of
