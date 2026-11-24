@@ -34,7 +34,8 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
     A* paths and flow fields for enemies, and replays checked for
     determinism;
   - game states: a loading screen while a level loads, a main menu, play,
-    and a pause;
+    and a pause, with menus that work with keys, a mouse, or a gamepad,
+    and settings for the display, the volumes, and the controls;
   - saves in nadir-scene, written atomically with a backup, and read back
     strictly (a game calls them itself: `App` does not save yet);
   - crash reports: every panic writes a report into the game's data
@@ -59,8 +60,7 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   48 kHz, which the asset server loads. Windows and macOS have no audio
   output yet (roadmap M6.4, M6.5), so there the game is silent.
 - **Not built yet:** gamepads on Windows and macOS (roadmap tasks M8.2 and
-  M8.3), a settings file (M9.3), menus (M9.2), and the Metal backend
-  (M10).
+  M8.3), a settings file (M9.3), and the Metal backend (M10).
 
 ## Build and run
 

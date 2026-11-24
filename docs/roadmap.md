@@ -5944,7 +5944,7 @@ by the batched sprite renderer.
     mid-tick.
   - Verify: `cargo test -p nadir-scene -p nadir_engine`
 
-- [ ] **M9.2 — menu kit and game UI**
+- [x] **M9.2 — menu kit and game UI**
   - Note: built and checked on Linux (x86_64) on 2026-11-23 (ADR-0076,
     accepted that day; the user chose one task across nadir-input, the
     facade and the sandbox, the rebinding on `Input` as `begin_rebind`,
@@ -5988,10 +5988,9 @@ by the batched sprite renderer.
       pad's pause, Play, the pause, Main menu, Quit). Fullscreen entered
       and left at 1920 × 1080. Vsync off was refused, as llvmpipe offers a
       swap interval of 1 alone, and the toggle went back on.
-  - ⏳ needs hardware: by hand in `cargo dev`, every menu with a real
-    gamepad alone (the wired Xbox pad of M8.1) and with a real mouse alone,
-    as the acceptance asks; then tick the box and add M9.2 to the game
-    states' feature in `docs/features.jsonc`.
+  - Checked by hand on 2026-11-23: the user reported that every menu
+    works with their own gamepad alone and with their own mouse alone, as
+    the acceptance asks.
   - Depends: M7.1, M7.8, M8.4, M8.5
   - Note (from M8.5, ADR-0074):
     - A prompt for a pad is `ButtonPrompts::button` (or `trigger`, or
