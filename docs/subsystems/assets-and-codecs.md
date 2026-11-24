@@ -37,7 +37,7 @@ Every decoder:
 | `kpcm` | The sound file, version 1, below | ✓ | ✓ | yes | 16-bit samples of 1 or 2 channels as they are, for short sounds (M6.8, ADR-0049). See below |
 | `pcm` | Below | — | — | yes (a sound's conversion as it loads, M6.9) | `resample`, a windowed sinc the same bits on every system, and `to_i16`. See below |
 | `klz` | Below | ✓ | ✓ | yes | Pack entry compression. See below |
-| `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (a prefab's source JSON, development data; the settings file, roadmap task M9.3, once it is built) | Order-preserving objects: `Vec<(String, Value)>` |
+| `json` | RFC 8259 + JSONC (`//`, `/* */`, trailing commas) | ✓ | ✓ | yes (a prefab's source JSON, development data, the settings file) | Order-preserving objects: `Vec<(String, Value)>` |
 | `kbj` | Below | ✓ | ✓ | yes | Binary form of the JSON value tree for cooked data. See below |
 | `bmfont` | AngelCode BMFont text format | — | ✓ | no | `info`, `common`, `page`, `char`, `kerning` lines. See subset below |
 | `aseprite` | Aseprite's `--format json-array` sprite sheet data | — | ✓ | no (cook only) | Frames, sheet, tags expanded to clips (ADR-0035). See subset below |
@@ -48,6 +48,7 @@ Every decoder:
 | `prefab` | The prefab file, below | — | ✓ | yes | KBJ, or its source's JSON, then checked strictly (ADR-0038). See below |
 | `kpak` | The pack file, version 1, below | — | ✓ | yes | Header, TOC and string table checked strictly; each entry's CRC before its KLZ (ADR-0041). See below |
 | `ksav` | The save file, version 1, below | ✓ | ✓ | yes | A 24-byte header with a CRC-32 over the whole file, then a KBJ payload, checked strictly (M9.4, ADR-0068). See "Save file reader and writer" |
+| `settings` | The settings file, version 1, below | ✓ | ✓ | yes | JSONC, read leniently: each setting falls back to the game's default alone, and members it does not know are kept when it is written (M9.3, ADR-0077). See "Settings file reader and writer" |
 
 ### Inflate (documented, tested)
 
@@ -1082,6 +1083,114 @@ the first that fails is the error:
   back as it was, its ids unique, its names names. A run of 120 s with
   the default seed tried 3,167,130 inputs (M9.4).
 
+### Settings file reader and writer (documented, tested)
+
+`settings::read(text, &defaults, limits)` reads `settings.jsonc`, the
+settings a player chose, over the game's defaults, into a `Settings`, with
+a `Warning` for each member it did not take as it was, and the file's
+value tree; `settings::write(&settings, Some(&source))` writes the text
+back over that tree. The facade reads the file as the game starts and
+writes it after each frame that changed a setting (`App::run`,
+`docs/01-architecture.md`, "Configuration and user data"). As built in
+M9.3 (ADR-0077):
+
+```jsonc
+// The game's settings. The game reads this file as it starts, and
+// writes it again when a setting changes: it keeps the members it does
+// not know, but not comments.
+{
+  "version": 1,
+  "display": { "fullscreen": false, "vsync": true },
+  "audio": { "music": 100, "sfx": 80, "ui": 100, "ambience": 60 },
+  "ui": { "scale": null, "language": "en" },
+  "input": {
+    "deadzones": { "stick_inner": 0.2, "stick_outer": 0.95, "trigger": 0.1,
+                   "press": 0.5, "release": 0.4 },
+    "bindings": {
+      "move": [{ "keys": { "up": "W", "down": "S", "left": "A", "right": "D" } },
+               { "stick": "Left" }, null, null],
+      "shoot": [{ "pad_axis": "RightTrigger", "sign": "+" }, { "mouse": "Left" }]
+    }
+  },
+  "log": { "level": "info", "targets": { "nadir_render": "debug" } }
+}
+```
+
+What each setting takes:
+
+| Setting | Takes |
+| :- | :- |
+| `display.fullscreen`, `display.vsync` | `true` or `false` |
+| `audio.music`, `audio.sfx`, `audio.ui`, `audio.ambience` | a bus's volume in percent: a whole number from 0 to 100 |
+| `ui.scale` | `null`, for a scale from the window's scale factor, or a number from 1/8 to 64, where the renderer holds a free scale |
+| `ui.language` | a language tag: 1 to 35 ASCII letters, digits and `-` (`settings::is_language`); whether the game has that language is the game's to check |
+| `input.deadzones.stick_inner`, `stick_outer`, `trigger`, `press`, `release` | a number from 0 to 1, each alone; their rules together (`stick_inner < stick_outer`, `release <= press`) are nadir-input's |
+| `input.bindings.<action>` | an array of at most 4 slots, each `null` (empty) or a binding; slots past its end are empty |
+| `log.level` | the level of every log target without one of its own: `"error"`, `"warn"`, `"info"`, `"debug"` or `"trace"` |
+| `log.targets.<module path>` | that target's level, for a module path such as `nadir_render::batch`: parts of ASCII letters, digits and `_` joined by `::`, at most 256 bytes |
+
+A binding is an object whose member says what it is: `{"key": "W"}`,
+`{"mouse": "Left"}`,
+`{"keys": {"up": "W", "down": "S", "left": "A", "right": "D"}}`,
+`{"pad": "A"}`, `{"pad_axis": "LeftY", "sign": "-"}` (a trigger has only
+`"+"`) or `{"stick": "Left"}`. Keys, buttons and axes go by their names
+in nadir-core (`Key::name` and the others), which are the variants' and
+case-sensitive. Which kinds of action a binding drives is the game's to
+check, as the reader does not know the actions' kinds.
+
+The reader is lenient, because a player may edit the file by hand and
+another version of the game may have written it:
+
+- **Refused whole** (a `CodecError`, and the game uses its defaults): text
+  over 1 MiB (`ErrorKind::TooLarge`), not JSONC (`CodecError::Json`), not
+  an object (`NotAnObject`), with no `version` that is a whole number of
+  at least 1 (`NoVersion`), or of a version newer than 1
+  (`NewerVersion`). Version 1 is the first, so no older one exists to
+  migrate.
+- **A missing setting or section** keeps its default, quietly.
+- **A setting of the wrong type or out of its range** keeps its default,
+  with a warning (`WarningKind::Invalid`, which says what it takes). So
+  does each setting of a section that is not an object.
+- **A slot that is not a binding** keeps the default's binding in that
+  slot; an action whose value is not an array of at most 4 keeps all its
+  defaults.
+- **A member that is not a setting**, at the top, in a section or in
+  `deadzones`, is a warning (`Unknown`), and is kept; so are the bindings
+  of an action the defaults do not have (`UnknownAction`).
+- **A log target** that is not a module path, or whose level is not a
+  level's name, is left out (`LeftOut`).
+
+Warnings name the member, as in `input.bindings.move[1]`, with control
+characters escaped, so that a name from the file cannot forge a log line.
+
+The writer writes the settings over the source's tree: each setting
+replaces its member where it is, a missing one goes at the end of its
+object, and every member it does not know stays where it was. A member of
+a known setting that held something wrong is written over. Comments are
+not in the tree, so the file's own are lost; the writer starts the file
+with its header comment. Written one member to a line, a file grows: one
+that keeping the source's members would take over 1 MiB, which the reader
+refuses, is written from the settings alone. A file read and written over
+itself is the same text.
+
+- **Test vectors:** `crates/codec/tests/settings/`, written by hand and
+  read by `crates/codec/tests/settings.rs`: every setting away from its
+  default, with comments and trailing commas (`every_setting.jsonc`); the
+  exact text the writer writes for those settings (`written.jsonc`), which
+  pins the format; one setting of each kind the reader does not take, and
+  members it keeps (`fallbacks.jsonc`); and a newer game's file
+  (`version_2.jsonc`). The unit tests in `src/settings.rs` check each
+  fallback rule, each kind of binding refused, and what the writer keeps.
+- **Fuzz target:** `settings`, with seeds in `fuzz/corpus/settings/`: the
+  three hand-written files and a minimal one. It reads each input over a
+  game's defaults of two actions, and asserts what the facade relies on,
+  since it applies the settings without checking them again: every
+  setting in its range, the defaults' actions alone with no trigger's
+  negative half, each log target a module path; and the file written over
+  its source reads back as the same settings, with warnings only of what
+  it keeps without knowing, and is written again as the same text. A run
+  of 120 s with the default seed tried 18,760,640 inputs (M9.3).
+
 ## `nadir-assets`
 
 ### Handles and storage
@@ -1978,12 +2087,15 @@ bytes, its samples, the resampled ones, and the file).
     them
   - JSON: RFC 8259 examples plus the JSONC extensions; deep nesting hits the
     limit and errors, it doesn't overflow the stack
+  - The settings file: hand-written files, and the writer's exact text, in
+    `crates/codec/tests/settings/`
 - **Fuzz targets** (fuzz smoke): every decoder above, the atlas file reader
   (`atlas`, M5.9), the Aseprite reader (`aseprite`, M5.5), the LDtk reader
   (`ldtk`), the level file reader (`level`) and the prefab file reader
   (`prefab`, all three M5.10), the pack file reader (`kpak`, M5.13), the
-  sound file reader (`kpcm`, M6.8), the font file reader (`font`, M7.7)
-  and the save file reader (`ksav`, M9.4).
+  sound file reader (`kpcm`, M6.8), the font file reader (`font`, M7.7),
+  the save file reader (`ksav`, M9.4) and the settings file reader
+  (`settings`, M9.3).
 - **Integration:** cook the sandbox assets twice and compare the hashes;
   read every cooked file through `PackSource` and `LooseSource`, and find
   the same bytes (`tools/cook/tests/cook/workspace.rs`, M5.14).

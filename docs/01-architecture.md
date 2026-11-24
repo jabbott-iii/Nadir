@@ -134,6 +134,7 @@ pub fn run(mut app: App) -> Result<(), Error> {
     crash::install(&app.config);                            // the panic hook: a report for each panic
     log_file::start(&app.config.studio, &app.config.game);  // nadir.log, the last three kept
     crash::tell_of_unseen(&app.config.title);               // the reports since the last launch
+    let mut settings = SettingsFile::load(path, &mut app.config, &app.world, bindings); // settings.jsonc (ADR-0077)
     let mut platform = Platform::new(&app.config.window())?;
     let mut gfx = Device::new(platform.gpu_surface())?;     // keeps no borrow (ADR-0016)
     let render = RenderConfig { virtual_resolution: app.config.virtual_resolution };
@@ -164,6 +165,7 @@ pub fn run(mut app: App) -> Result<(), Error> {
         draw.time = simulated_time(&app.clock);              // ticks + alpha, less the time paused: animated tiles (ADR-0023)
         app.schedule.run_frame(&mut app.world, &frame);      // frame.dt, frame.alpha; Extract sends the sound, fills `draw`
         states.end_frame(&mut app.world);                    // the transition the frame stages queued
+        app.follow_volumes(50);                              // a bus the Volumes resource changed, over 50 ms (ADR-0077)
 
         gfx.begin_frame(platform.gpu_surface())?;
         renderer.render(&mut gfx, &assets, &tiles, &draw,    // the AssetServer and TileLayers resources
@@ -174,6 +176,7 @@ pub fn run(mut app: App) -> Result<(), Error> {
         }
         if app.world.resource::<Quit>().requested() { break; }  // a main menu's Quit (ADR-0076)
         apply_display(&mut platform, &mut display, asked);   // DisplaySettings changed: fullscreen, vsync (ADR-0076)
+        settings.save_if_changed(&app.world, bindings);      // settings.jsonc, after a frame that changed one (ADR-0077)
         events.clear();
 
         if let Some(due) = limiter.end_of_frame(Instant::now()) {
@@ -444,17 +447,39 @@ rule yet: `release-no-dev` looks only for `nadir-debug`.
 
 ## Configuration and user data
 
-- Planned (roadmap task M9.3, not built yet): settings will live in
-  `settings.jsonc` in the user config directory (paths per OS are in
-  `docs/03-platforms.md`):
-  - display mode, vsync, volume per bus, input bindings, language
-- Until then, a game's settings menu changes them for the session alone
-  (M9.2, ADR-0076): the resource `DisplaySettings`, which `App::run`
-  applies; the buses' volumes, through `Audio::set_bus_volume`; and the
-  bindings, in the game's `ActionMap`.
-- The file will be versioned. Unknown keys will be preserved on save, and
-  invalid values will fall back to defaults with a logged warning, never a
-  crash.
+- Settings live in `settings.jsonc` in the user config directory (paths
+  per OS are in `docs/03-platforms.md`; roadmap task M9.3, ADR-0077):
+  fullscreen and vsync, the volume of each bus, the UI scale and the
+  language, the pads' deadzones, the input bindings by action name, and
+  the log's levels.
+  - **Where they live while the game runs:** in the engine's resources,
+    which a game's settings menu changes: `DisplaySettings`, which
+    `App::run` applies to the window; `Volumes`, which the buses follow
+    after each frame, over 50 ms; `UiSettings`, the UI scale and the
+    language; the deadzones on `Input`; and the bindings in the game's
+    `ActionMap`.
+  - **Read as the game starts:** `App::run` reads the file before the
+    window opens, and applies it. Only `App::run` reads or writes it, so
+    tests, headless runs, and recordings never see a player's settings.
+  - **Written as they change:** after each frame that changed one of those
+    resources, `App::run` writes the whole file again, through a temporary
+    file renamed over it, so that a crash leaves the old file or the new.
+    A frame that changed nothing costs a comparison and no allocation.
+- The file is versioned (version 1). A setting that is missing, of the
+  wrong type, or out of its range falls back to its default alone, with a
+  logged warning, never a crash. Members the engine does not know, and the
+  bindings of actions the game does not have, are kept as they were when
+  the file is written; comments are not.
+  - A file that cannot be read is the defaults, and is kept as
+    `settings.jsonc.bad` the next time the settings are written, so that a
+    hand edit gone wrong is not lost.
+  - A file of a newer version, which a newer game wrote, is the defaults
+    and is never written over: settings changed in that run last for the
+    run.
+  - nadir-codec's `settings` module reads and writes the text, and
+    `cargo xtask fuzz-smoke --target settings` fuzzes it
+    (`docs/subsystems/assets-and-codecs.md`, "Settings file reader and
+    writer").
 - Development builds (`dev`) keep the debug UI's windows' places in
   `debug_ui.jsonc` beside it, which only `App::run` reads and writes
   (M7.10, ADR-0058).

@@ -2416,6 +2416,8 @@ classDiagram
         -mixer Option~Mixer~
         -debug DebugTools, dev
         -states States
+        -volumes Volumes
+        -settings Option~SettingsFile~
         +new(config) App
         +insert_resource(resource) App
         +add_event~T~() App
@@ -2468,6 +2470,7 @@ classDiagram
         -set Option~str~
         -latch LatchFn
         -replay Option~Box~PlayReplay~~
+        -bindings Option~Box~KeptBindings~~
     }
     class EngineCore {
         -app App
@@ -2608,6 +2611,8 @@ classDiagram
     World o-- WindowSize
     World o-- VirtualResolution
     World o-- DisplaySettings
+    World o-- Volumes
+    World o-- UiSettings
     World o-- Quit
     World o-- TypeRegistry
     World o-- Audio
@@ -2620,6 +2625,8 @@ classDiagram
     note for Reloads "Only with the dev feature: what hot reload did, for the tests (crate-private)."
     note for WindowSize "The window's size, which maps the pointer to a UI's units with the VirtualResolution (every build since M9.2, ADR-0076)."
     note for DisplaySettings "Fullscreen and vsync: App::run applies a change after the frame."
+    note for Volumes "Also a resource: App::update moves a bus it changed over 50 ms (ADR-0077)."
+    note for UiSettings "The player's UI scale and language. App::run reads these, the display, the volumes, the deadzones and the bindings from settings.jsonc, and writes it after a frame that changed one (ADR-0077)."
     note for Quit "Asked for, App::run ends after the frame."
 ```
 

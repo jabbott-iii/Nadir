@@ -74,7 +74,13 @@ Built:
 - a world hash, to check that a replay gives the same simulation;
 - crash reports: from the start of `App::run`, every panic, on any
   thread, writes a report into the game's data folder, and the next
-  launch tells the player.
+  launch tells the player;
+- a settings file, `settings.jsonc` in the game's settings folder, which
+  `App::run` reads as the game starts and writes after each frame that
+  changes a setting: fullscreen and vsync, the buses' volumes, the UI
+  scale and language, the pads' deadzones, the bindings, and the log's
+  levels, each falling back to its default alone, with what the file holds
+  that the engine does not know kept.
 
 Not built yet:
 
@@ -82,8 +88,7 @@ Not built yet:
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
 - gamepads on Windows and macOS (roadmap tasks M8.2 and M8.3);
-- settings (M9.3), and saving a game from `App` (M9.7; nadir-scene has
-  saves since M9.4);
+- saving a game from `App` (M9.7; nadir-scene has saves since M9.4);
 - the Metal backend for macOS (M10).
 
 ## What you need

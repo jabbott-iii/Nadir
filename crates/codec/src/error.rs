@@ -20,7 +20,7 @@ use std::fmt;
 use crate::png;
 use crate::{
     aseprite, atlas, bmfont, font, inflate, json, kbj, klz, kpak, kpcm, ksav, ldtk, level, pcm,
-    prefab, qoa, qoi, wav,
+    prefab, qoa, qoi, settings, wav,
 };
 
 /// Errors produced by `nadir-codec`.
@@ -201,6 +201,13 @@ pub enum CodecError {
         /// What is wrong.
         kind: prefab::ErrorKind,
     },
+    /// A settings file is too large, is not an object, or is of a version
+    /// that is not read ([`settings::read`](crate::settings::read)). A file
+    /// that is not JSONC is a [`CodecError::Json`].
+    Settings {
+        /// What is wrong.
+        kind: settings::ErrorKind,
+    },
     /// A value cannot be encoded as KBJ.
     KbjEncode {
         /// Why not.
@@ -273,6 +280,7 @@ impl fmt::Display for CodecError {
                 write!(f, "prefab error in the file: {kind}")
             }
             Self::Prefab { at, kind } => write!(f, "prefab error at `{at}`: {kind}"),
+            Self::Settings { kind } => write!(f, "settings file error: {kind}"),
             Self::Wav { offset, kind } => write!(f, "WAV error at byte {offset}: {kind}"),
             Self::BmFont { line, column, kind } => {
                 write!(f, "BMFont error at line {line}, column {column}: {kind}")

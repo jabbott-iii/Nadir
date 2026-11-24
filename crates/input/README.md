@@ -38,8 +38,9 @@ Built today:
 Button prompts for each family of pad are the facade's (`nadir_engine`'s
 `Gamepads` and `ButtonPrompts`, roadmap task M8.5), which read the active
 device from here. Rebinding listens for the next press, which becomes a
-binding (`Input::begin_rebind`, roadmap task M9.2). Not yet: bindings in
-the settings file, which come with M9.3.
+binding (`Input::begin_rebind`, roadmap task M9.2). The facade keeps the
+bindings, by each action's name, and the deadzones in its settings file
+(roadmap task M9.3).
 
 ## Usage
 

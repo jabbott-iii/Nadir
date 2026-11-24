@@ -121,10 +121,11 @@ impl<A: ActionSet> ActionState<A> {
 - **The game defines actions** as an enum implementing `ActionSet`.
   - The name, kind and `ui_allowed` of an action belong to the code, so
     they are on the trait.
-  - Bindings are data, in the `ActionMap`. For now a game binds them in
-    code. A default table in a file, which a crate that can read JSON
-    would load (`input` depends on `core` and `platform` only), comes with
-    the settings file (roadmap task M9.3), which is not built yet.
+  - Bindings are data, in the `ActionMap`. A game binds its defaults in
+    code, and the facade's settings file keeps the player's (roadmap task
+    M9.3, ADR-0077; "Rebinding and settings", below). A table of defaults
+    in a data file, which a crate that can read JSON would load (`input`
+    depends on `core` and `platform` only), is not built.
 - **Bindings and kinds:** a key, mouse button or pad button drives a
   `Button` or an `Axis1`, which it holds at 1. A half of a pad's axis drives
   a `Button` or an `Axis1` too. A composite or a pad's stick drives an
@@ -165,8 +166,10 @@ impl<A: ActionSet> ActionState<A> {
   - Bound to a `Button`, a half of an axis presses at 0.5 and lets go below
     0.4, so that a value that hovers at the press point does not flicker.
   - `Input::set_deadzones` sets them, and refuses a set out of order or
-    range (`InputError::Deadzones`). The settings file (M9.3) will set them
-    per player.
+    range (`InputError::Deadzones`). The facade's settings file sets them
+    as the game starts (M9.3, ADR-0077), one set for every pad, since the
+    game is single-player. A set from the file that breaks these rules
+    keeps the defaults, with a warning.
 - **The pads' codes:** latching works on presses and releases, so a pad's
   button, each half of an axis past the press point, each half past its
   deadzone, and each stick out of its deadzone are codes in the change log,
@@ -190,8 +193,24 @@ impl<A: ActionSet> ActionState<A> {
 
 ## Rebinding and settings
 
-- Bindings are saved in the `input` section of `settings.jsonc` (M9.3), by
-  action name.
+- Bindings are saved in the `input.bindings` section of `settings.jsonc`
+  (M9.3, ADR-0077), by action name (`ActionSet::name`):
+  - Each action is an array of its four slots, each `null` (empty) or an
+    object whose member says what it is: `{"key": "W"}`,
+    `{"mouse": "Left"}`,
+    `{"keys": {"up": "W", "down": "S", "left": "A", "right": "D"}}`,
+    `{"pad": "A"}`, `{"pad_axis": "RightTrigger", "sign": "+"}`, or
+    `{"stick": "Left"}`. Keys, buttons, and axes go by their names in
+    nadir-core (`Key::name`, `MouseButton::name`, `GamepadButton::name`,
+    `GamepadAxis::name`), which are the variants' and case-sensitive.
+  - `App::run` puts the file's bindings in the game's `ActionMap` as the
+    game starts, over the map the game gave `App::add_actions`. A slot
+    that is not a binding, or that the action's kind does not take
+    (`ActionMap::bind` refuses it), keeps the game's default, with a
+    warning. The bindings of an action the game does not have, a renamed
+    one say, stay in the file as they were.
+  - `App::run` writes the map after each frame that changed it, so a
+    controls menu saves nothing itself.
 - **Rebind flow** (M9.2, ADR-0076; named `begin_rebind`, not the
   `begin_capture` planned here, as `set_capture` means something else):
 

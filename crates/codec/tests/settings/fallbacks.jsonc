@@ -1,0 +1,31 @@
+// One setting of each kind that the reader does not take, and a member of
+// each kind that it keeps without knowing. Each line says what it breaks.
+{
+  "version": 1,
+  "display": {
+    "fullscreen": 1,              // not a boolean
+    "vsync": false,               // taken
+  },
+  "audio": {
+    "music": 101,                 // above 100
+    "sfx": 12.5,                  // not a whole number
+    "master": 80,                 // not a setting: kept
+  },
+  "ui": {
+    "scale": 100,                 // above 64
+    "language": "en_GB",          // `_` is not in a tag
+  },
+  "input": {
+    "deadzones": { "trigger": 1.5 },  // above 1
+    "bindings": {
+      "move": [{ "key": "W" }, { "stick": "Middle" }],  // a key is taken here; no middle stick
+      "confirm": "Enter",         // not an array
+      "jump": [{ "key": "Space" }],  // not an action of the game: kept
+    },
+  },
+  "log": {
+    "level": "everything",        // not a level
+    "targets": { "nadir audio": "debug", "nadir_gfx": "info" },  // a space is not in a path
+  },
+  "theme": "dark",                // not a setting: kept
+}

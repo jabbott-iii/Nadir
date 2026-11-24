@@ -160,8 +160,10 @@ pub struct WindowSize(pub UVec2);   // a resource: the window's inside, physical
   memory, at `nadir/debug/` (`font.font.kbj`, `font.kbj`, `font_0.qoi`,
   `white.qoi`), before the game's loose files. Other characters draw a
   box.
-- **Scale:** `UiScale::Free` of the window's scale factor, rounded to a
-  whole number and at least 1, until the settings file's UI scale (M9.3).
+- **Scale:** `UiScale::Free` of the player's UI scale, the facade's
+  `UiSettings::scale`, which the settings file keeps (M9.3, ADR-0077).
+  Where they chose none, the window's scale factor, rounded to a whole
+  number and at least 1, so that the pixel font stays sharp.
 - **Capture:** the keys at each frame's start, from the UI's last
   `wants_keyboard`. The mouse at each press of a button and each turn of
   the wheel, before it reaches `Input`: the UI's while it holds the left

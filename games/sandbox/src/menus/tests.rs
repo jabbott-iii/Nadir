@@ -246,7 +246,7 @@ fn with_the_mouse_alone_every_page_opens_its_values_change_and_quit_quits() {
         Vec2::new(row.center().x + 1.0, row.center().y)
     };
     click_at(&mut app, music);
-    assert_eq!(app.world().resource::<Menus>().volumes.music, 0);
+    assert_eq!(app.world().resource::<Volumes>().music, 0);
     click(&mut app, 5);
     assert_eq!(page(&app), Page::Settings);
     click(&mut app, 1);
@@ -335,7 +335,7 @@ fn the_audio_page_sets_each_bus_in_tens() {
     tap(&mut app, Key::Down);
     tap(&mut app, Key::Left);
     tap(&mut app, Key::Left);
-    let volumes = app.world().resource::<Menus>().volumes;
+    let volumes = *app.world().resource::<Volumes>();
     assert_eq!(
         (volumes.music, volumes.sfx, volumes.ui, volumes.ambience),
         (90, 80, 100, 100)

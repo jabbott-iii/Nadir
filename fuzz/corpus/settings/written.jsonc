@@ -1,0 +1,75 @@
+// The game's settings. The game reads this file as it starts, and
+// writes it again when a setting changes: it keeps the members it does
+// not know, but not comments.
+{
+  "version": 1,
+  "display": {
+    "fullscreen": true,
+    "vsync": false
+  },
+  "audio": {
+    "music": 40,
+    "sfx": 75,
+    "ui": 0,
+    "ambience": 100
+  },
+  "ui": {
+    "scale": 2.5,
+    "language": "pt-BR"
+  },
+  "input": {
+    "deadzones": {
+      "stick_inner": 0.15,
+      "stick_outer": 0.9,
+      "trigger": 0.05,
+      "press": 0.6,
+      "release": 0.45
+    },
+    "bindings": {
+      "move": [
+        {
+          "keys": {
+            "up": "Up",
+            "down": "Down",
+            "left": "Left",
+            "right": "Right"
+          }
+        },
+        {
+          "stick": "Right"
+        },
+        null,
+        {
+          "keys": {
+            "up": "W",
+            "down": "S",
+            "left": "A",
+            "right": "D"
+          }
+        }
+      ],
+      "confirm": [
+        {
+          "key": "Space"
+        },
+        {
+          "pad": "B"
+        },
+        {
+          "mouse": "Right"
+        },
+        {
+          "pad_axis": "RightTrigger",
+          "sign": "+"
+        }
+      ]
+    }
+  },
+  "log": {
+    "level": "debug",
+    "targets": {
+      "nadir_render::batch": "trace",
+      "nadir_audio": "error"
+    }
+  }
+}

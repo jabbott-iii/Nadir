@@ -6039,7 +6039,54 @@ by the batched sprite renderer.
     with gamepad only and with mouse only.
   - Verify: `cargo test -p nadir_engine`; `cargo dev` (manual)
 
-- [ ] **M9.3 — settings file**
+- [x] **M9.3 — settings file**
+  - Note: built and checked on Linux (x86_64) on 2026-11-23 (ADR-0077,
+    accepted that day; the user chose one task across nadir-core,
+    nadir-codec, the facade, xtask and the sandbox; the UI scale, the
+    deadzones, the log's levels and a language beside what the menus
+    change; bindings as objects; and saving from the engine's comparison
+    of its resources):
+    - nadir-core: `name` and `from_name` on `Key`, `MouseButton`,
+      `GamepadButton` and `GamepadAxis`, the variants' names,
+      case-sensitive. 2 tests.
+    - nadir-codec: `settings::read` over the game's defaults, each setting
+      falling back alone with a `Warning`, the members it does not know
+      kept in the source, a log target that is not a module path left out;
+      refused whole over 1 MiB, not JSONC, not an object, with no version,
+      or of a newer one. `settings::write` over the file's tree, every
+      unknown member where it was, the settings alone if keeping them would
+      pass 1 MiB. 20 unit tests, and 4 of the hand-written vectors in
+      `crates/codec/tests/settings/`, one the writer's exact text.
+    - xtask: the `settings` fuzz target, its seeds in
+      `fuzz/corpus/settings/`, asserting every setting in its range and the
+      text written read back as the same settings and written again the
+      same. `cargo xtask fuzz-smoke --target settings --secs 120`: 18,760,640
+      inputs, about 156,000 a second, no finding.
+    - The facade: `App::run` reads `settings.jsonc` from the config folder
+      before the window opens, and applies it to `Config`,
+      `DisplaySettings`, `Volumes` (now a resource, which the buses follow
+      over 50 ms after the frame), `UiSettings` (new: the UI scale, which
+      the debug UI takes, and the language), `Input`'s deadzones, the log
+      and the game's `ActionMap`; then writes it after each frame that
+      changes one, and after the one that quits, through a temporary file.
+      A binding its action's kind refuses and deadzones out of order keep
+      their defaults; a file that cannot be read is kept as
+      `settings.jsonc.bad` at the first write; a newer game's is never
+      written over; a failed write is warned of once. 12 tests of the rules
+      (13 with `dev`, one that a frame without a change allocates nothing),
+      one of the loop's writes, one of a bus following `Volumes`, and one
+      of the debug UI taking the player's scale.
+    - The sandbox: its audio page sets `Volumes`, and the menus save
+      nothing themselves.
+    - In the window (`cargo run -p sandbox`, Mesa's llvmpipe, XWayland,
+      the XDG folders pointed at a scratch folder): a hand-edited file read
+      with three warnings (a volume of 250, an unknown member, a key for
+      `move`); the music turned down on the audio page with synthetic X
+      keys, written at once, keeping the unknown member and the edited
+      pause binding; the next run warned of the unknown member alone.
+    - Not run on Windows or macOS: there the folder comes from
+      `user_dirs` (M1.4), and the reads, writes and rename are `std::fs`.
+      M9's exit criteria check that settings persist on each OS.
   - Note (from M6.6, ADR-0048): the bus volumes, which M6.6 puts in the
     facade's `Config`, come from the settings file here.
   - Note (from M4.2): apply settings field by field (`fields()` and

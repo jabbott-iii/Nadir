@@ -34,11 +34,13 @@ use std::time::Duration;
 use nadir_codec::inflate::ErrorKind as InflateError;
 use nadir_codec::{
     CodecError, Limits, adler32, aseprite, atlas, bmfont, font, inflate, json, kbj, klz, kpak,
-    kpcm, ksav, ldtk, level, png, prefab, qoa, qoi, wav,
+    kpcm, ksav, ldtk, level, png, prefab, qoa, qoi, settings, wav,
 };
 use nadir_core::cli::Args;
 use nadir_core::hash::{crc32, fnv1a64};
+use nadir_core::log::Level;
 use nadir_core::testing::{DEFAULT_SEED, SEED_VAR};
+use nadir_core::{GamepadAxis, GamepadButton, Key};
 
 use self::engine::{Config, Finding, Kind, Outcome};
 use crate::error::Error;
@@ -126,6 +128,10 @@ const TARGETS: &[Target] = &[
     Target {
         name: "ksav",
         run: parse_save,
+    },
+    Target {
+        name: "settings",
+        run: read_settings,
     },
 ];
 
@@ -778,6 +784,182 @@ fn parse_prefab(input: &[u8]) {
             .iter()
             .all(|(name, value)| prefab::is_component_name(name) && !value.is_null()),
         "a component of no type's name, or null"
+    );
+}
+
+/// The defaults the `settings` target reads files over: a game's, with
+/// two actions, one of four keys and a stick, and one of a key and a pad's
+/// button.
+fn settings_defaults() -> &'static settings::Settings {
+    static DEFAULTS: OnceLock<settings::Settings> = OnceLock::new();
+    DEFAULTS.get_or_init(|| settings::Settings {
+        display: settings::Display {
+            fullscreen: false,
+            vsync: true,
+        },
+        audio: settings::Audio {
+            music: 100,
+            sfx: 100,
+            ui: 100,
+            ambience: 100,
+        },
+        ui: settings::Ui {
+            scale: None,
+            language: "en".to_string(),
+        },
+        input: settings::Input {
+            deadzones: settings::Deadzones {
+                stick_inner: 0.2,
+                stick_outer: 0.95,
+                trigger: 0.1,
+                press: 0.5,
+                release: 0.4,
+            },
+            bindings: vec![
+                settings::ActionBindings {
+                    action: "move".to_string(),
+                    slots: [
+                        Some(settings::Binding::Keys {
+                            up: Key::W,
+                            down: Key::S,
+                            left: Key::A,
+                            right: Key::D,
+                        }),
+                        Some(settings::Binding::Stick(settings::Stick::Left)),
+                        None,
+                        None,
+                    ],
+                },
+                settings::ActionBindings {
+                    action: "confirm".to_string(),
+                    slots: [
+                        Some(settings::Binding::Key(Key::Enter)),
+                        Some(settings::Binding::Pad(GamepadButton::A)),
+                        None,
+                        None,
+                    ],
+                },
+            ],
+        },
+        log: settings::Log {
+            level: Level::Info,
+            targets: Vec::new(),
+        },
+    })
+}
+
+/// The `settings` target: `nadir_codec::settings::read` over
+/// [`settings_defaults`], and what it promises the engine, which applies
+/// the settings without checking them again and writes them back:
+///
+/// - every setting is in its range: the volumes at most 100, the UI scale
+///   `None` or from 1/8 to 64, a language tag, the deadzones from 0 to 1,
+///   the defaults' actions alone, in their order, with no trigger's
+///   negative half, and each log target a module path;
+/// - written over the file, the text reads back as the same settings, with
+///   warnings only of members kept without being known, and is written
+///   again as the same text.
+///
+/// The input is at most 64 KiB, so the text written stays within the
+/// reader's 1 MiB.
+fn read_settings(input: &[u8]) {
+    let text = String::from_utf8_lossy(input);
+    let limits = Limits::default();
+    let defaults = settings_defaults();
+    let Ok(loaded) = settings::read(&text, defaults, limits) else {
+        return;
+    };
+    let read = &loaded.settings;
+    let audio = read.audio;
+    assert!(
+        [audio.music, audio.sfx, audio.ui, audio.ambience]
+            .iter()
+            .all(|&percent| percent <= 100),
+        "a volume above 100: {audio:?}"
+    );
+    assert!(
+        read.ui.scale.is_none_or(|scale| {
+            (settings::MIN_UI_SCALE..=settings::MAX_UI_SCALE).contains(&scale)
+        }),
+        "a UI scale out of range: {:?}",
+        read.ui.scale
+    );
+    assert!(
+        settings::is_language(&read.ui.language),
+        "not a language tag"
+    );
+    let zones = read.input.deadzones;
+    assert!(
+        [
+            zones.stick_inner,
+            zones.stick_outer,
+            zones.trigger,
+            zones.press,
+            zones.release
+        ]
+        .iter()
+        .all(|zone| (0.0..=1.0).contains(zone)),
+        "a deadzone out of range: {zones:?}"
+    );
+    let names = |bindings: &[settings::ActionBindings]| {
+        bindings
+            .iter()
+            .map(|action| action.action.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        names(&read.input.bindings),
+        names(&defaults.input.bindings),
+        "the actions are not the defaults'"
+    );
+    let negative_trigger = |binding: &settings::Binding| {
+        matches!(
+            binding,
+            settings::Binding::PadAxis {
+                axis: GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger,
+                sign: settings::Sign::Negative,
+            }
+        )
+    };
+    assert!(
+        !read
+            .input
+            .bindings
+            .iter()
+            .flat_map(|action| action.slots.iter().flatten())
+            .any(negative_trigger),
+        "a trigger's negative half"
+    );
+    assert!(
+        read.log
+            .targets
+            .iter()
+            .all(|(target, _)| settings::is_module_path(target)),
+        "a log target that is not a module path"
+    );
+    let written = settings::write(read, Some(&loaded.source));
+    let again = match settings::read(&written, defaults, limits) {
+        Ok(again) => again,
+        Err(error) => panic!(
+            "the {} bytes written do not read back: {error}",
+            written.len()
+        ),
+    };
+    assert!(
+        again.settings == *read,
+        "the settings written read back otherwise"
+    );
+    assert!(
+        again.warnings.iter().all(|warning| matches!(
+            warning.kind,
+            settings::WarningKind::Unknown | settings::WarningKind::UnknownAction
+        )),
+        "the text written has a setting it does not take: {:?}",
+        again.warnings
+    );
+    assert!(
+        settings::write(&again.settings, Some(&again.source)) == written,
+        "the text written, written again, changes"
     );
 }
 

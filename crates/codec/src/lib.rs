@@ -16,7 +16,7 @@
 //! WAV, the sound file (KPCM) and a resampler, KLZ block compression,
 //! JSON(C), binary JSON (KBJ), BMFont, Aseprite's sprite sheet data, LDtk's
 //! projects, the cook's atlas, font, level and prefab files, the pack
-//! file, and the save file.
+//! file, the save file, and the settings file.
 //!
 //! # Where it fits
 //!
@@ -52,6 +52,7 @@
 //! | [`kpak`] | The pack file, `game.kpak`: its header, its table of contents, and each entry checked against its CRC-32 | [`kpak::header`], [`kpak::toc`], [`kpak::parse`] |
 //! | [`klz`] | KLZ, an LZ77 block compression of Nadir's own, for pack entries | [`klz::decompress`], [`klz::compress`] |
 //! | [`ksav`] | The save file, `<slot>.ksav`: a header with the game's version, the time and a CRC-32, and a KBJ payload of saved entities and resources | [`ksav::header`], [`ksav::parse`], [`ksav::read`], [`ksav::encode`] |
+//! | [`settings`] | The settings file, `settings.jsonc`: the display, the buses' volumes, the UI scale and language, the pads' deadzones, the actions' bindings and the log's levels, each setting falling back to the game's default alone, and the members it does not know kept when it is written | [`settings::read`], [`settings::write`] |
 //!
 //! Today the game reads QOI textures, atlas files, prefab files and level
 //! files, which the engine's `load_level` loads into the world. The pack
@@ -63,6 +64,8 @@
 //! is built (M7.7), and the cook reads back each font file it writes;
 //! nadir-render's `Font` asset reads it (M7.1). The save file's reader and
 //! writer are built (M9.4): nadir-scene writes and reads saves with them.
+//! The settings file's reader and writer are built (M9.3): the engine
+//! reads the file as the game starts, and writes it as a setting changes.
 //!
 //! [`pcm`] changes a sound's rate, with a windowed sinc that gives the same
 //! bits on every system and keeps a loop's seam ([`pcm::resample`]), and
@@ -246,6 +249,7 @@ pub mod png;
 pub mod prefab;
 pub mod qoa;
 pub mod qoi;
+pub mod settings;
 pub mod wav;
 
 pub use error::CodecError;

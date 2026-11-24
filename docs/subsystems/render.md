@@ -385,7 +385,8 @@ pub struct TileLayerDraw { pub tiles: Handle<TileLayer>, pub layer: u8, pub dept
   scale, for mouse aiming.
 - UI renders after the upscale, at native resolution. It has two choices:
   - a pixel-UI scale (an integer multiple of virtual pixels), or
-  - a free scale from the settings UI-scale value.
+  - a free scale from the settings UI-scale value (the facade's
+    `UiSettings::scale`, which its settings file keeps: M9.3, ADR-0077).
 
   As built in M7.8 (ADR-0055), each `UiView` has one, `UiScale::Pixel(n)`
   or `UiScale::Free(s)`: see "The UI pass".

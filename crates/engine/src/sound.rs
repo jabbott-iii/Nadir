@@ -1125,6 +1125,23 @@ mod tests {
     }
 
     #[test]
+    fn a_bus_follows_the_volumes_resource_after_the_frame_that_changes_it() {
+        let mut game = Game::new();
+        let hum = game.constant("audio/hum.kpcm", 0.5);
+        // On the ambience bus, at full.
+        game.spawn(Vec2::ZERO, AudioEmitter::looped(hum));
+        assert_heard(&game.frames(2), heard(0.5, Vec2::ZERO));
+        // To a quarter of the gain, over 50 ms: three frames of a tick.
+        game.app.world().resource_mut::<Volumes>().ambience = 50;
+        assert_heard(&game.frames(4), heard(0.125, Vec2::ZERO));
+        // Another bus changes nothing heard here.
+        game.app.world().resource_mut::<Volumes>().sfx = 0;
+        assert_heard(&game.frames(4), heard(0.125, Vec2::ZERO));
+        game.app.world().resource_mut::<Volumes>().ambience = 100;
+        assert_heard(&game.frames(4), heard(0.5, Vec2::ZERO));
+    }
+
+    #[test]
     fn a_sound_or_a_track_that_did_not_load_is_warned_of_once_until_it_changes() {
         let mut game = Game::new();
         let (sound, track) = {

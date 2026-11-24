@@ -286,16 +286,21 @@ and plays them, and re-exports the crate as `nadir::audio`.
     silence, instead, and the asset server logs the failure.
 - **Volumes:** `Config::volumes` holds each bus's percent, 0 to 100, 100
   by default, more counting as 100. A percent is heard as its square,
-  `Volumes::gain(bus)`, so 50 is −12 dB. A game changes one while it runs
-  with `audio.set_bus_volume(bus, volumes.gain(bus), fade)`; M9.3's
-  settings file will fill them. There is no master volume.
+  `Volumes::gain(bus)`, so 50 is −12 dB. `Volumes` is also a resource,
+  which the buses follow: a game changes one while it runs by changing
+  the resource, and after the frame `App::update` moves that bus to it
+  over 50 ms (M9.3, ADR-0077). The facade's settings file keeps them:
+  `App::run` sets the resource and the buses from it as the game starts,
+  and writes it after a frame that changed them. A game may still call
+  `audio.set_bus_volume(bus, volumes.gain(bus), fade)` for a fade of its
+  own, which the file does not keep. There is no master volume.
 - **A sound played once**, as something happens, a footstep say, plays
   only if it has loaded: load it first with `load_now` (M6.9).
 - **Not built yet:** a level's own `music` and `ambience`, which
   `load_level` does not play, as the cook writes neither (the roadmap's
   backlog, ADR-0051); the components in prefabs and levels; an emitter
   that comes back on its own when its voice is stolen; output on Windows
-  and macOS (M6.4, M6.5); the settings file (M9.3).
+  and macOS (M6.4, M6.5).
 
 ## Tests
 

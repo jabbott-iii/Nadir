@@ -25,9 +25,10 @@ nadir-assets.workspace = true
 nadir-audio.workspace = true
 nadir-collision.workspace = true
 nadir-core.workspace = true
-# The button prompts' table, read from KBJ (ADR-0074); in development
-# builds, the files of the debug UI's font too, which are made as the cook
-# would write them (ADR-0058). The tests write QOI textures, and check
+# The button prompts' table, read from KBJ (ADR-0074); the settings file,
+# read and written (ADR-0077); in development builds, the files of the
+# debug UI's font too, which are made as the cook would write them
+# (ADR-0058). The tests write QOI textures, and check
 # that a QOI file too short for its size is refused before anything is
 # allocated; and they encode atlas files for `Sprite::from_atlas` and
 # `Clips::add_atlas`.

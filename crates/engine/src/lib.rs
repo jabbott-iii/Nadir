@@ -78,6 +78,15 @@
 //!   main menu's Quit.
 //! - The resource [`DisplaySettings`], fullscreen and vsync, is what a
 //!   settings menu changes: [`App::run`] applies a change after the frame.
+//!   So are the resources [`Volumes`], which [`App::update`] moves the
+//!   buses to, and [`UiSettings`], the UI scale and the language.
+//! - **The settings file**, `settings.jsonc` in the game's settings folder
+//!   (on Linux `~/.config/<game>`), keeps those, the pads' deadzones, the
+//!   game's bindings and the log's levels from one run to the next:
+//!   [`App::run`] reads it as the game starts, and writes it after each
+//!   frame that changed one. Each setting the file gets wrong falls back to
+//!   the game's default alone, with a warning, and what the file holds that
+//!   the engine does not know is written back as it was.
 //! - The resources [`WindowSize`] and [`VirtualResolution`] are the
 //!   window's size and the virtual image's, which map the pointer to the
 //!   UI's units.
@@ -590,6 +599,7 @@ mod navigation;
 mod pack;
 mod reflected;
 mod replay;
+mod settings;
 mod sound;
 mod states;
 mod tick_stats;
@@ -627,6 +637,7 @@ pub use nadir_scene::SaveId;
 pub use navigation::Navigation;
 pub use reflected::{CollisionLayers, loading_context, reflect_context};
 pub use replay::{Replay, world_hash};
+pub use settings::UiSettings;
 pub use sound::AudioState;
 pub use tick_stats::TickStats;
 pub use window_size::{VirtualResolution, WindowSize};

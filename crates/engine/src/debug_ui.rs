@@ -310,7 +310,8 @@ pub(crate) struct DebugTools {
     ui: Option<DebugUi>,
     /// Whether making it failed, which the log said once.
     failed: bool,
-    /// The free scale: the window's scale factor, whole and at least 1.
+    /// The free scale where [`UiSettings`](crate::UiSettings) has none: the
+    /// window's scale factor, whole and at least 1.
     scale: f32,
     /// What the debug UI held back from the game when it last changed it.
     held: Capture,
@@ -656,7 +657,9 @@ impl DebugTools {
             self.input.clear();
             return;
         };
-        ui.style_mut().scale = UiScale::Free(self.scale);
+        // The player's scale, from the settings, where there is one.
+        let scale = world.resource::<crate::UiSettings>().scale;
+        ui.style_mut().scale = UiScale::Free(scale.unwrap_or(self.scale));
         let output = world.resource::<WindowSize>().0;
         // The time controls' label goes first, so that a window over the
         // corner is drawn in front of it.
@@ -1735,6 +1738,24 @@ mod tests {
         );
         let mut rig = Rig::new();
         rig.frame(&[Event::ScaleFactorChanged(2.0), tap(Key::F8)[0]]);
+        let frame = rig.app.world().resource::<RenderFrame>();
+        let (_, view) = frame.ui.iter().next().expect("the window");
+        assert_eq!(view.scale(), UiScale::Free(2.0));
+    }
+
+    #[test]
+    fn the_players_ui_scale_from_the_settings_comes_before_the_windows() {
+        let mut rig = Rig::new();
+        rig.app.world().resource_mut::<crate::UiSettings>().scale = Some(1.5);
+        rig.frame(&[Event::ScaleFactorChanged(2.0), tap(Key::F8)[0]]);
+        {
+            let frame = rig.app.world().resource::<RenderFrame>();
+            let (_, view) = frame.ui.iter().next().expect("the window");
+            assert_eq!(view.scale(), UiScale::Free(1.5));
+        }
+        // With none, the window's again.
+        rig.app.world().resource_mut::<crate::UiSettings>().scale = None;
+        rig.frame(&[]);
         let frame = rig.app.world().resource::<RenderFrame>();
         let (_, view) = frame.ui.iter().next().expect("the window");
         assert_eq!(view.scale(), UiScale::Free(2.0));

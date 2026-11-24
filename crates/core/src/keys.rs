@@ -48,6 +48,15 @@ macro_rules! keys {
         impl Key {
             /// Every key, in order.
             pub const ALL: &'static [Key] = &[$( Key::$name, )+];
+
+            /// The key's name: the variant's, as in `"W"`, `"Digit1"` or
+            /// `"LeftShift"`. Settings files name keys by it, so renaming a
+            /// variant makes the files that name it miss it.
+            pub const fn name(self) -> &'static str {
+                match self {
+                    $( Key::$name => stringify!($name), )+
+                }
+            }
         }
     };
 }
@@ -296,6 +305,12 @@ impl Key {
     pub const fn usage(self) -> u8 {
         self as u8
     }
+
+    /// The key whose [`name`](Self::name) is `name`, if there is one. Names
+    /// are case-sensitive: `"W"`, not `"w"`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|key| key.name() == name)
+    }
 }
 
 /// A mouse button.
@@ -322,6 +337,27 @@ impl MouseButton {
         MouseButton::Back,
         MouseButton::Forward,
     ];
+
+    /// The button's name: the variant's, as in `"Left"`. Settings files
+    /// name buttons by it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            MouseButton::Left => "Left",
+            MouseButton::Right => "Right",
+            MouseButton::Middle => "Middle",
+            MouseButton::Back => "Back",
+            MouseButton::Forward => "Forward",
+        }
+    }
+
+    /// The button whose [`name`](Self::name) is `name`, if there is one.
+    /// Names are case-sensitive.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|button| button.name() == name)
+    }
 }
 
 /// A gamepad's button, by its place on a standard pad, named after the Xbox
@@ -394,6 +430,37 @@ impl GamepadButton {
     pub const fn index(self) -> usize {
         self as usize
     }
+
+    /// The button's name: the variant's, as in `"A"` or `"LeftBumper"`.
+    /// Settings files name buttons by it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            GamepadButton::A => "A",
+            GamepadButton::B => "B",
+            GamepadButton::X => "X",
+            GamepadButton::Y => "Y",
+            GamepadButton::LeftBumper => "LeftBumper",
+            GamepadButton::RightBumper => "RightBumper",
+            GamepadButton::Back => "Back",
+            GamepadButton::Start => "Start",
+            GamepadButton::Guide => "Guide",
+            GamepadButton::LeftStick => "LeftStick",
+            GamepadButton::RightStick => "RightStick",
+            GamepadButton::DPadUp => "DPadUp",
+            GamepadButton::DPadDown => "DPadDown",
+            GamepadButton::DPadLeft => "DPadLeft",
+            GamepadButton::DPadRight => "DPadRight",
+        }
+    }
+
+    /// The button whose [`name`](Self::name) is `name`, if there is one.
+    /// Names are case-sensitive.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|button| button.name() == name)
+    }
 }
 
 /// A gamepad's analog axis.
@@ -432,6 +499,25 @@ impl GamepadAxis {
     /// The axis's place in [`GamepadAxis::ALL`].
     pub const fn index(self) -> usize {
         self as usize
+    }
+
+    /// The axis's name: the variant's, as in `"LeftX"` or
+    /// `"RightTrigger"`. Settings files name axes by it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            GamepadAxis::LeftX => "LeftX",
+            GamepadAxis::LeftY => "LeftY",
+            GamepadAxis::RightX => "RightX",
+            GamepadAxis::RightY => "RightY",
+            GamepadAxis::LeftTrigger => "LeftTrigger",
+            GamepadAxis::RightTrigger => "RightTrigger",
+        }
+    }
+
+    /// The axis whose [`name`](Self::name) is `name`, if there is one.
+    /// Names are case-sensitive.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|axis| axis.name() == name)
     }
 
     /// Whether this is a trigger, which goes from 0 to 1, and not a stick's
@@ -542,5 +628,44 @@ mod tests {
             triggers,
             [&GamepadAxis::LeftTrigger, &GamepadAxis::RightTrigger]
         );
+    }
+
+    #[test]
+    fn each_name_is_its_variant_and_reads_back() {
+        // A settings file names inputs this way, so a name must stay the
+        // variant's and lead back to it.
+        fn check<T: Copy + PartialEq + std::fmt::Debug>(
+            all: &[T],
+            name: fn(T) -> &'static str,
+            from_name: fn(&str) -> Option<T>,
+        ) {
+            for &item in all {
+                assert_eq!(name(item), format!("{item:?}"));
+                assert_eq!(from_name(name(item)), Some(item));
+            }
+        }
+        check(Key::ALL, Key::name, Key::from_name);
+        check(MouseButton::ALL, MouseButton::name, MouseButton::from_name);
+        check(
+            GamepadButton::ALL,
+            GamepadButton::name,
+            GamepadButton::from_name,
+        );
+        check(GamepadAxis::ALL, GamepadAxis::name, GamepadAxis::from_name);
+    }
+
+    #[test]
+    fn names_are_case_sensitive_and_unknown_names_are_none() {
+        assert_eq!(Key::from_name("LeftShift"), Some(Key::LeftShift));
+        assert_eq!(Key::from_name("leftshift"), None);
+        assert_eq!(Key::from_name("w"), None);
+        assert_eq!(Key::from_name(""), None);
+        assert_eq!(MouseButton::from_name("left"), None);
+        assert_eq!(GamepadButton::from_name("a"), None);
+        assert_eq!(
+            GamepadAxis::from_name("RightTrigger"),
+            Some(GamepadAxis::RightTrigger)
+        );
+        assert_eq!(GamepadAxis::from_name("Trigger"), None);
     }
 }

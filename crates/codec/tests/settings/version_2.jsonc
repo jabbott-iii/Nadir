@@ -1,0 +1,2 @@
+// A newer game's file: this one reads version 1 and older.
+{ "version": 2, "display": { "fullscreen": true } }

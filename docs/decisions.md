@@ -7472,3 +7472,156 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   pointer in the replay format); M9.3's settings file loads these settings;
   a driver refuses a vsync change the platform cannot report beforehand;
   or a game's UI needs a capture beside the debug UI's.
+
+## ADR-0077 — M9.3: the settings file, `settings.jsonc`, read by nadir-codec over the game's defaults, each setting falling back alone, and written back over the file it read; loaded and saved by `App::run` from the engine's resources; `Volumes` a resource the buses follow; `UiSettings`; names for nadir-core's keys and buttons
+
+- **Status:** Accepted: the user chose four points on 2026-11-23: one
+  task across the five crates it touches; version 1 holding, besides what
+  the menus change (fullscreen, vsync, the bus volumes, the bindings), the
+  UI scale, the pads' deadzones, the log's levels and a language; bindings
+  written as objects; and saving automatic, from the engine comparing its
+  resources after each frame. The user accepted the rest, the agent's
+  design, as written the same day.
+- **Date:** 2026-11-23
+- **Context:**
+  - M9.3 asks for `settings.jsonc` loaded, validated and saved, unknown
+    keys preserved, invalid values falling back to defaults with a warning,
+    a test for each fallback rule and a registered fuzz target. Its notes
+    ask for the bus volumes (ADR-0048), the UI scale as a free scale from
+    1/8 to 64 with a default from the window's scale factor (ADR-0055),
+    which replaces the debug UI's rounded scale (ADR-0058), the bindings by
+    action name (M3.1), and what the sandbox's menus change for the session
+    (ADR-0076, whose revisit trigger is this task). `core.md` and
+    `input.md` promised the log's levels and the deadzones from the file.
+  - `xtask`, which runs the fuzzer, may depend on nadir-core and
+    nadir-codec alone, so a fuzzed reader has to live in nadir-codec, as
+    the prefab, level and save files' do. nadir-codec cannot see
+    nadir-input's `Binding` or the facade's types.
+  - nadir-core's `Key`, `MouseButton`, `GamepadButton` and `GamepadAxis`
+    had no names to read back but their `Debug` text.
+  - The facade had the display settings in `DisplaySettings`, the volumes
+    in `Config` and the sandbox's `Menus`, the deadzones on `Input`, and
+    the bindings in the game's `ActionMap`.
+- **Decision:**
+  - **The format, version 1** (`docs/subsystems/assets-and-codecs.md`,
+    "Settings file reader and writer"): a JSONC object of `version`, and
+    the sections `display` (`fullscreen`, `vsync`), `audio` (`music`,
+    `sfx`, `ui`, `ambience`, whole percents from 0 to 100), `ui` (`scale`,
+    `null` or 1/8 to 64; `language`, 1 to 35 ASCII letters, digits and
+    `-`), `input` (`deadzones`, five numbers from 0 to 1; `bindings`, an
+    array of at most 4 slots per action name) and `log` (`level`, and
+    `targets` by module path, each a lowercase level's name). A binding is
+    an object whose member says what it is: `key`, `mouse`, `keys` (four
+    keys' names), `pad`, `pad_axis` with `sign` (`+` or `-`, which a
+    trigger lacks), or `stick` (`Left` or `Right`).
+  - **nadir-core:** `name` and `from_name` on the four input enums, the
+    variants' names, case-sensitive; `Key`'s are made by the macro that
+    declares it, so that the two cannot disagree.
+  - **nadir-codec's `settings`:** `read(text, &defaults, limits)` starts
+    from the game's defaults and takes each setting the file gives; a
+    missing one keeps its default quietly, one of the wrong type or range
+    keeps it with a `Warning` (`Invalid`), a slot that is not a binding
+    keeps the default's slot, an action that is not an array of at most 4
+    keeps its defaults, an unknown member is a warning (`Unknown`) and is
+    kept in the source, as are the bindings of an action the defaults lack
+    (`UnknownAction`), and a log target that is not a module path or lacks
+    a level is left out (`LeftOut`). Refused whole: over 1 MiB, not JSONC,
+    not an object, no whole `version` of 1 or more, or a newer version
+    (`ErrorKind::NewerVersion`). `write(&settings, source)` writes over the
+    tree read, each setting in place, a new one at the end of its object,
+    every unknown member where it was; over 1 MiB with the source, it
+    writes the settings alone. The deadzones' rules together, and which
+    kinds of action a binding drives, are left to nadir-input. The
+    module's mirror of a binding (`settings::Binding`, `Sign`, `Stick`)
+    has nadir-input's six cases.
+  - **The fuzz target `settings`:** reads each input over a game's
+    defaults of two actions and asserts each setting in its range, the
+    defaults' actions alone, no trigger's negative half, each target a
+    module path, and the text written over the source read back as the
+    same settings, with warnings only of members kept, and written again
+    as the same text.
+  - **The facade:** `App::run` reads the file from the game's config
+    folder (`user_dirs`) before the window opens, and applies it to
+    `Config`'s fullscreen, vsync and volumes, `DisplaySettings`, `Volumes`,
+    `UiSettings`, `Input::set_deadzones`, the log (`set_level`,
+    `set_target_level`), and the game's `ActionMap`, through a typed hook
+    that `App::add_actions` keeps with the game's default map. A binding
+    `ActionMap::bind` refuses keeps the slot's default, and deadzones that
+    `set_deadzones` refuses keep theirs, each with a warning naming the
+    file. After each frame of the loop, after `apply_display`, and after
+    the frame that quits, it compares those resources and the map with what
+    it last read or wrote, which allocates nothing, and on a change writes
+    the whole file through a temporary file, synced and renamed over it. A
+    file not there is the defaults, quietly; one that cannot be read, the
+    defaults with a warning, kept as `settings.jsonc.bad` at the first
+    write (not written over if that rename fails); a newer game's, the
+    defaults, never written over, the run's changes lasting for the run. A
+    failed write is a warning, tried again at the next change. The log's
+    levels are written back as read: the console's `log` lasts for the
+    run. `App::update` and `App::offscreen` never touch the file.
+  - **`Volumes` is a resource**, from `Config::volumes`, and after the
+    frame stages `App::update` moves each bus whose percent it changed to
+    it, over 50 ms; `App::run` sets the buses at once from the file. A
+    game may still call `Audio::set_bus_volume` for a fade of its own,
+    which the file does not keep.
+  - **`UiSettings`**, a new resource: `scale: Option<f32>` (the player's
+    free UI scale, `None` for one from the window's scale factor) and
+    `language: String` (`en` by default), which nothing in the engine reads
+    yet. The debug UI draws at its scale where it has one, and otherwise at
+    the window's scale factor rounded to a whole number, as before. The
+    file writes a scale held to 1/8 to 64, NaN as 1, as the renderer holds
+    a free scale; a percent above 100 as 100; and each `f32` as its
+    shortest decimal (`0.2`, not `0.20000000298023224`).
+  - **The sandbox:** its audio page sets the `Volumes` resource, and
+    `Menus` keeps no volumes of its own; it saves nothing itself.
+- **Consequences:**
+  - Good: a player's display, audio, controls, UI scale, deadzones and
+    log levels outlast the run, with no saving code in the game; each
+    wrong value costs that value alone; a hand edit, a newer game's file
+    and members of another tool's survive; the fuzz target reaches every
+    rule of the reader and the writer's round trip. Tests: 20 unit tests
+    and 4 of the hand-written vectors in nadir-codec, a test of the names
+    in nadir-core, 12 of the facade's rules (one more with `dev`, that a
+    frame with no change allocates nothing), one of the loop writing after
+    the changing frame and the quitting one, one of a bus following
+    `Volumes`, and one of the debug UI taking the player's scale. On Linux,
+    the sandbox read a hand-edited file with three warnings, and wrote the
+    music's change from its audio page through synthetic X key events,
+    keeping the unknown member and the edited binding; the next run warned
+    of the unknown member alone.
+  - Bad: comments in the file are lost at the first write; the file is
+    long, every binding on lines of its own (the JSON writer's pretty
+    form); a write runs on the main thread with a sync, so a frame that
+    changes a setting may take a few milliseconds more on a slow disk; a
+    driver's refusal of vsync off is written as vsync on; a binding object
+    with an extra member is refused whole rather than read without it; the
+    language is kept but drives nothing; a game's own menus do not read
+    `UiSettings::scale` unless it sets their style from it.
+  - nadir-codec's `Settings` and the facade's resources are two copies of
+    the same values, joined by hand in `crates/engine/src/settings.rs`; a
+    setting added later touches both, and bumps the version (parsers
+    rule).
+- **Alternatives considered:**
+  - The reader in the facade, through nadir-scene's reflection (`fields()`
+    and `field_mut()`, M4.2's note): no fuzz target, as `xtask` cannot
+    depend on the facade or nadir-scene, and reflection has no ranges or
+    binding shapes to check.
+  - Bindings as strings (`"key W"`, `"pad_axis RightTrigger +"`): shorter
+    by hand, but a grammar of its own (the user chose objects).
+  - An explicit `Settings` resource the game marks for saving: game code
+    to forget (the user chose saving from the engine's comparison).
+  - Writing over a file that cannot be read without keeping it: a hand
+    edit with one typo lost; never writing over it: a damaged file stops
+    every save until the player deletes it.
+  - Writing over a newer game's file: going back to the newer game would
+    lose its settings.
+  - Leaving the buses to the game (`Audio::set_bus_volume` alone): two
+    homes for one volume, either of which could be changed without the
+    other.
+  - Keeping the console's `log` levels in the file: a debugging command
+    changing the player's file.
+- **Revisit when:** a setting is added or changed (then version 2, with a
+  migration from 1); a write's sync shows as a frame spike in a profile; a
+  game localizes its text (then `language` drives it); a game's menus need
+  the free UI scale (then they read `UiSettings`); or players lose comments
+  they wrote and ask for them (then a writer that keeps JSONC comments).

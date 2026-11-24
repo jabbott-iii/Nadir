@@ -92,8 +92,9 @@
 //! gamepad bindings, deadzones and the active device (M8.4). The facade
 //! keeps each pad's family and reads the button prompts' table (M8.5).
 //! Rebinding listens for the next press, which becomes a binding
-//! ([`Input::begin_rebind`], M9.2). Bindings in the settings file come with
-//! M9.3.
+//! ([`Input::begin_rebind`], M9.2). The facade keeps the bindings, by each
+//! action's [`name`](ActionSet::name), and the deadzones in its settings
+//! file (M9.3).
 //!
 //! # The parts
 //!

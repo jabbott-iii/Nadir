@@ -59,8 +59,14 @@ at a time, alongside the game in `games/sandbox`, which pulls each feature in.
   The cook turns WAVs into the game's sound files and QOA, resampled to
   48 kHz, which the asset server loads. Windows and macOS have no audio
   output yet (roadmap M6.4, M6.5), so there the game is silent.
+- **Settings:** `settings.jsonc` in the game's settings folder keeps the
+  display, the buses' volumes, the UI scale and language, the pads'
+  deadzones, the bindings, and the log's levels from one run to the next.
+  Each setting the file gets wrong falls back to its default alone, and
+  what the file holds that the engine does not know is kept (roadmap task
+  M9.3).
 - **Not built yet:** gamepads on Windows and macOS (roadmap tasks M8.2 and
-  M8.3), a settings file (M9.3), and the Metal backend (M10).
+  M8.3), and the Metal backend (M10).
 
 ## Build and run
 

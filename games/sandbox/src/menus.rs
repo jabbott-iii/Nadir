@@ -29,8 +29,10 @@
 //! Every page is used with the keys, a pad or the mouse alone: each has a
 //! Back button besides the back action, and its last line says which keys
 //! or buttons choose and go back, as the pad last used prints them
-//! (`ButtonPrompts`). The settings last until the game ends: the settings
-//! file is roadmap M9.3's.
+//! (`ButtonPrompts`). The settings live in the engine's resources,
+//! `DisplaySettings`, `Volumes` and the `ActionMap`, so the engine keeps
+//! them in its settings file from one run to the next (roadmap M9.3,
+//! ADR-0077): the menus save nothing themselves.
 //!
 //! The menus read their actions in ticks, so a recording replays a menu
 //! used with the keys or a pad; the pointer is not recorded, so a click
@@ -108,8 +110,8 @@ enum Go {
     Defaults,
 }
 
-/// The menus: their styles, each page's state, the session's volumes, and
-/// the controls page's rebinding.
+/// The menus: their styles, each page's state, and the controls page's
+/// rebinding.
 pub(crate) struct Menus {
     /// The main menu's style, whose backdrop hides what is behind; the
     /// pause menu's, which lets the paused world show through; and the
@@ -127,8 +129,6 @@ pub(crate) struct Menus {
     /// Where the pointer was, and the ticks it has rested there.
     pointer: Vec2,
     rest: u32,
-    /// The buses' volumes, as the game started them: full.
-    pub(crate) volumes: Volumes,
     /// The row a rebinding listens for, and what the last one did.
     pub(crate) listening: Option<usize>,
     pub(crate) note: &'static str,
@@ -252,7 +252,6 @@ impl Menus {
             button_shown: false,
             pointer: Vec2::ZERO,
             rest: POINTER_REST_TICKS,
-            volumes: Volumes::default(),
             listening: None,
             note: "",
             prompts,
@@ -353,7 +352,6 @@ fn run_menus(world: &World, _tick: &Tick) {
         page,
         settings_from,
         pages,
-        volumes,
         listening,
         note,
         value,
@@ -366,7 +364,7 @@ fn run_menus(world: &World, _tick: &Tick) {
         Page::Pause => pause_page(&mut menu, pause_pressed && listening.is_none()),
         Page::Settings => settings_page(&mut menu, *settings_from),
         Page::Display => display_page(&mut menu, &mut world.resource_mut::<DisplaySettings>()),
-        Page::Audio => audio_page(&mut menu, volumes, &world.resource::<Audio>()),
+        Page::Audio => audio_page(&mut menu, &mut world.resource_mut::<Volumes>()),
         Page::Controls => {
             let server = world.resource::<AssetServer>();
             let prompts = prompts.and_then(|prompts| server.get(prompts));
@@ -571,9 +569,9 @@ fn display_page(menu: &mut MenuPage<'_>, display: &mut DisplaySettings) -> Go {
     go
 }
 
-/// Each bus's volume, in tens of percent: a change goes to the mixer at
-/// once, over 50 ms.
-fn audio_page(menu: &mut MenuPage<'_>, volumes: &mut Volumes, audio: &Audio) -> Go {
+/// Each bus's volume, in tens of percent: the engine moves the bus to a
+/// change after the frame, over 50 ms.
+fn audio_page(menu: &mut MenuPage<'_>, volumes: &mut Volumes) -> Go {
     menu.title("Audio");
     menu.space();
     let mut go = if menu.back() {
@@ -590,7 +588,6 @@ fn audio_page(menu: &mut MenuPage<'_>, volumes: &mut Volumes, audio: &Audio) -> 
         let mut percent = i32::from(volumes.get(bus));
         if menu.slider(label, &mut percent, 0, 100, 10) {
             volumes.set(bus, u8::try_from(percent).unwrap_or(100));
-            audio.set_bus_volume(bus, volumes.gain(bus), 50);
         }
     }
     if menu.button("Back") {

@@ -260,14 +260,14 @@ pub fn check_sized<T: std::fmt::Debug>(
   still depends on the machine.
 - The exit status is 0 for a clean run and 1 if there is a finding.
 - Every parser in `nadir-codec`, `nadir-assets` and the save loader registers
-  a fuzz target, and so will the settings loader (roadmap task M9.3, not
-  built yet).
+  a fuzz target, and so does the settings loader: `settings`, nadir-codec's
+  reader of `settings.jsonc` (M9.3, ADR-0077).
   - A target may do more than call its parser. One whose format carries
     checksums repairs a copy of each input, so that mutations get past
     them (`png`, `kpak`, `ksav`). One that can check its own answers asserts them, so that
     a wrong answer is a finding too (`inflate`, `klz`, `kbj`, `kpcm`, `ksav`), and so does
     one whose reader makes promises its users rely on (`atlas`, `font`,
-    `aseprite`, `ldtk`, `level`, `prefab`, `kpak`, `ksav`). See
+    `aseprite`, `ldtk`, `level`, `prefab`, `kpak`, `ksav`, `settings`). See
     `docs/subsystems/assets-and-codecs.md`. The save loader's is `ksav`
     (M9.4), nadir-codec's reader of the save file.
 - The optional coverage-guided fuzzing (`cargo fuzz`) is a separate,

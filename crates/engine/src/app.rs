@@ -43,6 +43,7 @@ use nadir_scene::{
 use crate::animation::AnimationClock;
 use crate::limiter::FrameLimiter;
 use crate::replay::{PlayReplay, ReplayInput};
+use crate::settings::{Kept, KeptBindings, SettingsFile, UiSettings};
 use crate::sound::{AudioState, MixerOutput, Tracked};
 use crate::{
     AnimationFinished, Animator, AudioEmitter, AudioListener, Clips, Collider, CollisionLayers,
@@ -62,6 +63,11 @@ const MAX_FRAME: Duration = Duration::from_millis(250);
 /// How many profile scope records each frame's buffer holds before it
 /// must grow: a frame of 15 ticks of 60 systems each.
 const PROFILE_RECORDS: usize = 1_024;
+
+/// How long a bus takes to reach a volume the [`Volumes`] resource changed
+/// to, in milliseconds: short enough to follow a slider, long enough not to
+/// click.
+const VOLUME_FADE_MS: u32 = 50;
 
 /// What a game asks of the engine.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,7 +93,8 @@ pub struct Config {
     pub min_window_size: UVec2,
     /// Whether the user can resize the window.
     pub resizable: bool,
-    /// Whether the window starts in borderless fullscreen.
+    /// Whether the window starts in borderless fullscreen, unless the
+    /// settings file says otherwise ([`App::run`]).
     pub fullscreen: bool,
     /// The most frames to run in a second. `None` and `Some(0)` mean no
     /// limit. With [`vsync`](Self::vsync) the display paces the loop too,
@@ -96,7 +103,8 @@ pub struct Config {
     /// it can and keeps a processor core busy.
     pub frame_rate_limit: Option<u32>,
     /// Whether each frame waits for the display's refresh, so that it does
-    /// not tear (a swap interval of 1).
+    /// not tear (a swap interval of 1), unless the settings file says
+    /// otherwise ([`App::run`]).
     pub vsync: bool,
     /// The size of the image the world is drawn into, in pixels. It is
     /// scaled up into the window by the largest whole factor that fits
@@ -106,8 +114,8 @@ pub struct Config {
     /// whose pack `game.kpak` builds without `dev` read when it is there
     /// ([`App::new`]).
     pub assets: PathBuf,
-    /// The volume of each of the mixer's buses as the game starts: full,
-    /// by default.
+    /// The volume of each of the mixer's buses as the game starts, unless
+    /// the settings file gives them ([`App::run`]): full, by default.
     pub volumes: Volumes,
 }
 
@@ -135,10 +143,15 @@ impl Default for Config {
 /// ([`Volumes::gain`]), so 50 is −12 dB, nearer half as loud than the
 /// −6 dB of half the gain.
 ///
-/// [`App::new`] sets the buses to [`Config::volumes`]. A game changes one
-/// while it runs, from its settings say, with
-/// `audio.set_bus_volume(bus, volumes.gain(bus), fade)`
-/// ([`Audio::set_bus_volume`](nadir_audio::Audio::set_bus_volume)).
+/// It is also a resource. [`App::new`] puts [`Config::volumes`] in it and
+/// sets the buses to it, and [`App::run`] sets both from the settings file
+/// as the game starts. A game changes a bus while it runs, from its
+/// settings menu say, by changing the resource: after each frame,
+/// [`App::update`] moves each bus whose volume it changed to it over
+/// 50 ms, and [`App::run`] writes it to the settings file. A game may also
+/// call `audio.set_bus_volume(bus, volumes.gain(bus), fade)`
+/// ([`Audio::set_bus_volume`](nadir_audio::Audio::set_bus_volume)) itself,
+/// for a fade of its own, which the settings file does not keep.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Volumes {
     /// The music's: [`Bus::Music`].
@@ -220,6 +233,8 @@ struct Actions {
     latch: LatchFn,
     /// The replay that [`App::play_replay`] plays, until it ends.
     replay: Option<Box<dyn PlayReplay>>,
+    /// The bindings the settings file keeps, once the game adds its set.
+    bindings: Option<Box<dyn KeptBindings>>,
 }
 
 impl Actions {
@@ -230,6 +245,7 @@ impl Actions {
             set: None,
             latch: latch_into_nothing(),
             replay: None,
+            bindings: None,
         }
     }
 }
@@ -576,6 +592,10 @@ impl EngineCore {
 ///   virtual image's, from [`Config::virtual_resolution`]
 /// - [`DisplaySettings`](crate::DisplaySettings), fullscreen and vsync, as
 ///   [`Config`] opens the window, which [`App::run`] applies as they change
+/// - [`Volumes`], from [`Config::volumes`], which the buses follow
+///   ([`App::update`]), and [`UiSettings`](crate::UiSettings), the UI scale
+///   and the language, at their defaults: [`App::run`] sets these and
+///   [`DisplaySettings`](crate::DisplaySettings) from the settings file
 /// - [`Quit`](crate::Quit), which ends [`App::run`] once a system asks
 /// - the events [`TriggerEnter`], [`TriggerExit`] and [`AnimationFinished`]
 /// - with the `dev` feature, `FrameAllocs`, what the last frame allocated
@@ -629,6 +649,11 @@ pub struct App {
     /// The game states' enter and exit systems, the loading, and the time
     /// held while paused.
     states: crate::states::States,
+    /// The volumes the buses were last set to, which [`App::update`]
+    /// compares the [`Volumes`] resource with.
+    volumes: Volumes,
+    /// The settings file, which only [`App::run`] reads and writes.
+    settings: Option<SettingsFile>,
 }
 
 impl App {
@@ -652,8 +677,10 @@ impl App {
     /// ([`App::collision_layers`]).
     ///
     /// It makes the mixer, of [`AudioConfig::default`], and sets each bus
-    /// to [`Config::volumes`]. [`AudioListener`], [`AudioEmitter`] and
-    /// [`MusicArea`] are not reflected: a game gives them in code.
+    /// to [`Config::volumes`], which it puts in the [`Volumes`] resource.
+    /// It reads no settings file: [`App::run`] does. [`AudioListener`],
+    /// [`AudioEmitter`] and [`MusicArea`] are not reflected: a game gives
+    /// them in code.
     pub fn new(config: Config) -> Self {
         let on_failure = if cfg!(feature = "dev") {
             OnFailure::Placeholder
@@ -705,6 +732,8 @@ impl App {
             fullscreen: config.fullscreen,
             vsync: config.vsync,
         });
+        world.insert_resource(config.volumes);
+        world.insert_resource(UiSettings::default());
         world.insert_resource(crate::Quit::default());
         world.add_event::<TriggerEnter>();
         world.add_event::<TriggerExit>();
@@ -775,6 +804,7 @@ impl App {
                 crate::level::extract_level,
                 hidden,
             );
+        let volumes = config.volumes;
         Self {
             config,
             world,
@@ -788,6 +818,8 @@ impl App {
             #[cfg(feature = "dev")]
             debug: crate::debug_ui::DebugTools::new(),
             states: crate::states::States::new(),
+            volumes,
+            settings: None,
         }
     }
 
@@ -884,6 +916,7 @@ impl App {
             self.actions.replay.is_none(),
             "a replay is playing: play_replay must come after add_actions"
         );
+        let bindings: Box<dyn KeptBindings> = Box::new(Kept::new(map.clone()));
         self.world.insert_resource(map);
         self.world.insert_resource(ActionState::<A>::new());
         self.actions = Actions {
@@ -894,6 +927,7 @@ impl App {
                 input.latch(&map, &mut state);
             }),
             replay: None,
+            bindings: Some(bindings),
         };
         self
     }
@@ -1055,8 +1089,10 @@ impl App {
     ///   settings folder, by its name: its title, or the explicit ID after
     ///   `##` in `"Title##id"`.
     /// - It is drawn after the game's UI, over it, in the engine's own
-    ///   font, at the window's scale factor rounded to a whole number
-    ///   (until the settings file's UI scale, roadmap M9.3).
+    ///   font, at the player's UI scale
+    ///   ([`UiSettings::scale`](crate::UiSettings::scale)), or, where they
+    ///   chose none, at the window's scale factor rounded to a whole
+    ///   number.
     /// - While the pointer is over a debug window, or a debug widget is held,
     ///   the game's actions do not see the mouse's buttons or the wheel;
     ///   while one of its text fields has the keyboard, they do not see the
@@ -1222,6 +1258,9 @@ impl App {
     /// headless run finishes none: tick systems must not depend on whether
     /// an asset has loaded.
     ///
+    /// After the frame stages, each bus whose volume the [`Volumes`]
+    /// resource changed moves to it over 50 ms.
+    ///
     /// It plays no sound. Its first call drops the mixer, unless
     /// [`App::take_mixer`] took it, and [`Audio`](nadir_audio::Audio) then
     /// does nothing: so tests, benchmarks, headless runs and
@@ -1315,6 +1354,7 @@ impl App {
         }
         // After the frame stages: a transition they queued.
         self.states.end_frame(&mut self.world);
+        self.follow_volumes(VOLUME_FADE_MS);
         #[cfg(feature = "dev")]
         {
             profile_scope!("nadir::debug_ui");
@@ -1340,6 +1380,37 @@ impl App {
     /// it applies the [`DisplaySettings`](crate::DisplaySettings) that
     /// changed: it enters or leaves fullscreen, and turns vsync on or off,
     /// putting back the value that holds where the driver refuses it.
+    ///
+    /// Before the window opens, it reads the settings file,
+    /// `settings.jsonc` in the game's settings folder (on Linux
+    /// `~/.config/<game>`), and applies it: fullscreen and vsync, to the
+    /// window and [`DisplaySettings`](crate::DisplaySettings); the buses'
+    /// volumes, to them and [`Volumes`]; the UI scale and the language, to
+    /// [`UiSettings`](crate::UiSettings); the pads' deadzones, to
+    /// [`Input`]; the log's levels; and the bindings of each action the
+    /// game added ([`App::add_actions`]), by the action's name. What the
+    /// file does not give stays as the game set it before `run`, and the
+    /// log's level is `info`.
+    ///
+    /// - A file that is not there is no settings, quietly. A setting of the
+    ///   wrong type or out of its range, a binding the action's kind does
+    ///   not take, and deadzones that break their rules together keep their
+    ///   defaults, each alone, with a warning.
+    /// - A file that cannot be read keeps every default, with a warning,
+    ///   and is kept as `settings.jsonc.bad` when the settings are next
+    ///   written; one a newer game wrote, of a newer version, is never
+    ///   written over, so the settings changed in the run last for the run.
+    /// - After each frame that changed one of those resources or the
+    ///   action map, and after the one that quits, it writes the whole
+    ///   file again, through a temporary file renamed over it. Members of
+    ///   the file it does not know, an action's bindings that the game does
+    ///   not have, and the log's levels stay as they were; comments do not.
+    ///   A frame that changed nothing allocates nothing for it. A write that
+    ///   fails is a warning, and is tried again at the next change.
+    ///
+    /// Only `run` reads and writes the file: [`App::update`] and
+    /// [`App::offscreen`] leave it alone, so that tests and recordings do
+    /// not see a player's settings.
     ///
     /// The log file is `nadir.log`, in the game's logs folder: on Linux
     /// `~/.local/share/<game>`. Each run starts a new file and keeps the
@@ -1400,8 +1471,14 @@ impl App {
     fn run_window(mut self) -> Result<(), Error> {
         log_file::start(&self.config.studio, &self.config.game);
         crash::tell_of_unseen(&self.config.title);
+        let dirs = nadir_platform::user_dirs(&self.config.studio, &self.config.game);
+        // Before the window opens, which takes its fullscreen and vsync.
+        match &dirs {
+            Ok(dirs) => self.load_settings(dirs.config.join(crate::settings::FILE_NAME)),
+            Err(error) => warn!("the settings are not read, nor kept: {error}"),
+        }
         #[cfg(feature = "dev")]
-        match nadir_platform::user_dirs(&self.config.studio, &self.config.game) {
+        match dirs {
             Ok(dirs) => {
                 self.debug
                     .keep_places_in(dirs.config.join(crate::debug_ui::FILE_NAME));
@@ -1560,6 +1637,7 @@ impl App {
                     // What the window took: a vsync it refused shows as it is.
                     *core.app.world.resource_mut::<crate::DisplaySettings>() = display;
                 }
+                core.app.keep_settings();
                 #[cfg(feature = "dev")]
                 if core.app.debug.quit() {
                     info!("the console's `quit` ends the game");
@@ -1572,6 +1650,8 @@ impl App {
                 precise_sleep(due);
             }
         }
+        // The frame that quit, which the loop left before keeping them.
+        core.borrow_mut().app.keep_settings();
         Ok(())
     }
 
@@ -1661,6 +1741,43 @@ impl Offscreen {
 }
 
 impl App {
+    /// Moves each bus whose volume the [`Volumes`] resource changed, since
+    /// the buses were last set to it, to it over `fade_ms`.
+    fn follow_volumes(&mut self, fade_ms: u32) {
+        let asked = *self.world.resource::<Volumes>();
+        if asked == self.volumes {
+            return;
+        }
+        let audio = self.world.resource::<nadir_audio::Audio>();
+        for bus in Bus::ALL {
+            if asked.get(bus) != self.volumes.get(bus) {
+                audio.set_bus_volume(bus, asked.gain(bus), fade_ms);
+            }
+        }
+        self.volumes = asked;
+    }
+
+    /// Reads the settings file at `path`, applies it, and keeps it, to
+    /// write as the settings change. The buses go to its volumes at once.
+    fn load_settings(&mut self, path: PathBuf) {
+        let file = SettingsFile::load(
+            path,
+            &mut self.config,
+            &self.world,
+            self.actions.bindings.as_deref_mut(),
+        );
+        self.settings = Some(file);
+        self.follow_volumes(0);
+    }
+
+    /// Writes the settings file, if the game has one and a setting changed
+    /// since it was read or last written.
+    fn keep_settings(&mut self) {
+        if let Some(settings) = &mut self.settings {
+            settings.save_if_changed(&self.world, self.actions.bindings.as_deref_mut());
+        }
+    }
+
     /// After a replayed tick: if it was the replay's last, or the next
     /// cannot be read, says so in [`Replay`] and lets the live input latch
     /// from the next tick on.
@@ -2679,6 +2796,52 @@ mod tests {
 
     /// The frames run so far.
     struct FrameCount(u32);
+
+    /// Where a test's settings file is.
+    struct SettingsPath(PathBuf);
+
+    #[test]
+    fn the_loop_writes_the_settings_after_a_frame_that_changes_them_and_the_one_that_quits() {
+        use std::{env, fs, process};
+        let dir = env::temp_dir().join(format!("nadir-engine-loop-settings-{}", process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join(crate::settings::FILE_NAME);
+        // Frame 2 turns the music down; 3 finds it written; 4 changes the
+        // UI scale and quits.
+        let log = shared();
+        let mut app = app()
+            .insert_resource(Rc::clone(&log))
+            .insert_resource(FrameCount(0))
+            .insert_resource(SettingsPath(path.clone()))
+            .add_frame_system(FrameStage::Ui, "settings", |world, _| {
+                let mut count = world.resource_mut::<FrameCount>();
+                count.0 += 1;
+                match count.0 {
+                    2 => world.resource_mut::<Volumes>().music = 30,
+                    3 => {
+                        let path = &world.resource::<SettingsPath>().0;
+                        let text = fs::read_to_string(path).unwrap_or_default();
+                        let seen = &world.resource::<Shared>().seen;
+                        seen.borrow_mut()
+                            .push(format!("{}", text.contains("\"music\": 30")));
+                    }
+                    4 => {
+                        world.resource_mut::<UiSettings>().scale = Some(2.0);
+                        world.resource_mut::<crate::Quit>().request();
+                    }
+                    _ => {}
+                }
+            });
+        app.config.frame_rate_limit = None;
+        app.load_settings(path.clone());
+        let mut window = SettingsWindow::default();
+        app.run_loop(&mut window, None)
+            .expect("no error without a device");
+        assert_eq!(*log.seen.borrow(), ["true"], "written after frame 2");
+        let text = fs::read_to_string(&path).expect("written");
+        assert!(text.contains("\"scale\": 2.0"), "{text}");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_wheel_moves_on_each_tick_without_an_action_set() {
