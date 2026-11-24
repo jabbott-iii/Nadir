@@ -279,12 +279,18 @@ Update the docs in the same pull request when the change affects them:
 
 ## Commits and pull requests
 
-- A commit for a roadmap task starts with its ID and the crates it
-  changes, then what it does, as in
+- Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),
+  as `.claude/rules/commits.md` sets them out: `<type>(<scope>): <summary>`,
+  the summary in the imperative mood and 72 characters or fewer in all.
+  The scope is a crate's folder name (`core`, `render`), `facade` for
+  `crates/engine`, or `cook`, `xtask`, `sandbox`, `bench`, `site`, `docs`,
+  `ci` or `claude`, and is left out when a change spans several. A commit
+  for a roadmap task ends its summary with the task's ID, as in
+  `feat(scene): restore a save over its level (M9.8)`. The body says what
+  changed and why, wrapped at 72 columns.
+- Commits before 2026-11-24 have the older shape, the task's ID and the
+  crates first, as in
   `M8.1 core, sys and platform: Linux gamepads from evdev, with inotify hotplug`.
-  Any other commit
-  starts with the area it changes, as in
-  `bench: qoi_decode_2048 and inflate_10mb`.
 - Keep a pull request to one issue or task. Split unrelated work into
   issues of its own.
 - Do not commit build output (`target/`), captures or other generated
@@ -295,7 +301,10 @@ Update the docs in the same pull request when the change affects them:
 The repository is set up for coding agents: `AGENTS.md` holds the rules
 for any agent, and `CLAUDE.md` and `.claude/` add Claude Code's skills
 (`/next-task`, `/evaluate-dependency`, `/add-ffi-binding`,
-`/record-decision`), path-scoped rules and permission guardrails.
+`/record-decision`, and the others `CLAUDE.md` lists), its rules and
+permission guardrails. Most of the skills and six of the rules come from
+[Doctrina](https://github.com/jabbott-iii/Doctrina), each rule's "Project
+details" filled in with Nadir's values.
 
 - Agents never commit, push or rewrite history: they leave their changes
   uncommitted for a person to review.

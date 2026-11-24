@@ -134,7 +134,10 @@ The **fallback** column is a pre-evaluated crate we would consider if the
   if a path package comes from outside the workspace (vendored code).
 - **`cargo xtask layers`** checks the workspace dependency graph against the
   matrix in `docs/01-architecture.md`.
-- **Path-scoped rule** `.claude/rules/dependencies.md` loads whenever an agent
-  opens a Cargo manifest.
+- **The rule** `.claude/rules/dependencies.md`, from Doctrina, loads in
+  every Claude Code session: it counts anything the project didn't write,
+  CI actions and tools included, as a dependency, and its "Project details"
+  name no allowed publisher, so every package from outside the workspace
+  needs an exception.
 - **Claude Code permissions** ask before `cargo add`, `cargo remove`,
   `cargo update` and `cargo install`.
