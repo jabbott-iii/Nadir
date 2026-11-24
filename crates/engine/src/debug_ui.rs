@@ -204,8 +204,9 @@ enum Command {
 const PREFABS: &str = "prefabs";
 
 /// The components a prefab the inspector saves leaves out: a spawn places
-/// the entity, and gives it its own save number.
-const NOT_IN_PREFABS: [&str; 2] = [Transform::TYPE_NAME, SaveId::TYPE_NAME];
+/// the entity, and gives it its own save number; and a parent is another
+/// entity, which a prefab cannot name.
+const NOT_IN_PREFABS: [&str; 3] = [Transform::TYPE_NAME, SaveId::TYPE_NAME, Parent::TYPE_NAME];
 
 /// The color of the outline around the entity the inspector shows.
 const OUTLINE: Color = Color::rgb(255, 200, 0);

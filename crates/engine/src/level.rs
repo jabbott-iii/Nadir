@@ -31,7 +31,7 @@ use nadir_render::{
     Atlas, Flip, RenderFrame, Texture, Tile, TileLayer, TileLayerDraw, TileLayers, TileSet,
 };
 use nadir_scene::level::{Level, LevelFile};
-use nadir_scene::{PrefabError, PrefabLibrary, TypeRegistry};
+use nadir_scene::{PrefabError, PrefabLibrary, SaveId, TypeRegistry, Value};
 
 use crate::{ClipError, Clips, CollisionLayers, Collisions, Sprite, Transform, loading_context};
 
@@ -48,8 +48,11 @@ struct Loaded {
     name: String,
     background: Color,
     /// Its tall tiles' entities, then its prefabs', in the order they
-    /// spawned.
+    /// spawned, or, after a save is restored, the save's in their place.
     entities: Vec<Entity>,
+    /// Its prefabs' entities' ids, each with its overrides in the level, in
+    /// order of id: what a save of them is restored over.
+    ids: Vec<(u64, Vec<(String, Value)>)>,
     /// Its tile layers, in [`TileLayers`], drawn in this order.
     layers: Vec<TileLayerDraw>,
     /// The atlases whose clips it holds in [`Clips`], by their pages.
@@ -88,7 +91,10 @@ impl CurrentLevel {
     }
 
     /// The entities the level spawned, its tall tiles' then its prefabs',
-    /// which the next load despawns. Empty if none is loaded.
+    /// which the next load despawns. Empty if none is loaded. A save
+    /// restored over the level ([`Saves`](crate::Saves)) puts its entities
+    /// of the level's ids in place of those of its prefabs, after the tall
+    /// tiles', in the save's order.
     pub fn entities(&self) -> &[Entity] {
         self.level
             .as_ref()
@@ -101,6 +107,14 @@ impl CurrentLevel {
         self.level
             .as_ref()
             .map_or(&[], |level| level.layers.as_slice())
+    }
+
+    /// The overrides the level gives its entity of the id `id`, if it has
+    /// one of that id.
+    pub(crate) fn overrides_of(&self, id: u64) -> Option<&[(String, Value)]> {
+        let ids = &self.level.as_ref()?.ids;
+        let at = ids.binary_search_by_key(&id, |(known, _)| *known).ok()?;
+        Some(ids[at].1.as_slice())
     }
 
     /// The path of the level's file, if one is loaded.
@@ -214,7 +228,7 @@ impl std::error::Error for LevelError {
 
 /// The path of the level file of the level `name`, if it is a level's
 /// name.
-fn level_path(name: &str) -> Option<String> {
+pub(crate) fn level_path(name: &str) -> Option<String> {
     let named = !name.is_empty()
         && name
             .bytes()
@@ -236,7 +250,9 @@ fn level_path(name: &str) -> Option<String> {
 ///    ([`Clips::add_atlas`]).
 /// 4. Its tall tiles spawn as sprites (`TileSet::block_uv`), each with its
 ///    feet at its place, then its entities spawn through their prefabs, each
-///    with its [`Transform`] at its place in the level.
+///    with its [`Transform`] at its place in the level and its
+///    [`SaveId`], the id the cook gave it, from 2^62 up, which stays the
+///    same from one run to the next, so that saves find it again.
 /// 5. Its tile layers go into [`TileLayers`], and the engine draws them
 ///    each frame, in their order, in front of the clear color, which is the
 ///    level's background. Its grid replaces the [`Collisions`]' grid, on
@@ -270,6 +286,7 @@ pub fn load_level(world: &mut World, name: &str) -> Result<(), LevelError> {
         name: name.to_string(),
         background: Color::BLACK,
         entities: Vec::new(),
+        ids: Vec::new(),
         layers: Vec::new(),
         atlases: Vec::new(),
         grid: false,
@@ -373,6 +390,7 @@ pub(crate) fn reload_level(world: &mut World) -> Result<bool, LevelError> {
         name: old.name.clone(),
         background: Color::BLACK,
         entities: Vec::new(),
+        ids: Vec::new(),
         layers: Vec::new(),
         atlases: Vec::new(),
         grid: false,
@@ -420,6 +438,27 @@ pub(crate) fn reload_level(world: &mut World) -> Result<bool, LevelError> {
     );
     world.resource_mut::<CurrentLevel>().level = Some(made);
     Ok(true)
+}
+
+/// After a save is restored over the level `world` holds, if any: its
+/// entities that the restore despawned leave its list, and the restored
+/// entities of its ids, `restored` (each with its id, in the save's order),
+/// join it, so that the next load despawns them.
+pub(crate) fn adopt_restored(world: &World, restored: &[(u64, Entity)]) {
+    let mut current = world.resource_mut::<CurrentLevel>();
+    let Some(level) = &mut current.level else {
+        return;
+    };
+    level.entities.retain(|&entity| world.is_alive(entity));
+    for &(id, entity) in restored {
+        if level
+            .ids
+            .binary_search_by_key(&id, |(known, _)| *known)
+            .is_ok()
+        {
+            level.entities.push(entity);
+        }
+    }
 }
 
 /// Removes what `level` made, and unloads [`Scope::Level`].
@@ -622,7 +661,9 @@ fn make(world: &mut World, path: &str, made: &mut Loaded) -> Result<(), LevelErr
     world.apply_commands();
     {
         let mut transforms = world.write::<Transform>();
-        for &(entity, position) in &spawned {
+        let mut ids = world.write::<SaveId>();
+        // `spawn_level` spawns the file's entities in its order.
+        for (&(entity, position), entry) in spawned.iter().zip(&file.entities) {
             let at = point([position.x, position.y]);
             match transforms.get_mut(entity) {
                 Some(transform) => transform.position = at,
@@ -630,8 +671,12 @@ fn make(world: &mut World, path: &str, made: &mut Loaded) -> Result<(), LevelErr
                     transforms.insert(entity, Transform::at(at));
                 }
             }
+            ids.insert(entity, SaveId(entry.id));
             made.entities.push(entity);
+            made.ids.push((entry.id, entry.overrides.clone()));
         }
+        // The reader checked that no two are one.
+        made.ids.sort_unstable_by_key(|(id, _)| *id);
     }
 
     // Its tile layers.
@@ -767,7 +812,7 @@ pub(crate) mod tests {
     /// The level `meadow`: a layer of 4 × 3 cells, its first tile animated
     /// and its second mirrored; a grid; a tall tile; two stones, the second
     /// with its collider's offset overridden.
-    const MEADOW: &str = r#"{ "version": 1, "size": [64, 48], "background": [10, 20, 30],
+    const MEADOW: &str = r#"{ "version": 2, "size": [64, 48], "background": [10, 20, 30],
         "assets": ["atlas/tiles.kbj"],
         "tilesets": [ { "atlas": "atlas/tiles.kbj", "sprite": "tiles/ground", "columns": 2, "rows": 1,
                         "animations": [ { "tile": 0, "frames": 2, "ms": 200 } ] } ],
@@ -776,19 +821,19 @@ pub(crate) mod tests {
         "grid": { "size": [4, 3], "cell": 16, "origin": [0, 0], "layer": "World",
                   "solid": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] },
         "tall": [ { "tileset": 0, "tile": 1, "size": [1, 1], "feet": [24, 32], "layer": 1 } ],
-        "entities": [ { "prefab": "stone", "position": [40, 16], "overrides": {} },
-                      { "prefab": "stone", "position": [8, 40],
+        "entities": [ { "id": 4611686018427387905, "prefab": "stone", "position": [40, 16], "overrides": {} },
+                      { "id": 4611686018427387906, "prefab": "stone", "position": [8, 40],
                         "overrides": { "Collider": { "offset": [0, -4] } } } ] }"#;
 
     /// The level `pond`: nothing but its size and background.
-    const POND: &str = r#"{ "version": 1, "size": [16, 16], "background": [1, 2, 3], "assets": [],
+    const POND: &str = r#"{ "version": 2, "size": [16, 16], "background": [1, 2, 3], "assets": [],
         "tilesets": [], "layers": [], "tall": [], "entities": [] }"#;
 
     /// The level `haunted`, of a ghost whose prefab has a component no one
     /// registered.
-    const HAUNTED: &str = r#"{ "version": 1, "size": [16, 16], "background": [1, 2, 3], "assets": [],
+    const HAUNTED: &str = r#"{ "version": 2, "size": [16, 16], "background": [1, 2, 3], "assets": [],
         "tilesets": [], "layers": [], "tall": [],
-        "entities": [ { "prefab": "ghost", "position": [0, 0], "overrides": {} } ] }"#;
+        "entities": [ { "id": 4611686018427387905, "prefab": "ghost", "position": [0, 0], "overrides": {} } ] }"#;
 
     fn kbj(text: &str) -> Vec<u8> {
         let value = json::parse(text, Limits::default()).expect("the test's JSON");

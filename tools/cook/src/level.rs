@@ -16,8 +16,9 @@
 //! ADR-0038's conventions (`docs/subsystems/assets-and-codecs.md`, "LDtk
 //! levels"): the tile sets its levels draw, checked against their images
 //! and read for their animated and tall tiles; then each level's tile
-//! layers, its `Collision` grid, its tall tiles and its entities, written
-//! as KBJ and read back as the game reads it.
+//! layers, its `Collision` grid, its tall tiles and its entities, each with
+//! an id made of its LDtk instance id ([`entity_id`]), written as KBJ and
+//! read back as the game reads it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -26,6 +27,7 @@ use nadir_assets::AssetPath;
 use nadir_codec::json::{self, Value};
 use nadir_codec::ldtk::{FieldInstance, LayerInstance, LayerKind, Level, TilesetDef};
 use nadir_codec::{Limits, kbj, level, prefab};
+use nadir_core::hash::fnv1a64;
 
 use crate::CookError;
 
@@ -43,6 +45,19 @@ const FLIP: i64 = 65536;
 /// that a small crafted project, of many large layers each with a tile,
 /// cannot make the cook hold more than some 300 MiB of them.
 pub(crate) const MAX_CELLS: u64 = 1 << 23;
+
+/// The id in the level file of the entity whose LDtk instance id is `iid`:
+/// [`level::MIN_ID`] plus the low 62 bits of the 64-bit FNV-1a hash of its
+/// bytes, so from 2^62 to 2^63 − 1 (ADR-0078). LDtk gives each entity an
+/// iid when it is placed, and keeps it as the entity is moved or edited,
+/// so the id stays the same from one cook to the next, and the game's
+/// saves find the entity again by it.
+///
+/// Never change how it is made: every save of a level's entities holds
+/// these ids, and a load would no longer find them.
+pub(crate) fn entity_id(iid: &str) -> u64 {
+    level::MIN_ID | (fnv1a64(iid.as_bytes()) & (level::MIN_ID - 1))
+}
 
 /// An error at `at` in the file `path` (as found): `at` a member path, or
 /// empty for the file as a whole.
@@ -391,8 +406,9 @@ pub(crate) struct Cooked {
 /// alpha below 1, two tiles in one cell, a tile off its layer's grid or of
 /// another size, a flipped tall tile, an offset or a second `Collision`
 /// layer or one that is not an IntGrid, an entity whose prefab is not
-/// there, and a field that overrides nothing or that version 1 cannot
-/// write. [`CookError::Encode`] if the level file cannot be written as KBJ,
+/// there, two entities of a level whose ids are one (of one iid, or, by
+/// chance, of two iids that hash alike), and a field that overrides
+/// nothing or that the level file cannot write. [`CookError::Encode`] if the level file cannot be written as KBJ,
 /// or the game's reader refuses it.
 pub(crate) fn cook(
     levels: &[LevelSource],
@@ -462,6 +478,8 @@ fn one(
     let mut grid = None;
     let mut tall = Vec::new();
     let mut entities = Vec::new();
+    // Each entity's id, and where the entity that has it is, and its iid.
+    let mut ids: BTreeMap<u64, (String, &str)> = BTreeMap::new();
     let empty = Vec::new();
     let instances = level.layers.as_ref().unwrap_or(&empty);
     // What the grid and the drawn layers' cells will hold, before any is
@@ -524,11 +542,31 @@ fn one(
                     ),
                 ));
             }
+            let id = entity_id(&entity.iid);
+            if let Some((other, other_iid)) = ids.get(&id) {
+                let reason = if *other_iid == entity.iid {
+                    format!(
+                        "the entity `{}` has the iid {:?} of the entity at `{other}` too: each \
+                         entity of a level needs its own, which the game saves it by",
+                        entity.identifier, entity.iid
+                    )
+                } else {
+                    format!(
+                        "the entity `{}`, of iid {:?}, would have the id {id} of the entity at \
+                         `{other}`, of iid {other_iid:?}: give one of them another iid",
+                        entity.identifier, entity.iid
+                    )
+                };
+                return Err(fault(found, &format!("{at}.iid"), reason));
+            }
+            ids.insert(id, (at.clone(), entity.iid.as_str()));
             let position = pair(
                 i64::from(entity.px[0]) + i64::from(layer.offset[0]),
                 i64::from(entity.px[1]) + i64::from(layer.offset[1]),
             );
+            let id = i64::try_from(id).expect("an entity's id is below 2^63");
             entities.push(object(vec![
+                ("id", int(id)),
                 ("prefab", Value::String(name)),
                 ("position", position),
                 ("overrides", overrides(found, &at, &entity.fields)?),
@@ -822,7 +860,7 @@ fn overrides(found: &str, at: &str, fields: &[FieldInstance]) -> Result<Value, C
                 found,
                 &format!("{at}.__type"),
                 format!(
-                    "a field of type `{}` cannot override a component in version 1: use an Int, Float, Bool, String, Multilines, FilePath or enum field",
+                    "a field of type `{}` cannot override a component in a level file: use an Int, Float, Bool, String, Multilines, FilePath or enum field",
                     field.kind
                 ),
             ));
@@ -875,6 +913,20 @@ fn overrides(found: &str, at: &str, fields: &[FieldInstance]) -> Result<Value, C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_entity_s_id_is_of_its_iid_and_in_the_range_levels_have() {
+        // An iid as LDtk writes one, the tests' own, and none at all.
+        for iid in ["8d2c79e0-c210-11ee-8c9b-6d3d4b1e3d0f", "tree-iid", ""] {
+            let id = entity_id(iid);
+            assert!(
+                (level::MIN_ID..=i64::MAX as u64).contains(&id),
+                "{iid}: {id}"
+            );
+            assert_eq!(id, entity_id(iid), "the same each time");
+        }
+        assert_ne!(entity_id("tree-iid"), entity_id("rock-iid"));
+    }
 
     #[test]
     fn identifiers_are_named_in_snake_case() {

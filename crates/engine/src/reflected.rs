@@ -43,14 +43,14 @@
 use nadir_assets::{AssetServer, FinalizeCtx, Handle, Scope};
 use nadir_collision::{ColliderKind, LayerMask, Shape};
 use nadir_core::{Color, Vec2};
-use nadir_ecs::World;
+use nadir_ecs::{Entity, World};
 use nadir_render::{Atlas, Flip, SortMode, Texture};
 use nadir_scene::{
     FieldInfo, FromValue, Reflect, ReflectContext, ReflectError, ReflectErrorKind, ReflectKind,
     Value,
 };
 
-use crate::{Animator, Clips, Collider, Sprite};
+use crate::{Animator, Clips, Collider, Parent, Sprite};
 
 /// The names of the game's collision layers: the layer of bit `n` of a
 /// [`LayerMask`] is named by the `n`-th, so that prefabs and levels write
@@ -656,6 +656,69 @@ impl FromValue for Collider {
         let mut collider = Collider::solid(shape);
         collider.apply_members(members, false, cx)?;
         Ok(collider)
+    }
+}
+
+/// A [`Parent`] is `{"entity": <the parent's save id>, "offset": [x, y]}`:
+/// its entity as an [`Entity`] is written, through the context's
+/// [`SaveIdMap`](nadir_scene::SaveIdMap), so that only a save, which has
+/// one, can write or read it, and a prefab or a level cannot give one. An
+/// offset left out is none.
+impl Reflect for Parent {
+    opaque!("Parent");
+
+    fn to_value(&self, cx: &mut ReflectContext<'_>) -> Value {
+        Value::Object(vec![
+            pair("entity", cx.field("entity", |cx| self.entity.to_value(cx))),
+            pair("offset", self.offset.to_value(cx)),
+        ])
+    }
+
+    fn apply_value(
+        &mut self,
+        value: &Value,
+        cx: &mut ReflectContext<'_>,
+    ) -> Result<(), ReflectError> {
+        let members = object(value, cx, "an object of a parent's fields")?;
+        self.apply_members(members, cx)
+    }
+}
+
+impl Parent {
+    /// Applies the members of a parent's value.
+    fn apply_members(
+        &mut self,
+        members: &[(String, Value)],
+        cx: &mut ReflectContext<'_>,
+    ) -> Result<(), ReflectError> {
+        for (key, member) in members {
+            match key.as_str() {
+                "entity" => {
+                    self.entity = cx.field("entity", |cx| Entity::from_value(member, cx))?
+                }
+                "offset" => self.offset = cx.field("offset", |cx| Vec2::from_value(member, cx))?,
+                _ => cx.unknown_field("Parent", key),
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FromValue for Parent {
+    const TYPE_NAME: &'static str = "Parent";
+
+    /// The parent the value's `entity` names, which it needs, at its
+    /// `offset`, or at none.
+    fn from_value(value: &Value, cx: &mut ReflectContext<'_>) -> Result<Self, ReflectError> {
+        let members = object(value, cx, "an object of a parent's fields")?;
+        let entity = member(members, "entity")
+            .ok_or_else(|| cx.error(ReflectErrorKind::MissingField { field: "entity" }))?;
+        let mut parent = Parent {
+            entity: cx.field("entity", |cx| Entity::from_value(entity, cx))?,
+            offset: Vec2::ZERO,
+        };
+        parent.apply_members(members, cx)?;
+        Ok(parent)
     }
 }
 

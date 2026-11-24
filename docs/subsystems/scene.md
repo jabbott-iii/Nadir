@@ -156,7 +156,10 @@ pub trait FromValue: Reflect + Sized {
       transient, and a read one starts its clip (ADR-0024). A clip with no
       name is written as `null`, with a warning, and for a hash as its
       handle's index and generation;
-  - not yet: `Parent`, whose `Entity` saves can write since M9.4: M9.7's;
+  - `Parent`, by hand, as `{"entity": <save id>, "offset": [x, y]}`
+    (M9.8, ADR-0078): its entity is read and written only through a
+    context's save ids, so only a save can give one, never a prefab or a
+    level;
   - never in data: `PrevTransform`, which the engine gives every drawn
     entity.
 
@@ -355,10 +358,44 @@ As built in M9.4 (ADR-0068; `crates/scene/src/save.rs`, the bytes in
   runs those from the file's version on. Version 1's fixture,
   `crates/scene/tests/saves/v1.ksav`, is written by `make_fixture.py`
   beside it and never again.
-- **Not yet** (M9.7, the facade): a `SaveIds` in every `App`, a slot in
-  the user data folder, the engine's components marked saved or not,
-  `Parent` reflected, and ids for a level's entities that do not change
-  between runs.
+
+As built in M9.8 (ADR-0078), the facade saves a game with these, and
+nadir-scene's functions are unchanged:
+
+- **Ids:** every `App` has a `SaveIds`, which gives out ids from 1 up. A
+  level's entities have the ids the cook made of their LDtk instance ids,
+  from 2^62 to 2^63 − 1 (the level file's version 2,
+  `docs/subsystems/assets-and-codecs.md`), which `load_level` gives as
+  their `SaveId`s: the same from one run, and one cook, to the next, and
+  never one the counter gives out.
+- **What is saved:** of the engine's components, `Transform`, `Player`,
+  `Facing` and `Parent`; `Velocity`, `Sprite`, `Collider` and `Animator`
+  are rebuilt by the game or given by the prefab. A game marks its own
+  with `App::register_saved_component` and `App::register_saved_resource`.
+- **Slots:** the resource `Saves` keeps each slot, named by 1 to 64
+  lowercase ASCII letters, digits, `_` and `-`, as `<slot>.ksav` in its
+  folder, which `App::run` makes `saves` in the game's data folder (on
+  Linux `~/.local/share/<game>/saves`) unless the game set one.
+  `Saves::save(slot)` and `Saves::load(slot)` ask; the engine makes the
+  last asked for after the tick, or the frame stages, that asked, before
+  the transition they queued, and neither while a level is loading.
+- **A save** checks that each saved entity's `Parent` has a `SaveId`,
+  names the level the world holds in the saved resource `SavedLevel`,
+  then `capture`s the world and `write_file`s it, with `Config::version`
+  as the game's version.
+- **A load** `read_file`s the slot, then goes to `Loading` of its level.
+  The level loads as any does, the game enters `InGame`, and its enter
+  systems run (`Saves::loading` tells them a load is coming). Then the
+  save is restored over the world: each saved entity of one of the
+  level's ids is made of its prefab, then the level's overrides of it,
+  then its saved components, so that a level's override of an unsaved
+  component survives; a level's entity the save lacks stays gone. The
+  restored entities of the level's ids replace the old ones in
+  `CurrentLevel`, so the next level's load despawns them. A save of no
+  level is restored at once, between ticks.
+- **The outcome** is a `SaveEvent` (`Saved`, `Loaded` with `from_backup`,
+  `SaveFailed`, `LoadFailed` with `missing`), which the engine's
+  `nadir::saves` sends in the next tick, to its readers and the frame's.
 
 ## Game states
 

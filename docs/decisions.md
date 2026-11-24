@@ -2877,7 +2877,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0038 — M5.6 split into four tasks; LDtk 1.5.3 and its conventions; the level file `.klvl` (version 1) and the prefab file; how prefabs, reflection and `load_level` behave
 
-- **Status:** Accepted; as built in M5.11, a handle the asset server does not know, and an `Animator`'s clip with no name, are written as `null` with a warning, since `to_value` cannot fail (ADR-0020), and reading them back is an error; for a hash, a nameless clip is written as its handle; as built in M5.12, the cook's `Counts` is `#[non_exhaustive]`, with `Levels { levels, entities }` (a break), a project's job is `ldtk/<its path>`, without `.ldtk`, only the tile sets of the layers it draws are read, a layer whose tiles are all tall is no tile layer, an entity's field with no value is left out and its overrides are in name order, a level's own fields are not cooked, with a warning, a level's tile layers and grid hold at most 2^23 cells together, and the data job reads each prefab of `data/prefabs/` with `prefab::read` and checks its name; as built in M5.6, `load_level` is `App::load_level`, and `nadir::load_level` on a world, with `unload_level`, the resource `CurrentLevel` and an error of its own, `LevelError`, so the facade's `Error` is unchanged; `Clips` knows an atlas by its pages and holds one added twice once more, until each lets go (`Clips::release_atlas`); a level puts back the clear color it replaced when it goes, and its prefabs stay in the `PrefabLibrary`; the engine's `nadir::extract_level` draws the level's tile layers; the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` (ADR-0033, ADR-0036); and the sandbox names its collision layers, so the field's world hash changed once more, colliders now written with their layers' names (`8587378f99a52c1a` → `298521738b5650ef` over the capture, its frames the same); that the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` is superseded by ADR-0041: they carry the pack, `assets/game.kpak`, alone
+- **Status:** Accepted; as built in M5.11, a handle the asset server does not know, and an `Animator`'s clip with no name, are written as `null` with a warning, since `to_value` cannot fail (ADR-0020), and reading them back is an error; for a hash, a nameless clip is written as its handle; as built in M5.12, the cook's `Counts` is `#[non_exhaustive]`, with `Levels { levels, entities }` (a break), a project's job is `ldtk/<its path>`, without `.ldtk`, only the tile sets of the layers it draws are read, a layer whose tiles are all tall is no tile layer, an entity's field with no value is left out and its overrides are in name order, a level's own fields are not cooked, with a warning, a level's tile layers and grid hold at most 2^23 cells together, and the data job reads each prefab of `data/prefabs/` with `prefab::read` and checks its name; as built in M5.6, `load_level` is `App::load_level`, and `nadir::load_level` on a world, with `unload_level`, the resource `CurrentLevel` and an error of its own, `LevelError`, so the facade's `Error` is unchanged; `Clips` knows an atlas by its pages and holds one added twice once more, until each lets go (`Clips::release_atlas`); a level puts back the clear color it replaced when it goes, and its prefabs stay in the `PrefabLibrary`; the engine's `nadir::extract_level` draws the level's tile layers; the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` (ADR-0033, ADR-0036); and the sandbox names its collision layers, so the field's world hash changed once more, colliders now written with their layers' names (`8587378f99a52c1a` → `298521738b5650ef` over the capture, its frames the same); that the download, the release archives and the sandbox's `.deb` carry `data/` and `levels/` beside `atlas/` is superseded by ADR-0041: they carry the pack, `assets/game.kpak`, alone; the level file's version 1 is superseded by ADR-0078's version 2, which gives each entity an id made of its LDtk iid
 - **Date:** 2026-11-01
 - **Context:**
   - Roadmap task M5.6 ("cook: LDtk importer; scene: prefabs and level
@@ -7625,3 +7625,169 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   game localizes its text (then `language` drives it); a game's menus need
   the free UI scale (then they read `UiSettings`); or players lose comments
   they wrote and ask for them (then a writer that keeps JSONC comments).
+
+## ADR-0078 — M9.8: the facade's saves, split from M9.7: `Saves` slots in the data folder, made between ticks; a load through its level's loading, restored after the game enters `InGame`; the level file's version 2, each entity with an id made of its LDtk iid; `Parent` reflected and saved
+
+- **Status:** Accepted: the user chose four points on 2026-11-24: M9.7
+  split in two, the facade's saves first (this task, M9.8) and the
+  level's content after (M9.7); a level's entities saved by ids made of
+  their LDtk instance ids (iids), a change to the level file's format;
+  the content's design for M9.7, which is not built here (gems that open
+  a gate in the south, whose crossing wins, and enemies whose catch
+  sends the person back to the last save point); and the determinism
+  test's hashes blessed again for `Parent`'s registration. The user
+  accepted the rest, the agent's design, as written the same day.
+- **Date:** 2026-11-24
+- **Context:**
+  - M9.7 asked for one complete level: LDtk and Aseprite content,
+    enemies, pickups, music, a save point and a win condition. M9.4's note
+    on it (ADR-0068) left the facade's part of saves to it: a `SaveIds` in
+    every `App`, a slot in the user data folder written with `write_file`
+    and read with `read_file`, telling the player of a backup read, a load
+    after its level (`PrefabLibrary::load_save`, then `restore`), the
+    engine's components marked saved or not, `Parent` reflected by hand,
+    and ids for a level's entities that do not change between runs. Done
+    as one task, it touched the facade, nadir-codec, the cook and the
+    sandbox, past the three crates `CLAUDE.md` allows a task.
+  - A level's entities had no id of their own: the level file's
+    `EntityEntry` held a prefab, a position and overrides. LDtk gives each
+    entity instance an iid, a UUID string, when it is placed, and keeps it
+    as the entity is moved or edited; nadir-codec's LDtk reader reads it
+    already.
+  - `SaveIds` gives out ids from 1 up. A level's ids must never meet them.
+  - Events sent between ticks reach no tick reader: a tick clears the
+    tick's buffer as it starts (`docs/subsystems/ecs.md`).
+  - `restore` makes an entity of its prefab and its saved components
+    alone: a level's override of an unsaved component (a collider's
+    offset, say) would be lost on a load.
+  - `Parent` holds an `Entity`, which saves write as its entity's
+    `SaveId` since M9.4; one whose entity has none is written as `null`,
+    with a warning, and cannot be read back.
+- **Decision:**
+  - **The split:** M9.8, "facade and cook: saves in the game", is this
+    task, before M9.7 in the roadmap; M9.7 depends on it and keeps the
+    content, with the user's design in its notes.
+  - **The level file, version 2** (`crates/codec/src/level.rs`;
+    `docs/subsystems/assets-and-codecs.md`, "Level file"): each entity
+    has an `id`, a whole number from `level::MIN_ID`, 2^62, to 2^63 − 1,
+    that no entity before it in the level has (`ErrorKind::DuplicateId`).
+    Version 1 is not supported, as any other version: the cook makes the
+    files, and its cache knows its own build (its `cooker` holds a hash of
+    its executable), so a new cook makes every level again. The fuzz
+    target checks the range and that no two ids are one; its four seeds
+    are version 2, `field.klvl` the field as the cook makes it now.
+  - **The cook:** an entity's id is `MIN_ID | (fnv1a64(iid) & (MIN_ID −
+    1))`: 2^62 plus the low 62 bits of the 64-bit FNV-1a hash of its iid's
+    bytes. Two entities of a level with one id are refused, naming both:
+    one iid twice (a hand edit), or two iids that hash alike, which a
+    level of n entities meets with a chance of about n² / 2^63. The cook's
+    test holds two ids as written numbers, so that a change to how they
+    are made, which would lose every save of a level's entities, fails
+    there.
+  - **The facade's level:** `load_level` gives each entity of a level its
+    `SaveId` from the file, and `CurrentLevel` keeps each id's overrides.
+  - **`Saves`**, a resource of every `App`: slots named by 1 to 64
+    lowercase ASCII letters, digits, `_` and `-`, each a file
+    `<slot>.ksav` in `Saves::folder`, which `App::run` makes `saves` in
+    the game's data folder unless the game set one (`set_folder`); `path`,
+    `exists`, `save`, `load` and `loading`. A save or load asked for is
+    made after the tick, or the frame stages, that asked, before the
+    transition they queued, and the last asked for wins. Neither is made
+    while the game is loading a level.
+    - **A save** fails if a saved entity's `Parent` has no `SaveId`; it
+      sets the resource `SavedLevel` to the `CurrentLevel`'s name, empty
+      for none, then `capture`s the world, makes the folder, and
+      `write_file`s it with `Config::version`, new, the game's version.
+    - **A load** `read_file`s the slot, then, for a save of a level, goes
+      to `GameState::Loading` of it. Once the game enters `InGame` from
+      that loading, after its enter systems, which `Saves::loading` tells
+      of a load to come, it prepends the level's overrides of each saved
+      entity of the level's ids to its saved components, loads the save's
+      prefabs, and `restore`s it, in `Scope::Level` (`Scope::Global` with
+      no level). `CurrentLevel` drops its entities the restore despawned
+      and adopts the restored ones of its ids, so that the next load
+      takes them away. A game that leaves the loading for another state
+      first gets a failed load. A save of no level is restored at once.
+    - **Its outcome** is a `SaveEvent` (`Saved`, `Loaded` with
+      `from_backup`, `SaveFailed`, `LoadFailed` with `missing`), held
+      until the next tick, where the engine's `nadir::saves`, after
+      `nadir::snapshot` in the tick's `Input` stage, sends it to the
+      tick's readers and the frame's.
+  - **What is saved:** `Transform`, `Player`, `Facing` and `Parent` are
+    registered with `register_saved_component`; `Velocity`, `Sprite`,
+    `Collider`, `Animator` and `SaveId` are not (a `SaveId` is the
+    entity's id in the save). `App::register_saved_component` and
+    `App::register_saved_resource` are new, for a game's own types.
+  - **`Parent`** is reflected by hand in `reflected.rs`, as
+    `{"entity": <save id>, "offset": [x, y]}`, the offset optional; only a
+    context with save ids reads or writes its entity, so a prefab or a
+    level cannot give one. The inspector's "Save as prefab" leaves it
+    out with `Transform` and `SaveId`.
+  - nadir-scene's `restore` and `capture` are unchanged: ADR-0068's
+    revisit trigger ("M9.7 finds the facade needs `restore` to change")
+    did not fire.
+- **Consequences:**
+  - A level's entity is saved by the same id from one cook to the next,
+    as long as it keeps its iid in LDtk: one deleted and placed again is
+    another entity, and a save of the old one restores nothing of it.
+  - Registering `Parent` changes every world hash, which includes each
+    registered type's name even with no components: the determinism
+    test's `hashes.txt` was blessed again, with the user's agreement. Its
+    replay was the same, byte for byte; each of the 7,212 hashes by type
+    of the 12 types before (601 ticks) was the same; every whole hash of
+    the 601 changed, and the new `Parent` column is one value throughout.
+  - `Config` gains `version`: a game that writes `Config` out whole, field
+    by field, not with `..Config::default()`, must add it.
+  - A load gives the saved entities new `Entity`s. A game that holds one
+    across a load (the sandbox's `Field::spawned` list) holds a dead one;
+    it holds the `SaveId` instead, or finds the entity again by a
+    component, or despawns its saved entities by their `SaveId` when it
+    clears. A game entity restored without a prefab gets its saved
+    components alone: the sandbox's person needs a prefab for its sprite,
+    collider and animator to come back (M9.7).
+  - A save is made on the main thread, and `write_file` waits for the
+    disk to flush the file (`sync_all`); not yet measured.
+  - A load of a save whose level no longer exists fails as any failed
+    level does: `App::run` ends with `Error::Level`, after the dialog.
+  - A game component that holds an `Entity` meets `Parent`'s problem: an
+    entity without a `SaveId` is written as `null`, and the save does not
+    load. Only `Parent` is checked before a save.
+- **Alternatives considered:**
+  - All of M9.7 in one task: four crates and the content in one diff (the
+    user chose the split).
+  - Ids by the order a level lists its entities: no format change, but a
+    level edited between a save and its load gives the save's values to
+    other entities (the user chose the iids).
+  - The iid's UUID parsed for its 128 bits: an LDtk iid is not promised to
+    be a UUID, and the level file would need two numbers or a string per
+    entity. A hash of the iid's bytes takes any string.
+  - Level ids from 1, beside the counter's: the two would meet. A range
+    from 2^62 keeps every id below 2^63, so it is written as an integer,
+    not the string a larger one needs (ADR-0020).
+  - Sending `SaveEvent` at once, between ticks: tick readers, such as
+    the menus (ADR-0076), would never see it. A result the game polls
+    (`take_finished`) has one reader and no frame of its own.
+  - Restoring before the game's enter systems of `InGame`: a game would
+    have to tell a load from a new game in every enter system to keep from
+    spawning twice. After them, a game's new-game spawns are replaced, and
+    `Saves::loading` is there for one that wants to know.
+  - Restoring a load in place, without the level's loading: what the save
+    does not hold (an enemy's place, an unsaved component) would stay as
+    the game left it, not as the level starts.
+  - The level's overrides in nadir-scene's `restore`: a change to its
+    contract, and the save's entities do not know the level; prepending
+    them to the saved components in the facade gives the same layers, in
+    the same order, prefab first.
+  - The save's level in the payload, beside `next_id`: a change to the
+    KSAV format (version 2, with a migration). A saved resource,
+    `SavedLevel`, uses the globals version 1 already has.
+  - A save on a thread of its own: a background write and its result to
+    join, for a write not yet measured.
+- **Revisit when:** a save's write shows as a frame spike in a profile
+  (then the write moves to a thread); a game holds entities across loads
+  in more places than a list (then the facade hands out the old entity
+  for each new one); a game's own component holds an `Entity` and a save
+  of it fails to load (then the check covers every reflected `Entity`); a
+  level's entity placed again is expected to keep its save (then ids
+  from a field the designer sets); or a game wants more than one level in
+  a save (then the save holds each level's entities, by level).

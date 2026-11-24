@@ -1553,6 +1553,7 @@ mod tests {
             printed,
             [
                 "tick  Input: nadir::snapshot",
+                "tick  Input: nadir::saves",
                 "tick  Gameplay: move_player (conditional)",
                 "tick  Gameplay: nav_grid (conditional)",
                 "tick  Gameplay: guards (conditional)",

@@ -212,6 +212,7 @@ fn each_type() -> Vec<TypeRegistry> {
         alone::<Sprite>(),
         alone::<Collider>(),
         alone::<Animator>(),
+        alone::<Parent>(),
         alone::<Score>(),
         alone::<Dashing>(),
         alone::<Walker>(),

@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The level file, `levels/<name>.klvl`, version 1: a level's tile layers,
+//! The level file, `levels/<name>.klvl`, version 2: a level's tile layers,
 //! its collision grid, its tall tiles and its entities, which the cook
 //! makes of an LDtk level (`docs/subsystems/assets-and-codecs.md`, "Level
 //! file"; ADR-0038). The cook writes it; the game reads it with [`parse`].
+//! Version 2 gave each entity an id (ADR-0078), which the game saves it
+//! by.
 //!
 //! ```text
-//! { "version": 1,
+//! { "version": 2,
 //!   "size": [1024, 768],
 //!   "background": [64, 70, 91],
 //!   "assets": ["atlas/sprites.kbj"],
@@ -31,13 +33,15 @@
 //!   "grid": { "size": [64, 48], "cell": 16, "origin": [0, 0], "layer": "World",
 //!             "solid": [1, 1, 1, …] },
 //!   "tall": [ { "tileset": 0, "tile": 4, "size": [1, 2], "feet": [104, 336], "layer": 1 } ],
-//!   "entities": [ { "prefab": "tree", "position": [392, 112], "overrides": {} } ] }
+//!   "entities": [ { "id": 5794571398270011493, "prefab": "tree", "position": [392, 112],
+//!                   "overrides": {} } ] }
 //! ```
 //!
 //! It is KBJ, read with the KBJ decoder and its limits, then checked:
 //!
-//! - **The version first:** any whole number other than 1 is not
-//!   supported, whatever else the file holds.
+//! - **The version first:** any whole number other than 2 is not
+//!   supported, whatever else the file holds. Version 1, whose entities had
+//!   no ids, is not read either: cook the level again.
 //! - **Members:** each object has the members above and no others; `grid`,
 //!   and `music`, `ambience` and `camera` at the top, may be left out.
 //! - **The level:** a size of 1 to [`MAX_SIDE`] pixels a side; a background
@@ -58,8 +62,9 @@
 //! - **Tall tiles:** a block of a set's tiles, of 1 or more a side, from
 //!   its top-left tile, inside the set; a place for its feet; a sort layer
 //!   of 0 to 255.
-//! - **Entities:** a prefab's name ([`prefab::is_name`]); a position; and
-//!   overrides, an object of component names
+//! - **Entities:** an id, from [`MIN_ID`] to 2^63 − 1, that no other
+//!   entity of the level has; a prefab's name ([`prefab::is_name`]); a
+//!   position; and overrides, an object of component names
 //!   ([`prefab::is_component_name`]) whose values are not `null`.
 //! - **The rest:** music and ambience are asset paths that are not empty; a
 //!   camera's bounds are `[x, y, w, h]`, its size 1 or more.
@@ -71,11 +76,19 @@
 
 use std::fmt;
 
+use nadir_core::FastHashMap;
+
 use crate::json::Value;
 use crate::{CodecError, Limits, kbj, prefab};
 
 /// The version of the level file that [`parse`] reads.
-pub const VERSION: i64 = 1;
+pub const VERSION: i64 = 2;
+
+/// The smallest id of a level's entity: 2^62. Levels' entities have the
+/// ids from here to 2^63 − 1, the largest an `i64` holds, and a game's
+/// counter of save ids gives out its own from 1 up, so that the two never
+/// meet (ADR-0078). The cook makes an entity's id of its LDtk instance id.
+pub const MIN_ID: u64 = 1 << 62;
 
 /// The longest side of a level, in pixels: 2^24, where an `f32` still
 /// counts every pixel.
@@ -234,6 +247,10 @@ pub struct TallEntry {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct EntityEntry {
+    /// Its id, from [`MIN_ID`] to 2^63 − 1, which no other entity of the
+    /// level has, and which stays the same from one cook to the next while
+    /// the entity stays in the level: the game saves the entity by it.
+    pub id: u64,
     /// The prefab's name.
     pub prefab: String,
     /// Where it is in the level, in pixels.
@@ -326,6 +343,11 @@ pub enum ErrorKind {
     BadComponentName,
     /// An override's value is `null`.
     NullOverride,
+    /// An entity's id is one that an entity before it in the level has.
+    DuplicateId {
+        /// The id.
+        id: u64,
+    },
 }
 
 impl fmt::Display for ErrorKind {
@@ -359,6 +381,9 @@ impl fmt::Display for ErrorKind {
                 "a component's name is a letter, then letters, digits and `_`"
             ),
             Self::NullOverride => write!(f, "an override's value is not `null`"),
+            Self::DuplicateId { id } => {
+                write!(f, "an entity before it in the level has the id {id}")
+            }
         }
     }
 }
@@ -369,7 +394,7 @@ impl fmt::Display for ErrorKind {
 /// # Errors
 ///
 /// [`CodecError::Kbj`] if the bytes are not KBJ, and [`CodecError::Level`],
-/// naming where, if they are not a level file of version 1.
+/// naming where, if they are not a level file of version 2.
 pub fn parse(bytes: &[u8], limits: Limits) -> Result<LevelFile, CodecError> {
     read(&kbj::decode(bytes, limits)?)
 }
@@ -661,9 +686,16 @@ fn read(value: &Value) -> Result<LevelFile, CodecError> {
 
     let entities_at = At::Member(&root, "entities");
     let items = top.array("entities")?;
-    let mut entities = Vec::with_capacity(items.len());
+    let mut entities: Vec<EntityEntry> = Vec::with_capacity(items.len());
+    let mut ids: FastHashMap<u64, ()> = FastHashMap::default();
+    ids.reserve(items.len());
     for (index, item) in items.iter().enumerate() {
-        entities.push(entity(item, &At::Item(&entities_at, index))?);
+        let at = At::Item(&entities_at, index);
+        let entry = entity(item, &at)?;
+        if ids.insert(entry.id, ()).is_some() {
+            return Err(At::Member(&at, "id").error(ErrorKind::DuplicateId { id: entry.id }));
+        }
+        entities.push(entry);
     }
 
     let camera = match top.get("camera") {
@@ -881,12 +913,14 @@ fn tall_tile(
 }
 
 fn entity(value: &Value, at: &At<'_>) -> Result<EntityEntry, CodecError> {
-    let members = Members::of(value, at, &["prefab", "position", "overrides"])?;
+    let members = Members::of(value, at, &["id", "prefab", "position", "overrides"])?;
+    let id = members.whole("id", MIN_ID as i64, i64::MAX)?;
     let prefab = members.string("prefab")?;
     if !prefab::is_name(&prefab) {
         return Err(At::Member(at, "prefab").error(ErrorKind::BadPrefabName));
     }
     Ok(EntityEntry {
+        id: u64::try_from(id).expect("the range starts above 0"),
         prefab,
         position: members.point("position")?,
         overrides: overrides(members.require("overrides")?, &At::Member(at, "overrides"))?,
@@ -918,8 +952,10 @@ mod tests {
 
     /// A level of 3 × 2 cells of 16 pixels: grass, water that ripples, a
     /// path, mirrored grass, nothing, and a stone; walled where the water
-    /// and the stone are; a tall wall, a tree, and a rock with an override.
-    const LEVEL: &str = r#"{ "version": 1, "size": [48, 32], "background": [64, 70, 91],
+    /// and the stone are; a tall wall, a tree, and a rock with an override,
+    /// the tree's id the smallest an entity may have and the rock's the
+    /// largest.
+    const LEVEL: &str = r#"{ "version": 2, "size": [48, 32], "background": [64, 70, 91],
         "assets": ["atlas/props.kbj", "atlas/sprites.kbj"],
         "tilesets": [ { "atlas": "atlas/sprites.kbj", "sprite": "sprites/tiles", "columns": 8, "rows": 4,
                         "animations": [ { "tile": 5, "frames": 2, "ms": 600 }, { "tile": 8, "frames": 4, "ms": 250 } ] } ],
@@ -927,8 +963,9 @@ mod tests {
                       "cells": [1, 9, 3, 196609, 0, 4] } ],
         "grid": { "size": [3, 2], "cell": 16, "origin": [0, 0], "layer": "World", "solid": [0, 1, 0, 0, 0, 1] },
         "tall": [ { "tileset": 0, "tile": 4, "size": [1, 2], "feet": [8, 32], "layer": 1 } ],
-        "entities": [ { "prefab": "tree", "position": [24, 16], "overrides": {} },
-                      { "prefab": "rock", "position": [40, 32], "overrides": { "Health": { "max": 3 } } } ] }"#;
+        "entities": [ { "id": 4611686018427387904, "prefab": "tree", "position": [24, 16], "overrides": {} },
+                      { "id": 9223372036854775807, "prefab": "rock", "position": [40, 32],
+                        "overrides": { "Health": { "max": 3 } } } ] }"#;
 
     /// [`LEVEL`] with `from` replaced by `to`.
     fn level_with(from: &str, to: &str) -> String {
@@ -988,14 +1025,18 @@ mod tests {
                 layer: 1,
             }]
         );
+        assert_eq!(
+            [level.entities[0].id, level.entities[1].id],
+            [MIN_ID, i64::MAX as u64]
+        );
         assert_eq!(level.entities[1].prefab, "rock");
         assert_eq!(level.entities[1].position, [40, 32]);
         assert_eq!(level.entities[1].overrides[0].0, "Health");
         assert_eq!((level.music.clone(), level.camera), (None, None));
         // The rest, and no grid.
         let more = level_with(
-            r#""version": 1,"#,
-            r#""version": 1, "music": "audio/field.qoa", "ambience": "audio/wind.qoa", "camera": [-8, 0, 64, 32],"#,
+            r#""version": 2,"#,
+            r#""version": 2, "music": "audio/field.qoa", "ambience": "audio/wind.qoa", "camera": [-8, 0, 64, 32],"#,
         );
         let more = more.replacen(
             r#""grid": { "size": [3, 2], "cell": 16, "origin": [0, 0], "layer": "World", "solid": [0, 1, 0, 0, 0, 1] },"#,
@@ -1019,7 +1060,8 @@ mod tests {
 
     #[test]
     fn another_version_is_not_supported_whatever_it_holds() {
-        for (version, found) in [("2", 2), ("0", 0)] {
+        // Version 1, before entities had ids, as much as a later one.
+        for (version, found) in [("1", 1), ("3", 3), ("0", 0)] {
             let later = format!(r#"{{ "version": {version}, "chunks": [] }}"#);
             assert_eq!(
                 error(&later),
@@ -1028,31 +1070,31 @@ mod tests {
         }
         let error = CodecError::Level {
             at: "version".to_string(),
-            kind: ErrorKind::Version { found: 2 },
+            kind: ErrorKind::Version { found: 1 },
         };
         assert_eq!(
             error.to_string(),
-            "level file error at `version`: version 2 is not supported: this build reads version 1"
+            "level file error at `version`: version 1 is not supported: this build reads version 2"
         );
     }
 
     #[test]
     fn each_rule_is_checked_and_names_where() {
-        let cases: [(String, &str, ErrorKind); 34] = [
+        let cases: [(String, &str, ErrorKind); 38] = [
             (
-                level_with(r#""version": 1"#, r#""version": "1""#),
+                level_with(r#""version": 2"#, r#""version": "1""#),
                 "version",
                 ErrorKind::WrongType {
                     expected: "a whole number",
                 },
             ),
             (
-                level_with(r#""version": 1, "#, ""),
+                level_with(r#""version": 2, "#, ""),
                 "",
                 ErrorKind::MissingMember { name: "version" },
             ),
             (
-                level_with(r#""version": 1"#, r#""version": 1, "chunks": []"#),
+                level_with(r#""version": 2"#, r#""version": 2, "chunks": []"#),
                 "",
                 ErrorKind::UnknownMember {
                     name: "chunks".to_string(),
@@ -1194,6 +1236,32 @@ mod tests {
                 ErrorKind::BadPrefabName,
             ),
             (
+                level_with(r#""id": 4611686018427387904, "#, ""),
+                "entities[0]",
+                ErrorKind::MissingMember { name: "id" },
+            ),
+            (
+                level_with("4611686018427387904", "4611686018427387903"),
+                "entities[0].id",
+                ErrorKind::OutOfRange {
+                    min: MIN_ID as i64,
+                    max: i64::MAX,
+                },
+            ),
+            (
+                level_with("4611686018427387904", "1"),
+                "entities[0].id",
+                ErrorKind::OutOfRange {
+                    min: MIN_ID as i64,
+                    max: i64::MAX,
+                },
+            ),
+            (
+                level_with("9223372036854775807", "4611686018427387904"),
+                "entities[1].id",
+                ErrorKind::DuplicateId { id: MIN_ID },
+            ),
+            (
                 level_with(r#"{ "Health": { "max": 3 } }"#, r#"{ "Health": null }"#),
                 "entities[1].overrides.Health",
                 ErrorKind::NullOverride,
@@ -1253,7 +1321,7 @@ mod tests {
                 ErrorKind::EmptyString,
             ),
             (
-                level_with(r#""version": 1,"#, r#""version": 1, "camera": [0, 0, 64],"#),
+                level_with(r#""version": 2,"#, r#""version": 2, "camera": [0, 0, 64],"#),
                 "camera",
                 ErrorKind::WrongLength { expected: 4 },
             ),
@@ -1271,8 +1339,8 @@ mod tests {
         );
         assert_eq!(
             error(&level_with(
-                r#""version": 1,"#,
-                r#""version": 1, "camera": [0, 0, 0, 32],"#
+                r#""version": 2,"#,
+                r#""version": 2, "camera": [0, 0, 0, 32],"#
             )),
             (
                 "camera[2]".to_string(),
@@ -1284,8 +1352,8 @@ mod tests {
         );
         assert_eq!(
             error(&level_with(
-                r#""version": 1,"#,
-                r#""version": 1, "music": "","#
+                r#""version": 2,"#,
+                r#""version": 2, "music": "","#
             )),
             ("music".to_string(), ErrorKind::EmptyString)
         );
@@ -1325,6 +1393,15 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "level file error in the file: `size` is missing"
+        );
+        let error = CodecError::Level {
+            at: "entities[3].id".to_string(),
+            kind: ErrorKind::DuplicateId { id: MIN_ID },
+        };
+        assert_eq!(
+            error.to_string(),
+            "level file error at `entities[3].id`: an entity before it in the level has the id \
+             4611686018427387904"
         );
     }
 }

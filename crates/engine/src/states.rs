@@ -87,12 +87,16 @@ impl States {
     }
 
     /// Makes the transition queued, if one is due: between ticks only.
+    /// After its exit and enter systems, a load that waits for its level is
+    /// restored, if this was the level's loading ending in
+    /// [`GameState::InGame`] (`saves.rs`).
     pub(crate) fn apply(&mut self, world: &mut World) {
         if let Some(transition) = self.systems.apply(world) {
             self.loading = matches!(transition.to, GameState::Loading(_)).then(|| Step::Entered {
                 shown: false,
                 since: Instant::now(),
             });
+            crate::saves::transitioned(world, &transition);
         }
     }
 

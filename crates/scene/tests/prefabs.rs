@@ -486,10 +486,10 @@ fn a_level_s_entities_spawn_through_their_prefabs_in_the_level_scope() {
     let mut server = a_server(&[("enemy", ENEMY), ("slime", SLIME), ("lamp", lamp)]);
     let level = level::parse(
         &kbj(
-            r#"{ "version": 1, "size": [64, 48], "background": [0, 0, 0], "assets": [],
+            r#"{ "version": 2, "size": [64, 48], "background": [0, 0, 0], "assets": [],
                  "tilesets": [], "layers": [], "tall": [],
-                 "entities": [ { "prefab": "lamp", "position": [8, 16], "overrides": {} },
-                               { "prefab": "slime", "position": [40, -2],
+                 "entities": [ { "id": 4611686018427387905, "prefab": "lamp", "position": [8, 16], "overrides": {} },
+                               { "id": 4611686018427387906, "prefab": "slime", "position": [40, -2],
                                  "overrides": { "Health": { "current": 1 } } } ] }"#,
         ),
         Limits::default(),
@@ -531,10 +531,10 @@ fn a_level_s_entities_spawn_through_their_prefabs_in_the_level_scope() {
     // An override that does not fit names the entity and the level.
     let bad = level::parse(
         &kbj(
-            r#"{ "version": 1, "size": [64, 48], "background": [0, 0, 0], "assets": [],
+            r#"{ "version": 2, "size": [64, 48], "background": [0, 0, 0], "assets": [],
                  "tilesets": [], "layers": [], "tall": [],
-                 "entities": [ { "prefab": "enemy", "position": [0, 0], "overrides": {} },
-                               { "prefab": "enemy", "position": [0, 0],
+                 "entities": [ { "id": 4611686018427387905, "prefab": "enemy", "position": [0, 0], "overrides": {} },
+                               { "id": 4611686018427387906, "prefab": "enemy", "position": [0, 0],
                                  "overrides": { "Health": { "max": [] } } } ] }"#,
         ),
         Limits::default(),
@@ -562,9 +562,9 @@ fn a_level_s_entities_spawn_through_their_prefabs_in_the_level_scope() {
     let mut server = a_server(&[("enemy", ENEMY), ("slime", bad_slime)]);
     let level = level::parse(
         &kbj(
-            r#"{ "version": 1, "size": [16, 16], "background": [0, 0, 0], "assets": [],
+            r#"{ "version": 2, "size": [16, 16], "background": [0, 0, 0], "assets": [],
                  "tilesets": [], "layers": [], "tall": [],
-                 "entities": [ { "prefab": "slime", "position": [0, 0], "overrides": {} } ] }"#,
+                 "entities": [ { "id": 4611686018427387905, "prefab": "slime", "position": [0, 0], "overrides": {} } ] }"#,
         ),
         Limits::default(),
     )

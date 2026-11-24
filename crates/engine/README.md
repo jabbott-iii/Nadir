@@ -75,6 +75,10 @@ Built:
 - crash reports: from the start of `App::run`, every panic, on any
   thread, writes a report into the game's data folder, and the next
   launch tells the player;
+- saves: slots in the game's data folder, written between ticks through a
+  temporary file beside a backup of the save before, and loaded through
+  the save's level, a level's entities found again by the ids the cook
+  gives them;
 - a settings file, `settings.jsonc` in the game's settings folder, which
   `App::run` reads as the game starts and writes after each frame that
   changes a setting: fullscreen and vsync, the buses' volumes, the UI
@@ -88,7 +92,6 @@ Not built yet:
   contexts there land (roadmap tasks M2.6 and M2.7), and sound there
   (M6.4 and M6.5);
 - gamepads on Windows and macOS (roadmap tasks M8.2 and M8.3);
-- saving a game from `App` (M9.7; nadir-scene has saves since M9.4);
 - the Metal backend for macOS (M10).
 
 ## What you need
@@ -438,6 +441,7 @@ adds its own first in their stages:
 | Stage | Engine system | What it does |
 | :- | :- | :- |
 | tick `Input` | `nadir::snapshot` | Copies each `Transform` into its `PrevTransform` |
+| tick `Input` | `nadir::saves` | Sends a `SaveEvent` for each save or load that `Saves` made since the last tick |
 | tick `Movement` | `nadir::movement` | Moves each entity with a `Velocity`; one with a `Collider` slides along what it meets |
 | tick `PostMovement` | `nadir::parent_offsets` | Puts each entity with a `Parent` at its parent's position, plus its offset |
 | tick `PostMovement` | `nadir::triggers` | Sends `TriggerEnter` and `TriggerExit` |
@@ -656,6 +660,48 @@ the state it started in.
 - In `Paused` the ticks come, so that a pause menu's tick systems see the
   input, but the engine moves nothing, fires no trigger, finds no path,
   and holds the frames' time, which animators and animated tiles follow.
+
+### Saves
+
+The resource `Saves` saves the game into a slot, a file in the game's
+data folder (on Linux `~/.local/share/<game>/saves/<slot>.ksav`), and
+loads it back. Only entities with a `SaveId` are saved, with their
+components of the types registered as saved: of the engine's,
+`Transform`, `Player`, `Facing` and `Parent`, and a game's own through
+`App::register_saved_component`. A level's entities have ids of their
+own, which the cook makes from their LDtk instance ids; a game gives the
+entities it spawns ids from the `SaveIds` resource.
+
+```rust
+use nadir::prelude::*;
+
+/// The person reached the save point this tick.
+fn save_point(world: &World, _tick: &Tick) {
+    world.resource_mut::<Saves>().save("slot1");
+}
+
+/// "Continue" on the main menu.
+fn continue_game(world: &World, _tick: &Tick) {
+    world.resource_mut::<Saves>().load("slot1");
+}
+
+/// How each went, a tick later.
+fn tell_the_player(world: &World, _frame: &Frame) {
+    for event in world.resource::<Events<SaveEvent>>().frame_events() {
+        if let SaveEvent::Loaded { from_backup: Some(why), .. } = event {
+            // The last save was damaged, and the one before it loaded.
+            let _ = why;
+        }
+    }
+}
+# let _ = (save_point, continue_game, tell_the_player);
+```
+
+The engine makes a save or a load after the tick that asked, before any
+transition the tick queued. A load goes through `Loading` of the save's
+level; once the game enters `InGame` and its enter systems have run, the
+save replaces every entity with a `SaveId`. A load gives the saved
+entities new `Entity` values: keep their `SaveId`s across one.
 
 ### Logs and errors
 

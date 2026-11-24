@@ -749,6 +749,17 @@ fn parse_level_file(input: &[u8]) {
             "a tall block outside its set"
         );
     }
+    let mut ids: Vec<u64> = file.entities.iter().map(|entity| entity.id).collect();
+    assert!(
+        ids.iter()
+            .all(|id| (level::MIN_ID..=i64::MAX as u64).contains(id)),
+        "an entity's id outside the range of levels' ids"
+    );
+    ids.sort_unstable();
+    assert!(
+        ids.windows(2).all(|pair| pair[0] < pair[1]),
+        "two entities of one id"
+    );
     for entity in &file.entities {
         assert!(
             prefab::is_name(&entity.prefab),

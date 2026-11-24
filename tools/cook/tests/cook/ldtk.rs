@@ -115,9 +115,12 @@ fn project_text(levels: &str, external: bool) -> String {
 /// What `MEADOW` cooks to: the auto-layer, the ground, then the
 /// `Collision` layer's tile by rules, drawn bottom up; the grid; the tall
 /// wall, with its layer's offset; the entities, as prefabs, with their
-/// layer's offset and their fields as overrides in name order.
+/// layer's offset and their fields as overrides in name order, and each
+/// with its id, 2^62 plus the low 62 bits of the FNV-1a hash of its iid
+/// (`tree-iid`, `rock-iid`): numbers written out, so that a change to how
+/// the cook makes them, which would lose every save, fails here.
 const COOKED: &str = r#"{
-  "version": 1, "size": [64, 48], "background": [16, 32, 48], "assets": ["atlas/tiles.kbj"],
+  "version": 2, "size": [64, 48], "background": [16, 32, 48], "assets": ["atlas/tiles.kbj"],
   "tilesets": [ { "atlas": "atlas/tiles.kbj", "sprite": "tiles/ground", "columns": 4, "rows": 2,
                   "animations": [ { "tile": 2, "frames": 2, "ms": 300 } ] } ],
   "layers": [
@@ -131,10 +134,10 @@ const COOKED: &str = r#"{
             "solid": [1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1] },
   "tall": [ { "tileset": 0, "tile": 1, "size": [1, 2], "feet": [64, 52], "layer": 1 } ],
   "entities": [
-    { "prefab": "tree", "position": [26, 18],
+    { "id": 5601776014190313534, "prefab": "tree", "position": [26, 18],
       "overrides": { "Health": { "max": 12 }, "Name": { "text": "Oak" },
                      "Sprite": { "flip": { "x": true } } } },
-    { "prefab": "big_rock", "position": [42, 34], "overrides": {} } ] }"#;
+    { "id": 7531268310235867979, "prefab": "big_rock", "position": [42, 34], "overrides": {} } ] }"#;
 
 /// JSON text of `value`.
 fn text(value: &Value) -> String {
@@ -532,7 +535,7 @@ fn each_mistake_adr_0038_names_is_refused_with_its_file_and_member() {
     for kind in ["Point", "Color", "Tile", "EntityRef", "Array<Int>"] {
         refused_at(
             &format!("{FIELD}.__type"),
-            &format!("a field of type `{kind}` cannot override a component in version 1"),
+            &format!("a field of type `{kind}` cannot override a component in a level file"),
             |project| *at(project, &format!("{FIELD}.__type")) = Value::String(kind.to_string()),
         );
     }
@@ -544,7 +547,7 @@ fn each_mistake_adr_0038_names_is_refused_with_its_file_and_member() {
     // Even with no value, before an instance sets one.
     refused_at(
         &format!("{FIELD}.__type"),
-        "a field of type `Point` cannot override a component in version 1",
+        "a field of type `Point` cannot override a component in a level file",
         |project| {
             *at(project, &format!("{FIELD}.__type")) = Value::String("Point".to_string());
             *at(project, &format!("{FIELD}.__value")) = Value::Null;
@@ -591,6 +594,18 @@ fn each_mistake_adr_0038_names_is_refused_with_its_file_and_member() {
         set(
             "levels[0].layerInstances[0].entityInstances[0].__identifier",
             Value::String("Bush".to_string()),
+        ),
+    );
+    // Two entities of one iid: the game saves each by its id, made of it.
+    refused_at(
+        &format!("{LEVEL}[0].entityInstances[1].iid"),
+        &format!(
+            "the entity `BigRock` has the iid \"tree-iid\" of the entity at \
+             `{LEVEL}[0].entityInstances[0]` too"
+        ),
+        set(
+            "levels[0].layerInstances[0].entityInstances[1].iid",
+            Value::String("tree-iid".to_string()),
         ),
     );
     // A tile set's image outside the source folder, or not there.

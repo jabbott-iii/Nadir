@@ -49,8 +49,9 @@ Built today:
 A whole level, its tile layers, grid and tall tiles with its entities, is
 loaded by the facade's `App::load_level`, which uses these; its `App` makes
 the state transitions after each tick and after the frame stages, and
-gives `Loading` and `Paused` their meaning. Not yet: saving and loading a
-game from the facade's `App`, with roadmap M9.7.
+gives `Loading` and `Paused` their meaning. Its `Saves` resource saves and
+loads a game with these, a level's entities by the ids the cook gives
+them.
 
 ## Usage
 

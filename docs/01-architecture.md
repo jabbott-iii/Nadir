@@ -262,6 +262,7 @@ pub enum FrameStage { Animate, Camera, Ui, Extract }
   | Stage | Engine system | Does |
   | :- | :- | :- |
   | tick `Input` | `nadir::snapshot` | copies `Transform` into `PrevTransform` |
+  | tick `Input` | `nadir::saves` | sends a `SaveEvent` for each save or load that `Saves` made between ticks since the last tick (M9.8, ADR-0078) |
   | tick `Movement` | `nadir::movement` | rebuilds `Collisions`, moves each `Velocity`, sliding `Collider`s |
   | tick `PostMovement` | `nadir::parent_offsets` | puts each `Parent`'s child at its root plus the offsets |
   | tick `PostMovement` | `nadir::triggers` | sends `TriggerEnter` and `TriggerExit` |

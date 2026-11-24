@@ -235,9 +235,11 @@ nadir_scene::reflect_enum! {
 /// whose chain is longer, or loops, or ends at an entity without a
 /// `Transform` (one that was despawned, say) is left where it is.
 ///
-/// It is not reflected yet: saves write an `Entity` as its
-/// [`SaveId`](crate::SaveId) since roadmap M9.4 (ADR-0068), and M9.7
-/// reflects `Parent`.
+/// It is reflected, and saved, as `{"entity": 12, "offset": [0, -8]}`:
+/// its entity as that entity's [`SaveId`](crate::SaveId), which only a
+/// save knows (ADR-0078). So a prefab or a level cannot give one, and a
+/// save of a child whose parent has no `SaveId` fails
+/// ([`Saves`](crate::Saves)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Parent {
     /// The entity it goes with.

@@ -233,8 +233,9 @@ struct Entry<C> {
 - **Stable IDs for saves:** a `SaveId(u64)` component, assigned from a
   world-level counter. Saves never store raw `Entity` values. Both are
   nadir-scene's since M9.4 (ADR-0068): `SaveId`, which the facade
-  re-exports, and `SaveIds`, the counter, a resource the facade does not
-  add yet (M9.7).
+  re-exports, and `SaveIds`, the counter, a resource of every `App` since
+  M9.8, which gives out ids from 1; a level's entities have ids from 2^62
+  up, which the cook made of their LDtk instance ids (ADR-0078).
 - **Tags:** zero-sized components (`struct Enemy;`) use the normal
   `SparseSet<T>`. `Vec<ZST>` never allocates, so tags cost only the
   sparse/dense arrays.

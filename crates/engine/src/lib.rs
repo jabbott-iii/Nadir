@@ -129,7 +129,7 @@
 //! | [`Facing`] | Which way it faces: facing left mirrors its `Sprite` |
 //! | [`Parent`] | Puts it at another entity's position, plus an offset |
 //! | [`Player`] | A tag for the entity the player controls |
-//! | [`SaveId`] | Its id in saves, nadir-scene's (roadmap M9.4) |
+//! | [`SaveId`] | Its id in saves, nadir-scene's (roadmap M9.4): [`Saves`] saves only the entities that have one |
 //! | [`PrevTransform`] | Where it was at the start of the last tick, for drawing between ticks: the engine keeps it |
 //! | [`AudioListener`] | Where the game hears from, in place of the camera |
 //! | [`AudioEmitter`] | A sound that plays at it, and follows it |
@@ -137,10 +137,12 @@
 //!
 //! [`Transform`], [`Velocity`], [`Player`], [`SaveId`], [`Facing`],
 //! [`Sprite`], [`Collider`] and [`Animator`] are reflected, so prefabs and
-//! levels can give them; [`Parent`], [`AudioListener`], [`AudioEmitter`]
-//! and [`MusicArea`] are not yet (M9.7 brings `Parent`, whose entity saves
-//! can write since M9.4), and
-//! [`PrevTransform`] is the engine's own, and is never in data. A
+//! levels can give them. [`Parent`] is reflected too, but names another
+//! entity by its [`SaveId`], so only a save can give one. Saves keep
+//! [`Transform`], [`Player`], [`Facing`] and [`Parent`] ("Saves", below).
+//! [`AudioListener`], [`AudioEmitter`] and [`MusicArea`] are not
+//! reflected, and [`PrevTransform`] is the engine's own, and is never in
+//! data. A
 //! [`Sprite`] is written with its texture's path, and a prefab may name a
 //! frame of a cooked atlas instead, `{"atlas": "atlas/sprites.kbj",
 //! "sprite": "sprites/hero", "frame": 0}`; a [`Collider`]'s layers by the
@@ -170,7 +172,30 @@
 //! and its grid into the [`Collisions`], and the engine draws its tile
 //! layers each frame, its background the clear color. [`CurrentLevel`]
 //! says what it made, and the next load removes it whole; a
-//! [`LevelError`] says why one did not load (ADR-0038).
+//! [`LevelError`] says why one did not load (ADR-0038). Each of its
+//! entities has a [`SaveId`], the id the cook made of its LDtk instance id,
+//! from 2^62 up, which stays the same from one run to the next.
+//!
+//! # Saves
+//!
+//! The resource [`Saves`] keeps the game's save slots, files in the game's
+//! data folder that [`App::run`] gives it (on Linux
+//! `~/.local/share/<game>/saves`). [`Saves::save`] and [`Saves::load`] ask,
+//! from any system, and the engine makes the save or load after the tick,
+//! or the frame stages, that asked, before the transition they queued
+//! (roadmap M9.8, ADR-0078):
+//!
+//! - A save writes each entity with a [`SaveId`], with its components of
+//!   the types registered as saved ([`App::register_saved_component`]),
+//!   each resource registered as saved ([`App::register_saved_resource`]),
+//!   and the level the world holds. A game gives the entities it spawns
+//!   their ids from the [`SaveIds`] resource.
+//! - A load goes to the loading of the save's level. Once the game enters
+//!   `InGame` from it and its enter systems have run, the save replaces
+//!   every entity with a [`SaveId`]: a level's entity is made of its
+//!   prefab, the level's overrides and its saved components, and one the
+//!   save lacks, one killed before the save, stays gone.
+//! - A [`SaveEvent`] says how each went, in the next tick.
 //!
 //! # Game states
 //!
@@ -599,6 +624,7 @@ mod navigation;
 mod pack;
 mod reflected;
 mod replay;
+mod saves;
 mod settings;
 mod sound;
 mod states;
@@ -633,10 +659,11 @@ pub use error::Error;
 pub use frame_allocs::FrameAllocs;
 pub use gamepads::{ButtonPrompts, Gamepads};
 pub use level::{CurrentLevel, LevelError, load_level, unload_level};
-pub use nadir_scene::SaveId;
+pub use nadir_scene::{SaveId, SaveIds};
 pub use navigation::Navigation;
 pub use reflected::{CollisionLayers, loading_context, reflect_context};
 pub use replay::{Replay, world_hash};
+pub use saves::{SaveEvent, SavedLevel, Saves};
 pub use settings::UiSettings;
 pub use sound::AudioState;
 pub use tick_stats::TickStats;
@@ -668,6 +695,7 @@ pub mod prelude {
         AnimationFinished, Animator, App, AudioEmitter, AudioListener, AudioState, ButtonPrompts,
         Clip, ClipError, ClipFrame, Clips, Collider, Collisions, Config, Facing, GamepadFamily,
         Gamepads, MusicArea, Navigation, Parent, Placement, Playback, Player, PrevTransform,
-        SaveId, Sprite, TickStats, Transform, TriggerEnter, TriggerExit, Velocity, Volumes,
+        SaveEvent, SaveId, SaveIds, Saves, Sprite, TickStats, Transform, TriggerEnter, TriggerExit,
+        Velocity, Volumes,
     };
 }

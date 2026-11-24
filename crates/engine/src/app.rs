@@ -37,7 +37,7 @@ use nadir_platform::{
 };
 use nadir_render::{FrameStats, Output, RenderConfig, RenderFrame, Renderer, TileLayers};
 use nadir_scene::{
-    FromValue, PrefabLibrary, StateKind, StateMachine, TransitionSystem, TypeRegistry,
+    FromValue, PrefabLibrary, SaveIds, StateKind, StateMachine, TransitionSystem, TypeRegistry,
 };
 
 use crate::animation::AnimationClock;
@@ -69,6 +69,10 @@ const PROFILE_RECORDS: usize = 1_024;
 /// click.
 const VOLUME_FADE_MS: u32 = 50;
 
+/// The folder of the save slots, in the game's data folder, which
+/// [`App::run`] gives the [`Saves`](crate::Saves).
+const SAVES_FOLDER: &str = "saves";
+
 /// What a game asks of the engine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -86,6 +90,10 @@ pub struct Config {
     /// on every system (the rules are at [`nadir_platform::user_dirs`]). If
     /// one is not, the game runs without a log file, and a warning says why.
     pub game: String,
+    /// The game's version, such as `1.0.3`, which each save file's header
+    /// keeps ([`Saves`](crate::Saves)), so that a later version can tell
+    /// what wrote one. Empty by default.
+    pub version: String,
     /// The size of the inside of the window, in logical pixels.
     pub window_size: UVec2,
     /// The smallest size the user can give the window, in logical pixels.
@@ -125,6 +133,7 @@ impl Default for Config {
             title: "Nadir".to_string(),
             studio: "Nadir".to_string(),
             game: "Nadir".to_string(),
+            version: String::new(),
             window_size: UVec2::new(1280, 720),
             min_window_size: UVec2::new(320, 180),
             resizable: true,
@@ -524,6 +533,9 @@ impl EngineCore {
 /// - `nadir::snapshot` (tick `Input`): copies each [`Transform`] into its
 ///   [`PrevTransform`], and gives one to every entity with a [`Sprite`]
 ///   and to the root of every drawn child;
+/// - `nadir::saves` (tick `Input`): sends a [`SaveEvent`](crate::SaveEvent)
+///   for each save or load made since the last tick
+///   ([`Saves`](crate::Saves));
 /// - `nadir::movement` (tick `Movement`): rebuilds [`Collisions`] and
 ///   moves every entity with a [`Velocity`], sliding the ones with a
 ///   [`Collider`];
@@ -670,11 +682,15 @@ impl App {
     ///
     /// Of the engine's components, [`Transform`], [`Velocity`], [`Player`],
     /// [`SaveId`], [`Facing`], [`Sprite`], [`Collider`] and [`Animator`] are
-    /// reflected, so that prefabs and levels can give them (ADR-0038).
-    /// [`Parent`] is not yet (roadmap M9.4), and [`PrevTransform`] is the
-    /// engine's own. Its resources include a [`PrefabLibrary`] with no
-    /// prefabs, and [`CollisionLayers`] with no names
-    /// ([`App::collision_layers`]).
+    /// reflected, so that prefabs and levels can give them (ADR-0038), and
+    /// so is [`Parent`], which only a save can give, as it names an entity.
+    /// Saves keep [`Transform`], [`Player`], [`Facing`] and [`Parent`]; the
+    /// others a load rebuilds, or a prefab gives (ADR-0078).
+    /// [`PrevTransform`] is the engine's own. Its resources include a
+    /// [`PrefabLibrary`] with no prefabs, [`CollisionLayers`] with no names
+    /// ([`App::collision_layers`]), [`SaveIds`](nadir_scene::SaveIds), which
+    /// gives out save ids from 1, and [`Saves`](crate::Saves), in no folder
+    /// until [`App::run`].
     ///
     /// It makes the mixer, of [`AudioConfig::default`], and sets each bus
     /// to [`Config::volumes`], which it puts in the [`Volumes`] resource.
@@ -738,16 +754,22 @@ impl App {
         world.add_event::<TriggerEnter>();
         world.add_event::<TriggerExit>();
         world.add_event::<AnimationFinished>();
+        world.insert_resource(SaveIds::new());
+        world.insert_resource(crate::Saves::new(&config.version));
+        world.insert_resource(crate::SavedLevel::default());
+        world.add_event::<crate::SaveEvent>();
 
         let mut registry = TypeRegistry::new();
-        registry.register_component::<Transform>();
+        registry.register_saved_component::<Transform>();
         registry.register_component::<Velocity>();
-        registry.register_component::<Player>();
+        registry.register_saved_component::<Player>();
         registry.register_component::<SaveId>();
-        registry.register_component::<Facing>();
+        registry.register_saved_component::<Facing>();
         registry.register_component::<Sprite>();
         registry.register_component::<Collider>();
         registry.register_component::<Animator>();
+        registry.register_saved_component::<Parent>();
+        registry.register_saved_resource::<crate::SavedLevel>();
         registry.register_components(&mut world);
         world.insert_resource(registry);
         world.register::<PrevTransform>();
@@ -766,6 +788,7 @@ impl App {
         let mut schedule = Schedule::new();
         schedule
             .add_fixed(FixedStage::Input, "nadir::snapshot", glue::snapshot)
+            .add_fixed(FixedStage::Input, "nadir::saves", crate::saves::send_events)
             .add_fixed_if(
                 FixedStage::Movement,
                 "nadir::movement",
@@ -859,6 +882,42 @@ impl App {
             .resource_mut::<TypeRegistry>()
             .register_component::<T>();
         self.world.register::<T>();
+        self
+    }
+
+    /// Adds the reflected component type `T`, as
+    /// [`App::register_component`] does, as one that saves keep: a save
+    /// writes each entity's of the type, and a load puts it back
+    /// ([`Saves`](crate::Saves)). A component of a type registered without
+    /// it is transient: a load rebuilds it, or the entity's prefab gives
+    /// it.
+    ///
+    /// # Panics
+    ///
+    /// If another type has the same reflected name.
+    #[must_use]
+    pub fn register_saved_component<T: Component + FromValue>(mut self) -> Self {
+        self.world
+            .resource_mut::<TypeRegistry>()
+            .register_saved_component::<T>();
+        self.world.register::<T>();
+        self
+    }
+
+    /// Adds the reflected resource type `T`, under its reflected name, as
+    /// one that saves keep: a save writes the world's, and a load replaces
+    /// it with the saved one ([`Saves`](crate::Saves)). Insert the resource
+    /// too ([`App::insert_resource`]): a load of a save that has one fails
+    /// in a world without it.
+    ///
+    /// # Panics
+    ///
+    /// If another resource type has the same reflected name.
+    #[must_use]
+    pub fn register_saved_resource<T: FromValue + 'static>(self) -> Self {
+        self.world
+            .resource_mut::<TypeRegistry>()
+            .register_saved_resource::<T>();
         self
     }
 
@@ -1332,7 +1391,9 @@ impl App {
             if replayed {
                 self.end_replay_tick();
             }
-            // Between ticks: a transition this tick queued.
+            // Between ticks: a save or load this tick asked for, on the
+            // world it left, then a transition it queued.
+            crate::saves::make_requested(&mut self.world);
             self.states.apply(&mut self.world);
             let took = start.elapsed();
             stats.ticks += 1;
@@ -1352,7 +1413,9 @@ impl App {
             profile_scope!("nadir::frame_stages");
             self.schedule.run_frame(&mut self.world, &frame);
         }
-        // After the frame stages: a transition they queued.
+        // After the frame stages: a save or load they asked for, then a
+        // transition they queued.
+        crate::saves::make_requested(&mut self.world);
         self.states.end_frame(&mut self.world);
         self.follow_volumes(VOLUME_FADE_MS);
         #[cfg(feature = "dev")]
@@ -1411,6 +1474,10 @@ impl App {
     /// Only `run` reads and writes the file: [`App::update`] and
     /// [`App::offscreen`] leave it alone, so that tests and recordings do
     /// not see a player's settings.
+    ///
+    /// It gives the [`Saves`](crate::Saves) their folder, `saves` in the
+    /// game's data folder (on Linux `~/.local/share/<game>/saves`), unless
+    /// the game set one before.
     ///
     /// The log file is `nadir.log`, in the game's logs folder: on Linux
     /// `~/.local/share/<game>`. Each run starts a new file and keeps the
@@ -1474,8 +1541,13 @@ impl App {
         let dirs = nadir_platform::user_dirs(&self.config.studio, &self.config.game);
         // Before the window opens, which takes its fullscreen and vsync.
         match &dirs {
-            Ok(dirs) => self.load_settings(dirs.config.join(crate::settings::FILE_NAME)),
-            Err(error) => warn!("the settings are not read, nor kept: {error}"),
+            Ok(dirs) => {
+                self.load_settings(dirs.config.join(crate::settings::FILE_NAME));
+                self.world
+                    .resource_mut::<crate::Saves>()
+                    .default_folder(dirs.data.join(SAVES_FOLDER));
+            }
+            Err(error) => warn!("the settings are not read, nor kept, and saves fail: {error}"),
         }
         #[cfg(feature = "dev")]
         match dirs {
@@ -1968,6 +2040,7 @@ mod tests {
             title: "Sandbox".to_string(),
             studio: "Studio".to_string(),
             game: "Game".to_string(),
+            version: "1.0.3".to_string(),
             window_size: UVec2::new(960, 540),
             min_window_size: UVec2::new(480, 270),
             resizable: false,
@@ -2016,6 +2089,7 @@ mod tests {
             printed,
             [
                 "tick  Input: nadir::snapshot",
+                "tick  Input: nadir::saves",
                 "tick  Gameplay: walk (conditional)",
                 "tick  Movement: nadir::movement (conditional)",
                 "tick  Movement: bounce",
@@ -2035,7 +2109,7 @@ mod tests {
     }
 
     #[test]
-    fn the_engines_components_are_registered_and_eight_are_reflected() {
+    fn the_engines_components_are_registered_and_nine_are_reflected() {
         let app = app();
         let world = app.world();
         assert!(world.is_registered::<Transform>());
@@ -2063,7 +2137,8 @@ mod tests {
                 "Facing",
                 "Sprite",
                 "Collider",
-                "Animator"
+                "Animator",
+                "Parent"
             ]
         );
         // The engine's own, the prefabs a game loads, no level yet, and
@@ -3513,7 +3588,7 @@ mod tests {
             write_kbj(
                 "levels/plot.klvl",
                 &format!(
-                    r#"{{ "version": 1, "size": [32, 24], "background": [0, 0, 255],
+                    r#"{{ "version": 2, "size": [32, 24], "background": [0, 0, 255],
                          "assets": ["tiles.kbj"],
                          "tilesets": [ {{ "atlas": "tiles.kbj", "sprite": "tiles", "columns": 2,
                                           "rows": 1, "animations": [] }} ],
@@ -3631,14 +3706,15 @@ mod tests {
         fn yard(tile: u16, prop: &str) -> String {
             let cells = vec![(tile + 1).to_string(); 8].join(", ");
             format!(
-                r#"{{ "version": 1, "size": [32, 16], "background": [0, 0, 255],
+                r#"{{ "version": 2, "size": [32, 16], "background": [0, 0, 255],
                      "assets": ["atlas/sprites.kbj"],
                      "tilesets": [ {{ "atlas": "atlas/sprites.kbj", "sprite": "tiles/ground",
                                       "columns": 2, "rows": 1, "animations": [] }} ],
                      "layers": [ {{ "tileset": 0, "size": [4, 2], "cell": 8, "origin": [-16, -8],
                                     "layer": 0, "depth": 0, "cells": [{cells}] }} ],
                      "tall": [],
-                     "entities": [ {{ "prefab": "{prop}", "position": [0, 0], "overrides": {{}} }} ] }}"#
+                     "entities": [ {{ "id": 4611686018427387905, "prefab": "{prop}", "position": [0, 0],
+                                     "overrides": {{}} }} ] }}"#
             )
         }
 
@@ -4183,7 +4259,7 @@ mod tests {
             }
             let side = GROUND * 16;
             let level = format!(
-                r#"{{ "version": 1, "size": [{side}, {side}], "background": [0, 0, 0],
+                r#"{{ "version": 2, "size": [{side}, {side}], "background": [0, 0, 0],
                      "assets": ["ground.kbj"],
                      "tilesets": [ {{ "atlas": "ground.kbj", "sprite": "ground", "columns": 2, "rows": 2,
                                       "animations": [ {{ "tile": 1, "frames": 3, "ms": 100 }} ] }} ],

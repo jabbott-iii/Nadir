@@ -6150,7 +6150,8 @@ by the batched sprite renderer.
       (26,393 a second), no finding.
     - Not done here: M4.7's note (`nadir::world_hash` given a
       `SaveIdMap`) and M7.4's ("Save as prefab" of the saved components
-      only), both "may"s; the facade's part is M9.7's (its note).
+      only), both "may"s; the facade's part is M9.7's (its note), split
+      into M9.8 on 2026-11-24.
   - Note (from M4.2): reflect `Entity` as its `SaveId` here (ADR-0020).
     - Give `ReflectContext` the map between them. `Entity` has no
       `Default`, so implement `FromValue` for it directly.
@@ -6314,7 +6315,56 @@ by the batched sprite renderer.
   - Verify: `cargo test -p nadir_engine`;
     `cargo dev --debug-panic`, then inspect the report (manual)
 
-- [ ] **M9.7 — content: one complete level of the real game**
+- [x] **M9.8 — facade and cook: saves in the game**
+  - Split from M9.7 on 2026-11-24 (ADR-0078): the user chose the facade's
+    saves first, a level's entities saved by ids made of their LDtk
+    iids, and M9.7 for the level's content.
+  - Note: built and checked on Linux (x86_64) on 2026-11-24 (ADR-0078,
+    accepted that day: the user's choices above, and the agent's design
+    for the rest):
+    - nadir-codec: the level file's version 2, each entity's `id` from
+      `level::MIN_ID` (2^62) to 2^63 − 1, none twice in a level
+      (`ErrorKind::DuplicateId`); version 1 refused as any other. 4 more
+      rule tests (an id missing, below the range twice, one twice), and
+      the ids read at both ends of the range.
+    - The cook: `entity_id`, 2^62 plus the low 62 bits of the FNV-1a hash
+      of the entity's iid; two entities of one id refused, naming both.
+      Tests: the meadow's two ids as written numbers, one iid twice
+      refused, and ids in the range for an LDtk iid, the tests' and an
+      empty one. The branch for two iids that hash alike is not tested:
+      no such pair is known.
+    - xtask: the `level` target checks the ids' range and that none is
+      twice; its four seeds are version 2. `cargo xtask fuzz-smoke
+      --target level --secs 120`: 9,769,655 inputs, 81,414 a second, no
+      finding.
+    - The facade: `Saves` (slots in `<data>/saves`, `save`, `load`,
+      `path`, `exists`, `loading`, `set_folder`), `SaveEvent`, `SavedLevel`,
+      `SaveIds` in every `App`, `Config::version`,
+      `App::register_saved_component` and `register_saved_resource`; the
+      engine's `nadir::saves`, after `nadir::snapshot`; `load_level` gives
+      a level's entities their `SaveId`s; `Parent` reflected by hand and,
+      with `Transform`, `Player` and `Facing`, saved; the inspector's
+      "Save as prefab" leaves `Parent` out. 7 tests in
+      `crates/engine/src/saves/tests.rs`: a save and its load through the
+      level (the hero's saved components and not its velocity, a child
+      following the new hero, a broken stone gone, a pushed one in place
+      with the level's override, the gold, the counter, the enter system
+      told of the load, the next unload taking the restored stone); a
+      damaged file loaded from its backup, with the CRC's reason; a slot
+      missing, four names that are not a slot's, a child of an unsaved
+      parent, and no folder, each failing with nothing written; a load whose
+      loading the game leaves, and a save asked for while loading; a save
+      of no level restored between ticks, with its game version; a save's
+      level read from its globals; the components saved.
+    - The determinism test's `hashes.txt` blessed again, with the user's
+      agreement, for `Parent`'s registration: its replay the same byte for
+      byte, each of the 7,212 hashes by type of the 12 types before (601
+      ticks) the same, every whole hash changed, and the new column one
+      value throughout.
+    - Not run on Windows or macOS: the slots' folder comes from
+      `user_dirs` (M1.4), and the writes are nadir-scene's `std::fs`. Not
+      checked in the window: the sandbox saves nothing until M9.7's save
+      point.
   - Note (from M9.4, ADR-0068): nadir-scene saves, but the facade does not
     yet. For the save point:
     - give every `App` a `SaveIds`, and save and load a slot in the user
@@ -6332,6 +6382,47 @@ by the batched sprite renderer.
       (from LDtk's iids, say), apart from those `SaveIds` gives out;
     - a component an entity of a prefab lost comes back from the prefab
       on a load, even of a saved type: version 1 writes no removals.
+  - Depends: M9.4, M9.1, M5.12
+  - Do: the level file's version 2, each entity with an id the cook makes
+    of its LDtk iid, from 2^62 up; the facade's `Saves` slots in the data
+    folder, saved and loaded between ticks, a load through its level's
+    loading; `SaveIds` in every `App`; the engine's components saved or
+    not; `Parent` reflected; `SaveEvent`.
+  - Accept: a save and its load bring back the game's entities and the
+    level's, by their ids, with the level's overrides, and a level's
+    entity the save lacks stays gone; a damaged save loads from its
+    backup and says why; a save or load that cannot be made says why and
+    changes nothing; the level file refuses version 1 and two entities of
+    one id, and the cook gives an entity the same id at each cook.
+  - Verify: `cargo test -p nadir_engine -p nadir-codec -p nadir-cook
+    -p nadir-scene`; `cargo xtask fuzz-smoke --target level --secs 120`
+
+- [ ] **M9.7 — content: one complete level of the real game**
+  - Split on 2026-11-24 (ADR-0078): the facade's saves, which M9.4's note
+    asked of this task, are M9.8's. The user chose the level's design the
+    same day: gems scattered in the field, which open a gate in the south
+    once all are found; walking through the gate wins; a guard or the pack
+    that catches the person sends them back to the last save point.
+  - Note (from M9.8, ADR-0078), for the save point:
+    - `Saves::save("slot")` at the save point, `Saves::load` on a catch and
+      for "Continue" (`Saves::exists` shows it), and `SaveEvent` to tell
+      the player (`Loaded`'s `from_backup`, `LoadFailed`'s `missing`);
+      `Config::version` is the game's version in each save.
+    - A load restores after the game's enter systems of `InGame`, which
+      `spawn_field` is: the person it spawns, given a `SaveId` from
+      `SaveIds`, is replaced by the saved one. The saved person gets only
+      its saved components, so spawn the person of a prefab (its sprite,
+      collider and animator then come back), or give it the rest after the
+      load (`SaveEvent::Loaded`).
+    - A load gives saved entities new `Entity`s: `Field::spawned` would
+      hold dead ones. Despawn the entities with a `SaveId` that are not
+      the level's (`CurrentLevel::entities`) in `clear_field`, or hold
+      `SaveId`s.
+    - The gems and the gate are a level's entities, saved by their ids: a
+      gem picked up (despawned) stays gone after a load; the gate's state
+      is a saved component, or follows from the gems left.
+    - The guards and the pack are spawned by the game: with no `SaveId`
+      they start afresh at each load, which a catch's reload wants.
   - Note (from M9.5, ADR-0069): enemies ask `Navigation` for paths, or
     follow a `FlowField` in a crowd; the sandbox's `enemies.rs` shows
     both. Paths see a grid's tiles only, and asking again does not route
@@ -6339,7 +6430,7 @@ by the batched sprite renderer.
     with the props' cells solid, as the sandbox's `NavGrid` does. Most
     searches across a 64 × 48 level fit the default budget of 1,024
     expansions; one to a goal it cannot reach takes up to 3 ticks.
-  - Depends: M9.1–M9.6, M6.6
+  - Depends: M9.1–M9.6, M9.8, M6.6
   - Do: build the level with LDtk and Aseprite content, enemies, pickups,
     music, a save point and a win condition.
   - Accept: a playtester outside the team finishes the level on each OS.

@@ -44,7 +44,7 @@ Every decoder:
 | `atlas` | The cook's atlas file, version 2, below | — | ✓ | yes | KBJ, then checked strictly; read by render's `Atlas` asset (ADR-0033, ADR-0035). See below |
 | `font` | The cook's font file, version 1, below | — | ✓ | yes | KBJ, then checked strictly; the cook reads back what it writes (M7.7, ADR-0053), and render's `Font` asset reads it (M7.1, ADR-0054). See below |
 | `ldtk` | LDtk 1.5.3's project `.ldtk` and level `.ldtkl` JSON | — | ✓ | no (cook only) | The members the cook uses, checked against the project's definitions (ADR-0038). See subset below |
-| `level` | The cook's level file, version 1, below | — | ✓ | yes | KBJ, then checked strictly (ADR-0038). See below |
+| `level` | The cook's level file, version 2, below | — | ✓ | yes | KBJ, then checked strictly (ADR-0038). See below |
 | `prefab` | The prefab file, below | — | ✓ | yes | KBJ, or its source's JSON, then checked strictly (ADR-0038). See below |
 | `kpak` | The pack file, version 1, below | — | ✓ | yes | Header, TOC and string table checked strictly; each entry's CRC before its KLZ (ADR-0041). See below |
 | `ksav` | The save file, version 1, below | ✓ | ✓ | yes | A 24-byte header with a CRC-32 over the whole file, then a KBJ payload, checked strictly (M9.4, ADR-0068). See "Save file reader and writer" |
@@ -901,15 +901,19 @@ their `TileInstance`s and `EntityInstance`s, and fields as
 `#[non_exhaustive]`. As built in M5.10 (ADR-0038):
 
 - **KBJ first**; a file that is not KBJ is a `CodecError::Kbj`.
-- **The version first:** any whole number other than 1 is `Version
-  { found }`, "not supported", whatever else the file holds.
+- **The version first:** any whole number other than 2 is `Version
+  { found }`, "not supported", whatever else the file holds. Version 1,
+  from before entities had ids (M9.8, ADR-0078), is refused as any other:
+  cook the level again.
 - **Strict:** each object has its members and no others; `grid`, `music`,
   `ambience` and `camera` may be left out.
 - **The rules** are the format's, below: sizes, channels, assets in byte
   order, each tile set's atlas among them, at most 65535 tiles a set,
   animations in order and apart, one cell for each of a layer's and the
   grid's, each cell's tile of its set and its flips 0 to 3, tall blocks
-  inside their set, prefab and component names, no `null` override.
+  inside their set, prefab and component names, no `null` override, and
+  each entity's `id` from `level::MIN_ID`, 2^62, to 2^63 − 1, which no
+  entity before it in the level has (`DuplicateId`).
 - **Errors** name where: `CodecError::Level { at, kind }`, such as
   `layers[0].cells[130]` or `entities[2].overrides.Health`.
 - **Tests:** a rule a test, from hand-written JSON text encoded to KBJ, in
@@ -919,7 +923,9 @@ their `TileInstance`s and `EntityInstance`s, and fields as
   background, and empty lists), and one of two tile sets and layers, mirrored
   every way; and the sandbox's field, `field.klvl`, as the cook writes it
   from `assets/levels/field.ldtk` (M5.12). The target asserts the promises
-  above.
+  above. Since version 2 (M9.8), the first three seeds' entities have ids
+  from 2^62 up, in their order, and `field.klvl` is the field as the cook
+  of M9.8 writes it.
 
 ### Prefab file reader (documented, tested)
 
@@ -1884,7 +1890,17 @@ error. As built in M5.12:
 - **Entities:** each entity, layer by layer from the bottom, in LDtk's
   order, spawns the prefab of its identifier in snake_case (`BigRock` →
   `big_rock`), which must be a `data/prefabs/<name>.jsonc` the cook found;
-  its position is its pivot's, `px`, with its layer's offset. Its fields
+  its position is its pivot's, `px`, with its layer's offset.
+- **Ids** (M9.8, ADR-0078): an entity's `id` is 2^62 plus the low 62 bits
+  of the 64-bit FNV-1a hash of its LDtk instance id, `iid`, a string LDtk
+  gives each entity when it is placed and keeps as it is moved or edited.
+  So the id stays the same from one cook to the next, and the game's saves
+  find the entity by it (`docs/subsystems/scene.md`, "Saves"). One placed
+  again, or copied, is another entity, with another iid. Two entities of a
+  level with one id are an error naming both: one iid twice (from a hand
+  edit), or, about once in 2^63 / n² levels of n entities, two iids that
+  hash alike, which another iid for one of them fixes. Never change how the
+  id is made: every save of a level's entities holds these ids. Its fields
   named `Component__field`, with more `__` for nested fields, are its
   overrides, `{"Component": {"field": value}}`, components and fields in
   name order. Int, Float, Bool, String, Multilines, FilePath and enum
@@ -1911,12 +1927,13 @@ error. As built in M5.12:
   job reports; `Counts` became `#[non_exhaustive]` for it in M5.12, a
   break (ADR-0038).
 
-### Level file `levels/<name>.klvl` (version 1)
+### Level file `levels/<name>.klvl` (version 2)
 
-KBJ, its members in this order (ADR-0038):
+KBJ, its members in this order (ADR-0038; the entities' ids since version
+2, ADR-0078):
 
 ```
-{ "version": 1,
+{ "version": 2,
   "size": [1024, 768],                       // pixels, 1 to 2^24 a side
   "background": [64, 70, 91],                // red, green, blue: 0 to 255
   "assets": ["atlas/sprites.kbj"],           // what it uses, in byte order, no two the same
@@ -1929,7 +1946,8 @@ KBJ, its members in this order (ADR-0038):
   "grid": { "size": [64, 48], "cell": 16, "origin": [0, 0], "layer": "World",   // optional
             "solid": [1, 1, 0, …] },                                          // row by row: 0 or 1
   "tall": [ { "tileset": 0, "tile": 4, "size": [1, 2], "feet": [104, 336], "layer": 1 } ],  // a block from its top-left tile
-  "entities": [ { "prefab": "tree", "position": [392, 112],
+  "entities": [ { "id": 5794571398270011493,                               // 2^62 to 2^63 - 1, no two the same
+                  "prefab": "tree", "position": [392, 112],
                   "overrides": { "Health": { "max": 3 } } } ],              // component names; no null
   "music": "audio/field.qoa", "ambience": "audio/wind.qoa",                 // optional asset paths
   "camera": [0, 0, 1024, 768] }                                             // optional bounds: x, y, w, h
@@ -1940,6 +1958,10 @@ KBJ, its members in this order (ADR-0038):
 - A tall tile is a sprite of the block (`TileSet::block_uv`), its feet the
   bottom middle of the block.
 - Positions are whole pixels that fit an `i32`.
+- An entity's id is the one it is saved by: the facade's `load_level`
+  gives it as the entity's `SaveId`. The ids from 2^62 up are kept for
+  levels' entities; a game's `SaveIds` counter gives out its own from 1,
+  so the two never meet.
 - The game reads it with `nadir_codec::level::parse` (above, "Level file
   reader"), through nadir-scene's `Level` asset, and the facade's
   `load_level` loads it into the world (`docs/subsystems/scene.md`,
