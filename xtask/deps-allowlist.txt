@@ -1,8 +1,11 @@
-# Third-party packages approved under docs/02-dependency-policy.md.
-# `cargo xtask deps` fails for any package that is not listed here.
+# Packages from outside the workspace that docs/02-dependency-policy.md
+# allows: approved third-party packages, and Ferrolua's first-party crates
+# (ADR-0079). `cargo xtask deps` fails for any package that is not listed
+# here.
 #
 # One package per line, with the exact version and the ADR that approved it:
 #
 #     name version ADR-NNNN
 #
-# The approved set is empty.
+# None is listed yet: the approved third-party set is empty, and M13.1
+# lists Ferrolua's crates.

@@ -49,7 +49,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0002 — Build it ourselves; zero third-party runtime crates
 
-- **Status:** Accepted
+- **Status:** Accepted; ADR-0079 counts Ferrolua's crates, the user's own
+  Lua in Rust, as first party
 - **Date:** 2026-10-12
 - **Context:** The project goal is to own the whole stack and minimize
   external code. The user's rule: a dependency is acceptable only if the
@@ -7194,6 +7195,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   same day, the user accepted the design points under **Decision** that go
   beyond those choices (the parts of Lua left out, the limits, where a
   script's state lives, the crate's place in the layers) as written.
+  Its Lua 5.4 and its interpreter written in `nadir-script` are
+  superseded by ADR-0079: Lua 5.5, run by Ferrolua behind
+  `nadir-script`.
 - **Date:** 2026-11-22
 - **Context:**
   - The user asked for Lua as the engine's scripting language, with its
@@ -7791,3 +7795,282 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   level's entity placed again is expected to keep its save (then ids
   from a field the designer sets); or a game wants more than one level in
   a save (then the save holds each level's entities, by level).
+
+## ADR-0079 — M13: Lua 5.5 run by Ferrolua, the user's own Lua in Rust, taken from crates.io as first-party code behind `nadir-script`; the interpreter's work moves to Ferrolua's roadmap; ADR-0075's parts of Lua left out, limits and engine side stay
+
+- **Status:** Accepted: on 2026-11-24 the user said that Nadir's Lua
+  scripting will be based on Ferrolua, and accepted the rest, the agent's
+  draft, as written the same day. The user then said that Ferrolua is Lua
+  5.5, not 5.4, so the language Nadir offers is Lua 5.5, and this record
+  says so in place of the draft's 5.4. Its context and its bad
+  consequences were then brought up to date with Ferrolua's design
+  documents (its commit `6cb5042`), the same day; the decision is
+  otherwise as accepted.
+- **Date:** 2026-11-24
+- **Context:**
+  - ADR-0075 (Lua 5.4 scripting, run by an interpreter of our own in safe
+    Rust that ships inside the engine) puts the whole interpreter in a
+    new crate, `nadir-script`: the lexer (M13.1), the parser and compiler
+    (M13.2), the virtual machine and garbage collector (M13.3), and the
+    standard library (M13.4). M13.5 to M13.8 connect it to the engine,
+    the dev tools and the sandbox. The overview sizes `script` XL (6,000
+    lines or more). No M13 task is started: M13.1 waits for M9.7, which
+    is not ticked, and M11.1 (packaging) waits for M13.8.
+  - ADR-0075 chose Lua 5.4. Among its triggers to revisit is a need for
+    "a feature of a Lua release after 5.4".
+  - On 2026-11-24 the user said that Nadir's Lua will be based around
+    Ferrolua, the user's own Lua implementation in Rust
+    (<https://github.com/jabbott-iii/Ferrolua>, MIT license), and that
+    Ferrolua is Lua 5.5. On that date it holds its rules, its design
+    documents, its decision log and its roadmap (its commit `6cb5042`),
+    but no Cargo workspace, no code, and no crate on crates.io.
+  - Ferrolua's plans, from those documents on 2026-11-24:
+    - Lua 5.5, checked against PUC-Rio Lua 5.5.1 (the reference
+      interpreter) and its error messages' wording (its ADR-0001), as a
+      superset: optional types, classes, `++` and compound assignment
+      work in every chunk, and strict checks are off unless a host or a
+      chunk turns them on (its ADR-0004);
+    - crates for the syntax, the bytecode, the compiler, the virtual
+      machine, the standard library, a just-in-time (JIT) compiler for
+      x86-64 (one that turns bytecode into machine code while a script
+      runs), the embedding API (the Rust functions a host program calls
+      to run Lua, crate `ferrolua`, which depends on the JIT's crate),
+      and analysis tools: a type checker, a linter, a formatter, and
+      language and debug servers;
+    - memory freed by reference counting in arenas, with no garbage
+      collector, so a loop of values lives until its state is dropped;
+      finalizers run at known points, and weak tables are kept (its
+      ADR-0003 and `docs/specs/memory.md`);
+    - the heap in safe Rust, and `unsafe` only in `ferrolua-jit` (its
+      ADR-0011 and ADR-0013);
+    - the virtual machine as the sandbox (its ADR-0014): a host picks
+      each state's libraries; `io`, `package`, `debug`, the rest of
+      `os` and precompiled chunks are off by default, but `os`'s time
+      functions are on; memory, instruction and call-depth limits,
+      which no `pcall` catches, and library work counted against the
+      instruction limit (`docs/specs/sandbox.md`);
+    - string hashes seeded per state from Rust's `RandomState`, and
+      `tostring` printing addresses for tables and functions
+      (`docs/specs/vm.md`, `docs/04-quality.md`);
+    - the interpreter on Linux x86-64 first, and Linux and macOS on
+      AArch64 and Windows on x86-64 in its backlog (`docs/03-platforms.md`);
+    - its first release on crates.io in M12, its last milestone, after
+      the JIT, the type checker, the linter and the language servers;
+    - no third-party code, with the user's GitHub and crates.io accounts
+      as its allowed publishers; Rust 1.100.0, with
+      `rust-version = "1.100"`.
+  - Nadir's rules allow no package from outside the workspace:
+    `AGENTS.md` (rule 1), ADR-0002 (build it ourselves, with an empty
+    approved set), `docs/02-dependency-policy.md`, and
+    `.claude/rules/dependencies.md`, whose **Allowed publishers** is
+    "none", the project's own author included.
+  - `cargo xtask deps` fails a path package from outside the workspace
+    even when it is listed (it counts as vendored code). It passes a
+    crates.io or Git package only at the exact version that
+    `xtask/deps-allowlist.txt` lists with its ADR. It cannot read a
+    package's owners.
+  - Nadir publishes 15 crates to crates.io (ADR-0036). crates.io accepts
+    a crate only if each of its normal dependencies is on crates.io, so a
+    published crate that uses Ferrolua needs Ferrolua there first.
+  - Nadir pins Rust 1.99.0 (`rust-toolchain.toml`). Cargo refuses to
+    build a crate whose `rust-version` is newer than the toolchain.
+  - Nadir is Apache-2.0. A game that ships the engine carries
+    `LICENSES.txt`, which lists our license, `NOTICE`, and the licenses
+    of approved dependencies (`docs/05-release.md`). The MIT license asks
+    that its copyright and permission notice go with every copy of the
+    code, and a game's binary would hold a copy of Ferrolua's code.
+  - What Nadir needs from its interpreter, all from ADR-0075 and M13:
+    the same order of a table's keys in every run, a seeded
+    `math.random`, no clock, a memory cap and an instruction budget that
+    no `pcall` catches, no Lua call that recurses on the Rust stack, no
+    binary chunks, no finalizers or weak tables, no allocation in a
+    steady tick, and errors that name the chunk, the line and the token.
+- **Decision** (the user chose Ferrolua on 2026-11-24, and Lua 5.5 with
+  it, and accepted the rest, the agent's draft, the same day):
+  - **Ferrolua runs Nadir's Lua.** Nadir no longer writes its own lexer,
+    parser, compiler, virtual machine, garbage collector or standard
+    library. `nadir-script` (`crates/script`, layer 2, with `core` as its
+    only workspace dependency) stays, as the one Nadir crate that uses
+    Ferrolua. It wraps Ferrolua's embedding API and gives the facade the
+    state that ADR-0075 describes: its caps, its seeded random generator,
+    each script's own environment, and errors with tracebacks. No
+    Ferrolua type appears in another crate's public API, so replacing
+    Ferrolua changes one crate.
+  - **Lua 5.5, not 5.4.** The language Nadir offers is the one the Lua
+    5.5 reference manual (<https://www.lua.org/manual/5.5/>) defines, as
+    Ferrolua implements it, without the parts that ADR-0075 leaves out.
+  - **What stays from ADR-0075:**
+    - the parts of Lua left out: finalizers (`__gc`), weak tables
+      (`__mode`), the `io`, `os`, `package` and `debug` libraries (but
+      `debug.traceback`), `dofile`, `loadfile`, `string.dump` and binary
+      chunks;
+    - determinism, the memory cap and the instruction budget;
+    - scripts as cooked assets, the `Script` component and its hooks,
+      the script API, and lasting state in reflected components;
+    - the dev tools (hot reload, the console's `lua` command, the
+      profiler's scopes), the scripting budget, and the `lua` fuzz
+      target, which now runs through `nadir-script`;
+    - `docs/subsystems/script.md`, which lists every difference from the
+      manual, Ferrolua's included.
+  - **First party, by a narrow rule:** Nadir's allowed publishers become
+    the user's own accounts (<https://github.com/jabbott-iii> and
+    <https://crates.io/users/jabbott-iii>), for Ferrolua's crates only.
+    A Ferrolua crate counts as first party only while all of these hold:
+    - the user is its only owner on crates.io (`cargo owner --list`);
+    - its source is the Ferrolua repository above;
+    - its own dependency tree holds only Ferrolua's crates;
+    - and it sets `unsafe_code = "forbid"`.
+
+    Any other crate of the user's needs an ADR of its own. ADR-0002's
+    set of approved third-party crates stays empty.
+  - **Pinned as the policy pins:** `nadir-script`'s manifest, and no
+    other, names Ferrolua's crates, from crates.io, by exact versions
+    (`= x.y.z`). Each is listed in `xtask/deps-allowlist.txt` as
+    `name version ADR-0079`, so `cargo xtask deps` still names every
+    outside package. Nadir uses no Git or path dependency on Ferrolua,
+    even pinned, because Nadir's own crates.io release could not ship
+    it. Updating Ferrolua is a change of its own. That change runs
+    `cargo tree` before and after, and rereads the manifests of the
+    crates Nadir links for `unsafe` and outside dependencies, since
+    `cargo xtask unsafe-audit` reads only this repository's files.
+  - **What Ferrolua must give Nadir**, for Ferrolua's roadmap. Each is
+    tested in Ferrolua, and again through `nadir-script` in Nadir:
+    1. A table's keys come in the same order in every run and on every
+       system: there is no random hash seed, or the host sets it.
+    2. A host can replace or remove any library function, so that
+       `math.random` and `math.randomseed` draw from nadir-core's
+       `Pcg32`, `print` writes to Nadir's log, and `require` finds only
+       the game's cooked scripts.
+    3. `tostring` of a table or a function gives an id, never an
+       address.
+    4. A script reaches the clock, the environment, files or processes
+       only through what a host registers.
+    5. Each state has a memory cap, and each call from the host an
+       instruction budget. Either one unwinds past any `pcall`, with a
+       traceback.
+    6. Lua-to-Lua calls run in the machine's own loop, calls nested
+       between the host and Lua have a cap, and the parser has nesting
+       limits, so no script can overflow the Rust stack.
+    7. A host can make a state without finalizers, weak tables or the
+       loading of binary chunks.
+    8. A collection starts from the bytes allocated, never from the
+       time, and the arenas are reused, so a steady loop that makes no
+       new tables or strings allocates nothing from the system.
+    9. Errors name the chunk, the line and the token, as PUC-Rio's do.
+    10. The interpreter and the collector are safe Rust, in crates that
+        forbid `unsafe`. The JIT is a crate of its own, or a feature off
+        by default.
+    11. Every crate Nadir links builds on Nadir's six targets (x86_64
+        and aarch64; Windows with MSVC, macOS and Linux) with Nadir's
+        pinned toolchain.
+    12. Ferrolua fuzzes its compiler and virtual machine, as its testing
+        rule plans already.
+  - **No JIT in Nadir.** Nadir runs Ferrolua's interpreter only. The JIT
+    needs `unsafe` and memory that holds machine code, covers x86-64
+    alone at first, and needs the `com.apple.security.cs.allow-jit`
+    entitlement under macOS's hardened runtime (the code-signing mode
+    that notarization requires). Nadir's rule 3 keeps
+    `unsafe` to `nadir-sys`, `nadir-platform` and `nadir-gfx`. Turning
+    the JIT on needs an ADR of its own.
+  - **The roadmap:**
+    - M13.1 becomes "script: the crate over Ferrolua, its spec, and the
+      fuzz target": the crate and its place in the layers, the spec,
+      the allowlist entries, and Nadir's tests of the requirements above
+      through `nadir-script`. It depends on M9.7 and on a Ferrolua
+      release on crates.io that meets them.
+    - M13.2 to M13.4 leave Nadir's roadmap for Ferrolua's, with a dated
+      note under M13's heading. Their IDs are not reused. M13.5 depends
+      on M13.1.
+    - M13.5 to M13.8 stay as written.
+  - **The toolchain:** a Ferrolua crate's `rust-version` must be no newer
+    than Nadir's pinned toolchain. Nadir moves to the toolchain that
+    Ferrolua's first release needs, in a commit of its own before the
+    one that adds the dependency.
+  - **The license:** each game package's `LICENSES.txt` lists Ferrolua's
+    license and copyright notice beside ours. `NOTICE` stays as it is,
+    since the MIT license asks nothing of it. If Ferrolua's license
+    changes, `LICENSES.txt` follows.
+- **Consequences:**
+  - Good:
+    - Nadir drops its largest planned subsystem, the XL interpreter, and
+      M13 shrinks from eight tasks to five, so the release waits on less
+      of Nadir's own work.
+    - The user keeps one Lua implementation, not two. Ferrolua's
+      conformance scripts, checked against PUC-Rio's output, catch
+      differences that ADR-0075's tests, written from the manual alone,
+      could miss.
+    - Ferrolua's analysis tools, once built, can check a game's scripts.
+  - Bad:
+    - Nadir's first release waits on another repository's: M13.1 cannot
+      start until Ferrolua is on crates.io and meets the requirements,
+      and M11.1 waits for M13.8. Ferrolua plans its first crates.io
+      release as its last milestone (M12), so Nadir waits for all of
+      Ferrolua's plan unless Ferrolua publishes earlier.
+    - As planned on 2026-11-24, Ferrolua differs from six of the
+      requirements above: its hash seed is random (1); `tostring` prints
+      addresses (3); finalizers and weak tables are always there (7);
+      with no collector, a loop of tables lives until its state is
+      dropped, and Nadir's one state lasts the whole game (8); `ferrolua`
+      depends on the JIT's crate (10); and it plans only Linux on x86-64,
+      with no macOS on x86-64 or Windows on AArch64 (11). Its new syntax
+      also works in every chunk, beyond the Lua 5.5 manual. Each needs a
+      change to Ferrolua's plan, or a new decision here, before M13.1.
+    - `Cargo.lock` holds packages from outside the workspace for the
+      first time. A takeover of the user's crates.io account would reach
+      Nadir; exact pins, and updates reviewed as their own changes, are
+      the defense.
+    - Ferrolua aims wider than Nadir (all of Lua 5.5, a JIT, analysis
+      tools), so the options that turn its features off are Nadir's to
+      keep tested.
+    - Two projects' sandbox rules must agree. A change to Ferrolua's
+      embedding API means a change in `nadir-script`.
+  - Follow-up work:
+    - Ferrolua (its own tasks): the requirements above, and a release on
+      crates.io.
+    - Nadir, done in the change that accepted this record:
+      - ADR-0075's status line (its Lua 5.4 and its interpreter written
+        in `nadir-script` superseded here) and ADR-0002's (Ferrolua's
+        crates first party);
+      - `AGENTS.md`: rule 1 and "Built from the ground up"; `CLAUDE.md`'s
+        row for `dependencies.md`; `CONTRIBUTING.md`'s rule on crates;
+      - `.claude/rules/dependencies.md`: **Allowed publishers** and
+        **Approved exceptions**;
+      - `docs/02-dependency-policy.md`: the rule, "What counts as a
+        dependency", "Enforcement" and register row 35; the comment at
+        the top of `xtask/deps-allowlist.txt`;
+      - `docs/00-overview.md`: the Lua non-goal line, the `script` row
+        of the scope estimate, and the two risk rows that cite ADR-0075;
+      - `docs/01-architecture.md`: the dependency matrix's opening
+        sentences;
+      - `docs/roadmap.md`: M13's opening, M13.1 to M13.5;
+      - `docs/features.jsonc`: the Lua scripting summary and its tasks;
+      - `docs/05-release.md`: what `LICENSES.txt` lists.
+- **Alternatives considered:**
+  - Keep ADR-0075, with Nadir writing its own interpreter: against the
+    user's direction, and two Lua interpreters by one author.
+  - Ferrolua as a Git or path dependency: `cargo xtask deps` refuses the
+    path, and crates.io refuses both, so Nadir's crates could not be
+    released.
+  - Ferrolua's code copied into the workspace as `crates/script`: two
+    copies to keep in step, and Nadir's rule counts copied code as a
+    dependency anyway.
+  - Ferrolua as an approved third-party exception, under the policy's
+    exception test: that test is for other people's code, and its
+    criterion 1 asks for a capability "not central to the engine". A
+    first-party rule says what is true.
+  - Every crate the user publishes as first party: wider than this need;
+    each other crate gets its own record.
+  - Ferrolua's JIT on in Nadir: `unsafe` and machine code made at run
+    time inside the game, x86-64 only, and a macOS entitlement, before
+    any measured need.
+- **Revisit when:**
+  - Ferrolua cannot meet one of the requirements above, or a later
+    release drops one;
+  - a Ferrolua crate that Nadir links gains `unsafe`, a dependency from
+    outside Ferrolua, or a crates.io owner other than the user;
+  - M9.7 is ticked and no Ferrolua release on crates.io meets the
+    requirements yet, which holds M13.1;
+  - the sandbox's scripts miss the scripting budget set in M13.8 with
+    the interpreter alone (the JIT question);
+  - Ferrolua moves to a Lua release after 5.5;
+  - or Ferrolua's license changes.

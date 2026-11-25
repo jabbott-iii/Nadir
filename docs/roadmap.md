@@ -6830,21 +6830,31 @@ studio.
 
 ## M13 — Lua scripting
 
-Games will write gameplay in Lua 5.4 scripts, run by an interpreter of
-our own, in safe Rust, that ships inside the engine, so that nobody
-installs Lua (ADR-0075, accepted on 2026-11-22: the user asked for Lua
-with its interpreter included, chose an interpreter of our own over the
-reference C one and a place before the release, and accepted the ADR as
-written the same day). Its number comes after the studio's, but its work
-comes before the release: M13.1 starts after M9.7, and M11.1 (packaging)
-waits for M13.8.
+Games will write gameplay in Lua 5.5 scripts, run inside the engine by
+Ferrolua, the user's own Lua in safe Rust
+(<https://github.com/jabbott-iii/Ferrolua>), so that nobody installs Lua.
+ADR-0075, accepted on 2026-11-22: the user asked for Lua with its
+interpreter included, and a place before the release. ADR-0079, accepted
+on 2026-11-24: the user chose Ferrolua, taken from crates.io as
+first-party code behind `nadir-script`, over an interpreter written in
+Nadir, and with it Lua 5.5 in place of 5.4. Its number comes after the
+studio's, but its work comes before the release: M13.1 starts after M9.7
+and a Ferrolua release that meets ADR-0079's requirements, and M11.1
+(packaging) waits for M13.8.
 
-- **The language** is the one the Lua 5.4 reference manual
-  (<https://www.lua.org/manual/5.4/>) defines, but for what ADR-0075
-  leaves out: finalizers (`__gc`), weak tables (`__mode`), the `io`,
-  `os`, `package`, and `debug` libraries (but `debug.traceback`),
-  `dofile`, `loadfile`, `string.dump`, and binary chunks. That way a
-  script reaches only what the engine gives it.
+**Note (2026-11-24, the user's choice, ADR-0079):** the interpreter's work
+left this roadmap for Ferrolua's. M13.1 gave up its values and its lexer
+and became the crate over Ferrolua. M13.2 (the parser and the compiler),
+M13.3 (the virtual machine and the garbage collector) and M13.4 (the
+standard library) were removed, and their IDs are not reused. ADR-0079
+lists what Ferrolua must give Nadir.
+
+- **The language** is the one the Lua 5.5 reference manual
+  (<https://www.lua.org/manual/5.5/>) defines, as Ferrolua implements it,
+  but for what ADR-0075 leaves out: finalizers (`__gc`), weak tables
+  (`__mode`), the `io`, `os`, `package`, and `debug` libraries (but
+  `debug.traceback`), `dofile`, `loadfile`, `string.dump`, and binary
+  chunks. That way a script reaches only what the engine gives it.
 - **Deterministic:** a table's keys are visited in the same order in
   every run, `math.random` draws from a seeded `Pcg32` (the engine's
   random number generator), and no script reads the clock, so replays and
@@ -6858,126 +6868,65 @@ waits for M13.8.
   State that must last lives in reflected components, so saves, the
   inspector, and replays see it.
 
-- [ ] **M13.1 — script: the crate, its spec, values, and the lexer**
-  - Depends: M9.7
+- [ ] **M13.1 — script: the crate over Ferrolua, its spec, and the fuzz target**
+  - Note: 2026-11-24, the user's choice (ADR-0079): this task was "the
+    crate, its spec, values, and the lexer". Ferrolua builds the values
+    and the lexer now, with the rest of the interpreter.
+  - Depends: M9.7, and a Ferrolua release on crates.io that meets
+    ADR-0079's requirements
   - Do:
-    - `crates/script`, package `nadir-script`, in layer 2 with `core`
-      only: its rows in the layer table and the dependency matrix
-      (`docs/01-architecture.md`), its line in `AGENTS.md`'s workspace
-      map, and what crates.io needs (a description, copies of `LICENSE`
-      and `NOTICE`, a `README.md` whose examples `src/lib.rs` tests;
-      ADR-0039). `xtask`'s row gains `script`, for the fuzz target.
-    - `docs/subsystems/script.md`: the design of ADR-0075, the limits and
-      their defaults, and every difference from the manual, which each
-      task of M13 keeps up to date.
-    - The values: nil, booleans, 64-bit integers and floats, kept apart
-      as Lua 5.4 keeps them, strings of bytes (not always UTF-8), tables,
-      functions (Lua's and the engine's), and coroutines.
-    - The lexer: every token of the manual's section 3.1, including long
-      brackets of any level, the escapes `\z`, `\x`, `\ddd`, and
-      `\u{XXX}`, hexadecimal floats, and decimal integer numerals that
-      overflow, which the manual reads as floats.
-    - The fuzz target `lua`, with seeds in `fuzz/corpus/lua/`, over the
-      lexer for now.
-  - Accept: a test for each rule of section 3.1; a lexical error names
-    the chunk, the line, and the token, as Lua's do
-    (`slime.lua:3: malformed number near '0x'`); no input panics; the
-    crate passes `cargo xtask crates`.
-  - Verify: `cargo test -p nadir-script`;
-    `cargo xtask fuzz-smoke --target lua`; `cargo xtask layers`;
-    `cargo xtask crates`
-
-- [ ] **M13.2 — script: the parser and the compiler**
-  - Depends: M13.1
-  - Do:
-    - A parser for the complete syntax of the manual's section 9, with
-      the precedence of section 3.4.8 and the rules of sections 3.3 and
-      3.5: local scopes, the `<const>` and `<close>` attributes, `goto`
-      and labels (no jump into the scope of a local), varargs, and
-      multiple assignment.
-    - A compiler to a bytecode of our own, kept in memory only: locals in
-      registers or on a stack (the task decides, in the spec), upvalues
-      (an enclosing function's locals that a closure keeps), constants,
-      and line numbers for errors and tracebacks.
-    - Limits, so that no input can overflow the Rust stack: a nesting
-      depth for expressions and blocks, 200 locals and 255 upvalues per
-      function (the reference's limits), and a source size.
-    - The fuzz target compiles each input.
-  - Accept: a test for each rule of section 9; a syntax error names the
+    - `crates/script`, package `nadir-script`, in layer 2 with `core` as
+      its only workspace dependency: its rows in the layer table and the
+      dependency matrix (`docs/01-architecture.md`), its line in
+      `AGENTS.md`'s workspace map, and what crates.io needs (a
+      description, copies of `LICENSE` and `NOTICE`, a `README.md` whose
+      examples `src/lib.rs` tests; ADR-0039). `xtask`'s row gains
+      `script`, for the fuzz target.
+    - Ferrolua's crates, in `nadir-script`'s manifest alone, from
+      crates.io by exact versions (`= x.y.z`), each listed in
+      `xtask/deps-allowlist.txt` with ADR-0079
+      (`docs/02-dependency-policy.md`, "First-party crates from outside
+      the workspace"). If they need a newer Rust than
+      `rust-toolchain.toml` pins, Nadir's toolchain moves first, in a
+      commit of its own.
+    - `cargo xtask deps`'s report, and the demo page's count of
+      third-party crates (`cargo xtask site`), count Ferrolua's crates
+      as first party; `SECURITY.md` points to Ferrolua's security policy
+      for its advisories.
+    - The wrapper: a state made without what ADR-0075 leaves out, with
+      its memory cap and instruction budget; `math.random` and
+      `math.randomseed` over nadir-core's `Pcg32`; `print` to the
+      engine's log; `require` that finds only what the engine gives it
+      (M13.5); and errors with their tracebacks. No Ferrolua type
+      appears in its public API.
+    - `docs/subsystems/script.md`: the design of ADR-0075 and ADR-0079,
+      the limits and their defaults, the Ferrolua version Nadir pins, and
+      every difference from the Lua 5.5 manual, Ferrolua's included,
+      which each task of M13 keeps up to date.
+    - The fuzz target `lua`, with seeds in `fuzz/corpus/lua/`: it
+      compiles each input through `nadir-script`, and runs what compiles
+      under a small budget and memory cap.
+  - Accept: tests through `nadir-script` of what Nadir needs from
+    Ferrolua (ADR-0079): a table's keys visited in the same order in two
+    runs, and `tostring` of a table the same in both; `math.random` the
+    same from the same seed; a runaway loop, a deep recursion, a table
+    that grows without end, and a pattern that would backtrack for long
+    each stop at their limit, uncaught by `pcall`; an input nested
+    100,000 levels deep refused with an error, not a stack overflow; a
+    walk of `_G` that finds no way to a file, a process, the clock, or
+    the environment; a lexical and a syntax error that each name the
     chunk, the line, and the token, as Lua's do
-    (`slime.lua:7: 'end' expected (to close 'function' at line 2) near <eof>`);
-    an input nested 100,000 levels deep is refused with an error, not a
-    stack overflow; no input panics.
+    (`slime.lua:3: malformed number near '0x'`); no input panics;
+    `cargo xtask deps` passes with Ferrolua's crates listed; the crate
+    passes `cargo xtask crates`.
   - Verify: `cargo test -p nadir-script`;
-    `cargo xtask fuzz-smoke --target lua`
-
-- [ ] **M13.3 — script: the virtual machine and the garbage collector**
-  - Depends: M13.2
-  - Do:
-    - The virtual machine: the arithmetic and bitwise operators with Lua
-      5.4's integer and float rules (integers wrap around; floor division
-      and modulo; the conversions of section 3.4.3), comparison,
-      concatenation, the length operator, tables with an array part and a
-      hash part, every metamethod of section 2.4 but `__gc` and `__mode`,
-      closures, varargs and multiple results, proper tail calls, `error`
-      and `pcall`, and coroutines (section 2.6).
-    - Calls from Lua to Lua run in the machine's own loop, not on the Rust
-      stack, so that a deep recursion is Lua's "stack overflow" error at a
-      cap.
-    - The garbage collector: mark and sweep over the interpreter's arenas,
-      in safe Rust, started by the bytes allocated since the last
-      collection, never by the time. From the bench below, the task
-      decides whether a collection runs whole or in steps across ticks,
-      and records it in the spec.
-    - The limits: a memory cap per state, and an instruction budget per
-      call from the engine. Each unwinds to the engine with a traceback,
-      past any `pcall`, so that a script cannot catch it and go on.
-    - Arenas reused: a loop that makes no new tables or strings allocates
-      nothing from the system after its first run.
-    - The fuzz target runs what compiles, under a small budget and cap.
-    - Benches in `nadir-bench`, named `lua_*`: calls (a recursive
-      Fibonacci), table writes and reads, string building, method calls
-      through metatables, and a collection of a heap of 100,000 small
-      tables.
-  - Accept: a test for each rule of sections 2.4, 2.6, and 3.4; the same
-    program visits a table's keys in the same order in two runs; a
-    runaway loop, a deep recursion, and a table that grows without end
-    each stop at their limit, uncaught by `pcall`; the arenas' reuse
-    checked with the allocation counter (M3.5) from a crate that may link
-    it, such as `nadir-bench`; the benches' numbers recorded in the
-    task's note.
-  - Verify: `cargo test -p nadir-script`;
-    `cargo xtask fuzz-smoke --target lua`; `cargo xtask bench lua`
-
-- [ ] **M13.4 — script: the standard library**
-  - Depends: M13.3
-  - Do:
-    - The basic functions (the manual's section 6.1), but `dofile`,
-      `loadfile`, and `collectgarbage` beyond `"count"`: `load` of text
-      chunks only, with an environment; `print` to the engine's log.
-    - `string` (section 6.4): Lua patterns (section 6.4.1) matched by a
-      matcher of our own, whose steps the instruction budget counts;
-      `string.format` as the manual defines it; `string.pack` and
-      `string.unpack` (section 6.4.2); not `string.dump`.
-    - `coroutine` (6.2), `utf8` (6.5), `table` (6.6), `math` (6.7), whose
-      `math.random` and `math.randomseed` use the state's `Pcg32`, and
-      `debug.traceback`.
-    - `require`, which finds the cooked scripts the engine names (M13.5),
-      and nothing else.
-    - Conformance: ask the user whether to run Lua 5.4's own test suite
-      (MIT license) outside the repository as a check (ADR-0075), and
-      record the answer in the task's note.
-  - Accept: a test for each function, from the manual's text and
-    examples; `tostring` prints a float as the reference does (`%.14g`,
-    with `.0` added to one that looks like an integer); a test walks
-    `_G` and finds no way to a file, a process, the clock, or the
-    environment; a pattern that would backtrack for long stops at the
-    budget.
-  - Verify: `cargo test -p nadir-script`;
-    `cargo xtask fuzz-smoke --target lua`
+    `cargo xtask fuzz-smoke --target lua`; `cargo xtask deps`;
+    `cargo xtask layers`; `cargo xtask crates`
 
 - [ ] **M13.5 — engine and cook: script assets and the `Script` component**
-  - Depends: M13.4
+  - Note: 2026-11-24 (ADR-0079): this task depended on M13.4 until that
+    task left for Ferrolua's roadmap.
+  - Depends: M13.1
   - Do:
     - The cook's script job: each `assets/scripts/**/*.lua`, under the
       cook's path rules, is compiled to check it, and one that fails

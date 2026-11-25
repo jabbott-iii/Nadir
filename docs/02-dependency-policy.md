@@ -6,8 +6,10 @@
 > crate is used only when it passes the exception test below, the user has
 > approved it, and it is recorded in the register in this document.
 
-The current approved set of third-party crates is **empty**. `Cargo.lock` must
-contain only workspace packages. `cargo xtask deps` fails otherwise.
+The current approved set of third-party crates is **empty**. Besides workspace
+packages, `Cargo.lock` may hold only Ferrolua's crates, which are first party
+(see "First-party crates from outside the workspace" below, ADR-0079); none is
+there yet. `cargo xtask deps` fails otherwise.
 
 ## What counts as a dependency
 
@@ -18,6 +20,9 @@ contain only workspace packages. `cargo xtask deps` fails otherwise.
 | A build script that downloads anything or runs third-party code | OS and SDK tools invoked by `xtask` packaging (`signtool`, `rc`, `codesign`, `notarytool`, `lipo`, `iconutil`, `hdiutil`, `appimagetool`, `tar`, `dpkg-deb`, `dpkg-shlibdeps`) |
 | A git submodule containing code | Content tools whose output files we parse (LDtk, Aseprite) |
 | A `cargo install`-ed tool that CI depends on | GitHub Actions used by CI. Pin by commit SHA; see `docs/04-quality.md` |
+
+Ferrolua's crates count too, but as first party: see "First-party crates from
+outside the workspace" below (ADR-0079).
 
 Reading a public file format specification (PNG, QOI, QOA, WAV, BMFont, LDtk
 JSON) and implementing it ourselves is **not** a dependency. That is the
@@ -30,6 +35,37 @@ intended path.
 | Windows | `kernel32`, `user32`, `gdi32`, `opengl32`, `winmm`, `ole32`, `shell32`, `dbghelp`, `avrt`, `xinput1_4` (fallback `xinput9_1_0`) | Linked import libraries from the MSVC toolchain; XInput, avrt and dbghelp loaded with `LoadLibraryW` |
 | macOS | `libobjc`, `Foundation`, `AppKit`, `QuartzCore`, `OpenGL`, `Metal`, `AudioToolbox`, `CoreAudio`, `CoreFoundation`, `GameController` | `#[link(name = "objc")]`, and `#[link(name = "...", kind = "framework")]` for the frameworks, in `nadir-sys` |
 | Linux | `libc` (glibc), `libX11.so.6`, `libEGL.so.1`, `libOpenGL.so.0` (fallback for GL symbols), `libasound.so.2`; later `libXi.so.6` | glibc linked; everything else loaded with `dlopen`, so a missing library produces a clear error message instead of a loader failure |
+
+## First-party crates from outside the workspace
+
+Ferrolua (<https://github.com/jabbott-iii/Ferrolua>), the user's own Lua 5.5
+in Rust, will run Nadir's Lua scripts from M13.1 (ADR-0079). Its crates are
+first party, not third-party exceptions, so they skip the exception test below,
+for as long as each of these holds:
+
+- The user is the crate's only owner on crates.io (`cargo owner --list`), and
+  its source is the Ferrolua repository.
+- Its own dependency tree holds only Ferrolua's crates.
+- It sets `unsafe_code = "forbid"`. Nadir links Ferrolua's interpreter only,
+  never its just-in-time (JIT) compiler, which needs `unsafe`; turning the JIT
+  on needs an ADR of its own.
+
+If one stops holding, ADR-0079 is revisited before that crate is updated. They
+come in as approved crates do (see step 3 of "Exception process"):
+
+- Only `nadir-script`'s manifest names them, from crates.io, with exact
+  requirements (`= x.y.z`). No Git or path dependency is used: Nadir's own
+  crates.io release could not ship one.
+- Each is listed in `xtask/deps-allowlist.txt` as `name version ADR-0079`.
+- An update is a change of its own. It runs `cargo tree` before and after, and
+  rereads the manifests of the crates Nadir links for `unsafe` and outside
+  dependencies, since `cargo xtask unsafe-audit` reads only this repository's
+  files.
+- Each game package's `LICENSES.txt` lists Ferrolua's license and copyright
+  notice (`docs/05-release.md`).
+
+Every other crate from outside the workspace, the user's other crates
+included, is third party.
 
 ## The exception test
 
@@ -124,7 +160,7 @@ The **fallback** column is a pre-evaluated crate we would consider if the
 | 32 | Timestamps | Build | UTC civil date from `SystemTime` (days-to-civil algorithm) | `chrono`, `time` | Not expected |
 | 33 | Error plumbing | Build | Per-crate error enums | `anyhow`, `thiserror` | Not expected |
 | 34 | Byte casting (`Pod`) | Build | `unsafe trait Pod` in `nadir-gfx`, implemented only for primitives and their arrays | `bytemuck` | Not expected |
-| 35 | Scripting language (Lua 5.4) | Build | Own interpreter in `nadir-script`, in safe Rust, shipped inside the game (ADR-0075, M13) | The reference C Lua 5.4 (MIT), vendored; not evaluated yet | The sandbox's scripts miss the scripting budget after optimization, or the interpreter's tasks (M13.1 to M13.4) take more than about 8 engineer-weeks |
+| 35 | Scripting language (Lua 5.5) | Build | Ferrolua, the user's own Lua 5.5 in safe Rust, first party, from crates.io by exact pins behind `nadir-script`, shipped inside the game; its interpreter only, no JIT (ADR-0075, ADR-0079, M13) | The reference C Lua 5.5 (MIT), vendored; not evaluated yet | Ferrolua cannot meet one of ADR-0079's requirements, or the sandbox's scripts miss the scripting budget after optimization |
 
 ## Enforcement
 
@@ -137,7 +173,8 @@ The **fallback** column is a pre-evaluated crate we would consider if the
 - **The rule** `.claude/rules/dependencies.md`, from Doctrina, loads in
   every Claude Code session: it counts anything the project didn't write,
   CI actions and tools included, as a dependency, and its "Project details"
-  name no allowed publisher, so every package from outside the workspace
-  needs an exception.
+  name the user's own accounts as the only allowed publishers, for
+  Ferrolua's crates alone (ADR-0079), so every other package from outside the
+  workspace needs an exception.
 - **Claude Code permissions** ask before `cargo add`, `cargo remove`,
   `cargo update` and `cargo install`.

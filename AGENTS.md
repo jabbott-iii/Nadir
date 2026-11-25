@@ -27,6 +27,8 @@ roadmap task is ticked: check before assuming.
 - **Out of scope:** web/WASM, Android, iOS, consoles, 3D, networking.
 - **Built from the ground up:** zero third-party runtime crates. We write our
   own OS bindings, graphics backends, math, ECS, codecs, mixer, UI and tools.
+  Lua scripts will run on Ferrolua, the user's own Lua 5.5 in Rust, whose
+  crates count as first party (ADR-0079).
 
 ## Read before working
 
@@ -55,7 +57,9 @@ roadmap task is ticked: check before assuming.
 1. **No third-party dependencies.** Do not add any crate outside this
    workspace to any `[dependencies]`, `[dev-dependencies]` or
    `[build-dependencies]` table, unless `docs/02-dependency-policy.md` lists
-   it as `Approved`. If you believe one is needed, stop. Write the evaluation
+   it as `Approved`, or it is one of Ferrolua's crates, which count as first
+   party in `nadir-script`'s manifest alone, by exact pins (ADR-0079). If you
+   believe one is needed, stop. Write the evaluation
    the policy describes and ask the user. `cargo xtask deps` enforces this.
 2. **Layering is one-way.** A crate may depend only on crates listed for it in
    `docs/01-architecture.md` → "Dependency matrix". `cargo xtask layers`

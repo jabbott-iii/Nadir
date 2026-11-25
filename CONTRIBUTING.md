@@ -54,7 +54,9 @@ These are the rules in `AGENTS.md` that a pull request is most often
 held up on:
 
 - **No third-party crates.** Do not add a crate from outside this
-  workspace to any dependency table. If you think one is needed, say so on
+  workspace to any dependency table. The one exception is Ferrolua's
+  crates, a Lua 5.5 in Rust by Nadir's own author, in `nadir-script`'s
+  manifest alone (ADR-0079). If you think one is needed, say so on
   the issue, with the evaluation that
   [`docs/02-dependency-policy.md`](docs/02-dependency-policy.md)
   describes. `cargo xtask deps` enforces this.

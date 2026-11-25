@@ -319,8 +319,8 @@
     {
       "name": "Lua scripting",
       "area": "Simulation",
-      "summary": "Games will write gameplay in Lua 5.4, run by an interpreter of the engine's own in safe Rust that ships inside the game, so nothing needs installing. Scripts will run on entities each tick, reach their components through reflection, stay within a memory cap and an instruction budget, replay exactly, and hot reload in development builds.",
-      "tasks": ["M13.1", "M13.2", "M13.3", "M13.4", "M13.5", "M13.6", "M13.7", "M13.8"]
+      "summary": "Games will write gameplay in Lua 5.5, run by Ferrolua, a Lua interpreter in safe Rust by Nadir's own author, which ships inside the game, so nothing needs installing. Scripts will run on entities each tick, reach their components through reflection, stay within a memory cap and an instruction budget, replay exactly, and hot reload in development builds.",
+      "tasks": ["M13.1", "M13.5", "M13.6", "M13.7", "M13.8"]
     }
   ]
 }

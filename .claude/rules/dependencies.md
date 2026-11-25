@@ -22,9 +22,14 @@ yet. Work out that value from the repository itself, and tell the user which val
 so they can fill them in. Until **Allowed publishers** is filled in, treat every package as third
 party, and until **Approved exceptions** is filled in, treat it as "none".
 
-- **Allowed publishers:** none. Nadir uses no package from any registry or Git URL, its own
-  author's included: only the crates of this workspace (`AGENTS.md`, rule 1;
-  `docs/02-dependency-policy.md`). Every package from outside the workspace is third party.
+- **Allowed publishers:** the user's own accounts, <https://github.com/jabbott-iii> and
+  <https://crates.io/users/jabbott-iii>, for Ferrolua's crates only (ADR-0079). A Ferrolua crate
+  is first party only while the user is its only owner on crates.io, its source is
+  <https://github.com/jabbott-iii/Ferrolua>, its own tree holds only Ferrolua's crates, and it
+  sets `unsafe_code = "forbid"`. Only `nadir-script` may depend on one, from crates.io by an exact
+  pin, and Nadir never links Ferrolua's JIT. Every other package from outside the workspace, the
+  user's other crates included, is third party (`AGENTS.md`, rule 1;
+  `docs/02-dependency-policy.md`).
 - **Platform:** Rust's toolchain as `rust-toolchain.toml` pins it (rustc, Cargo, rustfmt, and
   Clippy) and its standard library; the operating systems' own libraries and frameworks, which
   `nadir-sys` binds by hand, and the OS and SDK tools that `xtask` packaging runs (both listed in
@@ -42,8 +47,10 @@ party, and until **Approved exceptions** is filled in, treat it as "none".
   `xtask/deps-allowlist.txt` at its exact version.
 - **Approved exceptions:** the build-or-buy register in `docs/02-dependency-policy.md`, its rows
   of status `Approved`, each also listed in `xtask/deps-allowlist.txt` with its version and its
-  decision record: none today. `/evaluate-dependency` writes the evaluation that the policy asks
-  for, for the user to decide on.
+  decision record: none today. Ferrolua's crates are first party, not exceptions, but are listed
+  in `xtask/deps-allowlist.txt` too, with ADR-0079, so that `cargo xtask deps` passes them; none
+  is listed yet. `/evaluate-dependency` writes the evaluation that the policy asks for, for the
+  user to decide on.
 
 ## What counts as a dependency
 

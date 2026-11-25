@@ -36,7 +36,7 @@ session:
 | Rule file | Covers |
 | :- | :- |
 | `commits.md` | Commit messages (Conventional Commits), read-only Git, pull requests |
-| `dependencies.md` | Anything the project didn't write: none from outside the workspace |
+| `dependencies.md` | Anything the project didn't write: none from outside the workspace but Ferrolua's crates (ADR-0079) |
 | `testing.md` | Strict tests, coverage, performance, security, CI |
 | `writing.md` | Everything written for people: plain wording, American English, the two-reader check |
 

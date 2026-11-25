@@ -127,8 +127,12 @@ instead.
 
 `LICENSES.txt` lists our own license and `NOTICE`, which a game that
 ships the engine must carry (the license's section 4(d)), and the
-licenses of any approved dependencies. With zero dependencies, that's
-just ours. Fonts and other content have their own entries.
+licenses of the crates from outside the workspace that the game links.
+Today there are none, so that's just ours. Once the facade links
+`nadir-script` (M13.5), which brings in Ferrolua (ADR-0079), it also
+lists Ferrolua's MIT license and copyright notice, which that license
+asks to go with every copy. Fonts and other content have their own
+entries.
 
 ## Engine releases (`.github/workflows/release.yml`, ADR-0036)
 
