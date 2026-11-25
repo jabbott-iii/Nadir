@@ -6851,10 +6851,12 @@ lists what Ferrolua must give Nadir.
 
 - **The language** is the one the Lua 5.5 reference manual
   (<https://www.lua.org/manual/5.5/>) defines, as Ferrolua implements it,
-  but for what ADR-0075 leaves out: finalizers (`__gc`), weak tables
-  (`__mode`), the `io`, `os`, `package`, and `debug` libraries (but
-  `debug.traceback`), `dofile`, `loadfile`, `string.dump`, and binary
-  chunks. That way a script reaches only what the engine gives it.
+  but for what ADR-0075 leaves out: the `io`, `os`, `package`, and
+  `debug` libraries (but `debug.traceback`), `dofile`, `loadfile`,
+  `string.dump`, and binary chunks. That way a script reaches only what
+  the engine gives it. Finalizers (`__gc`) and weak tables (`__mode`)
+  stay, with loops collected at one point of each tick, and
+  `collectgarbage` answers only `"count"` (ADR-0081).
 - **Deterministic:** a table's keys are visited in the same order in
   every run from the same game seed, which sets the hash seed (ADR-0080);
   `math.random` draws from a seeded `Pcg32` (the engine's random number
@@ -6880,10 +6882,12 @@ lists what Ferrolua must give Nadir.
     `Options::hash_seed` answers requirement 1 (ADR-0080). Its probe steps
     count against the instruction limit (the user's choice, the same
     day), so the budget of each call from the engine bounds a table
-    operation too. Requirements 7 (states without finalizers and weak
-    tables), 10 (no JIT linked) and 11 (Nadir's six targets), its new
-    syntax in every chunk, and the date of its first crates.io release
-    (its M12) are still open.
+    operation too. ADR-0081 replaced requirement 7 the same day: Nadir
+    keeps finalizers and weak tables, and asks instead that `Lua::collect`
+    charge its finalizers to that call's budget, and that bytes count
+    alike on all six targets. Requirements 10 (no JIT linked) and 11
+    (Nadir's six targets), its new syntax in every chunk, and the date of
+    its first crates.io release (its M12) are still open.
   - Depends: M9.7, and a Ferrolua release on crates.io that meets
     ADR-0079's requirements
   - Do:
@@ -6910,8 +6914,10 @@ lists what Ferrolua must give Nadir.
       engine gives it (ADR-0080); `math.random` and
       `math.randomseed` over nadir-core's `Pcg32`; `print` to the
       engine's log; `require` that finds only what the engine gives it
-      (M13.5); and errors with their tracebacks. No Ferrolua type
-      appears in its public API.
+      (M13.5); errors with their tracebacks; Ferrolua's automatic
+      collection runs off, a call that collects loops under a budget of
+      its own, and a `collectgarbage` that answers only `"count"`
+      (ADR-0081). No Ferrolua type appears in its public API.
     - `docs/subsystems/script.md`: the design of ADR-0075, ADR-0079 and
       ADR-0080,
       the limits and their defaults, the Ferrolua version Nadir pins, and
@@ -6921,17 +6927,18 @@ lists what Ferrolua must give Nadir.
       compiles each input through `nadir-script`, and runs what compiles
       under a small budget and memory cap.
   - Accept: tests through `nadir-script` of what Nadir needs from
-    Ferrolua (ADR-0079, ADR-0080): a table's keys visited in the same
-    order in two runs with one seed, for string keys and for tables and
-    entities used as keys, and `tostring` of a table the same in both;
-    `math.random` the
-    same from the same seed; a runaway loop, a deep recursion, a table
-    that grows without end, and a pattern that would backtrack for long
-    each stop at their limit, uncaught by `pcall`; an input nested
-    100,000 levels deep refused with an error, not a stack overflow; a
-    walk of `_G` that finds no way to a file, a process, the clock, or
-    the environment; a lexical and a syntax error that each name the
-    chunk, the line, and the token, as Lua's do
+    Ferrolua (ADR-0079, ADR-0080, ADR-0081): a table's keys visited in
+    the same order in two runs with one seed, for string keys and for
+    tables and entities used as keys, and `tostring` of a table the same
+    in both; `math.random` the same from the same seed; a runaway loop, a
+    deep recursion, a table that grows without end, and a pattern that
+    would backtrack for long each stop at their limit, uncaught by
+    `pcall`; an input nested 100,000 levels deep refused with an error,
+    not a stack overflow; a walk of `_G` that finds no way to a file, a
+    process, the clock, or the environment; `collectgarbage` that answers
+    `"count"` and raises an error naming any other option; a collection
+    of loops whose finalizers stop at its budget; a lexical and a syntax
+    error that each name the chunk, the line, and the token, as Lua's do
     (`slime.lua:3: malformed number near '0x'`); no input panics;
     `cargo xtask deps` passes with Ferrolua's crates listed; the crate
     passes `cargo xtask crates`.
@@ -6963,12 +6970,20 @@ lists what Ferrolua must give Nadir.
       tick, and `on_despawn` before the entity goes. An error stops that
       entity's script, is logged once with its traceback, and the game
       goes on.
-    - The determinism test gains scripted entities.
+    - The collection of the state's loops at the end of the tick's
+      `Gameplay` stage, after every hook: every tick, or every n ticks
+      that the game sets in `Config`, with the budget of the finalizers it
+      runs in `Config` too. An error in one of those finalizers is logged
+      once and stops no entity's script (ADR-0081).
+    - The determinism test gains scripted entities, among them scripts
+      that make loops with finalizers and keep a weak table.
   - Accept: a planted syntax error fails the cook with its place; a
     test checks the hooks' order; an entity whose script fails stops
-    alone; the world hashes match across the determinism test's pacings
-    with scripted entities; a steady tick of scripts that make no new
-    tables or strings allocates nothing (the `dev` allocation counter).
+    alone; a loop's finalizer runs at the end of the tick, not inside a
+    hook, and an error in it stops no script; the world hashes match
+    across the determinism test's pacings with scripted entities; a
+    steady tick of scripts that make no new tables or strings allocates
+    nothing (the `dev` allocation counter).
   - Verify: `cargo test -p nadir-cook`; `cargo test -p nadir_engine`;
     `cargo xtask cook`; `cargo xtask layers`
 
@@ -7015,7 +7030,8 @@ lists what Ferrolua must give Nadir.
       prints its results; `scripts` lists the loaded scripts, and the
       entities whose scripts stopped, with their errors.
     - The profiler: a profile scope for each script's hooks, so that the
-      time shows by script.
+      time shows by script, and one for the collection of loops at the end
+      of each tick (ADR-0081).
     - The inspector shows the `Script` component and the script state.
   - Accept: tests for the console's commands and for a reload that keeps
     the state; a reload while `cargo dev` runs (manual, recorded in the

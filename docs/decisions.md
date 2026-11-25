@@ -7198,7 +7198,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   Its Lua 5.4 and its interpreter written in `nadir-script` are
   superseded by ADR-0079: Lua 5.5, run by Ferrolua behind
   `nadir-script`. Its "no random hash seed" gives way to a seed the
-  engine sets from the game's seed (ADR-0080).
+  engine sets from the game's seed (ADR-0080), and its leaving out of
+  finalizers and weak tables to ADR-0081, which keeps both.
 - **Date:** 2026-11-22
 - **Context:**
   - The user asked for Lua as the engine's scripting language, with its
@@ -7808,7 +7809,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   documents (its commit `6cb5042`), the same day; the decision is
   otherwise as accepted. ADR-0080 settles its requirement 1: a seed the
   engine sets from the game's seed, bounded probe steps, and hashing by
-  handle.
+  handle. ADR-0081 replaces its requirement 7 and keeps finalizers and
+  weak tables, with loops collected at one point of each tick.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0075 (Lua 5.4 scripting, run by an interpreter of our own in safe
@@ -8182,3 +8184,129 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     seed;
   - or a Ferrolua update changes the order, and recordings made before it
     must still replay.
+
+## ADR-0081 — M13: finalizers and weak tables kept; the engine collects Lua's loops at one point of each tick, under a budget of its own; `collectgarbage` answers only `"count"`
+
+- **Status:** Accepted: on 2026-11-24 the user chose the agent's
+  recommendation over leaving both out: keep finalizers and weak tables,
+  turn Ferrolua's automatic collection off and collect loops at one fixed
+  point, give that collection's finalizers a budget of the engine's, let
+  `collectgarbage` answer only `"count"`, and ask Ferrolua to count bytes
+  alike on every target. It replaces ADR-0079's requirement 7.
+- **Date:** 2026-11-24
+- **Context:**
+  - ADR-0075 left finalizers (`__gc`) and weak tables (`__mode`) out of
+    Nadir's Lua, "since scripts hold no OS resources for a collector to
+    free", when the plan was a tracing collector of Nadir's own, which
+    frees values at times a script does not control. ADR-0079 made it
+    Ferrolua's requirement 7: a state that a host can make without them.
+  - Ferrolua frees memory by reference counting, with a loop collector on
+    top (its ADR-0018 and `docs/specs/memory.md`):
+    - a value is freed as soon as its last reference goes, and its
+      finalizer runs at the next safe point, after the instruction that
+      dropped it;
+    - the loop collector frees the values that only loops keep alive. It
+      runs when the bytes allocated since its last run pass a threshold
+      the host sets, when a script calls `collectgarbage()`, or when the
+      host calls `Lua::collect`; a host can turn the automatic runs off;
+    - the same script, inputs, host calls, options and hash seed, on the
+      same target, give the same collections in the same order;
+    - an error in a finalizer becomes a warning, as in Lua 5.5;
+    - before a memory limit stops a script, it collects loops once (its
+      M3.2).
+  - Nadir runs each entity's hooks under an instruction budget per call,
+    and an error stops that entity's script alone (ADR-0075, M13.5). A
+    finalizer that runs inside a hook counts against that hook's budget,
+    and its error lands there.
+  - Game state that depends on when loops are collected, such as a weak
+    table that game logic reads, or a finalizer that changes the world,
+    makes the world depend on the collector's schedule. Under a schedule
+    of bytes allocated, that is the memory settings and how Ferrolua
+    counts bytes, which it promises only on one target. Nadir's
+    determinism test compares the same stored hashes on Linux, Windows
+    and macOS in CI (ADR-0025, `docs/04-quality.md`).
+  - Frames are not ticks: rendering runs at its own pace and interpolates
+    between ticks, and the determinism test runs the same input in frames
+    of mixed lengths.
+- **Decision** (the user chose these points on 2026-11-24; the interval
+  and the budget in `Config`, and the error for `collectgarbage`'s other
+  options, are the agent's details within them):
+  - **Finalizers and weak tables stay.** Nadir's Lua is Lua 5.5 without
+    the `io`, `os`, `package` and `debug` libraries (but
+    `debug.traceback`), `dofile`, `loadfile`, `string.dump` and binary
+    chunks. ADR-0079's requirement 7 is dropped.
+  - **The engine schedules the collection of loops.** Nadir turns
+    Ferrolua's automatic runs off and collects a state's loops at the end
+    of the tick's `Gameplay` stage, after every script hook of that tick:
+    every tick, or every n ticks if the game sets n in `Config`. A count of
+    ticks sets the schedule, not a count of bytes, so it is the same on
+    every target and at every frame pace. n is part of the game's build;
+    the settings file a player edits never holds it.
+  - **A budget of its own.** The finalizers that run during that
+    collection run under an instruction budget of the engine's, set in
+    `Config`. An error in one is logged once with Ferrolua's warning, and
+    stops no entity's script. A finalizer of a value outside any loop
+    runs where Ferrolua runs it: right after the instruction that dropped
+    the value's last reference, in that hook, under that hook's budget.
+  - **`collectgarbage`.** Nadir replaces it with one that answers
+    `"count"` and raises an error naming any other option, so no script
+    can collect, stop or restart the collector, or move its schedule.
+  - **What Ferrolua must give Nadir,** in place of requirement 7:
+    1. Finalizers that `Lua::collect` runs count against the instruction
+       budget of that call, as requirement 5's budget does for any call
+       from the host. Ferrolua's plan already lets a host turn the
+       automatic runs off and call `Lua::collect`.
+    2. A state's allocated bytes counted the same on all six of Nadir's
+       targets, so the memory cap, and the collection that Ferrolua runs
+       before the cap stops a script, fall at the same point everywhere.
+- **Consequences:**
+  - Good:
+    - Nadir's Lua is all of Lua 5.5 but its libraries for files, the OS
+      and debugging. Lua code that caches in weak tables or cleans up in
+      `__gc` runs, and Ferrolua needs no option to turn either off.
+    - Loops are collected at one point in each tick, so state that
+      depends on it is the same in every run, at every frame pace, and on
+      every OS. A loop's finalizer costs the engine's budget, not an
+      unrelated entity's.
+  - Bad:
+    - Loops wait until the end of the tick, or up to n ticks, to be freed,
+      so a script that makes many loops in a tick holds more memory than
+      under automatic runs. The memory cap still stops it, after Ferrolua
+      collects once, and in that case the loop finalizers run inside the
+      hook that reached the cap.
+    - A collection every tick takes time that grows with the number of
+      candidates (values whose count fell but not to zero). The profiler
+      shows it (M13.7); a larger n trades memory for time.
+    - Changing n changes when loop finalizers run and weak entries go, so
+      it can make older recordings diverge, as any change to the game's
+      build can.
+    - A script that calls `collectgarbage("collect")`, as some Lua code
+      does, gets an error. `docs/subsystems/script.md` lists the
+      difference.
+  - Follow-up work:
+    - Ferrolua (its own tasks): the two requirements above; its
+      `docs/specs/memory.md` promises the same collections only "on the
+      same target".
+    - Nadir: M13.1's wrapper turns the automatic runs off, collects under
+      a budget, and replaces `collectgarbage`; M13.5 places the collection
+      in the tick, with n and the budget in `Config`, and gives the
+      determinism test loops with finalizers and a weak table; M13.7 adds
+      a profile scope for the collection.
+- **Alternatives considered:**
+  - Leave both out, as requirement 7 had it: no game state can depend on
+    collection, but Ferrolua needs a host option, ideally one that makes
+    `setmetatable` with `__gc` or `__mode` an error, and Lua code that
+    relies on them breaks.
+  - Keep both under Ferrolua's automatic runs: loops are collected inside
+    whichever hook passes the threshold, so a finalizer costs and fails
+    in an unrelated entity's script, and the points hold only on one
+    target and at one setting.
+  - Collect between frames, as Ferrolua suggests for a host that cannot
+    accept a pause inside its work: the number of frames per tick changes
+    with the frame pace, so replays would diverge.
+- **Revisit when:**
+  - the collection at the end of each tick costs more than its share of
+    the scripting budget set in M13.8;
+  - Ferrolua cannot charge `Lua::collect`'s finalizers to a budget, or
+    cannot count bytes alike on Nadir's six targets;
+  - or a game needs `collectgarbage` beyond `"count"`.
