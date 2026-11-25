@@ -6885,9 +6885,12 @@ lists what Ferrolua must give Nadir.
     operation too. ADR-0081 replaced requirement 7 the same day: Nadir
     keeps finalizers and weak tables, and asks instead that `Lua::collect`
     charge its finalizers to that call's budget, and that bytes count
-    alike on all six targets. Requirements 10 (no JIT linked) and 11
-    (Nadir's six targets), its new syntax in every chunk, and the date of
-    its first crates.io release (its M12) are still open.
+    alike on all six targets. Ferrolua's ADR-0021, proposed the same day,
+    plans both: an instruction limit for each call from the host,
+    finalizers included, and bytes counted by fixed charges rather than
+    by the target. Requirements 10 (no JIT linked) and 11 (Nadir's six
+    targets), its new syntax in every chunk, and the date of its first
+    crates.io release (its M12) are still open.
   - Depends: M9.7, and a Ferrolua release on crates.io that meets
     ADR-0079's requirements
   - Do:
