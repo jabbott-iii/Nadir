@@ -7197,7 +7197,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   script's state lives, the crate's place in the layers) as written.
   Its Lua 5.4 and its interpreter written in `nadir-script` are
   superseded by ADR-0079: Lua 5.5, run by Ferrolua behind
-  `nadir-script`.
+  `nadir-script`. Its "no random hash seed" gives way to a seed the
+  engine sets from the game's seed (ADR-0080).
 - **Date:** 2026-11-22
 - **Context:**
   - The user asked for Lua as the engine's scripting language, with its
@@ -7805,7 +7806,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   says so in place of the draft's 5.4. Its context and its bad
   consequences were then brought up to date with Ferrolua's design
   documents (its commit `6cb5042`), the same day; the decision is
-  otherwise as accepted.
+  otherwise as accepted. ADR-0080 settles its requirement 1: a seed the
+  engine sets from the game's seed, bounded probe steps, and hashing by
+  handle.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0075 (Lua 5.4 scripting, run by an interpreter of our own in safe
@@ -8074,3 +8077,106 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     the interpreter alone (the JIT question);
   - Ferrolua moves to a Lua release after 5.5;
   - or Ferrolua's license changes.
+
+## ADR-0080 — M13: each Lua state's hash seed set by the engine from the game's seed; Ferrolua keeps a random default, bounds the probe steps of a table lookup, and hashes tables and engine values by handle
+
+- **Status:** Accepted: on 2026-11-24 the user chose the agent's three
+  recommendations: Ferrolua's default seed stays random and a host may set
+  a state's seed; Nadir sets it from the game's seed; and Ferrolua counts a
+  table lookup's probe steps against the instruction limit, or caps them.
+  Hashing by handle was the assumption those recommendations rested on,
+  and this record makes it a requirement. ADR-0079's requirement 1 takes
+  this form.
+- **Date:** 2026-11-24
+- **Context:**
+  - ADR-0079's requirement 1 asks that a table's keys come in the same
+    order in every run and on every system: "there is no random hash
+    seed, or the host sets it". ADR-0075 had chosen no random seed.
+  - Lua's `pairs` visits a table's array part (the keys 1 to n) in order,
+    whatever the seed; the seed decides the order of every other key. A
+    script whose result depends on that order, such as "the first enemy
+    found" or a sum of floats (whose rounding depends on the order), gives
+    different worlds from the same inputs unless the order is the same in
+    every run.
+  - A recording is an initial seed plus each tick's actions (ADR-0025,
+    `docs/04-quality.md`), and M13.5 seeds the game's `Pcg32` from the
+    game's seed. Saves hold no seed (ADR-0078): a loaded game runs with
+    the seed of its new session.
+  - Ferrolua's plan, at its commit `6cb5042`, seeds each state's string
+    hashes from Rust's `RandomState`, which changes every run, so that a
+    script can't choose keys that collide, and its tables' hash part uses
+    open addressing on that hash (`docs/specs/vm.md`). Its instruction
+    limit counts bytecode instructions and the work inside some library
+    calls (`docs/specs/sandbox.md`), but not the probe steps of a table
+    lookup.
+  - Hash flooding: keys chosen to land on the same slots make each lookup
+    walk a long chain, so n such insertions take on the order of n² probe
+    steps. Under a seed known in advance, a mod's script, or a level or
+    mod file whose names a script uses as keys, could make one
+    instruction run for seconds: a stalled tick that the instruction
+    budget never sees.
+  - PUC-Rio Lua hashes a table used as a key by its address, so such keys
+    change order between runs whatever the seed. Ferrolua keeps its heap
+    in arenas found by generational handles (its ADR-0011); its specs do
+    not say how it hashes a table, a function, or a host's value used as
+    a key.
+- **Decision** (the user chose the first three points on 2026-11-24; the
+  fourth was the assumption under them):
+  - **A seed the host sets.** Ferrolua's embedding API lets a host give a
+    state its hash seed when it makes the state. Its default stays a
+    random seed per state, for hosts that need no replays.
+  - **Nadir's seed from the game's seed.** Every Lua state of Nadir's gets
+    a seed derived from the game's seed on a stream of its own (nadir-core's
+    per-system streams), so seeding the hash takes nothing from
+    `math.random`'s sequence. A recording's seed then fixes the order, and
+    every run of a recording visits keys in the same order.
+  - **Bounded probes.** Ferrolua counts each probe step of a table's
+    lookups and insertions against the instruction limit, or caps how many
+    steps one probe may take; which of the two is Ferrolua's design. No set
+    of keys, even under a known seed, then makes one instruction run long.
+  - **Hashed by handle.** Ferrolua hashes a table, a function, a coroutine,
+    or a host's value used as a key by its handle or an id, never by an
+    address, so the same seed gives the same order for those keys too.
+- **Consequences:**
+  - Good:
+    - Replays and the determinism test hold with scripts that iterate
+      `pairs`, whatever they do with the order.
+    - A mod cannot know the seed of a player's run in advance, unless the
+      game fixes its seed, and bounded probes limit the damage when it can.
+    - Ferrolua's other hosts keep the random default.
+  - Bad:
+    - The order still depends on Ferrolua's hash function and on how its
+      tables grow. A Ferrolua update that changes either changes the
+      order, and can make an older recording diverge. Nadir pins exact
+      versions, and the determinism test catches such a change.
+    - A loaded save runs with a new session's seed, so its tables' keys
+      may come in another order than in the session that saved it.
+      Nothing replays from a save today.
+    - Lasting script state (M13.6) must not be written in `pairs` order,
+      or a save and the world hash would change with the seed.
+    - A game that fixes its seed, as the determinism test does with its
+      `SEED`, makes the seed known; bounded probes are then the defense.
+  - Follow-up work:
+    - Ferrolua (its own tasks): the seed option, the bounded probes and
+      hashing by handle, in its `docs/specs/vm.md`, `docs/specs/sandbox.md`
+      and roadmap.
+    - Nadir: M13.1's wrapper takes the seed, and its tests check the order
+      for string keys and for tables and entities used as keys; M13.5
+      derives the seed; M13.6 writes script state in an order that does not
+      depend on the seed, and records how in the ADR it already asks for.
+- **Alternatives considered:**
+  - A random seed in Nadir too: replays and the determinism test break for
+    any script whose result depends on `pairs` order.
+  - A fixed seed, as ADR-0075 had: the seed is public, so crafted keys
+    could stall a tick unless probes are bounded, and it gains nothing over
+    the game's seed.
+  - Tables that keep their keys in the order they were added, as Python's
+    dictionaries do: the order holds whatever the seed, but it is a larger
+    redesign of Ferrolua's tables. Not chosen.
+- **Revisit when:**
+  - Ferrolua's design cannot let a host set the seed, or cannot bound the
+    probe steps;
+  - a replay or a test starts from a save, which then needs to hold the
+    seed;
+  - or a Ferrolua update changes the order, and recordings made before it
+    must still replay.

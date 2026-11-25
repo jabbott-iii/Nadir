@@ -6856,9 +6856,10 @@ lists what Ferrolua must give Nadir.
   `debug.traceback`), `dofile`, `loadfile`, `string.dump`, and binary
   chunks. That way a script reaches only what the engine gives it.
 - **Deterministic:** a table's keys are visited in the same order in
-  every run, `math.random` draws from a seeded `Pcg32` (the engine's
-  random number generator), and no script reads the clock, so replays and
-  the determinism test hold with scripts.
+  every run from the same game seed, which sets the hash seed (ADR-0080);
+  `math.random` draws from a seeded `Pcg32` (the engine's random number
+  generator); and no script reads the clock, so replays and the
+  determinism test hold with scripts.
 - **Bounded:** each state (one running Lua world, with its own globals and
   heap) has a memory cap, and each call from the engine an instruction
   budget; Lua calls do not recurse on the Rust stack. A runaway script is
@@ -6894,12 +6895,14 @@ lists what Ferrolua must give Nadir.
       as first party; `SECURITY.md` points to Ferrolua's security policy
       for its advisories.
     - The wrapper: a state made without what ADR-0075 leaves out, with
-      its memory cap and instruction budget; `math.random` and
+      its memory cap, its instruction budget, and the hash seed the
+      engine gives it (ADR-0080); `math.random` and
       `math.randomseed` over nadir-core's `Pcg32`; `print` to the
       engine's log; `require` that finds only what the engine gives it
       (M13.5); and errors with their tracebacks. No Ferrolua type
       appears in its public API.
-    - `docs/subsystems/script.md`: the design of ADR-0075 and ADR-0079,
+    - `docs/subsystems/script.md`: the design of ADR-0075, ADR-0079 and
+      ADR-0080,
       the limits and their defaults, the Ferrolua version Nadir pins, and
       every difference from the Lua 5.5 manual, Ferrolua's included,
       which each task of M13 keeps up to date.
@@ -6907,8 +6910,10 @@ lists what Ferrolua must give Nadir.
       compiles each input through `nadir-script`, and runs what compiles
       under a small budget and memory cap.
   - Accept: tests through `nadir-script` of what Nadir needs from
-    Ferrolua (ADR-0079): a table's keys visited in the same order in two
-    runs, and `tostring` of a table the same in both; `math.random` the
+    Ferrolua (ADR-0079, ADR-0080): a table's keys visited in the same
+    order in two runs with one seed, for string keys and for tables and
+    entities used as keys, and `tostring` of a table the same in both;
+    `math.random` the
     same from the same seed; a runaway loop, a deep recursion, a table
     that grows without end, and a pattern that would backtrack for long
     each stop at their limit, uncaught by `pcall`; an input nested
@@ -6938,7 +6943,8 @@ lists what Ferrolua must give Nadir.
       module has an environment of its own, so that one script's globals
       do not leak into another's.
     - The game's Lua state: one per `App`, with its memory cap and budget
-      in `Config`, and its `Pcg32` seeded from the game's seed, so that
+      in `Config`, and its `Pcg32` and its hash seed derived from the
+      game's seed, each on a stream of its own (ADR-0080), so that
       replays match.
     - The `Script` component (reflected, naming its script), and an
       engine system, `nadir::scripts`, in the tick's `Gameplay` stage. It
@@ -6975,8 +6981,10 @@ lists what Ferrolua must give Nadir.
     - A game's own functions, added from Rust through the facade.
     - Script state: a reflected component of plain Lua values (numbers,
       strings, booleans, and tables of them), so that a script's lasting
-      state is saved, hashed, and shown in the inspector. The task
-      designs its shape and records it in an ADR.
+      state is saved, hashed, and shown in the inspector. Its keys are
+      written in an order that does not depend on the hash seed, so saves
+      and the world hash do not either (ADR-0080). The task designs its
+      shape and records it in an ADR.
     - The API documented in `docs/subsystems/script.md` and the facade's
       docs, and a guide example (`crates/engine/examples/guide_*.rs`)
       that runs a script, for the instructions page (ADR-0072).
