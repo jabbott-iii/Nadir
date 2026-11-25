@@ -129,8 +129,8 @@ instead.
 ships the engine must carry (the license's section 4(d)), and the
 licenses of the crates from outside the workspace that the game links.
 Today there are none, so that's just ours. Once the facade links
-`nadir-script` (M13.5), which brings in Ferrolua (ADR-0079), it also
-lists Ferrolua's MIT license and copyright notice, which that license
+`nadir-script` (M13.5), which brings in Lunaferra (ADR-0079), it also
+lists Lunaferra's MIT license and copyright notice, which that license
 asks to go with every copy. Fonts and other content have their own
 entries.
 

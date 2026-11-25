@@ -7,7 +7,7 @@
 > approved it, and it is recorded in the register in this document.
 
 The current approved set of third-party crates is **empty**. Besides workspace
-packages, `Cargo.lock` may hold only Ferrolua's crates, which are first party
+packages, `Cargo.lock` may hold only Lunaferra's crates, which are first party
 (see "First-party crates from outside the workspace" below, ADR-0079); none is
 there yet. `cargo xtask deps` fails otherwise.
 
@@ -21,7 +21,7 @@ there yet. `cargo xtask deps` fails otherwise.
 | A git submodule containing code | Content tools whose output files we parse (LDtk, Aseprite) |
 | A `cargo install`-ed tool that CI depends on | GitHub Actions used by CI. Pin by commit SHA; see `docs/04-quality.md` |
 
-Ferrolua's crates count too, but as first party: see "First-party crates from
+Lunaferra's crates count too, but as first party: see "First-party crates from
 outside the workspace" below (ADR-0079).
 
 Reading a public file format specification (PNG, QOI, QOA, WAV, BMFont, LDtk
@@ -52,11 +52,11 @@ A crate may use `unsafe` and still count (ADR-0083: ownership, the source and
 the tree decide). If a condition stops holding, the crate counts as third
 party, and the ADR that lists it is revisited before that crate is updated.
 
-The first are Ferrolua's crates (<https://github.com/jabbott-iii/Ferrolua>),
+The first are Lunaferra's crates (<https://github.com/jabbott-iii/Lunaferra>),
 the user's own language, derived from Lua 5.5, and its interpreter in Rust,
 which will run Nadir's scripts from M13.1 (ADR-0079, ADR-0082). They go in
-`nadir-script`'s manifest alone. Nadir links Ferrolua's interpreter only,
-never its just-in-time (JIT) compiler, which the `ferrolua` crate brings in
+`nadir-script`'s manifest alone. Nadir links Lunaferra's interpreter only,
+never its just-in-time (JIT) compiler, which the `lunaferra` crate brings in
 only with its `jit` feature, off by default; turning the JIT on needs an ADR
 of its own.
 
@@ -70,7 +70,7 @@ First-party crates come in this way, without the exception process below:
 - Each comes from crates.io, with an exact requirement (`= x.y.z`). No Git or
   path dependency is used: Nadir's own crates.io release could not ship one.
 - Each is listed in `xtask/deps-allowlist.txt` as `name version ADR-NNNN`,
-  with ADR-0079 for Ferrolua's crates and ADR-0084 for the rest.
+  with ADR-0079 for Lunaferra's crates and ADR-0084 for the rest.
 - Its `rust-version` is no newer than the Rust that `rust-toolchain.toml`
   pins; if it is, Nadir's toolchain moves first, in a commit of its own.
 - An addition or an update is a change of its own. It runs `cargo tree` before
@@ -82,7 +82,7 @@ First-party crates come in this way, without the exception process below:
   each one the game links (`docs/05-release.md`).
 
 First-party crates in use, each with the workspace crates that use it and
-whether it allows `unsafe`: none yet. M13.1 adds Ferrolua's.
+whether it allows `unsafe`: none yet. M13.1 adds Lunaferra's.
 
 Every other crate from outside the workspace is third party.
 
@@ -179,7 +179,7 @@ The **fallback** column is a pre-evaluated crate we would consider if the
 | 32 | Timestamps | Build | UTC civil date from `SystemTime` (days-to-civil algorithm) | `chrono`, `time` | Not expected |
 | 33 | Error plumbing | Build | Per-crate error enums | `anyhow`, `thiserror` | Not expected |
 | 34 | Byte casting (`Pod`) | Build | `unsafe trait Pod` in `nadir-gfx`, implemented only for primitives and their arrays | `bytemuck` | Not expected |
-| 35 | Scripting language (Ferrolua's, derived from Lua 5.5) | Build | Ferrolua, the user's own language and interpreter in safe Rust, first party, from crates.io by exact pins behind `nadir-script`, shipped inside the game; its interpreter only, no JIT (ADR-0075, ADR-0079, ADR-0082, M13) | The reference C Lua 5.5 (MIT), vendored, which runs Lua 5.5, not Ferrolua's language; not evaluated yet | Ferrolua cannot meet one of ADR-0079's requirements, or the sandbox's scripts miss the scripting budget after optimization |
+| 35 | Scripting language (Lunaferra's, derived from Lua 5.5) | Build | Lunaferra, the user's own language and interpreter in safe Rust, first party, from crates.io by exact pins behind `nadir-script`, shipped inside the game; its interpreter only, no JIT (ADR-0075, ADR-0079, ADR-0082, M13) | The reference C Lua 5.5 (MIT), vendored, which runs Lua 5.5, not Lunaferra's language; not evaluated yet | Lunaferra cannot meet one of ADR-0079's requirements, or the sandbox's scripts miss the scripting budget after optimization |
 
 ## Enforcement
 
@@ -193,7 +193,7 @@ The **fallback** column is a pre-evaluated crate we would consider if the
   every Claude Code session: it counts anything the project didn't write,
   CI actions and tools included, as a dependency, and its "Project details"
   name the user's own accounts as the only allowed publishers, for
-  Ferrolua's crates alone (ADR-0079), so every other package from outside the
+  Lunaferra's crates alone (ADR-0079), so every other package from outside the
   workspace needs an exception.
 - **Claude Code permissions** ask before `cargo add`, `cargo remove`,
   `cargo update` and `cargo install`.

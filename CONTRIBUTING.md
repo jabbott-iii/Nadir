@@ -56,7 +56,7 @@ held up on:
 - **No third-party crates.** Do not add a crate from outside this
   workspace to any dependency table. The exception is crates that only
   Nadir's author's accounts own and publish (ADR-0084), such as
-  Ferrolua's, a language derived from Lua 5.5 and its interpreter in
+  Lunaferra's, a language derived from Lua 5.5 and its interpreter in
   Rust, which go in `nadir-script`'s manifest alone (ADR-0079,
   ADR-0082). If you think one is needed, say so on
   the issue, with the evaluation that

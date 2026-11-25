@@ -49,7 +49,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0002 — Build it ourselves; zero third-party runtime crates
 
-- **Status:** Accepted; ADR-0079 counts Ferrolua's crates, the user's own
+- **Status:** Accepted; ADR-0079 counts Lunaferra's crates, the user's own
   Lua in Rust, as first party, and ADR-0084 every crate that only the
   user's accounts own and publish
 - **Date:** 2026-10-12
@@ -7197,11 +7197,11 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   beyond those choices (the parts of Lua left out, the limits, where a
   script's state lives, the crate's place in the layers) as written.
   Its Lua 5.4 and its interpreter written in `nadir-script` are
-  superseded by ADR-0079: Lua 5.5, run by Ferrolua behind
+  superseded by ADR-0079: Lua 5.5, run by Lunaferra behind
   `nadir-script`. Its "no random hash seed" gives way to a seed the
   engine sets from the game's seed (ADR-0080), and its leaving out of
   finalizers and weak tables to ADR-0081, which keeps both. ADR-0082
-  then makes the language Ferrolua's own, derived from Lua 5.5.
+  then makes the language Lunaferra's own, derived from Lua 5.5.
 - **Date:** 2026-11-22
 - **Context:**
   - The user asked for Lua as the engine's scripting language, with its
@@ -7800,28 +7800,28 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   from a field the designer sets); or a game wants more than one level in
   a save (then the save holds each level's entities, by level).
 
-## ADR-0079 — M13: Lua 5.5 run by Ferrolua, the user's own Lua in Rust, taken from crates.io as first-party code behind `nadir-script`; the interpreter's work moves to Ferrolua's roadmap; ADR-0075's parts of Lua left out, limits and engine side stay
+## ADR-0079 — M13: Lua 5.5 run by Lunaferra, the user's own Lua in Rust, taken from crates.io as first-party code behind `nadir-script`; the interpreter's work moves to Lunaferra's roadmap; ADR-0075's parts of Lua left out, limits and engine side stay
 
 - **Status:** Accepted: on 2026-11-24 the user said that Nadir's Lua
-  scripting will be based on Ferrolua, and accepted the rest, the agent's
-  draft, as written the same day. The user then said that Ferrolua is Lua
+  scripting will be based on Lunaferra, and accepted the rest, the agent's
+  draft, as written the same day. The user then said that Lunaferra is Lua
   5.5, not 5.4, so the language Nadir offers is Lua 5.5, and this record
   says so in place of the draft's 5.4. Its context and its bad
-  consequences were then brought up to date with Ferrolua's design
+  consequences were then brought up to date with Lunaferra's design
   documents (its commit `6cb5042`), the same day; the decision is
   otherwise as accepted. ADR-0080 settles its requirement 1: a seed the
   engine sets from the game's seed, bounded probe steps, and hashing by
   handle. ADR-0081 replaces its requirement 7 and keeps finalizers and
   weak tables, with loops collected at one point of each tick.
-  Ferrolua's ADR-0022 answers its requirement 10: the JIT is an
-  optional `jit` feature of the `ferrolua` crate, off by default.
-  ADR-0082 replaces its Lua 5.5 with Ferrolua's own language, derived
-  from Lua 5.5, and reads requirement 9 in Ferrolua's wording.
-  ADR-0083 drops the condition that a Ferrolua crate forbid `unsafe`,
+  Lunaferra's ADR-0022 answers its requirement 10: the JIT is an
+  optional `jit` feature of the `lunaferra` crate, off by default.
+  ADR-0082 replaces its Lua 5.5 with Lunaferra's own language, derived
+  from Lua 5.5, and reads requirement 9 in Lunaferra's wording.
+  ADR-0083 drops the condition that a Lunaferra crate forbid `unsafe`,
   and the first half of requirement 10; the JIT stays out. ADR-0084
   widens its first-party rule to every crate that only the user's
-  accounts own and publish; Ferrolua's stay in `nadir-script` alone.
-  ADR-0086 asks Ferrolua for an early crates.io release, after its M4
+  accounts own and publish; Lunaferra's stay in `nadir-script` alone.
+  ADR-0086 asks Lunaferra for an early crates.io release, after its M4
   and without its JIT, for M13.1 to wait for in place of its M12.
 - **Date:** 2026-11-24
 - **Context:**
@@ -7836,12 +7836,12 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - ADR-0075 chose Lua 5.4. Among its triggers to revisit is a need for
     "a feature of a Lua release after 5.4".
   - On 2026-11-24 the user said that Nadir's Lua will be based around
-    Ferrolua, the user's own Lua implementation in Rust
-    (<https://github.com/jabbott-iii/Ferrolua>, MIT license), and that
-    Ferrolua is Lua 5.5. On that date it holds its rules, its design
+    Lunaferra, the user's own Lua implementation in Rust
+    (<https://github.com/jabbott-iii/Lunaferra>, MIT license), and that
+    Lunaferra is Lua 5.5. On that date it holds its rules, its design
     documents, its decision log and its roadmap (its commit `6cb5042`),
     but no Cargo workspace, no code, and no crate on crates.io.
-  - Ferrolua's plans, from those documents on 2026-11-24:
+  - Lunaferra's plans, from those documents on 2026-11-24:
     - Lua 5.5, checked against PUC-Rio Lua 5.5.1 (the reference
       interpreter) and its error messages' wording (its ADR-0001), as a
       superset: optional types, classes, `++` and compound assignment
@@ -7851,14 +7851,14 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       machine, the standard library, a just-in-time (JIT) compiler for
       x86-64 (one that turns bytecode into machine code while a script
       runs), the embedding API (the Rust functions a host program calls
-      to run Lua, crate `ferrolua`, which depends on the JIT's crate),
+      to run Lua, crate `lunaferra`, which depends on the JIT's crate),
       and analysis tools: a type checker, a linter, a formatter, and
       language and debug servers;
     - memory freed by reference counting in arenas, with no garbage
       collector, so a loop of values lives until its state is dropped;
       finalizers run at known points, and weak tables are kept (its
       ADR-0003 and `docs/specs/memory.md`);
-    - the heap in safe Rust, and `unsafe` only in `ferrolua-jit` (its
+    - the heap in safe Rust, and `unsafe` only in `lunaferra-jit` (its
       ADR-0011 and ADR-0013);
     - the virtual machine as the sandbox (its ADR-0014): a host picks
       each state's libraries; `io`, `package`, `debug`, the rest of
@@ -7888,34 +7888,34 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     package's owners.
   - Nadir publishes 15 crates to crates.io (ADR-0036). crates.io accepts
     a crate only if each of its normal dependencies is on crates.io, so a
-    published crate that uses Ferrolua needs Ferrolua there first.
+    published crate that uses Lunaferra needs Lunaferra there first.
   - Nadir pins Rust 1.99.0 (`rust-toolchain.toml`). Cargo refuses to
     build a crate whose `rust-version` is newer than the toolchain.
   - Nadir is Apache-2.0. A game that ships the engine carries
     `LICENSES.txt`, which lists our license, `NOTICE`, and the licenses
     of approved dependencies (`docs/05-release.md`). The MIT license asks
     that its copyright and permission notice go with every copy of the
-    code, and a game's binary would hold a copy of Ferrolua's code.
+    code, and a game's binary would hold a copy of Lunaferra's code.
   - What Nadir needs from its interpreter, all from ADR-0075 and M13:
     the same order of a table's keys in every run, a seeded
     `math.random`, no clock, a memory cap and an instruction budget that
     no `pcall` catches, no Lua call that recurses on the Rust stack, no
     binary chunks, no finalizers or weak tables, no allocation in a
     steady tick, and errors that name the chunk, the line and the token.
-- **Decision** (the user chose Ferrolua on 2026-11-24, and Lua 5.5 with
+- **Decision** (the user chose Lunaferra on 2026-11-24, and Lua 5.5 with
   it, and accepted the rest, the agent's draft, the same day):
-  - **Ferrolua runs Nadir's Lua.** Nadir no longer writes its own lexer,
+  - **Lunaferra runs Nadir's Lua.** Nadir no longer writes its own lexer,
     parser, compiler, virtual machine, garbage collector or standard
     library. `nadir-script` (`crates/script`, layer 2, with `core` as its
     only workspace dependency) stays, as the one Nadir crate that uses
-    Ferrolua. It wraps Ferrolua's embedding API and gives the facade the
+    Lunaferra. It wraps Lunaferra's embedding API and gives the facade the
     state that ADR-0075 describes: its caps, its seeded random generator,
     each script's own environment, and errors with tracebacks. No
-    Ferrolua type appears in another crate's public API, so replacing
-    Ferrolua changes one crate.
+    Lunaferra type appears in another crate's public API, so replacing
+    Lunaferra changes one crate.
   - **Lua 5.5, not 5.4.** The language Nadir offers is the one the Lua
     5.5 reference manual (<https://www.lua.org/manual/5.5/>) defines, as
-    Ferrolua implements it, without the parts that ADR-0075 leaves out.
+    Lunaferra implements it, without the parts that ADR-0075 leaves out.
   - **What stays from ADR-0075:**
     - the parts of Lua left out: finalizers (`__gc`), weak tables
       (`__mode`), the `io`, `os`, `package` and `debug` libraries (but
@@ -7928,30 +7928,30 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       profiler's scopes), the scripting budget, and the `lua` fuzz
       target, which now runs through `nadir-script`;
     - `docs/subsystems/script.md`, which lists every difference from the
-      manual, Ferrolua's included.
+      manual, Lunaferra's included.
   - **First party, by a narrow rule:** Nadir's allowed publishers become
     the user's own accounts (<https://github.com/jabbott-iii> and
-    <https://crates.io/users/jabbott-iii>), for Ferrolua's crates only.
-    A Ferrolua crate counts as first party only while all of these hold:
+    <https://crates.io/users/jabbott-iii>), for Lunaferra's crates only.
+    A Lunaferra crate counts as first party only while all of these hold:
     - the user is its only owner on crates.io (`cargo owner --list`);
-    - its source is the Ferrolua repository above;
-    - its own dependency tree holds only Ferrolua's crates;
+    - its source is the Lunaferra repository above;
+    - its own dependency tree holds only Lunaferra's crates;
     - and it sets `unsafe_code = "forbid"`.
 
     Any other crate of the user's needs an ADR of its own. ADR-0002's
     set of approved third-party crates stays empty.
   - **Pinned as the policy pins:** `nadir-script`'s manifest, and no
-    other, names Ferrolua's crates, from crates.io, by exact versions
+    other, names Lunaferra's crates, from crates.io, by exact versions
     (`= x.y.z`). Each is listed in `xtask/deps-allowlist.txt` as
     `name version ADR-0079`, so `cargo xtask deps` still names every
-    outside package. Nadir uses no Git or path dependency on Ferrolua,
+    outside package. Nadir uses no Git or path dependency on Lunaferra,
     even pinned, because Nadir's own crates.io release could not ship
-    it. Updating Ferrolua is a change of its own. That change runs
+    it. Updating Lunaferra is a change of its own. That change runs
     `cargo tree` before and after, and rereads the manifests of the
     crates Nadir links for `unsafe` and outside dependencies, since
     `cargo xtask unsafe-audit` reads only this repository's files.
-  - **What Ferrolua must give Nadir**, for Ferrolua's roadmap. Each is
-    tested in Ferrolua, and again through `nadir-script` in Nadir:
+  - **What Lunaferra must give Nadir**, for Lunaferra's roadmap. Each is
+    tested in Lunaferra, and again through `nadir-script` in Nadir:
     1. A table's keys come in the same order in every run and on every
        system: there is no random hash seed, or the host sets it.
     2. A host can replace or remove any library function, so that
@@ -7980,9 +7980,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     11. Every crate Nadir links builds on Nadir's six targets (x86_64
         and aarch64; Windows with MSVC, macOS and Linux) with Nadir's
         pinned toolchain.
-    12. Ferrolua fuzzes its compiler and virtual machine, as its testing
+    12. Lunaferra fuzzes its compiler and virtual machine, as its testing
         rule plans already.
-  - **No JIT in Nadir.** Nadir runs Ferrolua's interpreter only. The JIT
+  - **No JIT in Nadir.** Nadir runs Lunaferra's interpreter only. The JIT
     needs `unsafe` and memory that holds machine code, covers x86-64
     alone at first, and needs the `com.apple.security.cs.allow-jit`
     entitlement under macOS's hardened runtime (the code-signing mode
@@ -7990,63 +7990,63 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     `unsafe` to `nadir-sys`, `nadir-platform` and `nadir-gfx`. Turning
     the JIT on needs an ADR of its own.
   - **The roadmap:**
-    - M13.1 becomes "script: the crate over Ferrolua, its spec, and the
+    - M13.1 becomes "script: the crate over Lunaferra, its spec, and the
       fuzz target": the crate and its place in the layers, the spec,
       the allowlist entries, and Nadir's tests of the requirements above
-      through `nadir-script`. It depends on M9.7 and on a Ferrolua
+      through `nadir-script`. It depends on M9.7 and on a Lunaferra
       release on crates.io that meets them.
-    - M13.2 to M13.4 leave Nadir's roadmap for Ferrolua's, with a dated
+    - M13.2 to M13.4 leave Nadir's roadmap for Lunaferra's, with a dated
       note under M13's heading. Their IDs are not reused. M13.5 depends
       on M13.1.
     - M13.5 to M13.8 stay as written.
-  - **The toolchain:** a Ferrolua crate's `rust-version` must be no newer
+  - **The toolchain:** a Lunaferra crate's `rust-version` must be no newer
     than Nadir's pinned toolchain. Nadir moves to the toolchain that
-    Ferrolua's first release needs, in a commit of its own before the
+    Lunaferra's first release needs, in a commit of its own before the
     one that adds the dependency.
-  - **The license:** each game package's `LICENSES.txt` lists Ferrolua's
+  - **The license:** each game package's `LICENSES.txt` lists Lunaferra's
     license and copyright notice beside ours. `NOTICE` stays as it is,
-    since the MIT license asks nothing of it. If Ferrolua's license
+    since the MIT license asks nothing of it. If Lunaferra's license
     changes, `LICENSES.txt` follows.
 - **Consequences:**
   - Good:
     - Nadir drops its largest planned subsystem, the XL interpreter, and
       M13 shrinks from eight tasks to five, so the release waits on less
       of Nadir's own work.
-    - The user keeps one Lua implementation, not two. Ferrolua's
+    - The user keeps one Lua implementation, not two. Lunaferra's
       conformance scripts, checked against PUC-Rio's output, catch
       differences that ADR-0075's tests, written from the manual alone,
       could miss.
-    - Ferrolua's analysis tools, once built, can check a game's scripts.
+    - Lunaferra's analysis tools, once built, can check a game's scripts.
   - Bad:
     - Nadir's first release waits on another repository's: M13.1 cannot
-      start until Ferrolua is on crates.io and meets the requirements,
-      and M11.1 waits for M13.8. Ferrolua plans its first crates.io
+      start until Lunaferra is on crates.io and meets the requirements,
+      and M11.1 waits for M13.8. Lunaferra plans its first crates.io
       release as its last milestone (M12), so Nadir waits for all of
-      Ferrolua's plan unless Ferrolua publishes earlier.
-    - As planned on 2026-11-24, Ferrolua differs from six of the
+      Lunaferra's plan unless Lunaferra publishes earlier.
+    - As planned on 2026-11-24, Lunaferra differs from six of the
       requirements above: its hash seed is random (1); `tostring` prints
       addresses (3); finalizers and weak tables are always there (7);
       with no collector, a loop of tables lives until its state is
-      dropped, and Nadir's one state lasts the whole game (8); `ferrolua`
+      dropped, and Nadir's one state lasts the whole game (8); `lunaferra`
       depends on the JIT's crate (10); and it plans only Linux on x86-64,
       with no macOS on x86-64 or Windows on AArch64 (11). Its new syntax
       also works in every chunk, beyond the Lua 5.5 manual. Each needs a
-      change to Ferrolua's plan, or a new decision here, before M13.1.
+      change to Lunaferra's plan, or a new decision here, before M13.1.
     - `Cargo.lock` holds packages from outside the workspace for the
       first time. A takeover of the user's crates.io account would reach
       Nadir; exact pins, and updates reviewed as their own changes, are
       the defense.
-    - Ferrolua aims wider than Nadir (all of Lua 5.5, a JIT, analysis
+    - Lunaferra aims wider than Nadir (all of Lua 5.5, a JIT, analysis
       tools), so the options that turn its features off are Nadir's to
       keep tested.
-    - Two projects' sandbox rules must agree. A change to Ferrolua's
+    - Two projects' sandbox rules must agree. A change to Lunaferra's
       embedding API means a change in `nadir-script`.
   - Follow-up work:
-    - Ferrolua (its own tasks): the requirements above, and a release on
+    - Lunaferra (its own tasks): the requirements above, and a release on
       crates.io.
     - Nadir, done in the change that accepted this record:
       - ADR-0075's status line (its Lua 5.4 and its interpreter written
-        in `nadir-script` superseded here) and ADR-0002's (Ferrolua's
+        in `nadir-script` superseded here) and ADR-0002's (Lunaferra's
         crates first party);
       - `AGENTS.md`: rule 1 and "Built from the ground up"; `CLAUDE.md`'s
         row for `dependencies.md`; `CONTRIBUTING.md`'s rule on crates;
@@ -8065,42 +8065,42 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Alternatives considered:**
   - Keep ADR-0075, with Nadir writing its own interpreter: against the
     user's direction, and two Lua interpreters by one author.
-  - Ferrolua as a Git or path dependency: `cargo xtask deps` refuses the
+  - Lunaferra as a Git or path dependency: `cargo xtask deps` refuses the
     path, and crates.io refuses both, so Nadir's crates could not be
     released.
-  - Ferrolua's code copied into the workspace as `crates/script`: two
+  - Lunaferra's code copied into the workspace as `crates/script`: two
     copies to keep in step, and Nadir's rule counts copied code as a
     dependency anyway.
-  - Ferrolua as an approved third-party exception, under the policy's
+  - Lunaferra as an approved third-party exception, under the policy's
     exception test: that test is for other people's code, and its
     criterion 1 asks for a capability "not central to the engine". A
     first-party rule says what is true.
   - Every crate the user publishes as first party: wider than this need;
     each other crate gets its own record.
-  - Ferrolua's JIT on in Nadir: `unsafe` and machine code made at run
+  - Lunaferra's JIT on in Nadir: `unsafe` and machine code made at run
     time inside the game, x86-64 only, and a macOS entitlement, before
     any measured need.
 - **Revisit when:**
-  - Ferrolua cannot meet one of the requirements above, or a later
+  - Lunaferra cannot meet one of the requirements above, or a later
     release drops one;
-  - a Ferrolua crate that Nadir links gains `unsafe`, a dependency from
-    outside Ferrolua, or a crates.io owner other than the user;
-  - M9.7 is ticked and no Ferrolua release on crates.io meets the
+  - a Lunaferra crate that Nadir links gains `unsafe`, a dependency from
+    outside Lunaferra, or a crates.io owner other than the user;
+  - M9.7 is ticked and no Lunaferra release on crates.io meets the
     requirements yet, which holds M13.1;
   - the sandbox's scripts miss the scripting budget set in M13.8 with
     the interpreter alone (the JIT question);
-  - Ferrolua moves to a Lua release after 5.5;
-  - or Ferrolua's license changes.
+  - Lunaferra moves to a Lua release after 5.5;
+  - or Lunaferra's license changes.
 
-## ADR-0080 — M13: each Lua state's hash seed set by the engine from the game's seed; Ferrolua keeps a random default, bounds the probe steps of a table lookup, and hashes tables and engine values by handle
+## ADR-0080 — M13: each Lua state's hash seed set by the engine from the game's seed; Lunaferra keeps a random default, bounds the probe steps of a table lookup, and hashes tables and engine values by handle
 
 - **Status:** Accepted: on 2026-11-24 the user chose the agent's three
-  recommendations: Ferrolua's default seed stays random and a host may set
-  a state's seed; Nadir sets it from the game's seed; and Ferrolua counts a
+  recommendations: Lunaferra's default seed stays random and a host may set
+  a state's seed; Nadir sets it from the game's seed; and Lunaferra counts a
   table lookup's probe steps against the instruction limit, or caps them.
   Hashing by handle was the assumption those recommendations rested on,
   and this record makes it a requirement. ADR-0079's requirement 1 takes
-  this form. Ferrolua's side: its commit `b073a43` added
+  this form. Lunaferra's side: its commit `b073a43` added
   `Options::hash_seed`, and its ADR-0020 records the bounded probes and
   hashing by handle.
 - **Date:** 2026-11-24
@@ -8118,7 +8118,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     `docs/04-quality.md`), and M13.5 seeds the game's `Pcg32` from the
     game's seed. Saves hold no seed (ADR-0078): a loaded game runs with
     the seed of its new session.
-  - Ferrolua's plan, at its commit `6cb5042`, seeds each state's string
+  - Lunaferra's plan, at its commit `6cb5042`, seeds each state's string
     hashes from Rust's `RandomState`, which changes every run, so that a
     script can't choose keys that collide, and its tables' hash part uses
     open addressing on that hash (`docs/specs/vm.md`). Its instruction
@@ -8132,13 +8132,13 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     instruction run for seconds: a stalled tick that the instruction
     budget never sees.
   - PUC-Rio Lua hashes a table used as a key by its address, so such keys
-    change order between runs whatever the seed. Ferrolua keeps its heap
+    change order between runs whatever the seed. Lunaferra keeps its heap
     in arenas found by generational handles (its ADR-0011); its specs do
     not say how it hashes a table, a function, or a host's value used as
     a key.
 - **Decision** (the user chose the first three points on 2026-11-24; the
   fourth was the assumption under them):
-  - **A seed the host sets.** Ferrolua's embedding API lets a host give a
+  - **A seed the host sets.** Lunaferra's embedding API lets a host give a
     state its hash seed when it makes the state. Its default stays a
     random seed per state, for hosts that need no replays.
   - **Nadir's seed from the game's seed.** Every Lua state of Nadir's gets
@@ -8146,11 +8146,11 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     per-system streams), so seeding the hash takes nothing from
     `math.random`'s sequence. A recording's seed then fixes the order, and
     every run of a recording visits keys in the same order.
-  - **Bounded probes.** Ferrolua counts each probe step of a table's
+  - **Bounded probes.** Lunaferra counts each probe step of a table's
     lookups and insertions against the instruction limit, or caps how many
-    steps one probe may take; which of the two is Ferrolua's design. No set
+    steps one probe may take; which of the two is Lunaferra's design. No set
     of keys, even under a known seed, then makes one instruction run long.
-  - **Hashed by handle.** Ferrolua hashes a table, a function, a coroutine,
+  - **Hashed by handle.** Lunaferra hashes a table, a function, a coroutine,
     or a host's value used as a key by its handle or an id, never by an
     address, so the same seed gives the same order for those keys too.
 - **Consequences:**
@@ -8159,10 +8159,10 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       `pairs`, whatever they do with the order.
     - A mod cannot know the seed of a player's run in advance, unless the
       game fixes its seed, and bounded probes limit the damage when it can.
-    - Ferrolua's other hosts keep the random default.
+    - Lunaferra's other hosts keep the random default.
   - Bad:
-    - The order still depends on Ferrolua's hash function and on how its
-      tables grow. A Ferrolua update that changes either changes the
+    - The order still depends on Lunaferra's hash function and on how its
+      tables grow. A Lunaferra update that changes either changes the
       order, and can make an older recording diverge. Nadir pins exact
       versions, and the determinism test catches such a change.
     - A loaded save runs with a new session's seed, so its tables' keys
@@ -8173,7 +8173,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     - A game that fixes its seed, as the determinism test does with its
       `SEED`, makes the seed known; bounded probes are then the defense.
   - Follow-up work:
-    - Ferrolua (its own tasks): the seed option, the bounded probes and
+    - Lunaferra (its own tasks): the seed option, the bounded probes and
       hashing by handle, in its `docs/specs/vm.md`, `docs/specs/sandbox.md`
       and roadmap.
     - Nadir: M13.1's wrapper takes the seed, and its tests check the order
@@ -8188,35 +8188,35 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     the game's seed.
   - Tables that keep their keys in the order they were added, as Python's
     dictionaries do: the order holds whatever the seed, but it is a larger
-    redesign of Ferrolua's tables. Not chosen.
+    redesign of Lunaferra's tables. Not chosen.
 - **Revisit when:**
-  - Ferrolua's design cannot let a host set the seed, or cannot bound the
+  - Lunaferra's design cannot let a host set the seed, or cannot bound the
     probe steps;
   - a replay or a test starts from a save, which then needs to hold the
     seed;
-  - or a Ferrolua update changes the order, and recordings made before it
+  - or a Lunaferra update changes the order, and recordings made before it
     must still replay.
 
 ## ADR-0081 — M13: finalizers and weak tables kept; the engine collects Lua's loops at one point of each tick, under a budget of its own; `collectgarbage` answers only `"count"`
 
 - **Status:** Accepted: on 2026-11-24 the user chose the agent's
   recommendation over leaving both out: keep finalizers and weak tables,
-  turn Ferrolua's automatic collection off and collect loops at one fixed
+  turn Lunaferra's automatic collection off and collect loops at one fixed
   point, give that collection's finalizers a budget of the engine's, let
-  `collectgarbage` answer only `"count"`, and ask Ferrolua to count bytes
+  `collectgarbage` answer only `"count"`, and ask Lunaferra to count bytes
   alike on every target. It replaces ADR-0079's requirement 7.
-  Ferrolua's side: its ADR-0021 counts the instruction limit for each
+  Lunaferra's side: its ADR-0021 counts the instruction limit for each
   call from the host, a collection's finalizers included, and counts
   bytes by fixed charges, the same on every target. ADR-0082 makes the
-  language Ferrolua's own; what this record keeps and leaves out stays.
+  language Lunaferra's own; what this record keeps and leaves out stays.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0075 left finalizers (`__gc`) and weak tables (`__mode`) out of
     Nadir's Lua, "since scripts hold no OS resources for a collector to
     free", when the plan was a tracing collector of Nadir's own, which
     frees values at times a script does not control. ADR-0079 made it
-    Ferrolua's requirement 7: a state that a host can make without them.
-  - Ferrolua frees memory by reference counting, with a loop collector on
+    Lunaferra's requirement 7: a state that a host can make without them.
+  - Lunaferra frees memory by reference counting, with a loop collector on
     top (its ADR-0018 and `docs/specs/memory.md`):
     - a value is freed as soon as its last reference goes, and its
       finalizer runs at the next safe point, after the instruction that
@@ -8237,7 +8237,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - Game state that depends on when loops are collected, such as a weak
     table that game logic reads, or a finalizer that changes the world,
     makes the world depend on the collector's schedule. Under a schedule
-    of bytes allocated, that is the memory settings and how Ferrolua
+    of bytes allocated, that is the memory settings and how Lunaferra
     counts bytes, which it promises only on one target. Nadir's
     determinism test compares the same stored hashes on Linux, Windows
     and macOS in CI (ADR-0025, `docs/04-quality.md`).
@@ -8252,7 +8252,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     `debug.traceback`), `dofile`, `loadfile`, `string.dump` and binary
     chunks. ADR-0079's requirement 7 is dropped.
   - **The engine schedules the collection of loops.** Nadir turns
-    Ferrolua's automatic runs off and collects a state's loops at the end
+    Lunaferra's automatic runs off and collects a state's loops at the end
     of the tick's `Gameplay` stage, after every script hook of that tick:
     every tick, or every n ticks if the game sets n in `Config`. A count of
     ticks sets the schedule, not a count of bytes, so it is the same on
@@ -8260,26 +8260,26 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     the settings file a player edits never holds it.
   - **A budget of its own.** The finalizers that run during that
     collection run under an instruction budget of the engine's, set in
-    `Config`. An error in one is logged once with Ferrolua's warning, and
+    `Config`. An error in one is logged once with Lunaferra's warning, and
     stops no entity's script. A finalizer of a value outside any loop
-    runs where Ferrolua runs it: right after the instruction that dropped
+    runs where Lunaferra runs it: right after the instruction that dropped
     the value's last reference, in that hook, under that hook's budget.
   - **`collectgarbage`.** Nadir replaces it with one that answers
     `"count"` and raises an error naming any other option, so no script
     can collect, stop or restart the collector, or move its schedule.
-  - **What Ferrolua must give Nadir,** in place of requirement 7:
+  - **What Lunaferra must give Nadir,** in place of requirement 7:
     1. Finalizers that `Lua::collect` runs count against the instruction
        budget of that call, as requirement 5's budget does for any call
-       from the host. Ferrolua's plan already lets a host turn the
+       from the host. Lunaferra's plan already lets a host turn the
        automatic runs off and call `Lua::collect`.
     2. A state's allocated bytes counted the same on all six of Nadir's
-       targets, so the memory cap, and the collection that Ferrolua runs
+       targets, so the memory cap, and the collection that Lunaferra runs
        before the cap stops a script, fall at the same point everywhere.
 - **Consequences:**
   - Good:
     - Nadir's Lua is all of Lua 5.5 but its libraries for files, the OS
       and debugging. Lua code that caches in weak tables or cleans up in
-      `__gc` runs, and Ferrolua needs no option to turn either off.
+      `__gc` runs, and Lunaferra needs no option to turn either off.
     - Loops are collected at one point in each tick, so state that
       depends on it is the same in every run, at every frame pace, and on
       every OS. A loop's finalizer costs the engine's budget, not an
@@ -8287,7 +8287,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - Bad:
     - Loops wait until the end of the tick, or up to n ticks, to be freed,
       so a script that makes many loops in a tick holds more memory than
-      under automatic runs. The memory cap still stops it, after Ferrolua
+      under automatic runs. The memory cap still stops it, after Lunaferra
       collects once, and in that case the loop finalizers run inside the
       hook that reached the cap.
     - A collection every tick takes time that grows with the number of
@@ -8300,7 +8300,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       does, gets an error. `docs/subsystems/script.md` lists the
       difference.
   - Follow-up work:
-    - Ferrolua (its own tasks): the two requirements above; its
+    - Lunaferra (its own tasks): the two requirements above; its
       `docs/specs/memory.md` promises the same collections only "on the
       same target".
     - Nadir: M13.1's wrapper turns the automatic runs off, collects under
@@ -8310,42 +8310,42 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       a profile scope for the collection.
 - **Alternatives considered:**
   - Leave both out, as requirement 7 had it: no game state can depend on
-    collection, but Ferrolua needs a host option, ideally one that makes
+    collection, but Lunaferra needs a host option, ideally one that makes
     `setmetatable` with `__gc` or `__mode` an error, and Lua code that
     relies on them breaks.
-  - Keep both under Ferrolua's automatic runs: loops are collected inside
+  - Keep both under Lunaferra's automatic runs: loops are collected inside
     whichever hook passes the threshold, so a finalizer costs and fails
     in an unrelated entity's script, and the points hold only on one
     target and at one setting.
-  - Collect between frames, as Ferrolua suggests for a host that cannot
+  - Collect between frames, as Lunaferra suggests for a host that cannot
     accept a pause inside its work: the number of frames per tick changes
     with the frame pace, so replays would diverge.
 - **Revisit when:**
   - the collection at the end of each tick costs more than its share of
     the scripting budget set in M13.8;
-  - Ferrolua cannot charge `Lua::collect`'s finalizers to a budget, or
+  - Lunaferra cannot charge `Lua::collect`'s finalizers to a budget, or
     cannot count bytes alike on Nadir's six targets;
   - or a game needs `collectgarbage` beyond `"count"`.
 
-## ADR-0082 — M13: scripts in Ferrolua's own language, with Python's operators and 0-based indexes, in place of Lua 5.5; what ADR-0075 and ADR-0081 leave out, and ADR-0079's requirements, stay
+## ADR-0082 — M13: scripts in Lunaferra's own language, with Python's operators and 0-based indexes, in place of Lua 5.5; what ADR-0075 and ADR-0081 leave out, and ADR-0079's requirements, stay
 
 - **Status:** Accepted: on 2026-11-24 the user accepted the agent's
   proposal as drafted. ADR-0085 replaces its description of the
-  language with Ferrolua's ADR-0023 to ADR-0026, which add f-strings,
+  language with Lunaferra's ADR-0023 to ADR-0026, which add f-strings,
   locals by default, lists, tuples and sets, and Python's truth; the
   rest of this record stays.
 - **Date:** 2026-11-24
 - **Context:**
-  - ADR-0079 chose Ferrolua to run Nadir's scripts, and with it Lua
+  - ADR-0079 chose Lunaferra to run Nadir's scripts, and with it Lua
     5.5: the language Nadir offers is the one the Lua 5.5 reference
-    manual defines, as Ferrolua implements it, without what ADR-0075
+    manual defines, as Lunaferra implements it, without what ADR-0075
     leaves out. Its requirement 9 asks for errors that name the chunk,
     the line and the token, as PUC-Rio's do, and it is to be revisited
-    when Ferrolua moves to a Lua release after 5.5. ADR-0081 keeps
+    when Lunaferra moves to a Lua release after 5.5. ADR-0081 keeps
     finalizers and weak tables, and calls the result Lua 5.5 without
     four libraries and a few functions.
-  - On 2026-11-24, Ferrolua's ADR-0023, accepted that day, made
-    Ferrolua's language its own, derived from Lua 5.5, with no mode that
+  - On 2026-11-24, Lunaferra's ADR-0023, accepted that day, made
+    Lunaferra's language its own, derived from Lua 5.5, with no mode that
     runs Lua 5.5 scripts unchanged:
     - Python's operators: `**` raises to a power, `!=` tests
       inequality, `^` is bitwise XOR, `+` also joins strings, and Lua's
@@ -8361,43 +8361,43 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     reserved word; no float stands in for an integer; and line numbers,
     argument numbers and stack levels still count from 1. Whether its
     files keep the `.lua` extension is still the owner's to decide.
-  - Ferrolua's language keeps Lua's statements, values, tables,
+  - Lunaferra's language keeps Lua's statements, values, tables,
     metatables, closures, coroutines and standard library apart from
     those changes, so ADR-0079's other requirements don't depend on it:
     key order, replaceable library functions, ids from `tostring`, the
     caps, no recursion on the Rust stack, collection by bytes, safe
-    Rust, the six targets and fuzzing. Ferrolua's ADR-0021 and ADR-0022
+    Rust, the six targets and fuzzing. Lunaferra's ADR-0021 and ADR-0022
     answer ADR-0081's two requests and requirement 10.
   - Nadir has no script yet: no task of M13 is ticked, the repository
     holds no `.lua` file, and `nadir-script` does not exist.
 - **Decision** (the agent's proposal, which the user accepted as drafted
   on 2026-11-24):
-  - **Scripts are in Ferrolua's language,** as Ferrolua's ADR-0023
-    defines it, with the details its ADR-0024 settles, as the Ferrolua
+  - **Scripts are in Lunaferra's language,** as Lunaferra's ADR-0023
+    defines it, with the details its ADR-0024 settles, as the Lunaferra
     release Nadir pins implements it. Nadir leaves out what ADR-0075 and
     ADR-0081 leave out: the `io`, `os`, `package` and `debug` libraries
     (but `debug.traceback`), `dofile`, `loadfile`, `string.dump` and
     binary chunks, with `collectgarbage` answering only `"count"`.
     Finalizers and weak tables stay, collected as ADR-0081 schedules.
   - **ADR-0079's requirements stay,** with requirement 9 read as:
-    errors name the chunk, the line and the token, in Ferrolua's
+    errors name the chunk, the line and the token, in Lunaferra's
     wording, which is PUC-Rio's wherever the two languages share the
     construct.
-  - **A Ferrolua release that changes the language** is a change of
-    Nadir's own, as every Ferrolua update is (ADR-0079): it updates
+  - **A Lunaferra release that changes the language** is a change of
+    Nadir's own, as every Lunaferra update is (ADR-0079): it updates
     `docs/subsystems/script.md`, the sandbox's scripts and the `lua`
     fuzz target's seeds in the same change.
-  - **Names wait for Ferrolua's.** The names in Nadir's plan that say
+  - **Names wait for Lunaferra's.** The names in Nadir's plan that say
     Lua (the cook's `assets/scripts/**/*.lua`, the console's `lua`
     command, the `lua` fuzz target) follow the name and extension that
-    Ferrolua settles; M13.1 renames them, before work starts, if
-    Ferrolua's differ. Where Nadir's docs say Lua 5.5 for what Nadir
-    offers, they say Ferrolua's language instead.
+    Lunaferra settles; M13.1 renames them, before work starts, if
+    Lunaferra's differ. Where Nadir's docs say Lua 5.5 for what Nadir
+    offers, they say Lunaferra's language instead.
   - **The non-goal** "Scripting languages other than Lua" in
-    `docs/00-overview.md` becomes "other than Ferrolua's".
+    `docs/00-overview.md` becomes "other than Lunaferra's".
 - **Consequences:**
   - Good:
-    - Nadir keeps Ferrolua, and the interpreter's work stays off Nadir's
+    - Nadir keeps Lunaferra, and the interpreter's work stays off Nadir's
       roadmap, as ADR-0079 planned. No script exists to port.
     - A game author who knows Python reads the operators, indexes and
       ranges as written, and a string that holds a number cannot change
@@ -8407,105 +8407,105 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - Bad:
     - Nadir's scripts are not Lua. Lua tutorials and libraries need
       porting, and lua-language-server, StyLua and luacheck misread the
-      files; editor support waits for Ferrolua's own tools (its M7 and
+      files; editor support waits for Lunaferra's own tools (its M7 and
       M9).
     - The language's details are still moving (its ADR-0024 is
       proposed, and the extension open), so M13.1's spec and tests wait
-      for them, as they already wait for a Ferrolua release.
+      for them, as they already wait for a Lunaferra release.
     - Lua code ported in that squares with `x ^ 2` computes an XOR, with
-      no error when `x` is an integer. Ferrolua's linter reports it (its
+      no error when `x` is an integer. Lunaferra's linter reports it (its
       M7.2); Nadir runs no linter on scripts yet.
     - "Lua" in Nadir's docs, the demo page's feature list and the
       roadmap reads wrong until each is renamed.
   - Follow-up:
     - ADR-0079's and ADR-0081's status lines point to this record.
-    - Lua 5.5 becomes Ferrolua's language in `AGENTS.md`,
+    - Lua 5.5 becomes Lunaferra's language in `AGENTS.md`,
       `CONTRIBUTING.md`, `docs/00-overview.md` (the non-goal, the
-      `script` row and the Ferrolua risk), `docs/01-architecture.md`,
+      `script` row and the Lunaferra risk), `docs/01-architecture.md`,
       `docs/02-dependency-policy.md`, the Lua scripting feature's name
       and summary in `docs/features.jsonc`, and M13's opening, its
       language bullet and M13.1 in `docs/roadmap.md`.
     - M13.1's example error, `slime.lua:3: malformed number near
-      '0x'`, takes Ferrolua's extension and wording.
+      '0x'`, takes Lunaferra's extension and wording.
 - **Alternatives considered:**
-  - Ask Ferrolua for a Lua 5.5 mode: its ADR-0023 turned down a mode
+  - Ask Lunaferra for a Lua 5.5 mode: its ADR-0023 turned down a mode
     per chunk, because every table passed between the two modes needs
     its integer keys shifted in the VM, the JIT and every library
     function.
-  - Pin a Ferrolua release from before ADR-0023: none exists. Ferrolua
+  - Pin a Lunaferra release from before ADR-0023: none exists. Lunaferra
     has no code yet, and its first release (its M12) comes after the
     change.
   - Go back to Nadir's own Lua 5.5 interpreter, as ADR-0075 planned:
     Nadir keeps Lua, but takes back the XL interpreter that ADR-0079
-    moved to Ferrolua (the removed M13.2 to M13.4).
+    moved to Lunaferra (the removed M13.2 to M13.4).
   - Another Lua 5.5 interpreter: rule 1 allows no third-party crate, and
     none of the dependency policy's reasons applies.
   - No scripting: gameplay stays in Rust and data files, and M13 is
     dropped, with its hot-reloaded gameplay code.
-- **Revisit when:** Ferrolua adds a mode that runs Lua 5.5, changes its
+- **Revisit when:** Lunaferra adds a mode that runs Lua 5.5, changes its
   language again in a release Nadir would pin, or a game needs a Lua
   library it cannot port.
 
-## ADR-0083 — M13: Ferrolua's crates may contain `unsafe`, first party by their owners, source and tree alone; the JIT stays out of Nadir
+## ADR-0083 — M13: Lunaferra's crates may contain `unsafe`, first party by their owners, source and tree alone; the JIT stays out of Nadir
 
 - **Status:** Accepted: on 2026-11-24 the user asked that crates with
   `unsafe` code be usable in Nadir as long as the accounts the
-  dependency rule names own them. Keeping the rule to Ferrolua's
+  dependency rule names own them. Keeping the rule to Lunaferra's
   crates, keeping the JIT out, and naming each linked crate that allows
   `unsafe` at every update are the agent's details within it. The same
-  day, ADR-0084 widened the rule beyond Ferrolua's crates.
+  day, ADR-0084 widened the rule beyond Lunaferra's crates.
 - **Date:** 2026-11-24
 - **Context:**
-  - ADR-0079 counts a Ferrolua crate as first party only while four
+  - ADR-0079 counts a Lunaferra crate as first party only while four
     things hold: the user is its only owner on crates.io, its source is
-    the Ferrolua repository, its own dependency tree holds only
-    Ferrolua's crates, and it sets `unsafe_code = "forbid"`. Its
-    requirement 10 asks that Ferrolua's interpreter and collector be
+    the Lunaferra repository, its own dependency tree holds only
+    Lunaferra's crates, and it sets `unsafe_code = "forbid"`. Its
+    requirement 10 asks that Lunaferra's interpreter and collector be
     safe Rust, in crates that forbid `unsafe`. The dependency rule
     (`.claude/rules/dependencies.md`) and `docs/02-dependency-policy.md`
     state the same conditions.
   - Nadir's rule 3 keeps `unsafe` to `nadir-sys`, `nadir-platform` and
     `nadir-gfx` among the workspace's crates. `cargo xtask unsafe-audit`
-    reads only this repository's files, so it never checks a Ferrolua
+    reads only this repository's files, so it never checks a Lunaferra
     crate; the fourth condition was to be checked by reading each
     crate's manifest at every update.
-  - Ferrolua plans `unsafe` in one crate, `ferrolua-jit`, which the
-    `ferrolua` crate brings in only with its `jit` feature, off by
-    default (Ferrolua's ADR-0013, proposed, and ADR-0022). Its other
+  - Lunaferra plans `unsafe` in one crate, `lunaferra-jit`, which the
+    `lunaferra` crate brings in only with its `jit` feature, off by
+    default (Lunaferra's ADR-0013, proposed, and ADR-0022). Its other
     crates plan none, but a later release could add some, and the
     fourth condition would then bar that release from Nadir.
 - **Decision** (the user's, on 2026-11-24, with the agent's details
   that the status line names):
-  - **Ownership decides.** A Ferrolua crate is first party while the
-    user is its only owner on crates.io, its source is the Ferrolua
-    repository, and its own dependency tree holds only Ferrolua's
+  - **Ownership decides.** A Lunaferra crate is first party while the
+    user is its only owner on crates.io, its source is the Lunaferra
+    repository, and its own dependency tree holds only Lunaferra's
     crates, whether or not it uses `unsafe`. The condition that it set
     `unsafe_code = "forbid"` is dropped, and so is the first half of
     requirement 10: it asks only that the JIT be a crate of its own or
-    a feature off by default, as Ferrolua's ADR-0022 makes it.
-  - **Still Ferrolua's crates only.** The rule covers no other crate of
+    a feature off by default, as Lunaferra's ADR-0022 makes it.
+  - **Still Lunaferra's crates only.** The rule covers no other crate of
     the user's; each still needs an ADR of its own, as ADR-0079 says.
-  - **The JIT stays out.** Nadir still runs Ferrolua's interpreter only,
+  - **The JIT stays out.** Nadir still runs Lunaferra's interpreter only,
     for ADR-0079's other reasons: the JIT covers x86-64 alone at first,
     and needs memory that holds machine code and macOS's
     `com.apple.security.cs.allow-jit` entitlement. Turning it on still
     needs an ADR of its own.
   - **Each update names the `unsafe`.** The change that adds or updates
-    Ferrolua's crates rereads the manifests of the crates Nadir links,
+    Lunaferra's crates rereads the manifests of the crates Nadir links,
     as before, and lists each one that allows `unsafe` in its
     description and in `docs/subsystems/script.md`.
   - **Rule 3 is about this workspace.** `AGENTS.md`'s rule 3 keeps
     `unsafe` to its three crates among Nadir's own, and says that
-    Ferrolua's crates may contain it.
+    Lunaferra's crates may contain it.
 - **Consequences:**
-  - Good: a Ferrolua release that uses `unsafe` in its interpreter, for
+  - Good: a Lunaferra release that uses `unsafe` in its interpreter, for
     speed or for a call into the OS, no longer bars Nadir from taking
     it.
   - Good: the conditions left are the ones the registry and the
     manifests answer: the owners, the source and the tree.
-  - Bad: a Ferrolua crate Nadir links may hold `unsafe` code that
+  - Bad: a Lunaferra crate Nadir links may hold `unsafe` code that
     Nadir's audit does not read, so a memory-safety bug there would
-    reach Nadir's games. Ferrolua's own rules for `unsafe` (its
+    reach Nadir's games. Lunaferra's own rules for `unsafe` (its
     ADR-0013) and its tests are what guard it.
   - Bad: a game binary may contain `unsafe` outside the three crates
     that rule 3 names, which a reader of the rule alone could miss.
@@ -8513,18 +8513,18 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     dependency rule, `docs/02-dependency-policy.md`, `AGENTS.md`'s rule
     3 and M13.1's spec follow.
 - **Alternatives considered:**
-  - Keep the condition: every Ferrolua crate Nadir links stays safe
+  - Keep the condition: every Lunaferra crate Nadir links stays safe
     Rust, but no release that adds `unsafe` anywhere could be taken.
   - Drop it for every crate the user's accounts own, not only
-    Ferrolua's: the user's other crates would come in without an ADR
+    Lunaferra's: the user's other crates would come in without an ADR
     each.
   - Drop it and link the JIT too: faster scripts on x86-64, but the
     entitlement, the targets, and determinism between the interpreter
     and the JIT need a decision of their own.
-- **Revisit when:** a memory-safety bug in a Ferrolua crate reaches a
+- **Revisit when:** a memory-safety bug in a Lunaferra crate reaches a
   Nadir game, or Nadir wants the JIT or another crate of the user's.
 
-## ADR-0084 — Every crate that only the user's accounts own and publish counts as first party, not Ferrolua's alone; each is approved, pinned and listed as Ferrolua's are
+## ADR-0084 — Every crate that only the user's accounts own and publish counts as first party, not Lunaferra's alone; each is approved, pinned and listed as Lunaferra's are
 
 - **Status:** Accepted: on 2026-11-24, asked after ADR-0083 whether to
   widen its rule to every crate the user's accounts own, the user chose
@@ -8533,7 +8533,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   list of first-party crates are the agent's details within it.
 - **Date:** 2026-11-24
 - **Context:**
-  - ADR-0079 counts the user's crates as first party for Ferrolua's
+  - ADR-0079 counts the user's crates as first party for Lunaferra's
     alone, and asks an ADR of its own for any other crate of the
     user's. ADR-0083 dropped its condition that such a crate forbid
     `unsafe`, and kept that scope.
@@ -8563,22 +8563,22 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     of `docs/01-architecture.md`, and in the dependency policy's list of
     first-party crates in use. Review checks the matrix, since
     `cargo xtask layers` does not read registry packages.
-  - **Taken as Ferrolua's are:** from crates.io by an exact pin
+  - **Taken as Lunaferra's are:** from crates.io by an exact pin
     (`= x.y.z`), never by a Git or path dependency; listed in
-    `xtask/deps-allowlist.txt` with ADR-0084 (Ferrolua's keep ADR-0079);
+    `xtask/deps-allowlist.txt` with ADR-0084 (Lunaferra's keep ADR-0079);
     a `rust-version` no newer than Nadir's pinned Rust, or Nadir's
     toolchain moves first, in a commit of its own; its license in each
     game package's `LICENSES.txt`. Each addition and update is a change
     of its own that runs `cargo tree` before and after, rereads the
     manifests of the crates Nadir links, and lists each one that allows
     `unsafe`.
-  - **Ferrolua's stay where they are.** Its crates go in
+  - **Lunaferra's stay where they are.** Its crates go in
     `nadir-script`'s manifest alone, and its JIT stays out (ADR-0079,
     ADR-0083).
   - **Counts.** The first change that adds a first-party crate other
-    than Ferrolua's makes `cargo xtask deps`'s report and the demo
+    than Lunaferra's makes `cargo xtask deps`'s report and the demo
     page's count of third-party crates count it as first party, as
-    M13.1 does for Ferrolua's.
+    M13.1 does for Lunaferra's.
 - **Consequences:**
   - Good: a crate of the user's that serves Nadir, such as a library
     shared with another project, comes in with a reviewed change and no
@@ -8598,7 +8598,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     `docs/01-architecture.md`, `AGENTS.md`, `CLAUDE.md`,
     `CONTRIBUTING.md` and the allowlist's header follow.
 - **Alternatives considered:**
-  - Keep the rule to Ferrolua's crates, as ADR-0083 has it: every other
+  - Keep the rule to Lunaferra's crates, as ADR-0083 has it: every other
     crate of the user's needs a decision record first.
   - Every crate the user owns, with no further conditions: one with a
     co-owner, or one that brings in a third-party crate, would come in
@@ -8609,25 +8609,25 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   Nadir links gains a co-owner, or a first-party crate brings a
   third-party one into its tree.
 
-## ADR-0085 — M13: Ferrolua's f-strings, function-wide locals, lists, tuples and sets, and Python's truth in Nadir's scripts; script state keeps the collections in an order the seed does not set; the console keeps its names between lines
+## ADR-0085 — M13: Lunaferra's f-strings, function-wide locals, lists, tuples and sets, and Python's truth in Nadir's scripts; script state keeps the collections in an order the seed does not set; the console keeps its names between lines
 
 - **Status:** Accepted: on 2026-11-24 the user asked for a record after
-  the agent compared Nadir's plan with Ferrolua's, and accepted the
+  the agent compared Nadir's plan with Lunaferra's, and accepted the
   agent's draft as written the same day. It replaces ADR-0082's
-  description of the language (Ferrolua's ADR-0023 "with the details
+  description of the language (Lunaferra's ADR-0023 "with the details
   its ADR-0024 settles"), and the rest of ADR-0082 stays.
 - **Date:** 2026-11-24
 - **Context:**
-  - In this record, a bare `ADR-NNNN` is Nadir's, and Ferrolua's records
-    are always called "Ferrolua's ADR-NNNN": both logs have an ADR-0025.
-  - ADR-0082 (scripts in Ferrolua's own language, with Python's
-    operators and 0-based indexes) defines Nadir's scripts as Ferrolua's
+  - In this record, a bare `ADR-NNNN` is Nadir's, and Lunaferra's records
+    are always called "Lunaferra's ADR-NNNN": both logs have an ADR-0025.
+  - ADR-0082 (scripts in Lunaferra's own language, with Python's
+    operators and 0-based indexes) defines Nadir's scripts as Lunaferra's
     ADR-0023 defines its language, "with the details its ADR-0024
-    settles, as the Ferrolua release Nadir pins implements it". Its
+    settles, as the Lunaferra release Nadir pins implements it". Its
     context gives ADR-0024's rule for truth: only `nil` and `false` are
-    false, as in Lua. It is to be revisited when Ferrolua "changes its
+    false, as in Lua. It is to be revisited when Lunaferra "changes its
     language again in a release Nadir would pin".
-  - The same day, Ferrolua's ADR-0025 and ADR-0026, both accepted,
+  - The same day, Lunaferra's ADR-0025 and ADR-0026, both accepted,
     changed its language again:
     - f-strings (formatted string literals): `f"{name} has {n:>3} items"`
       formats each field in braces, with Python's conversions and format
@@ -8650,14 +8650,14 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       false. A table or userdata (a value the host makes, such as an
       entity) whose metatable has a `__bool` that returns `false` is
       false. Every other value, `nan` included, is true. This replaces
-      the rule of Ferrolua's ADR-0024, as that record's status line
+      the rule of Lunaferra's ADR-0024, as that record's status line
       says.
-  - No Ferrolua release comes before these changes: Ferrolua has no code
+  - No Lunaferra release comes before these changes: Lunaferra has no code
     yet, and its first release is its M12. Nadir has no script yet, and
     `nadir-script` does not exist.
   - What Nadir's plan says that the changes touch:
     - M13's language bullet in `docs/roadmap.md` lists Lua 5.5's values
-      and Python's operators "as Ferrolua's ADR-0023 and ADR-0024 define
+      and Python's operators "as Lunaferra's ADR-0023 and ADR-0024 define
       them", with no f-strings, collections, scoping or truth.
     - M13.5 gives each module an environment of its own, "so that one
       script's globals do not leak into another's".
@@ -8668,11 +8668,11 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       (ADR-0080). That task designs the shape and records it in an ADR.
     - M13.7's console command, `lua <code>`, runs a chunk in the game's
       state. Under locals by default, a name that one chunk assigns is a
-      local of that chunk, gone when the next line runs. Ferrolua's own
+      local of that chunk, gone when the next line runs. Lunaferra's own
       prompt (its ADR-0033) compiles each line as if `global *` covered
       it, into a table for the session that falls back to the globals.
-      That prompt is in its command, `ferrolua-cli`, not in its
-      embedding API. Ferrolua keeps Lua 5.5's `load`, for text only,
+      That prompt is in its command, `lunaferra-cli`, not in its
+      embedding API. Lunaferra keeps Lua 5.5's `load`, for text only,
       which takes an environment (the table that holds a chunk's
       globals, which the chunk reads as `_ENV`).
     - ADR-0025 (the determinism test, one hash file for every system)
@@ -8680,14 +8680,14 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       a NaN could set".
 - **Decision** (the agent's proposal, which the user accepted as drafted
   on 2026-11-24):
-  - **The language is Ferrolua's ADR-0023 to ADR-0026.** Nadir's scripts
-    are in Ferrolua's language as its ADR-0023 to ADR-0026 define it,
+  - **The language is Lunaferra's ADR-0023 to ADR-0026.** Nadir's scripts
+    are in Lunaferra's language as its ADR-0023 to ADR-0026 define it,
     with its ADR-0025's truth in place of its ADR-0024's, as the
-    Ferrolua release Nadir pins implements it. What ADR-0075 and
+    Lunaferra release Nadir pins implements it. What ADR-0075 and
     ADR-0081 leave out stays out, and ADR-0079's requirements stay as
     ADR-0082 reads them.
   - **Sequences as lists.** A sequence the engine hands a script, such as
-    a query's results, is a Ferrolua list with the indexes of its Rust
+    a query's results, is a Lunaferra list with the indexes of its Rust
     slice (ADR-0082), not a table.
   - **`nil` for no value.** The script API gives `nil` where there is no
     value, never `0`, `""` or an empty collection in its place, so
@@ -8702,13 +8702,13 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     table's keys are (ADR-0080). M13.6's ADR settles the shape, as
     planned.
   - **The console keeps its names.** `lua <code>` compiles each line as
-    Ferrolua's prompt does: as if `global *` covered its top level, in
+    Lunaferra's prompt does: as if `global *` covered its top level, in
     an environment of the console's own that falls back to the state's
     globals, given through `load`'s environment argument. A name one
     line assigns is there on the next, and no script's environment
     changes.
   - **Spec and seeds.** `docs/subsystems/script.md` lists the scoping
-    and truth rules first among the ways Ferrolua's language differs
+    and truth rules first among the ways Lunaferra's language differs
     from Lua 5.5, as the two that change what ported Lua code does
     without an error. The `lua` fuzz target's seeds (M13.1) include
     f-strings, list, tuple and set literals, and `global` and `nonlocal`
@@ -8723,23 +8723,23 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       list the engine hands a script is the length of its Rust slice.
     - `0.0` and `-0.0` are both false, so a zero's sign cannot change a
       branch, as ADR-0025's rules for the tick path ask.
-    - The console needs no new Ferrolua API: `load` and `_ENV` already
+    - The console needs no new Lunaferra API: `load` and `_ENV` already
       give it an environment of its own.
-    - ADR-0079's requirements do not change, and Ferrolua is asked for
+    - ADR-0079's requirements do not change, and Lunaferra is asked for
       nothing new.
   - Bad:
     - Ported Lua code changes meaning without an error:
       `x = x or default` replaces a `0`, `if count then` skips a count
       of 0, and a counter in a closure needs `nonlocal`. Nadir runs no
-      linter on scripts (ADR-0082); Ferrolua's porting rules (its M7.2)
+      linter on scripts (ADR-0082); Lunaferra's porting rules (its M7.2)
       report some of these.
     - Script state has three more kinds of value for M13.6's save
       shape, the world hash and the inspector to handle, and every save
       and every hash sorts each set's members.
     - Every truth test of a table reads its metatable and its count of
-      entries (Ferrolua's ADR-0025), a cost that M13.8's bench
+      entries (Lunaferra's ADR-0025), a cost that M13.8's bench
       includes.
-    - The language may still move: Ferrolua's ADR-0007 (classes) and
+    - The language may still move: Lunaferra's ADR-0007 (classes) and
       ADR-0008 (strict mode) are proposed, so M13.1's spec and tests
       still wait for the release Nadir pins.
   - Follow-up, done in the change that accepted this record:
@@ -8750,13 +8750,13 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       `docs/features.jsonc` need no change: "derived from Lua 5.5, with
       Python's operators and indexes from 0" stays true.
 - **Alternatives considered:**
-  - Leave ADR-0082 as it is: its "as the Ferrolua release Nadir pins
+  - Leave ADR-0082 as it is: its "as the Lunaferra release Nadir pins
     implements it" already takes the changes in, but the roadmap and the
     spec would describe Lua's truth, and M13.6 and M13.7 would not plan
     for collections or for the console's names.
-  - Ask Ferrolua for Lua's truth or Lua's scoping as an option of the
+  - Ask Lunaferra for Lua's truth or Lua's scoping as an option of the
     host: one file would then mean two things in two hosts and in
-    Ferrolua's tools, and Ferrolua's plan has no such option.
+    Lunaferra's tools, and Lunaferra's plan has no such option.
   - Script state of tables only, as M13.6 has it: scripts would turn
     their collections into tables before storing them, and a list that
     holds `nil` cannot make that trip.
@@ -8768,35 +8768,35 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     the next, which leaves the console of little use.
   - `global *` alone, with the console's names in the state's globals:
     every script would see them.
-- **Revisit when:** Ferrolua's language changes again (its ADR-0007 or
+- **Revisit when:** Lunaferra's language changes again (its ADR-0007 or
   ADR-0008 accepted with a change to values or scoping, or a later
   record); a game's script state needs a value beyond these; or a test
   through `nadir-script` finds a `Vec` or a `HashSet` that does not
-  convert as Ferrolua's ADR-0026 says.
+  convert as Lunaferra's ADR-0026 says.
 
-## ADR-0086 — M13: Nadir asks Ferrolua for an early crates.io release of the crates `ferrolua` links without its JIT, once its M4 and M3.18 are done, so that Nadir's first release does not wait for Ferrolua's JIT and tools
+## ADR-0086 — M13: Nadir asks Lunaferra for an early crates.io release of the crates `lunaferra` links without its JIT, once its M4 and M3.18 are done, so that Nadir's first release does not wait for Lunaferra's JIT and tools
 
 - **Status:** Accepted: on 2026-11-24 the user asked for a record after
-  the agent compared Nadir's plan with Ferrolua's, and accepted the
-  agent's draft as written the same day. Ferrolua's side, a record and
-  a task for the early release, is still to be made in Ferrolua's
+  the agent compared Nadir's plan with Lunaferra's, and accepted the
+  agent's draft as written the same day. Lunaferra's side, a record and
+  a task for the early release, is still to be made in Lunaferra's
   repository.
 - **Date:** 2026-11-24
 - **Context:**
   - As in ADR-0085, a bare `ADR-NNNN` or `M<n>` is Nadir's, and
-    Ferrolua's are always called Ferrolua's.
-  - ADR-0079 (Ferrolua runs Nadir's scripts, taken from crates.io) makes
-    M13.1 wait for M9.7 and for a Ferrolua release on crates.io that
+    Lunaferra's are always called Lunaferra's.
+  - ADR-0079 (Lunaferra runs Nadir's scripts, taken from crates.io) makes
+    M13.1 wait for M9.7 and for a Lunaferra release on crates.io that
     meets its requirements. Nadir takes no Git or path dependency on
-    Ferrolua: `cargo xtask deps` refuses a path package, and crates.io
+    Lunaferra: `cargo xtask deps` refuses a path package, and crates.io
     refuses a crate whose dependencies are not on crates.io. M11.1
     (packaging for all three OSes) waits for M13.8, so that the first
     release is scripted (ADR-0075).
-  - ADR-0079 named the cost: Ferrolua plans its first release as its
-    last milestone, its M12, "so Nadir waits for all of Ferrolua's plan
-    unless Ferrolua publishes earlier". It is to be revisited when M9.7
+  - ADR-0079 named the cost: Lunaferra plans its first release as its
+    last milestone, its M12, "so Nadir waits for all of Lunaferra's plan
+    unless Lunaferra publishes earlier". It is to be revisited when M9.7
     is ticked and no such release exists.
-  - Ferrolua's roadmap on 2026-11-24 runs its milestones in this order:
+  - Lunaferra's roadmap on 2026-11-24 runs its milestones in this order:
     - M0, the workspace; M1, parsing; M2, the interpreter;
     - M3, embedding, the standard library and the sandbox, with CI on
       every target from its M3.18;
@@ -8804,36 +8804,36 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       mode;
     - M5, a just-in-time (JIT) compiler for x86-64;
     - M13, the JIT on AArch64 too, with executable memory on Windows,
-      macOS and Android (Ferrolua's ADR-0027 added it);
+      macOS and Android (Lunaferra's ADR-0027 added it);
     - M6 to M10, a type checker, a linter and a formatter, a security
       scanner, a language server and a debug adapter;
     - M11, an optimizing JIT;
     - and M12, the first release on crates.io, whose first task depends
       on its M11.5 and M13.6.
 
-    No task of Ferrolua's is ticked, and it has no Cargo workspace yet.
-  - Nadir links the `ferrolua` crate with its `jit` feature off (ADR-0079,
-    ADR-0083), and so `ferrolua-syntax`, `ferrolua-bytecode`,
-    `ferrolua-math`, `ferrolua-compiler`, `ferrolua-vm` and
-    `ferrolua-stdlib`, as Ferrolua's crate map lists them. What ADR-0079,
-    ADR-0080 and ADR-0081 ask of Ferrolua is planned in its M2 and M3:
+    No task of Lunaferra's is ticked, and it has no Cargo workspace yet.
+  - Nadir links the `lunaferra` crate with its `jit` feature off (ADR-0079,
+    ADR-0083), and so `lunaferra-syntax`, `lunaferra-bytecode`,
+    `lunaferra-math`, `lunaferra-compiler`, `lunaferra-vm` and
+    `lunaferra-stdlib`, as Lunaferra's crate map lists them. What ADR-0079,
+    ADR-0080 and ADR-0081 ask of Lunaferra is planned in its M2 and M3:
     bounded probe steps in M2.4, the fuzz targets for the compiler and
     the interpreter in M2.16, the full embedding API and `Lua::collect`
     in M3.1, the limits in M3.2, the host's hash seed in M3.16, and CI on
     Nadir's six targets in M3.18. Its M4 completes the language as
-    Ferrolua plans it. Nadir uses nothing from its M5 to M11 or its M13.
-  - A Ferrolua release that changes the language is a change of Nadir's
+    Lunaferra plans it. Nadir uses nothing from its M5 to M11 or its M13.
+  - A Lunaferra release that changes the language is a change of Nadir's
     own, which updates the spec, the sandbox's scripts and the fuzz seeds
     with it (ADR-0082).
-  - Ferrolua's crates would be at 0.x versions, whose API may change in
+  - Lunaferra's crates would be at 0.x versions, whose API may change in
     any release. Nadir pins exact versions and takes each update as a
     change of its own (ADR-0079).
 - **Decision** (the agent's proposal, which the user accepted as drafted
   on 2026-11-24):
-  - **An early release.** Nadir asks Ferrolua to publish on crates.io the
-    crates that `ferrolua` links without its `jit` feature, at a 0.x
+  - **An early release.** Nadir asks Lunaferra to publish on crates.io the
+    crates that `lunaferra` links without its `jit` feature, at a 0.x
     version, once its M4 is done and its M3.18 passes on every target:
-    before its JIT and its tools, and without `ferrolua-jit`. Ferrolua's
+    before its JIT and its tools, and without `lunaferra-jit`. Lunaferra's
     M12 stays its release of everything.
   - **M13.1 waits for that release.** M13.1 depends on M9.7 and on that
     release, if it meets ADR-0079's requirements, or else on the first
@@ -8844,50 +8844,50 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     as the fallback for the user to weigh.
 - **Consequences:**
   - Good:
-    - Nadir's M13 waits for Ferrolua's M0 to M4, not for its JIT on two
+    - Nadir's M13 waits for Lunaferra's M0 to M4, not for its JIT on two
       processors, its tools and its optimizing tier, none of which Nadir
       links.
-    - Ferrolua's embedding API meets a real host before its M12.2, the
+    - Lunaferra's embedding API meets a real host before its M12.2, the
       review of every public item, so that review can draw on Nadir's
       use.
-    - The language is complete as Ferrolua plans it, so Nadir's spec and
+    - The language is complete as Lunaferra plans it, so Nadir's spec and
       seeds are not rewritten for M4's additions.
   - Bad:
-    - Part of Ferrolua's M12 moves earlier: the order in which its crates
+    - Part of Lunaferra's M12 moves earlier: the order in which its crates
       publish, and their crates.io metadata (its M12.1 and M12.2), are
       needed for the early release too.
-    - At 0.x, any Ferrolua release may break `nadir-script`. A later one
+    - At 0.x, any Lunaferra release may break `nadir-script`. A later one
       may also change the hash function or how tables grow, and so the
       order of a table's keys (ADR-0080). Exact pins, the determinism
       test and an update reviewed as its own change are the defense.
-    - Nadir still waits for Ferrolua's M0 to M4, none of whose tasks is
+    - Nadir still waits for Lunaferra's M0 to M4, none of whose tasks is
       ticked. Its M4.4 and M4.6 wait for two of its own proposed records
       (its ADR-0007, classes, and ADR-0008, strict mode).
-    - It rests on a choice in another repository. If Ferrolua turns it
+    - It rests on a choice in another repository. If Lunaferra turns it
       down, Nadir waits for its M12, or takes the fallback.
   - Follow-up:
-    - Ferrolua, the user's: a record and a roadmap task for the early
+    - Lunaferra, the user's: a record and a roadmap task for the early
       release.
     - Nadir, done in the change that accepted this record: ADR-0079's
       status line; M13's opening and M13.1's `Depends` in
-      `docs/roadmap.md`; the Ferrolua row in the risk table of
+      `docs/roadmap.md`; the Lunaferra row in the risk table of
       `docs/00-overview.md`.
 - **Alternatives considered:**
-  - Wait for Ferrolua's M12, as planned: nothing changes here, but
-    Nadir's first release waits for Ferrolua's JIT on two processors,
+  - Wait for Lunaferra's M12, as planned: nothing changes here, but
+    Nadir's first release waits for Lunaferra's JIT on two processors,
     its analysis tools, its language and debug servers, and its
     optimizing tier.
   - M11.1 no longer waits for M13.8: Nadir's first release goes on its
     own schedule and ships without scripting, and M13 comes in a later
     release. It undoes ADR-0075's choice of a scripted first release,
     which is the user's to change.
-  - An early release after Ferrolua's M3 instead of its M4: M13.1 could
+  - An early release after Lunaferra's M3 instead of its M4: M13.1 could
     start sooner, but compound assignment, classes and strict mode would
     come in a later release that changes the language, and the spec,
     the scripts and the seeds would change with it (ADR-0082).
-  - A Git or path dependency while Ferrolua is unpublished: `cargo xtask
+  - A Git or path dependency while Lunaferra is unpublished: `cargo xtask
     deps` refuses a path, and neither could ship in Nadir's crates.io
     release (ADR-0079).
-- **Revisit when:** Ferrolua accepts, changes or turns down the early
-  release; Ferrolua's M4 is done; or M9.7 is ticked with no Ferrolua
+- **Revisit when:** Lunaferra accepts, changes or turns down the early
+  release; Lunaferra's M4 is done; or M9.7 is ticked with no Lunaferra
   release on crates.io that meets ADR-0079's requirements.
