@@ -8086,7 +8086,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   table lookup's probe steps against the instruction limit, or caps them.
   Hashing by handle was the assumption those recommendations rested on,
   and this record makes it a requirement. ADR-0079's requirement 1 takes
-  this form.
+  this form. Ferrolua's side: its commit `b073a43` added
+  `Options::hash_seed`, and its ADR-0020 records the bounded probes and
+  hashing by handle.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0079's requirement 1 asks that a table's keys come in the same

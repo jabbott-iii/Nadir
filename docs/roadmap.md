@@ -6873,6 +6873,14 @@ lists what Ferrolua must give Nadir.
   - Note: 2026-11-24, the user's choice (ADR-0079): this task was "the
     crate, its spec, values, and the lexer". Ferrolua builds the values
     and the lexer now, with the rest of the interpreter.
+  - Note: 2026-11-24, where Ferrolua's plan stands on ADR-0079's
+    requirements: its ADR-0018 (a loop collector run by the bytes
+    allocated) and ADR-0019 (object IDs, never addresses, in `tostring`)
+    answer requirements 8 and 3, and its ADR-0020 with
+    `Options::hash_seed` answers requirement 1 (ADR-0080). Requirements 7
+    (states without finalizers and weak tables), 10 (no JIT linked) and
+    11 (Nadir's six targets), its new syntax in every chunk, and the date
+    of its first crates.io release (its M12) are still open.
   - Depends: M9.7, and a Ferrolua release on crates.io that meets
     ADR-0079's requirements
   - Do:
