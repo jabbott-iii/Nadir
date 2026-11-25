@@ -6902,9 +6902,21 @@ lists what Ferrolua must give Nadir.
     the JIT is an optional `jit` feature of the `ferrolua` crate, off by
     default. Its ADR-0023, accepted the same day, then made its
     language its own, with Python's operators, 0-based indexes and no
-    Lua 5.5 mode; ADR-0082 (proposed) decides what Nadir offers.
-    Requirement 11 (Nadir's six targets) and the date of its first
-    crates.io release (its M12) are still open.
+    Lua 5.5 mode; ADR-0082, accepted the same day, decides what Nadir
+    offers. Its ADR-0027 and ADR-0028, accepted the same day, answer
+    requirement 11 (Nadir's six targets): its library builds for 11
+    targets, Nadir's six among them, with CI on each from its M3.18.
+    The date of its first crates.io release is still open: its M12,
+    whose first task waits for the end of its JIT work, its M11.5 (the
+    optimizing JIT's budget) and its M13.6 (the JIT's CI on every
+    target that has one).
+  - Note: 2026-11-24, two records proposed, for the user to decide:
+    ADR-0085 takes in Ferrolua's ADR-0025 and ADR-0026 (f-strings,
+    locals by default for the whole function, lists, tuples and sets,
+    and Python's truth), which this task's spec and `lua` seeds would
+    then cover; ADR-0086 asks Ferrolua for an early crates.io release
+    of the crates `ferrolua` links without its JIT, after its M4, which
+    this task would then wait for.
   - Depends: M9.7, and a Ferrolua release on crates.io that meets
     ADR-0079's requirements
   - Do:
@@ -7014,6 +7026,11 @@ lists what Ferrolua must give Nadir.
     `cargo xtask cook`; `cargo xtask layers`
 
 - [ ] **M13.6 — engine: the script API**
+  - Note: 2026-11-24, ADR-0085 (proposed: Ferrolua's lists, tuples and
+    sets, and Python's truth) would hand sequences to scripts as lists,
+    give `nil` where there is no value, keep an entity true whether or
+    not it is alive, and let script state hold lists, tuples and sets,
+    each set written in an order the hash seed does not set.
   - Depends: M13.5
   - Do:
     - Entities in Lua: values of their own type, made only by the
@@ -7046,6 +7063,10 @@ lists what Ferrolua must give Nadir.
   - Verify: `cargo test -p nadir_engine`
 
 - [ ] **M13.7 — dev tools: hot reload, the console, and the profiler**
+  - Note: 2026-11-24, ADR-0085 (proposed) would compile each line of the
+    console's `lua` command as if `global *` covered it, in an
+    environment of the console's own, so that under Ferrolua's locals by
+    default a name one line assigns is there on the next.
   - Depends: M13.6
   - Do:
     - Hot reload: in `cargo dev`, beside `cargo xtask cook --watch`, a

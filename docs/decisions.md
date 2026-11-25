@@ -8603,3 +8603,282 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** one of the user's accounts is taken over, a crate
   Nadir links gains a co-owner, or a first-party crate brings a
   third-party one into its tree.
+
+## ADR-0085 — M13: Ferrolua's f-strings, function-wide locals, lists, tuples and sets, and Python's truth in Nadir's scripts; script state keeps the collections in an order the seed does not set; the console keeps its names between lines
+
+- **Status:** Proposed. The agent drafted it on 2026-11-24, when the user
+  asked for a record after the agent compared Nadir's plan with
+  Ferrolua's. If accepted, it replaces ADR-0082's description of the
+  language (Ferrolua's ADR-0023 "with the details its ADR-0024
+  settles"), and the rest of ADR-0082 stays.
+- **Date:** 2026-11-24
+- **Context:**
+  - In this record, a bare `ADR-NNNN` is Nadir's, and Ferrolua's records
+    are always called "Ferrolua's ADR-NNNN": both logs have an ADR-0025.
+  - ADR-0082 (scripts in Ferrolua's own language, with Python's
+    operators and 0-based indexes) defines Nadir's scripts as Ferrolua's
+    ADR-0023 defines its language, "with the details its ADR-0024
+    settles, as the Ferrolua release Nadir pins implements it". Its
+    context gives ADR-0024's rule for truth: only `nil` and `false` are
+    false, as in Lua. It is to be revisited when Ferrolua "changes its
+    language again in a release Nadir would pin".
+  - The same day, Ferrolua's ADR-0025 and ADR-0026, both accepted,
+    changed its language again:
+    - f-strings (formatted string literals): `f"{name} has {n:>3} items"`
+      formats each field in braces, with Python's conversions and format
+      specifications.
+    - Locals by default, for the whole function: assigning a name
+      anywhere in a function makes it a local of that function, unless
+      the function declares it `global` or `nonlocal`. `global *`
+      restores Lua's rule for a function and the functions nested in
+      it. Reading a local before it is assigned raises an error.
+    - Lists (`[1, 2]`), tuples (`(1, 2)`) and sets (`set(...)`), each a
+      type of its own beside tables. A list or a tuple holds any value,
+      `nil` included, and an index outside `-#c` to `#c - 1` raises an
+      error. A tuple whose elements can all be keys hashes by value; a
+      list or a set used as a key raises an error. A set visits its
+      members in an order the hash seed fixes, as a table's keys are. A
+      host's `Vec` converts to and from a list, and a `HashSet` to and
+      from a set, and `type` returns `"list"`, `"tuple"` and `"set"`.
+    - Python's truth: `nil`, `false`, `0`, `0.0`, `-0.0`, `""`, an empty
+      collection, and a table with no entries and no metatable are
+      false. A table or userdata (a value the host makes, such as an
+      entity) whose metatable has a `__bool` that returns `false` is
+      false. Every other value, `nan` included, is true. This replaces
+      the rule of Ferrolua's ADR-0024, as that record's status line
+      says.
+  - No Ferrolua release comes before these changes: Ferrolua has no code
+    yet, and its first release is its M12. Nadir has no script yet, and
+    `nadir-script` does not exist.
+  - What Nadir's plan says that the changes touch:
+    - M13's language bullet in `docs/roadmap.md` lists Lua 5.5's values
+      and Python's operators "as Ferrolua's ADR-0023 and ADR-0024 define
+      them", with no f-strings, collections, scoping or truth.
+    - M13.5 gives each module an environment of its own, "so that one
+      script's globals do not leak into another's".
+    - M13.6 hands scripts the engine's values, and keeps a script's
+      lasting state in a reflected component "of plain Lua values
+      (numbers, strings, booleans, and tables of them)", whose keys are
+      written in an order that does not depend on the hash seed
+      (ADR-0080). That task designs the shape and records it in an ADR.
+    - M13.7's console command, `lua <code>`, runs a chunk in the game's
+      state. Under locals by default, a name that one chunk assigns is a
+      local of that chunk, gone when the next line runs. Ferrolua's own
+      prompt (its ADR-0033) compiles each line as if `global *` covered
+      it, into a table for the session that falls back to the globals.
+      That prompt is in its command, `ferrolua-cli`, not in its
+      embedding API. Ferrolua keeps Lua 5.5's `load`, for text only,
+      which takes an environment (the table that holds a chunk's
+      globals, which the chunk reads as `_ENV`).
+    - ADR-0025 (the determinism test, one hash file for every system)
+      keeps out of the tick path any "state whose bits a zero's sign or
+      a NaN could set".
+- **Decision** (proposed by the agent; the user decides):
+  - **The language is Ferrolua's ADR-0023 to ADR-0026.** Nadir's scripts
+    are in Ferrolua's language as its ADR-0023 to ADR-0026 define it,
+    with its ADR-0025's truth in place of its ADR-0024's, as the
+    Ferrolua release Nadir pins implements it. What ADR-0075 and
+    ADR-0081 leave out stays out, and ADR-0079's requirements stay as
+    ADR-0082 reads them.
+  - **Sequences as lists.** A sequence the engine hands a script, such as
+    a query's results, is a Ferrolua list with the indexes of its Rust
+    slice (ADR-0082), not a table.
+  - **`nil` for no value.** The script API gives `nil` where there is no
+    value, never `0`, `""` or an empty collection in its place, so
+    `if v then` and `v or default` test whether a value is there. A
+    field that holds `0` tests false, and `docs/subsystems/script.md`
+    says so beside the API. An entity has no `__bool`: it is true
+    whether or not it is alive, and `e:alive()` is the test.
+  - **Collections in script state.** The plain values of M13.6's script
+    state include lists, tuples and sets of plain values. Lists and
+    tuples keep their order, `nil` elements included. A set's members
+    are written in an order that does not depend on the hash seed, as a
+    table's keys are (ADR-0080). M13.6's ADR settles the shape, as
+    planned.
+  - **The console keeps its names.** `lua <code>` compiles each line as
+    Ferrolua's prompt does: as if `global *` covered its top level, in
+    an environment of the console's own that falls back to the state's
+    globals, given through `load`'s environment argument. A name one
+    line assigns is there on the next, and no script's environment
+    changes.
+  - **Spec and seeds.** `docs/subsystems/script.md` lists the scoping
+    and truth rules first among the ways Ferrolua's language differs
+    from Lua 5.5, as the two that change what ported Lua code does
+    without an error. The `lua` fuzz target's seeds (M13.1) include
+    f-strings, list, tuple and set literals, and `global` and `nonlocal`
+    declarations.
+- **Consequences:**
+  - Good:
+    - A module's top-level assignment is a local of that module unless
+      the script declares it `global`, so a typo no longer makes a
+      global that another script sees. M13.5's environment per module
+      now guards only the names a script declares `global`.
+    - A list has an exact length, even with `nil` elements, so `#` of a
+      list the engine hands a script is the length of its Rust slice.
+    - `0.0` and `-0.0` are both false, so a zero's sign cannot change a
+      branch, as ADR-0025's rules for the tick path ask.
+    - The console needs no new Ferrolua API: `load` and `_ENV` already
+      give it an environment of its own.
+    - ADR-0079's requirements do not change, and Ferrolua is asked for
+      nothing new.
+  - Bad:
+    - Ported Lua code changes meaning without an error:
+      `x = x or default` replaces a `0`, `if count then` skips a count
+      of 0, and a counter in a closure needs `nonlocal`. Nadir runs no
+      linter on scripts (ADR-0082); Ferrolua's porting rules (its M7.2)
+      report some of these.
+    - Script state has three more kinds of value for M13.6's save
+      shape, the world hash and the inspector to handle, and every save
+      and every hash sorts each set's members.
+    - Every truth test of a table reads its metatable and its count of
+      entries (Ferrolua's ADR-0025), a cost that M13.8's bench
+      includes.
+    - The language may still move: Ferrolua's ADR-0007 (classes) and
+      ADR-0008 (strict mode) are proposed, so M13.1's spec and tests
+      still wait for the release Nadir pins.
+  - Follow-up, if accepted:
+    - ADR-0082's status line names this record.
+    - `docs/roadmap.md`: M13's language bullet; M13.1's spec and seeds;
+      M13.6's API and script state; M13.7's console.
+    - `docs/00-overview.md`'s `script` row and the scripting summary in
+      `docs/features.jsonc` need no change: "derived from Lua 5.5, with
+      Python's operators and indexes from 0" stays true.
+- **Alternatives considered:**
+  - Leave ADR-0082 as it is: its "as the Ferrolua release Nadir pins
+    implements it" already takes the changes in, but the roadmap and the
+    spec would describe Lua's truth, and M13.6 and M13.7 would not plan
+    for collections or for the console's names.
+  - Ask Ferrolua for Lua's truth or Lua's scoping as an option of the
+    host: one file would then mean two things in two hosts and in
+    Ferrolua's tools, and Ferrolua's plan has no such option.
+  - Script state of tables only, as M13.6 has it: scripts would turn
+    their collections into tables before storing them, and a list that
+    holds `nil` cannot make that trip.
+  - An entity whose `__bool` returns `e:alive()`: `if target then` would
+    cover a despawned target, but every truth test of an entity would
+    read the world, and a value's truth would change from one tick to
+    the next with no script touching it.
+  - Console lines as plain chunks: each line's names would be gone on
+    the next, which leaves the console of little use.
+  - `global *` alone, with the console's names in the state's globals:
+    every script would see them.
+- **Revisit when:** Ferrolua's language changes again (its ADR-0007 or
+  ADR-0008 accepted with a change to values or scoping, or a later
+  record); a game's script state needs a value beyond these; or a test
+  through `nadir-script` finds a `Vec` or a `HashSet` that does not
+  convert as Ferrolua's ADR-0026 says.
+
+## ADR-0086 — M13: Nadir asks Ferrolua for an early crates.io release of the crates `ferrolua` links without its JIT, once its M4 and M3.18 are done, so that Nadir's first release does not wait for Ferrolua's JIT and tools
+
+- **Status:** Proposed. The agent drafted it on 2026-11-24, when the user
+  asked for a record after the agent compared Nadir's plan with
+  Ferrolua's. Ferrolua's part is the user's to decide in Ferrolua's
+  repository.
+- **Date:** 2026-11-24
+- **Context:**
+  - As in ADR-0085, a bare `ADR-NNNN` or `M<n>` is Nadir's, and
+    Ferrolua's are always called Ferrolua's.
+  - ADR-0079 (Ferrolua runs Nadir's scripts, taken from crates.io) makes
+    M13.1 wait for M9.7 and for a Ferrolua release on crates.io that
+    meets its requirements. Nadir takes no Git or path dependency on
+    Ferrolua: `cargo xtask deps` refuses a path package, and crates.io
+    refuses a crate whose dependencies are not on crates.io. M11.1
+    (packaging for all three OSes) waits for M13.8, so that the first
+    release is scripted (ADR-0075).
+  - ADR-0079 named the cost: Ferrolua plans its first release as its
+    last milestone, its M12, "so Nadir waits for all of Ferrolua's plan
+    unless Ferrolua publishes earlier". It is to be revisited when M9.7
+    is ticked and no such release exists.
+  - Ferrolua's roadmap on 2026-11-24 runs its milestones in this order:
+    - M0, the workspace; M1, parsing; M2, the interpreter;
+    - M3, embedding, the standard library and the sandbox, with CI on
+      every target from its M3.18;
+    - M4, compound assignment, type annotations, classes and strict
+      mode;
+    - M5, a just-in-time (JIT) compiler for x86-64;
+    - M13, the JIT on AArch64 too, with executable memory on Windows,
+      macOS and Android (Ferrolua's ADR-0027 added it);
+    - M6 to M10, a type checker, a linter and a formatter, a security
+      scanner, a language server and a debug adapter;
+    - M11, an optimizing JIT;
+    - and M12, the first release on crates.io, whose first task depends
+      on its M11.5 and M13.6.
+
+    No task of Ferrolua's is ticked, and it has no Cargo workspace yet.
+  - Nadir links the `ferrolua` crate with its `jit` feature off (ADR-0079,
+    ADR-0083), and so `ferrolua-syntax`, `ferrolua-bytecode`,
+    `ferrolua-math`, `ferrolua-compiler`, `ferrolua-vm` and
+    `ferrolua-stdlib`, as Ferrolua's crate map lists them. What ADR-0079,
+    ADR-0080 and ADR-0081 ask of Ferrolua is planned in its M2 and M3:
+    bounded probe steps in M2.4, the fuzz targets for the compiler and
+    the interpreter in M2.16, the full embedding API and `Lua::collect`
+    in M3.1, the limits in M3.2, the host's hash seed in M3.16, and CI on
+    Nadir's six targets in M3.18. Its M4 completes the language as
+    Ferrolua plans it. Nadir uses nothing from its M5 to M11 or its M13.
+  - A Ferrolua release that changes the language is a change of Nadir's
+    own, which updates the spec, the sandbox's scripts and the fuzz seeds
+    with it (ADR-0082).
+  - Ferrolua's crates would be at 0.x versions, whose API may change in
+    any release. Nadir pins exact versions and takes each update as a
+    change of its own (ADR-0079).
+- **Decision** (proposed by the agent; the user decides):
+  - **An early release.** Nadir asks Ferrolua to publish on crates.io the
+    crates that `ferrolua` links without its `jit` feature, at a 0.x
+    version, once its M4 is done and its M3.18 passes on every target:
+    before its JIT and its tools, and without `ferrolua-jit`. Ferrolua's
+    M12 stays its release of everything.
+  - **M13.1 waits for that release.** M13.1 depends on M9.7 and on that
+    release, if it meets ADR-0079's requirements, or else on the first
+    release that does, as now.
+  - **M11.1 is unchanged.** Nadir's first release still waits for M13.8.
+    If M9.7 is ticked with no such release on crates.io, ADR-0079's
+    trigger brings the question back, with the second alternative below
+    as the fallback for the user to weigh.
+- **Consequences:**
+  - Good:
+    - Nadir's M13 waits for Ferrolua's M0 to M4, not for its JIT on two
+      processors, its tools and its optimizing tier, none of which Nadir
+      links.
+    - Ferrolua's embedding API meets a real host before its M12.2, the
+      review of every public item, so that review can draw on Nadir's
+      use.
+    - The language is complete as Ferrolua plans it, so Nadir's spec and
+      seeds are not rewritten for M4's additions.
+  - Bad:
+    - Part of Ferrolua's M12 moves earlier: the order in which its crates
+      publish, and their crates.io metadata (its M12.1 and M12.2), are
+      needed for the early release too.
+    - At 0.x, any Ferrolua release may break `nadir-script`. A later one
+      may also change the hash function or how tables grow, and so the
+      order of a table's keys (ADR-0080). Exact pins, the determinism
+      test and an update reviewed as its own change are the defense.
+    - Nadir still waits for Ferrolua's M0 to M4, none of whose tasks is
+      ticked. Its M4.4 and M4.6 wait for two of its own proposed records
+      (its ADR-0007, classes, and ADR-0008, strict mode).
+    - It rests on a choice in another repository. If Ferrolua turns it
+      down, Nadir waits for its M12, or takes the fallback.
+  - Follow-up, if accepted:
+    - Ferrolua, the user's: a record and a roadmap task for the early
+      release.
+    - Nadir: ADR-0079's status line; M13's opening and M13.1's `Depends`
+      in `docs/roadmap.md`; the Ferrolua row in the risk table of
+      `docs/00-overview.md`.
+- **Alternatives considered:**
+  - Wait for Ferrolua's M12, as planned: nothing changes here, but
+    Nadir's first release waits for Ferrolua's JIT on two processors,
+    its analysis tools, its language and debug servers, and its
+    optimizing tier.
+  - M11.1 no longer waits for M13.8: Nadir's first release goes on its
+    own schedule and ships without scripting, and M13 comes in a later
+    release. It undoes ADR-0075's choice of a scripted first release,
+    which is the user's to change.
+  - An early release after Ferrolua's M3 instead of its M4: M13.1 could
+    start sooner, but compound assignment, classes and strict mode would
+    come in a later release that changes the language, and the spec,
+    the scripts and the seeds would change with it (ADR-0082).
+  - A Git or path dependency while Ferrolua is unpublished: `cargo xtask
+    deps` refuses a path, and neither could ship in Nadir's crates.io
+    release (ADR-0079).
+- **Revisit when:** Ferrolua accepts, changes or turns down the early
+  release; Ferrolua's M4 is done; or M9.7 is ticked with no Ferrolua
+  release on crates.io that meets ADR-0079's requirements.
