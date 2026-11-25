@@ -23,6 +23,9 @@ enforced by tooling from day one.
 - [x] **M0.1 — Workspace skeleton**
   - Note: toolchain pinned to `1.99.0` (b940084d7 2026-09-28), the current
     stable on 2026-10-12.
+  - Note: on 2026-11-24 the toolchain moved to `1.100.0`
+    (0ef1bc386 2026-11-09), the current stable that day, at the user's
+    request.
   - Note: members have no workspace dependencies or features yet; each
     later task adds the edges it needs. `cargo dev` fails until the sandbox
     declares its `dev` feature.

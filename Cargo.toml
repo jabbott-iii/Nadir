@@ -37,7 +37,6 @@ edition = "2024"
 authors = ["Joseph Anthony Abbott III <jabbottpublicsupport@gmail.com>"]
 description = "A lightweight, cross-platform Rust engine."
 license = "Apache-2.0"
-readme = "README.md"
 homepage = "https://jabbott.dev/Nadir/"
 repository = "https://github.com/jabbott-iii/Nadir"
 keywords = ["2d", "game-engine", "top-down", "gamedev", "rust"]

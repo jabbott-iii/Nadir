@@ -94,7 +94,7 @@ body:
     attributes:
       label: Environment
       description: The OS version, CPU, GPU and driver (the log names the OpenGL renderer), `rustc -V`, and any environment variables you set, such as `LIBGL_ALWAYS_SOFTWARE`.
-      placeholder: Ubuntu 24.04, x86_64, Mesa 25.2.8 (llvmpipe), rustc 1.99.0
+      placeholder: Ubuntu 24.04, x86_64, Mesa 25.2.8 (llvmpipe), rustc 1.100.0
   - type: textarea
     id: logs
     attributes:

@@ -31,7 +31,7 @@ so they can fill them in.
   `tools/cook`, `xtask`, the sandbox game in `games/sandbox`, and the benchmarks in `bench`. The
   dependency matrix in `docs/01-architecture.md` says which may depend on which, and
   `cargo xtask layers` enforces it.
-- **Toolchain:** edition 2024, and Rust 1.99.0 pinned in `rust-toolchain.toml`, with `rustfmt`
+- **Toolchain:** edition 2024, and Rust 1.100.0 pinned in `rust-toolchain.toml`, with `rustfmt`
   and `clippy`. No `rust-version` (MSRV) is set: the pinned toolchain is the one supported.
 - **Check commands:** `cargo xtask ci`, which runs `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo xtask cook`,
