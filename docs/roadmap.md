@@ -6843,10 +6843,15 @@ first-party code behind `nadir-script`, over an interpreter written in
 Nadir, and with it Lua 5.5 in place of 5.4. ADR-0082, accepted the same
 day: the scripts are in Ferrolua's own language, derived from Lua 5.5
 with Python's operators and indexes from 0, which Ferrolua's ADR-0023
-made its language in place of Lua 5.5. Its number comes after the
-studio's, but its work comes before the release: M13.1 starts after M9.7
-and a Ferrolua release that meets ADR-0079's requirements, and M11.1
-(packaging) waits for M13.8.
+made its language in place of Lua 5.5. ADR-0085, accepted the same day,
+takes in what Ferrolua's ADR-0025 and ADR-0026 then added: f-strings,
+locals by default, lists, tuples and sets, and Python's truth. Its number
+comes after the studio's, but its work comes before the release: M13.1
+starts after M9.7 and a Ferrolua release that meets ADR-0079's
+requirements, and M11.1 (packaging) waits for M13.8. ADR-0086, accepted
+the same day, asks Ferrolua for such a release on crates.io after its
+M4, before its JIT and its tools, so that this milestone need not wait
+for Ferrolua's last one.
 
 **Note (2026-11-24, the user's choice, ADR-0079):** the interpreter's work
 left this roadmap for Ferrolua's. M13.1 gave up its values and its lexer
@@ -6855,13 +6860,16 @@ M13.3 (the virtual machine and the garbage collector) and M13.4 (the
 standard library) were removed, and their IDs are not reused. ADR-0079
 lists what Ferrolua must give Nadir.
 
-- **The language** is Ferrolua's (ADR-0082): the statements, values,
-  tables, metatables, closures, coroutines, and standard library of Lua
-  5.5, with Python's operators, `in`, `is`, chained comparisons, and
-  conditional expressions, no conversion between strings and numbers,
-  and indexes from 0 with ranges that leave out their end, as Ferrolua's
-  ADR-0023 and ADR-0024 define them and the Ferrolua release Nadir pins
-  implements them. It goes without what ADR-0075 leaves out: the `io`,
+- **The language** is Ferrolua's (ADR-0082, ADR-0085): the statements,
+  values, tables, metatables, closures, coroutines, and standard library
+  of Lua 5.5, with Python's operators, `in`, `is`, chained comparisons,
+  and conditional expressions, no conversion between strings and
+  numbers, and indexes from 0 with ranges that leave out their end; and
+  f-strings, locals that reach their whole function unless declared
+  `global` or `nonlocal`, lists, tuples and sets beside tables, and
+  Python's truth, in which `0`, `""` and empty collections are false.
+  Ferrolua's ADR-0023 to ADR-0026 define them, and the Ferrolua release
+  Nadir pins implements them. It goes without what ADR-0075 leaves out: the `io`,
   `os`, `package`, and `debug` libraries (but `debug.traceback`),
   `dofile`, `loadfile`, `string.dump`, and binary chunks. That way a
   script reaches only what the engine gives it. Finalizers (`__gc`) and
@@ -6910,15 +6918,17 @@ lists what Ferrolua must give Nadir.
     whose first task waits for the end of its JIT work, its M11.5 (the
     optimizing JIT's budget) and its M13.6 (the JIT's CI on every
     target that has one).
-  - Note: 2026-11-24, two records proposed, for the user to decide:
-    ADR-0085 takes in Ferrolua's ADR-0025 and ADR-0026 (f-strings,
-    locals by default for the whole function, lists, tuples and sets,
-    and Python's truth), which this task's spec and `lua` seeds would
-    then cover; ADR-0086 asks Ferrolua for an early crates.io release
-    of the crates `ferrolua` links without its JIT, after its M4, which
-    this task would then wait for.
+  - Note: 2026-11-24, the user's choice: ADR-0085 takes in Ferrolua's
+    ADR-0025 and ADR-0026 (f-strings, locals by default for the whole
+    function, lists, tuples and sets, and Python's truth), which this
+    task's spec and `lua` seeds cover; ADR-0086 asks Ferrolua for an
+    early crates.io release of the crates `ferrolua` links without its
+    JIT, after its M4, which this task waits for if it meets ADR-0079's
+    requirements. Ferrolua's record and task for that release are still
+    to be made.
   - Depends: M9.7, and a Ferrolua release on crates.io that meets
-    ADR-0079's requirements
+    ADR-0079's requirements: the early release that ADR-0086 asks for,
+    after Ferrolua's M4, if it does
   - Do:
     - `crates/script`, package `nadir-script`, in layer 2 with `core` as
       its only workspace dependency: its rows in the layer table and the
@@ -6949,15 +6959,19 @@ lists what Ferrolua must give Nadir.
       collection runs off, a call that collects loops under a budget of
       its own, and a `collectgarbage` that answers only `"count"`
       (ADR-0081). No Ferrolua type appears in its public API.
-    - `docs/subsystems/script.md`: the design of ADR-0075 and ADR-0079
-      to ADR-0083, the limits and their defaults, the Ferrolua version
-      Nadir pins and each of its crates Nadir links that allows `unsafe`,
-      every difference from Ferrolua's language, and how that language
-      differs from Lua 5.5, for authors who know Lua, which each task of
-      M13 keeps up to date.
-    - The fuzz target `lua`, with seeds in `fuzz/corpus/lua/`: it
-      compiles each input through `nadir-script`, and runs what compiles
-      under a small budget and memory cap.
+    - `docs/subsystems/script.md`: the design of ADR-0075, ADR-0079 to
+      ADR-0083 and ADR-0085, the limits and their defaults, the Ferrolua
+      version Nadir pins and each of its crates Nadir links that allows
+      `unsafe`, every difference from Ferrolua's language, and how that
+      language differs from Lua 5.5, for authors who know Lua, which
+      each task of M13 keeps up to date. The scoping and truth rules
+      come first among those differences, as the two that change what
+      ported Lua code does without an error (ADR-0085).
+    - The fuzz target `lua`, with seeds in `fuzz/corpus/lua/`, among
+      them f-strings, list, tuple and set literals, and `global` and
+      `nonlocal` declarations (ADR-0085): it compiles each input through
+      `nadir-script`, and runs what compiles under a small budget and
+      memory cap.
     - Before work starts, the names that say Lua (the cook's
       `assets/scripts/**/*.lua`, the console's `lua` command, the `lua`
       fuzz target and `fuzz/corpus/lua/`, and `slime.lua` below) take
@@ -7026,17 +7040,18 @@ lists what Ferrolua must give Nadir.
     `cargo xtask cook`; `cargo xtask layers`
 
 - [ ] **M13.6 — engine: the script API**
-  - Note: 2026-11-24, ADR-0085 (proposed: Ferrolua's lists, tuples and
-    sets, and Python's truth) would hand sequences to scripts as lists,
-    give `nil` where there is no value, keep an entity true whether or
-    not it is alive, and let script state hold lists, tuples and sets,
-    each set written in an order the hash seed does not set.
+  - Note: 2026-11-24, the user's choice (ADR-0085, Ferrolua's lists,
+    tuples and sets, and Python's truth): sequences go to scripts as
+    lists, the API gives `nil` where there is no value, an entity is
+    true whether or not it is alive, and script state holds lists,
+    tuples and sets, as the steps below now say.
   - Depends: M13.5
   - Do:
     - Entities in Lua: values of their own type, made only by the
       engine, and compared by id. A script reads a despawned entity as
       dead (`e:alive()` is false), never as the entity that reused its
-      slot.
+      slot. An entity has no `__bool`, so it is true whether or not it
+      is alive, and `e:alive()` is the test (ADR-0085).
     - Components by field name, through reflection, as in
       `e.Health.current = e.Health.current - 1`: the reflected types in
       the `TypeRegistry` only. A number or a boolean field is read and
@@ -7047,26 +7062,35 @@ lists what Ferrolua must give Nadir.
       types a game registers as reflected; input actions by name
       (pressed, held, released, an axis's value); a sound played at an
       entity; the collision world's queries.
+    - A sequence the engine hands a script, such as a query's results,
+      is a Ferrolua list with the indexes of its Rust slice, not a
+      table. The API gives `nil` where there is no value, never `0`,
+      `""` or an empty collection in its place, and the docs say that a
+      field holding `0` tests false (ADR-0085).
     - A game's own functions, added from Rust through the facade.
-    - Script state: a reflected component of plain Lua values (numbers,
-      strings, booleans, and tables of them), so that a script's lasting
-      state is saved, hashed, and shown in the inspector. Its keys are
-      written in an order that does not depend on the hash seed, so saves
-      and the world hash do not either (ADR-0080). The task designs its
-      shape and records it in an ADR.
+    - Script state: a reflected component of plain values (numbers,
+      strings, booleans, and tables, lists, tuples and sets of them), so
+      that a script's lasting state is saved, hashed, and shown in the
+      inspector. Lists and tuples keep their order, `nil` elements
+      included. A table's keys and a set's members are written in an
+      order that does not depend on the hash seed, so saves and the
+      world hash do not either (ADR-0080, ADR-0085). The task designs
+      its shape and records it in an ADR.
     - The API documented in `docs/subsystems/script.md` and the facade's
       docs, and a guide example (`crates/engine/examples/guide_*.rs`)
       that runs a script, for the instructions page (ADR-0072).
   - Accept: a test for each function of the API; a script reads a stale
-    entity as dead; saving and loading a scripted entity keeps its
-    script state; a replay with scripted entities matches its live run.
+    entity as dead; a list the engine hands a script has the length and
+    indexes of its slice; saving and loading a scripted entity keeps its
+    script state, lists, tuples and sets included; a script state with
+    a set saves and hashes the same under two hash seeds; a replay with
+    scripted entities matches its live run.
   - Verify: `cargo test -p nadir_engine`
 
 - [ ] **M13.7 — dev tools: hot reload, the console, and the profiler**
-  - Note: 2026-11-24, ADR-0085 (proposed) would compile each line of the
-    console's `lua` command as if `global *` covered it, in an
-    environment of the console's own, so that under Ferrolua's locals by
-    default a name one line assigns is there on the next.
+  - Note: 2026-11-24, the user's choice (ADR-0085): under Ferrolua's
+    locals by default, the console's `lua` command keeps the names one
+    line assigns for the next, as the console's step below now says.
   - Depends: M13.6
   - Do:
     - Hot reload: in `cargo dev`, beside `cargo xtask cook --watch`, a
@@ -7074,15 +7098,21 @@ lists what Ferrolua must give Nadir.
       State kept in components survives. A script that no longer compiles
       leaves the old one running, and its error is logged.
     - The console: `lua <code>` runs a chunk in the game's state and
-      prints its results; `scripts` lists the loaded scripts, and the
-      entities whose scripts stopped, with their errors.
+      prints its results. Each line compiles as if `global *` covered
+      its top level, in an environment of the console's own that falls
+      back to the state's globals, given through `load`'s environment
+      argument, so a name one line assigns is there on the next and no
+      script's environment changes (ADR-0085). `scripts` lists the
+      loaded scripts, and the entities whose scripts stopped, with their
+      errors.
     - The profiler: a profile scope for each script's hooks, so that the
       time shows by script, and one for the collection of loops at the end
       of each tick (ADR-0081).
     - The inspector shows the `Script` component and the script state.
-  - Accept: tests for the console's commands and for a reload that keeps
-    the state; a reload while `cargo dev` runs (manual, recorded in the
-    task's note).
+  - Accept: tests for the console's commands, among them a name one
+    `lua` line assigns that the next line reads, and a script that
+    cannot see it; a test for a reload that keeps the state; a reload
+    while `cargo dev` runs (manual, recorded in the task's note).
   - Verify: `cargo test -p nadir_engine --features dev`;
     `cargo test -p nadir-debug`; `cargo dev` with a script edited
     (manual)

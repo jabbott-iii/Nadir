@@ -7821,6 +7821,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   and the first half of requirement 10; the JIT stays out. ADR-0084
   widens its first-party rule to every crate that only the user's
   accounts own and publish; Ferrolua's stay in `nadir-script` alone.
+  ADR-0086 asks Ferrolua for an early crates.io release, after its M4
+  and without its JIT, for M13.1 to wait for in place of its M12.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0075 (Lua 5.4 scripting, run by an interpreter of our own in safe
@@ -8328,7 +8330,10 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 ## ADR-0082 — M13: scripts in Ferrolua's own language, with Python's operators and 0-based indexes, in place of Lua 5.5; what ADR-0075 and ADR-0081 leave out, and ADR-0079's requirements, stay
 
 - **Status:** Accepted: on 2026-11-24 the user accepted the agent's
-  proposal as drafted.
+  proposal as drafted. ADR-0085 replaces its description of the
+  language with Ferrolua's ADR-0023 to ADR-0026, which add f-strings,
+  locals by default, lists, tuples and sets, and Python's truth; the
+  rest of this record stays.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0079 chose Ferrolua to run Nadir's scripts, and with it Lua
@@ -8606,11 +8611,11 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0085 — M13: Ferrolua's f-strings, function-wide locals, lists, tuples and sets, and Python's truth in Nadir's scripts; script state keeps the collections in an order the seed does not set; the console keeps its names between lines
 
-- **Status:** Proposed. The agent drafted it on 2026-11-24, when the user
-  asked for a record after the agent compared Nadir's plan with
-  Ferrolua's. If accepted, it replaces ADR-0082's description of the
-  language (Ferrolua's ADR-0023 "with the details its ADR-0024
-  settles"), and the rest of ADR-0082 stays.
+- **Status:** Accepted: on 2026-11-24 the user asked for a record after
+  the agent compared Nadir's plan with Ferrolua's, and accepted the
+  agent's draft as written the same day. It replaces ADR-0082's
+  description of the language (Ferrolua's ADR-0023 "with the details
+  its ADR-0024 settles"), and the rest of ADR-0082 stays.
 - **Date:** 2026-11-24
 - **Context:**
   - In this record, a bare `ADR-NNNN` is Nadir's, and Ferrolua's records
@@ -8673,7 +8678,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     - ADR-0025 (the determinism test, one hash file for every system)
       keeps out of the tick path any "state whose bits a zero's sign or
       a NaN could set".
-- **Decision** (proposed by the agent; the user decides):
+- **Decision** (the agent's proposal, which the user accepted as drafted
+  on 2026-11-24):
   - **The language is Ferrolua's ADR-0023 to ADR-0026.** Nadir's scripts
     are in Ferrolua's language as its ADR-0023 to ADR-0026 define it,
     with its ADR-0025's truth in place of its ADR-0024's, as the
@@ -8736,7 +8742,7 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
     - The language may still move: Ferrolua's ADR-0007 (classes) and
       ADR-0008 (strict mode) are proposed, so M13.1's spec and tests
       still wait for the release Nadir pins.
-  - Follow-up, if accepted:
+  - Follow-up, done in the change that accepted this record:
     - ADR-0082's status line names this record.
     - `docs/roadmap.md`: M13's language bullet; M13.1's spec and seeds;
       M13.6's API and script state; M13.7's console.
@@ -8770,9 +8776,10 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 
 ## ADR-0086 — M13: Nadir asks Ferrolua for an early crates.io release of the crates `ferrolua` links without its JIT, once its M4 and M3.18 are done, so that Nadir's first release does not wait for Ferrolua's JIT and tools
 
-- **Status:** Proposed. The agent drafted it on 2026-11-24, when the user
-  asked for a record after the agent compared Nadir's plan with
-  Ferrolua's. Ferrolua's part is the user's to decide in Ferrolua's
+- **Status:** Accepted: on 2026-11-24 the user asked for a record after
+  the agent compared Nadir's plan with Ferrolua's, and accepted the
+  agent's draft as written the same day. Ferrolua's side, a record and
+  a task for the early release, is still to be made in Ferrolua's
   repository.
 - **Date:** 2026-11-24
 - **Context:**
@@ -8821,7 +8828,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - Ferrolua's crates would be at 0.x versions, whose API may change in
     any release. Nadir pins exact versions and takes each update as a
     change of its own (ADR-0079).
-- **Decision** (proposed by the agent; the user decides):
+- **Decision** (the agent's proposal, which the user accepted as drafted
+  on 2026-11-24):
   - **An early release.** Nadir asks Ferrolua to publish on crates.io the
     crates that `ferrolua` links without its `jit` feature, at a 0.x
     version, once its M4 is done and its M3.18 passes on every target:
@@ -8857,11 +8865,12 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
       (its ADR-0007, classes, and ADR-0008, strict mode).
     - It rests on a choice in another repository. If Ferrolua turns it
       down, Nadir waits for its M12, or takes the fallback.
-  - Follow-up, if accepted:
+  - Follow-up:
     - Ferrolua, the user's: a record and a roadmap task for the early
       release.
-    - Nadir: ADR-0079's status line; M13's opening and M13.1's `Depends`
-      in `docs/roadmap.md`; the Ferrolua row in the risk table of
+    - Nadir, done in the change that accepted this record: ADR-0079's
+      status line; M13's opening and M13.1's `Depends` in
+      `docs/roadmap.md`; the Ferrolua row in the risk table of
       `docs/00-overview.md`.
 - **Alternatives considered:**
   - Wait for Ferrolua's M12, as planned: nothing changes here, but
