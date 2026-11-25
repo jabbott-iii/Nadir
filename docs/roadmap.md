@@ -6934,11 +6934,12 @@ lists what Ferrolua must give Nadir.
       collection runs off, a call that collects loops under a budget of
       its own, and a `collectgarbage` that answers only `"count"`
       (ADR-0081). No Ferrolua type appears in its public API.
-    - `docs/subsystems/script.md`: the design of ADR-0075, ADR-0079,
-      ADR-0080, ADR-0081 and ADR-0082, the limits and their defaults, the
-      Ferrolua version Nadir pins, every difference from Ferrolua's
-      language, and how that language differs from Lua 5.5, for authors
-      who know Lua, which each task of M13 keeps up to date.
+    - `docs/subsystems/script.md`: the design of ADR-0075 and ADR-0079
+      to ADR-0083, the limits and their defaults, the Ferrolua version
+      Nadir pins and each of its crates Nadir links that allows `unsafe`,
+      every difference from Ferrolua's language, and how that language
+      differs from Lua 5.5, for authors who know Lua, which each task of
+      M13 keeps up to date.
     - The fuzz target `lua`, with seeds in `fuzz/corpus/lua/`: it
       compiles each input through `nadir-script`, and runs what compiles
       under a small budget and memory cap.

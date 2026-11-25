@@ -41,9 +41,10 @@ through the code, and `diagrams/class-diagram.md` shows the main types.
 ## Dependency matrix
 
 A crate may depend on the workspace crates listed in its row and nothing else,
-but for `nadir-script`, which will also depend on Ferrolua's crates, first
-party under the dependency policy (ADR-0079 and ADR-0082: the user's own
-language, derived from Lua 5.5, and its interpreter in Rust).
+but for the first-party crates from outside the workspace that its row also
+names (ADR-0084: crates that only the user's accounts own and publish). The
+first will be Ferrolua's, in `nadir-script` alone (ADR-0079 and ADR-0082: the
+user's own language, derived from Lua 5.5, and its interpreter in Rust).
 No crate may depend on a third-party crate unless the dependency policy
 approves it.
 

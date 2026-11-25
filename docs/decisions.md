@@ -50,7 +50,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 ## ADR-0002 — Build it ourselves; zero third-party runtime crates
 
 - **Status:** Accepted; ADR-0079 counts Ferrolua's crates, the user's own
-  Lua in Rust, as first party
+  Lua in Rust, as first party, and ADR-0084 every crate that only the
+  user's accounts own and publish
 - **Date:** 2026-10-12
 - **Context:** The project goal is to own the whole stack and minimize
   external code. The user's rule: a dependency is acceptable only if the
@@ -7816,6 +7817,10 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   optional `jit` feature of the `ferrolua` crate, off by default.
   ADR-0082 replaces its Lua 5.5 with Ferrolua's own language, derived
   from Lua 5.5, and reads requirement 9 in Ferrolua's wording.
+  ADR-0083 drops the condition that a Ferrolua crate forbid `unsafe`,
+  and the first half of requirement 10; the JIT stays out. ADR-0084
+  widens its first-party rule to every crate that only the user's
+  accounts own and publish; Ferrolua's stay in `nadir-script` alone.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0075 (Lua 5.4 scripting, run by an interpreter of our own in safe
@@ -8435,3 +8440,166 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** Ferrolua adds a mode that runs Lua 5.5, changes its
   language again in a release Nadir would pin, or a game needs a Lua
   library it cannot port.
+
+## ADR-0083 — M13: Ferrolua's crates may contain `unsafe`, first party by their owners, source and tree alone; the JIT stays out of Nadir
+
+- **Status:** Accepted: on 2026-11-24 the user asked that crates with
+  `unsafe` code be usable in Nadir as long as the accounts the
+  dependency rule names own them. Keeping the rule to Ferrolua's
+  crates, keeping the JIT out, and naming each linked crate that allows
+  `unsafe` at every update are the agent's details within it. The same
+  day, ADR-0084 widened the rule beyond Ferrolua's crates.
+- **Date:** 2026-11-24
+- **Context:**
+  - ADR-0079 counts a Ferrolua crate as first party only while four
+    things hold: the user is its only owner on crates.io, its source is
+    the Ferrolua repository, its own dependency tree holds only
+    Ferrolua's crates, and it sets `unsafe_code = "forbid"`. Its
+    requirement 10 asks that Ferrolua's interpreter and collector be
+    safe Rust, in crates that forbid `unsafe`. The dependency rule
+    (`.claude/rules/dependencies.md`) and `docs/02-dependency-policy.md`
+    state the same conditions.
+  - Nadir's rule 3 keeps `unsafe` to `nadir-sys`, `nadir-platform` and
+    `nadir-gfx` among the workspace's crates. `cargo xtask unsafe-audit`
+    reads only this repository's files, so it never checks a Ferrolua
+    crate; the fourth condition was to be checked by reading each
+    crate's manifest at every update.
+  - Ferrolua plans `unsafe` in one crate, `ferrolua-jit`, which the
+    `ferrolua` crate brings in only with its `jit` feature, off by
+    default (Ferrolua's ADR-0013, proposed, and ADR-0022). Its other
+    crates plan none, but a later release could add some, and the
+    fourth condition would then bar that release from Nadir.
+- **Decision** (the user's, on 2026-11-24, with the agent's details
+  that the status line names):
+  - **Ownership decides.** A Ferrolua crate is first party while the
+    user is its only owner on crates.io, its source is the Ferrolua
+    repository, and its own dependency tree holds only Ferrolua's
+    crates, whether or not it uses `unsafe`. The condition that it set
+    `unsafe_code = "forbid"` is dropped, and so is the first half of
+    requirement 10: it asks only that the JIT be a crate of its own or
+    a feature off by default, as Ferrolua's ADR-0022 makes it.
+  - **Still Ferrolua's crates only.** The rule covers no other crate of
+    the user's; each still needs an ADR of its own, as ADR-0079 says.
+  - **The JIT stays out.** Nadir still runs Ferrolua's interpreter only,
+    for ADR-0079's other reasons: the JIT covers x86-64 alone at first,
+    and needs memory that holds machine code and macOS's
+    `com.apple.security.cs.allow-jit` entitlement. Turning it on still
+    needs an ADR of its own.
+  - **Each update names the `unsafe`.** The change that adds or updates
+    Ferrolua's crates rereads the manifests of the crates Nadir links,
+    as before, and lists each one that allows `unsafe` in its
+    description and in `docs/subsystems/script.md`.
+  - **Rule 3 is about this workspace.** `AGENTS.md`'s rule 3 keeps
+    `unsafe` to its three crates among Nadir's own, and says that
+    Ferrolua's crates may contain it.
+- **Consequences:**
+  - Good: a Ferrolua release that uses `unsafe` in its interpreter, for
+    speed or for a call into the OS, no longer bars Nadir from taking
+    it.
+  - Good: the conditions left are the ones the registry and the
+    manifests answer: the owners, the source and the tree.
+  - Bad: a Ferrolua crate Nadir links may hold `unsafe` code that
+    Nadir's audit does not read, so a memory-safety bug there would
+    reach Nadir's games. Ferrolua's own rules for `unsafe` (its
+    ADR-0013) and its tests are what guard it.
+  - Bad: a game binary may contain `unsafe` outside the three crates
+    that rule 3 names, which a reader of the rule alone could miss.
+  - Follow-up: ADR-0079's status line points to this record; the
+    dependency rule, `docs/02-dependency-policy.md`, `AGENTS.md`'s rule
+    3 and M13.1's spec follow.
+- **Alternatives considered:**
+  - Keep the condition: every Ferrolua crate Nadir links stays safe
+    Rust, but no release that adds `unsafe` anywhere could be taken.
+  - Drop it for every crate the user's accounts own, not only
+    Ferrolua's: the user's other crates would come in without an ADR
+    each.
+  - Drop it and link the JIT too: faster scripts on x86-64, but the
+    entitlement, the targets, and determinism between the interpreter
+    and the JIT need a decision of their own.
+- **Revisit when:** a memory-safety bug in a Ferrolua crate reaches a
+  Nadir game, or Nadir wants the JIT or another crate of the user's.
+
+## ADR-0084 — Every crate that only the user's accounts own and publish counts as first party, not Ferrolua's alone; each is approved, pinned and listed as Ferrolua's are
+
+- **Status:** Accepted: on 2026-11-24, asked after ADR-0083 whether to
+  widen its rule to every crate the user's accounts own, the user chose
+  to. The conditions on owners, source and tree, the user's approval of
+  each addition, the dependency matrix naming each use, and the policy's
+  list of first-party crates are the agent's details within it.
+- **Date:** 2026-11-24
+- **Context:**
+  - ADR-0079 counts the user's crates as first party for Ferrolua's
+    alone, and asks an ADR of its own for any other crate of the
+    user's. ADR-0083 dropped its condition that such a crate forbid
+    `unsafe`, and kept that scope.
+  - The dependency rule (`.claude/rules/dependencies.md`) calls a crate
+    first party when its allowed publishers control every release of
+    it: every owner crates.io lists is one of them, a team only if its
+    organization is, and its source repository is under one of their
+    accounts. It reads the owners from the registry, since a manifest's
+    `authors` and `repository` fields hold whatever the publisher typed.
+  - `cargo xtask deps` passes any package from outside the workspace
+    that `xtask/deps-allowlist.txt` lists at its exact version with an
+    ADR number. `cargo xtask layers` checks only the edges between
+    workspace crates and leaves registry packages to `deps`.
+    `cargo xtask unsafe-audit` reads only this repository's files.
+- **Decision** (the user's, on 2026-11-24, with the agent's details
+  that the status line names):
+  - **First party by owners, source and tree.** A crate from outside
+    the workspace is first party while every owner crates.io lists for
+    it is the user's account, `jabbott-iii`, with no team; its source
+    repository is under <https://github.com/jabbott-iii>; and its own
+    dependency tree holds only first-party crates. It may use `unsafe`
+    (ADR-0083). If a condition stops holding, the crate counts as third
+    party, and this record is revisited before the crate is updated.
+  - **Approved and placed.** The user approves each one in the change
+    that adds it, which needs no ADR. That change names the crate in the
+    row of each workspace crate that uses it, in the dependency matrix
+    of `docs/01-architecture.md`, and in the dependency policy's list of
+    first-party crates in use. Review checks the matrix, since
+    `cargo xtask layers` does not read registry packages.
+  - **Taken as Ferrolua's are:** from crates.io by an exact pin
+    (`= x.y.z`), never by a Git or path dependency; listed in
+    `xtask/deps-allowlist.txt` with ADR-0084 (Ferrolua's keep ADR-0079);
+    a `rust-version` no newer than Nadir's pinned Rust, or Nadir's
+    toolchain moves first, in a commit of its own; its license in each
+    game package's `LICENSES.txt`. Each addition and update is a change
+    of its own that runs `cargo tree` before and after, rereads the
+    manifests of the crates Nadir links, and lists each one that allows
+    `unsafe`.
+  - **Ferrolua's stay where they are.** Its crates go in
+    `nadir-script`'s manifest alone, and its JIT stays out (ADR-0079,
+    ADR-0083).
+  - **Counts.** The first change that adds a first-party crate other
+    than Ferrolua's makes `cargo xtask deps`'s report and the demo
+    page's count of third-party crates count it as first party, as
+    M13.1 does for Ferrolua's.
+- **Consequences:**
+  - Good: a crate of the user's that serves Nadir, such as a library
+    shared with another project, comes in with a reviewed change and no
+    decision record, under the same pins, allowlist line and checks.
+  - Good: the dependency rule's own test of first party applies as it
+    is written.
+  - Bad: trust rests on the user's two accounts. Whoever takes over one
+    can publish a release that passes the owner check; the exact pins
+    and the review of each update are what keep such a release out.
+  - Bad: the code in those crates, `unsafe` included, is outside
+    Nadir's audits and Nadir's rules 2 to 4; each crate's own tests and
+    rules guard it.
+  - Bad: "built from the ground up" now covers code in the user's other
+    repositories, which Nadir's own review does not see.
+  - Follow-up: ADR-0002's, ADR-0079's and ADR-0083's status lines point
+    to this record; the dependency rule, `docs/02-dependency-policy.md`,
+    `docs/01-architecture.md`, `AGENTS.md`, `CLAUDE.md`,
+    `CONTRIBUTING.md` and the allowlist's header follow.
+- **Alternatives considered:**
+  - Keep the rule to Ferrolua's crates, as ADR-0083 has it: every other
+    crate of the user's needs a decision record first.
+  - Every crate the user owns, with no further conditions: one with a
+    co-owner, or one that brings in a third-party crate, would come in
+    too.
+  - First party by the manifest's `authors` and `repository` fields:
+    anyone can type them.
+- **Revisit when:** one of the user's accounts is taken over, a crate
+  Nadir links gains a co-owner, or a first-party crate brings a
+  third-party one into its tree.

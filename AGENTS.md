@@ -29,7 +29,8 @@ roadmap task is ticked: check before assuming.
   own OS bindings, graphics backends, math, ECS, codecs, mixer, UI and tools.
   Scripts will run on Ferrolua, the user's own language and interpreter
   in Rust, derived from Lua 5.5, whose crates count as first party
-  (ADR-0079, ADR-0082).
+  (ADR-0079, ADR-0082), as does any crate that only the user's accounts
+  own and publish (ADR-0084).
 
 ## Read before working
 
@@ -58,9 +59,10 @@ roadmap task is ticked: check before assuming.
 1. **No third-party dependencies.** Do not add any crate outside this
    workspace to any `[dependencies]`, `[dev-dependencies]` or
    `[build-dependencies]` table, unless `docs/02-dependency-policy.md` lists
-   it as `Approved`, or it is one of Ferrolua's crates, which count as first
-   party in `nadir-script`'s manifest alone, by exact pins (ADR-0079). If you
-   believe one is needed, stop. Write the evaluation
+   it as `Approved`, or it is first party: only the user's accounts own and
+   publish it, the user approved it, and it comes by an exact pin (ADR-0084;
+   Ferrolua's crates go in `nadir-script` alone, ADR-0079). If you believe a
+   third-party one is needed, stop. Write the evaluation
    the policy describes and ask the user. `cargo xtask deps` enforces this.
 2. **Layering is one-way.** A crate may depend only on crates listed for it in
    `docs/01-architecture.md` → "Dependency matrix". `cargo xtask layers`
@@ -71,6 +73,9 @@ roadmap task is ticked: check before assuming.
      sound.
    - Every `pub unsafe fn` has a `# Safety` doc section.
    - Raw OS declarations live only in `nadir-sys`.
+   - This rule covers the workspace's own crates. First-party crates from
+     outside it, such as Ferrolua's, may contain `unsafe` (ADR-0083,
+     ADR-0084), which `cargo xtask unsafe-audit` does not read.
 4. **Platform `cfg` lives in a few places only.** `#[cfg(target_os = ...)]`
    appears only in `nadir-sys`, `nadir-platform`, the `nadir-gfx`
    backend selection, and `xtask` packaging code. Game-facing APIs are

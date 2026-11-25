@@ -38,35 +38,53 @@ intended path.
 
 ## First-party crates from outside the workspace
 
-Ferrolua (<https://github.com/jabbott-iii/Ferrolua>), the user's own language,
-derived from Lua 5.5, and its interpreter in Rust, will run Nadir's scripts
-from M13.1 (ADR-0079, ADR-0082). Its crates are first party, not third-party
-exceptions, so they skip the exception test below, for as long as each of
-these holds:
+A crate from outside the workspace is first party, not a third-party
+exception, so it skips the exception test below, for as long as each of these
+holds (ADR-0084: every crate that only the user's accounts own and publish):
 
-- The user is the crate's only owner on crates.io (`cargo owner --list`), and
-  its source is the Ferrolua repository.
-- Its own dependency tree holds only Ferrolua's crates.
-- It sets `unsafe_code = "forbid"`. Nadir links Ferrolua's interpreter only,
-  never its just-in-time (JIT) compiler, which needs `unsafe`; turning the JIT
-  on needs an ADR of its own.
+- Every owner crates.io lists for it (`cargo owner --list`) is the user's
+  account, `jabbott-iii`, with no team. The registry decides, not the
+  `authors` or `repository` fields of its manifest, which anyone can type.
+- Its source repository is under <https://github.com/jabbott-iii>.
+- Its own dependency tree holds only first-party crates.
 
-If one stops holding, ADR-0079 is revisited before that crate is updated. They
-come in as approved crates do (see step 3 of "Exception process"):
+A crate may use `unsafe` and still count (ADR-0083: ownership, the source and
+the tree decide). If a condition stops holding, the crate counts as third
+party, and the ADR that lists it is revisited before that crate is updated.
 
-- Only `nadir-script`'s manifest names them, from crates.io, with exact
-  requirements (`= x.y.z`). No Git or path dependency is used: Nadir's own
-  crates.io release could not ship one.
-- Each is listed in `xtask/deps-allowlist.txt` as `name version ADR-0079`.
-- An update is a change of its own. It runs `cargo tree` before and after, and
-  rereads the manifests of the crates Nadir links for `unsafe` and outside
-  dependencies, since `cargo xtask unsafe-audit` reads only this repository's
-  files.
-- Each game package's `LICENSES.txt` lists Ferrolua's license and copyright
-  notice (`docs/05-release.md`).
+The first are Ferrolua's crates (<https://github.com/jabbott-iii/Ferrolua>),
+the user's own language, derived from Lua 5.5, and its interpreter in Rust,
+which will run Nadir's scripts from M13.1 (ADR-0079, ADR-0082). They go in
+`nadir-script`'s manifest alone. Nadir links Ferrolua's interpreter only,
+never its just-in-time (JIT) compiler, which the `ferrolua` crate brings in
+only with its `jit` feature, off by default; turning the JIT on needs an ADR
+of its own.
 
-Every other crate from outside the workspace, the user's other crates
-included, is third party.
+First-party crates come in this way, without the exception process below:
+
+- The user approves each one in the change that adds it, which needs no ADR.
+  That change names it in the row of each crate that uses it, in the
+  dependency matrix (`docs/01-architecture.md`), and in the list below.
+  Review checks the matrix, since `cargo xtask layers` reads only the edges
+  between workspace crates.
+- Each comes from crates.io, with an exact requirement (`= x.y.z`). No Git or
+  path dependency is used: Nadir's own crates.io release could not ship one.
+- Each is listed in `xtask/deps-allowlist.txt` as `name version ADR-NNNN`,
+  with ADR-0079 for Ferrolua's crates and ADR-0084 for the rest.
+- Its `rust-version` is no newer than the Rust that `rust-toolchain.toml`
+  pins; if it is, Nadir's toolchain moves first, in a commit of its own.
+- An addition or an update is a change of its own. It runs `cargo tree` before
+  and after, rereads the manifests of the crates Nadir links for outside
+  dependencies, and lists each crate that allows `unsafe` in its description
+  and in the list below, since `cargo xtask unsafe-audit` reads only this
+  repository's files.
+- Each game package's `LICENSES.txt` lists the license and copyright notice of
+  each one the game links (`docs/05-release.md`).
+
+First-party crates in use, each with the workspace crates that use it and
+whether it allows `unsafe`: none yet. M13.1 adds Ferrolua's.
+
+Every other crate from outside the workspace is third party.
 
 ## The exception test
 
