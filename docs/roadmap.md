@@ -6828,16 +6828,19 @@ studio.
 
 ---
 
-## M13 — Lua scripting
+## M13 — Scripting
 
-Games will write gameplay in Lua 5.5 scripts, run inside the engine by
-Ferrolua, the user's own Lua in safe Rust
-(<https://github.com/jabbott-iii/Ferrolua>), so that nobody installs Lua.
-ADR-0075, accepted on 2026-11-22: the user asked for Lua with its
-interpreter included, and a place before the release. ADR-0079, accepted
-on 2026-11-24: the user chose Ferrolua, taken from crates.io as
+Games will write gameplay in scripts, run inside the engine by Ferrolua,
+the user's own language and interpreter in safe Rust
+(<https://github.com/jabbott-iii/Ferrolua>), so that nobody installs
+anything. ADR-0075, accepted on 2026-11-22: the user asked for Lua with
+its interpreter included, and a place before the release. ADR-0079,
+accepted on 2026-11-24: the user chose Ferrolua, taken from crates.io as
 first-party code behind `nadir-script`, over an interpreter written in
-Nadir, and with it Lua 5.5 in place of 5.4. Its number comes after the
+Nadir, and with it Lua 5.5 in place of 5.4. ADR-0082, accepted the same
+day: the scripts are in Ferrolua's own language, derived from Lua 5.5
+with Python's operators and indexes from 0, which Ferrolua's ADR-0023
+made its language in place of Lua 5.5. Its number comes after the
 studio's, but its work comes before the release: M13.1 starts after M9.7
 and a Ferrolua release that meets ADR-0079's requirements, and M11.1
 (packaging) waits for M13.8.
@@ -6849,14 +6852,18 @@ M13.3 (the virtual machine and the garbage collector) and M13.4 (the
 standard library) were removed, and their IDs are not reused. ADR-0079
 lists what Ferrolua must give Nadir.
 
-- **The language** is the one the Lua 5.5 reference manual
-  (<https://www.lua.org/manual/5.5/>) defines, as Ferrolua implements it,
-  but for what ADR-0075 leaves out: the `io`, `os`, `package`, and
-  `debug` libraries (but `debug.traceback`), `dofile`, `loadfile`,
-  `string.dump`, and binary chunks. That way a script reaches only what
-  the engine gives it. Finalizers (`__gc`) and weak tables (`__mode`)
-  stay, with loops collected at one point of each tick, and
-  `collectgarbage` answers only `"count"` (ADR-0081).
+- **The language** is Ferrolua's (ADR-0082): the statements, values,
+  tables, metatables, closures, coroutines, and standard library of Lua
+  5.5, with Python's operators, `in`, `is`, chained comparisons, and
+  conditional expressions, no conversion between strings and numbers,
+  and indexes from 0 with ranges that leave out their end, as Ferrolua's
+  ADR-0023 and ADR-0024 define them and the Ferrolua release Nadir pins
+  implements them. It goes without what ADR-0075 leaves out: the `io`,
+  `os`, `package`, and `debug` libraries (but `debug.traceback`),
+  `dofile`, `loadfile`, `string.dump`, and binary chunks. That way a
+  script reaches only what the engine gives it. Finalizers (`__gc`) and
+  weak tables (`__mode`) stay, with loops collected at one point of each
+  tick, and `collectgarbage` answers only `"count"` (ADR-0081).
 - **Deterministic:** a table's keys are visited in the same order in
   every run from the same game seed, which sets the hash seed (ADR-0080);
   `math.random` draws from a seeded `Pcg32` (the engine's random number
@@ -6888,8 +6895,12 @@ lists what Ferrolua must give Nadir.
     alike on all six targets. Ferrolua's ADR-0021, accepted the same day,
     plans both: an instruction limit for each call from the host,
     finalizers included, and bytes counted by fixed charges rather than
-    by the target. Requirements 10 (no JIT linked) and 11 (Nadir's six
-    targets), its new syntax in every chunk, and the date of its first
+    by the target. Its ADR-0022 answers requirement 10 (no JIT linked):
+    the JIT is an optional `jit` feature of the `ferrolua` crate, off by
+    default. Its ADR-0023, accepted the same day, then made its
+    language its own, with Python's operators, 0-based indexes and no
+    Lua 5.5 mode; ADR-0082 (proposed) decides what Nadir offers.
+    Requirement 11 (Nadir's six targets) and the date of its first
     crates.io release (its M12) are still open.
   - Depends: M9.7, and a Ferrolua release on crates.io that meets
     ADR-0079's requirements
@@ -6905,9 +6916,11 @@ lists what Ferrolua must give Nadir.
       crates.io by exact versions (`= x.y.z`), each listed in
       `xtask/deps-allowlist.txt` with ADR-0079
       (`docs/02-dependency-policy.md`, "First-party crates from outside
-      the workspace"). If they need a newer Rust than
-      `rust-toolchain.toml` pins, Nadir's toolchain moves first, in a
-      commit of its own.
+      the workspace"). `ferrolua`'s `jit` feature stays off, and no
+      feature of `nadir-script` turns it on, since `cargo xtask test`
+      builds with `--all-features` (Ferrolua's ADR-0022). If they need a
+      newer Rust than `rust-toolchain.toml` pins, Nadir's toolchain
+      moves first, in a commit of its own.
     - `cargo xtask deps`'s report, and the demo page's count of
       third-party crates (`cargo xtask site`), count Ferrolua's crates
       as first party; `SECURITY.md` points to Ferrolua's security policy
@@ -6921,16 +6934,21 @@ lists what Ferrolua must give Nadir.
       collection runs off, a call that collects loops under a budget of
       its own, and a `collectgarbage` that answers only `"count"`
       (ADR-0081). No Ferrolua type appears in its public API.
-    - `docs/subsystems/script.md`: the design of ADR-0075, ADR-0079 and
-      ADR-0080,
-      the limits and their defaults, the Ferrolua version Nadir pins, and
-      every difference from the Lua 5.5 manual, Ferrolua's included,
-      which each task of M13 keeps up to date.
+    - `docs/subsystems/script.md`: the design of ADR-0075, ADR-0079,
+      ADR-0080, ADR-0081 and ADR-0082, the limits and their defaults, the
+      Ferrolua version Nadir pins, every difference from Ferrolua's
+      language, and how that language differs from Lua 5.5, for authors
+      who know Lua, which each task of M13 keeps up to date.
     - The fuzz target `lua`, with seeds in `fuzz/corpus/lua/`: it
       compiles each input through `nadir-script`, and runs what compiles
       under a small budget and memory cap.
-  - Accept: tests through `nadir-script` of what Nadir needs from
-    Ferrolua (ADR-0079, ADR-0080, ADR-0081): a table's keys visited in
+    - Before work starts, the names that say Lua (the cook's
+      `assets/scripts/**/*.lua`, the console's `lua` command, the `lua`
+      fuzz target and `fuzz/corpus/lua/`, and `slime.lua` below) take
+      the name and extension that Ferrolua settles, if they differ
+      (ADR-0082).
+  - Accept: tests through `nadir-script` of what Nadir needs from Ferrolua
+    (ADR-0079, ADR-0080, ADR-0081, ADR-0082): a table's keys visited in
     the same order in two runs with one seed, for string keys and for
     tables and entities used as keys, and `tostring` of a table the same
     in both; `math.random` the same from the same seed; a runaway loop, a
@@ -6939,12 +6957,13 @@ lists what Ferrolua must give Nadir.
     `pcall`; an input nested 100,000 levels deep refused with an error,
     not a stack overflow; a walk of `_G` that finds no way to a file, a
     process, the clock, or the environment; `collectgarbage` that answers
-    `"count"` and raises an error naming any other option; a collection
-    of loops whose finalizers stop at its budget; a lexical and a syntax
-    error that each name the chunk, the line, and the token, as Lua's do
-    (`slime.lua:3: malformed number near '0x'`); no input panics;
-    `cargo xtask deps` passes with Ferrolua's crates listed; the crate
-    passes `cargo xtask crates`.
+    `"count"` and raises an error naming any other option; a collection of
+    loops whose finalizers stop at its budget; a lexical and a syntax
+    error that each name the chunk, the line, and the token, in Ferrolua's
+    wording, which is PUC-Rio's where the two languages share the
+    construct (`slime.lua:3: malformed number near '0x'`); no input
+    panics; `cargo xtask deps` passes with Ferrolua's crates listed and no
+    `ferrolua-jit` in `Cargo.lock`; the crate passes `cargo xtask crates`.
   - Verify: `cargo test -p nadir-script`;
     `cargo xtask fuzz-smoke --target lua`; `cargo xtask deps`;
     `cargo xtask layers`; `cargo xtask crates`

@@ -30,9 +30,10 @@ them.** A subsystem is not "done" until the sandbox uses it.
   (ADR-0070).
 - Networking/multiplayer. Not in scope; it would require a new ADR because it
   changes simulation determinism requirements.
-- Scripting languages other than Lua. Gameplay is Rust, Lua 5.5 scripts
-  (run by Ferrolua, the user's own Lua in Rust, which ships inside the
-  engine), and data files (ADR-0075, ADR-0079, M13).
+- Scripting languages other than Ferrolua's. Gameplay is Rust, scripts in
+  Ferrolua's language, derived from Lua 5.5 (run by Ferrolua, the user's
+  own interpreter in Rust, which ships inside the engine), and data files
+  (ADR-0075, ADR-0079, ADR-0082, M13).
 - Native Wayland before the backlog's M14+ (ADR-0009).
 
 ## Performance budgets
@@ -89,7 +90,7 @@ S ≈ <1k lines, M ≈ 1–3k, L ≈ 3–6k, XL ≈ 6k+.
 | `assets` | M | Handles, storage, VFS, pack format, hot reload, worker pool |
 | `collision` | M | Shapes, spatial hash, move-and-slide, queries, pathfinding |
 | `scene` | M | Reflection macro, prefabs, level import, saves, states |
-| `script` | S | A wrapper over Ferrolua, the user's own Lua 5.5 in Rust: a state with its caps, seeded random numbers, the engine's log and tracebacks, and tests of what Nadir needs from it; Ferrolua builds the interpreter (ADR-0079) |
+| `script` | S | A wrapper over Ferrolua, the user's own language and interpreter in Rust, derived from Lua 5.5: a state with its caps, seeded random numbers, the engine's log and tracebacks, and tests of what Nadir needs from it; Ferrolua builds the interpreter (ADR-0079) |
 | `debug` | L | Immediate-mode UI, inspector, console, profiler |
 | `cook` | M | Atlas packer, importers, pack writer, incremental cache |
 | `xtask` + harnesses | M | CI checks, golden tests, fuzz smoke, packaging |
@@ -108,6 +109,6 @@ binding gets layout tests.
 | Apple removes OpenGL | Metal backend at M10; RHI designed for both from day one; pull M10 earlier if Apple announces removal |
 | Wayland-only systems without XWayland | Rare today on desktop distros; native Wayland in backlog (M14+) with a written trigger condition |
 | Scope creep (editor, render graph, a second scripting language) | Explicit non-goals; anything new needs an ADR |
-| Ferrolua is slower than the reference C interpreter, differs from it, misses one of Nadir's requirements, or is not on crates.io when M13.1 is due | Ferrolua's conformance scripts, checked against PUC-Rio Lua 5.5's output; Nadir's own tests of ADR-0079's requirements through `nadir-script`; every difference listed in `docs/subsystems/script.md`; exact pins, each update a change of its own; a scripting budget set in M13.8 and measured on min-spec in M11.5; the reference C interpreter as the register's fallback (ADR-0075, ADR-0079) |
+| Ferrolua is slower than the reference C interpreter, misses one of Nadir's requirements, changes its language again (ADR-0082), or is not on crates.io when M13.1 is due | Ferrolua's conformance scripts, each checked against the output PUC-Rio Lua 5.5 gives for its Lua twin; Nadir's own tests of ADR-0079's requirements through `nadir-script`; every difference listed in `docs/subsystems/script.md`; exact pins, each update a change of its own; a scripting budget set in M13.8 and measured on min-spec in M11.5; the reference C interpreter as the register's fallback (ADR-0075, ADR-0079) |
 | Untrusted file parsing (saves, mods, downloaded content) | Runtime loads only simple formats; every parser fuzzed; size and allocation caps; Lua scripts, which are code, run with no access to files, the OS or the clock, under memory and time caps that also bound a table lookup's probe steps, so crafted keys cannot stall a tick, and their compiler is fuzzed, in Ferrolua and through `nadir-script` (ADR-0075, ADR-0079, ADR-0080) |
 | Gamepad diversity | XInput, evdev and GameController cover mainstream pads; HID-level support is backlog |

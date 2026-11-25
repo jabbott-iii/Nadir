@@ -55,8 +55,9 @@ held up on:
 
 - **No third-party crates.** Do not add a crate from outside this
   workspace to any dependency table. The one exception is Ferrolua's
-  crates, a Lua 5.5 in Rust by Nadir's own author, in `nadir-script`'s
-  manifest alone (ADR-0079). If you think one is needed, say so on
+  crates, a language derived from Lua 5.5 and its interpreter in Rust,
+  by Nadir's own author, in `nadir-script`'s manifest alone (ADR-0079,
+  ADR-0082). If you think one is needed, say so on
   the issue, with the evaluation that
   [`docs/02-dependency-policy.md`](docs/02-dependency-policy.md)
   describes. `cargo xtask deps` enforces this.

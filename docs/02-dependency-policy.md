@@ -38,10 +38,11 @@ intended path.
 
 ## First-party crates from outside the workspace
 
-Ferrolua (<https://github.com/jabbott-iii/Ferrolua>), the user's own Lua 5.5
-in Rust, will run Nadir's Lua scripts from M13.1 (ADR-0079). Its crates are
-first party, not third-party exceptions, so they skip the exception test below,
-for as long as each of these holds:
+Ferrolua (<https://github.com/jabbott-iii/Ferrolua>), the user's own language,
+derived from Lua 5.5, and its interpreter in Rust, will run Nadir's scripts
+from M13.1 (ADR-0079, ADR-0082). Its crates are first party, not third-party
+exceptions, so they skip the exception test below, for as long as each of
+these holds:
 
 - The user is the crate's only owner on crates.io (`cargo owner --list`), and
   its source is the Ferrolua repository.
@@ -160,7 +161,7 @@ The **fallback** column is a pre-evaluated crate we would consider if the
 | 32 | Timestamps | Build | UTC civil date from `SystemTime` (days-to-civil algorithm) | `chrono`, `time` | Not expected |
 | 33 | Error plumbing | Build | Per-crate error enums | `anyhow`, `thiserror` | Not expected |
 | 34 | Byte casting (`Pod`) | Build | `unsafe trait Pod` in `nadir-gfx`, implemented only for primitives and their arrays | `bytemuck` | Not expected |
-| 35 | Scripting language (Lua 5.5) | Build | Ferrolua, the user's own Lua 5.5 in safe Rust, first party, from crates.io by exact pins behind `nadir-script`, shipped inside the game; its interpreter only, no JIT (ADR-0075, ADR-0079, M13) | The reference C Lua 5.5 (MIT), vendored; not evaluated yet | Ferrolua cannot meet one of ADR-0079's requirements, or the sandbox's scripts miss the scripting budget after optimization |
+| 35 | Scripting language (Ferrolua's, derived from Lua 5.5) | Build | Ferrolua, the user's own language and interpreter in safe Rust, first party, from crates.io by exact pins behind `nadir-script`, shipped inside the game; its interpreter only, no JIT (ADR-0075, ADR-0079, ADR-0082, M13) | The reference C Lua 5.5 (MIT), vendored, which runs Lua 5.5, not Ferrolua's language; not evaluated yet | Ferrolua cannot meet one of ADR-0079's requirements, or the sandbox's scripts miss the scripting budget after optimization |
 
 ## Enforcement
 

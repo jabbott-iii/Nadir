@@ -317,9 +317,9 @@
       "tasks": ["M11.5", "M11.6", "M11.7", "M11.8"]
     },
     {
-      "name": "Lua scripting",
+      "name": "Scripting",
       "area": "Simulation",
-      "summary": "Games will write gameplay in Lua 5.5, run by Ferrolua, a Lua interpreter in safe Rust by Nadir's own author, which ships inside the game, so nothing needs installing. Scripts will run on entities each tick, reach their components through reflection, stay within a memory cap and an instruction budget, replay exactly, and hot reload in development builds.",
+      "summary": "Games will write gameplay in Ferrolua, a scripting language by Nadir's own author, derived from Lua 5.5 with Python's operators and indexes from 0. Its interpreter, in safe Rust, ships inside the game, so nothing needs installing. Scripts will run on entities each tick, reach their components through reflection, stay within a memory cap and an instruction budget, replay exactly, and hot reload in development builds.",
       "tasks": ["M13.1", "M13.5", "M13.6", "M13.7", "M13.8"]
     }
   ]

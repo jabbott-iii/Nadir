@@ -27,8 +27,9 @@ roadmap task is ticked: check before assuming.
 - **Out of scope:** web/WASM, Android, iOS, consoles, 3D, networking.
 - **Built from the ground up:** zero third-party runtime crates. We write our
   own OS bindings, graphics backends, math, ECS, codecs, mixer, UI and tools.
-  Lua scripts will run on Ferrolua, the user's own Lua 5.5 in Rust, whose
-  crates count as first party (ADR-0079).
+  Scripts will run on Ferrolua, the user's own language and interpreter
+  in Rust, derived from Lua 5.5, whose crates count as first party
+  (ADR-0079, ADR-0082).
 
 ## Read before working
 

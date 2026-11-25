@@ -7199,7 +7199,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   superseded by ADR-0079: Lua 5.5, run by Ferrolua behind
   `nadir-script`. Its "no random hash seed" gives way to a seed the
   engine sets from the game's seed (ADR-0080), and its leaving out of
-  finalizers and weak tables to ADR-0081, which keeps both.
+  finalizers and weak tables to ADR-0081, which keeps both. ADR-0082
+  then makes the language Ferrolua's own, derived from Lua 5.5.
 - **Date:** 2026-11-22
 - **Context:**
   - The user asked for Lua as the engine's scripting language, with its
@@ -7811,6 +7812,10 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   engine sets from the game's seed, bounded probe steps, and hashing by
   handle. ADR-0081 replaces its requirement 7 and keeps finalizers and
   weak tables, with loops collected at one point of each tick.
+  Ferrolua's ADR-0022 answers its requirement 10: the JIT is an
+  optional `jit` feature of the `ferrolua` crate, off by default.
+  ADR-0082 replaces its Lua 5.5 with Ferrolua's own language, derived
+  from Lua 5.5, and reads requirement 9 in Ferrolua's wording.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0075 (Lua 5.4 scripting, run by an interpreter of our own in safe
@@ -8195,7 +8200,8 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   alike on every target. It replaces ADR-0079's requirement 7.
   Ferrolua's side: its ADR-0021 counts the instruction limit for each
   call from the host, a collection's finalizers included, and counts
-  bytes by fixed charges, the same on every target.
+  bytes by fixed charges, the same on every target. ADR-0082 makes the
+  language Ferrolua's own; what this record keeps and leaves out stays.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0075 left finalizers (`__gc`) and weak tables (`__mode`) out of
@@ -8313,3 +8319,119 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   - Ferrolua cannot charge `Lua::collect`'s finalizers to a budget, or
     cannot count bytes alike on Nadir's six targets;
   - or a game needs `collectgarbage` beyond `"count"`.
+
+## ADR-0082 — M13: scripts in Ferrolua's own language, with Python's operators and 0-based indexes, in place of Lua 5.5; what ADR-0075 and ADR-0081 leave out, and ADR-0079's requirements, stay
+
+- **Status:** Accepted: on 2026-11-24 the user accepted the agent's
+  proposal as drafted.
+- **Date:** 2026-11-24
+- **Context:**
+  - ADR-0079 chose Ferrolua to run Nadir's scripts, and with it Lua
+    5.5: the language Nadir offers is the one the Lua 5.5 reference
+    manual defines, as Ferrolua implements it, without what ADR-0075
+    leaves out. Its requirement 9 asks for errors that name the chunk,
+    the line and the token, as PUC-Rio's do, and it is to be revisited
+    when Ferrolua moves to a Lua release after 5.5. ADR-0081 keeps
+    finalizers and weak tables, and calls the result Lua 5.5 without
+    four libraries and a few functions.
+  - On 2026-11-24, Ferrolua's ADR-0023, accepted that day, made
+    Ferrolua's language its own, derived from Lua 5.5, with no mode that
+    runs Lua 5.5 scripts unchanged:
+    - Python's operators: `**` raises to a power, `!=` tests
+      inequality, `^` is bitwise XOR, `+` also joins strings, and Lua's
+      `..`, `~=` and binary `~` are gone;
+    - Python's `in`, `not in`, `is`, `is not`, chained comparisons and
+      `x if c else y`;
+    - no conversion between strings and numbers by an operator or a
+      library function, so `"10" + 1` raises an error;
+    - indexes from 0, with -1 the last, and ranges without their end, so
+      `for i = 0, n do` runs n times.
+  - Its ADR-0024, still proposed, settles what those choices leave
+    open: only `nil` and `false` are false, as in Lua; `is` is a
+    reserved word; no float stands in for an integer; and line numbers,
+    argument numbers and stack levels still count from 1. Whether its
+    files keep the `.lua` extension is still the owner's to decide.
+  - Ferrolua's language keeps Lua's statements, values, tables,
+    metatables, closures, coroutines and standard library apart from
+    those changes, so ADR-0079's other requirements don't depend on it:
+    key order, replaceable library functions, ids from `tostring`, the
+    caps, no recursion on the Rust stack, collection by bytes, safe
+    Rust, the six targets and fuzzing. Ferrolua's ADR-0021 and ADR-0022
+    answer ADR-0081's two requests and requirement 10.
+  - Nadir has no script yet: no task of M13 is ticked, the repository
+    holds no `.lua` file, and `nadir-script` does not exist.
+- **Decision** (the agent's proposal, which the user accepted as drafted
+  on 2026-11-24):
+  - **Scripts are in Ferrolua's language,** as Ferrolua's ADR-0023
+    defines it, with the details its ADR-0024 settles, as the Ferrolua
+    release Nadir pins implements it. Nadir leaves out what ADR-0075 and
+    ADR-0081 leave out: the `io`, `os`, `package` and `debug` libraries
+    (but `debug.traceback`), `dofile`, `loadfile`, `string.dump` and
+    binary chunks, with `collectgarbage` answering only `"count"`.
+    Finalizers and weak tables stay, collected as ADR-0081 schedules.
+  - **ADR-0079's requirements stay,** with requirement 9 read as:
+    errors name the chunk, the line and the token, in Ferrolua's
+    wording, which is PUC-Rio's wherever the two languages share the
+    construct.
+  - **A Ferrolua release that changes the language** is a change of
+    Nadir's own, as every Ferrolua update is (ADR-0079): it updates
+    `docs/subsystems/script.md`, the sandbox's scripts and the `lua`
+    fuzz target's seeds in the same change.
+  - **Names wait for Ferrolua's.** The names in Nadir's plan that say
+    Lua (the cook's `assets/scripts/**/*.lua`, the console's `lua`
+    command, the `lua` fuzz target) follow the name and extension that
+    Ferrolua settles; M13.1 renames them, before work starts, if
+    Ferrolua's differ. Where Nadir's docs say Lua 5.5 for what Nadir
+    offers, they say Ferrolua's language instead.
+  - **The non-goal** "Scripting languages other than Lua" in
+    `docs/00-overview.md` becomes "other than Ferrolua's".
+- **Consequences:**
+  - Good:
+    - Nadir keeps Ferrolua, and the interpreter's work stays off Nadir's
+      roadmap, as ADR-0079 planned. No script exists to port.
+    - A game author who knows Python reads the operators, indexes and
+      ranges as written, and a string that holds a number cannot change
+      a sum unnoticed.
+    - A list the engine hands a script keeps the indexes of its Rust
+      slice, so the script API (M13.6) shifts no index.
+  - Bad:
+    - Nadir's scripts are not Lua. Lua tutorials and libraries need
+      porting, and lua-language-server, StyLua and luacheck misread the
+      files; editor support waits for Ferrolua's own tools (its M7 and
+      M9).
+    - The language's details are still moving (its ADR-0024 is
+      proposed, and the extension open), so M13.1's spec and tests wait
+      for them, as they already wait for a Ferrolua release.
+    - Lua code ported in that squares with `x ^ 2` computes an XOR, with
+      no error when `x` is an integer. Ferrolua's linter reports it (its
+      M7.2); Nadir runs no linter on scripts yet.
+    - "Lua" in Nadir's docs, the demo page's feature list and the
+      roadmap reads wrong until each is renamed.
+  - Follow-up:
+    - ADR-0079's and ADR-0081's status lines point to this record.
+    - Lua 5.5 becomes Ferrolua's language in `AGENTS.md`,
+      `CONTRIBUTING.md`, `docs/00-overview.md` (the non-goal, the
+      `script` row and the Ferrolua risk), `docs/01-architecture.md`,
+      `docs/02-dependency-policy.md`, the Lua scripting feature's name
+      and summary in `docs/features.jsonc`, and M13's opening, its
+      language bullet and M13.1 in `docs/roadmap.md`.
+    - M13.1's example error, `slime.lua:3: malformed number near
+      '0x'`, takes Ferrolua's extension and wording.
+- **Alternatives considered:**
+  - Ask Ferrolua for a Lua 5.5 mode: its ADR-0023 turned down a mode
+    per chunk, because every table passed between the two modes needs
+    its integer keys shifted in the VM, the JIT and every library
+    function.
+  - Pin a Ferrolua release from before ADR-0023: none exists. Ferrolua
+    has no code yet, and its first release (its M12) comes after the
+    change.
+  - Go back to Nadir's own Lua 5.5 interpreter, as ADR-0075 planned:
+    Nadir keeps Lua, but takes back the XL interpreter that ADR-0079
+    moved to Ferrolua (the removed M13.2 to M13.4).
+  - Another Lua 5.5 interpreter: rule 1 allows no third-party crate, and
+    none of the dependency policy's reasons applies.
+  - No scripting: gameplay stays in Rust and data files, and M13 is
+    dropped, with its hot-reloaded gameplay code.
+- **Revisit when:** Ferrolua adds a mode that runs Lua 5.5, changes its
+  language again in a release Nadir would pin, or a game needs a Lua
+  library it cannot port.
