@@ -6877,10 +6877,13 @@ lists what Ferrolua must give Nadir.
     requirements: its ADR-0018 (a loop collector run by the bytes
     allocated) and ADR-0019 (object IDs, never addresses, in `tostring`)
     answer requirements 8 and 3, and its ADR-0020 with
-    `Options::hash_seed` answers requirement 1 (ADR-0080). Requirements 7
-    (states without finalizers and weak tables), 10 (no JIT linked) and
-    11 (Nadir's six targets), its new syntax in every chunk, and the date
-    of its first crates.io release (its M12) are still open.
+    `Options::hash_seed` answers requirement 1 (ADR-0080). Its probe steps
+    count against the instruction limit (the user's choice, the same
+    day), so the budget of each call from the engine bounds a table
+    operation too. Requirements 7 (states without finalizers and weak
+    tables), 10 (no JIT linked) and 11 (Nadir's six targets), its new
+    syntax in every chunk, and the date of its first crates.io release
+    (its M12) are still open.
   - Depends: M9.7, and a Ferrolua release on crates.io that meets
     ADR-0079's requirements
   - Do:
