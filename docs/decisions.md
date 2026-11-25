@@ -8193,6 +8193,9 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
   point, give that collection's finalizers a budget of the engine's, let
   `collectgarbage` answer only `"count"`, and ask Ferrolua to count bytes
   alike on every target. It replaces ADR-0079's requirement 7.
+  Ferrolua's side: its ADR-0021 counts the instruction limit for each
+  call from the host, a collection's finalizers included, and counts
+  bytes by fixed charges, the same on every target.
 - **Date:** 2026-11-24
 - **Context:**
   - ADR-0075 left finalizers (`__gc`) and weak tables (`__mode`) out of

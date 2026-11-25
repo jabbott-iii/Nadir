@@ -6885,7 +6885,7 @@ lists what Ferrolua must give Nadir.
     operation too. ADR-0081 replaced requirement 7 the same day: Nadir
     keeps finalizers and weak tables, and asks instead that `Lua::collect`
     charge its finalizers to that call's budget, and that bytes count
-    alike on all six targets. Ferrolua's ADR-0021, proposed the same day,
+    alike on all six targets. Ferrolua's ADR-0021, accepted the same day,
     plans both: an instruction limit for each call from the host,
     finalizers included, and bytes counted by fixed charges rather than
     by the target. Requirements 10 (no JIT linked) and 11 (Nadir's six
