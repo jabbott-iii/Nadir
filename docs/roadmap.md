@@ -6866,13 +6866,15 @@ development environment (IDE) in Rust, will be the IDE integrated with
 the engine. Nadir will use it for two things: writing a game's scripts,
 and modding games, that is, making mods (a player's own changes and
 additions to a game that has shipped). Tidepool is at version 0.1, and
-its own plugins are to run on Lunaferra too. No task in this roadmap
-builds the integration yet, and no decision record sets what it covers
-or how Tidepool and the engine connect. Mods need decisions of their own
-as well. Today a release build reads only its pack, as ADR-0041 (every
-cook writes `game.kpak`, which release builds read) decided, and hot
-reload runs only in development builds (ADR-0042); each record names
-mods as a reason to revisit it.
+its own plugins are to run on Lunaferra too. ADR-0087, accepted the
+same day, keeps Tidepool a program of its own, outside the workspace
+and the game, and has it reach Nadir's scripts through Lunaferra's
+language server and debug adapter. It leaves the integration's design
+and mods to records of their own. The backlog lists both, with their
+triggers, and no task builds either yet. Today a release build reads
+only its pack, as ADR-0041 (every cook writes `game.kpak`, which release
+builds read) decided, and hot reload runs only in development builds
+(ADR-0042); each record names mods as a reason to revisit it.
 
 - **The language** is Lunaferra's (ADR-0082, ADR-0085): the statements,
   values, tables, metatables, closures, coroutines, and standard library
@@ -7172,6 +7174,8 @@ development builds.
 | Opt-in crash upload | Volume of player bug reports; requires a privacy review |
 | Native file watchers (inotify, FSEvents, `ReadDirectoryChangesW`) | Polling cost on large asset trees |
 | Play-in-editor tooling: the game running inside the studio's level editor, rather than as the demo it launches (M12) | After M12, if level iteration is the bottleneck |
+| Tidepool's integration with the engine (ADR-0087): a declaration file of the script API for Lunaferra's language server, written by the cook or by `nadir-script`; whether a development build lets Lunaferra's debug adapter attach to its scripts, over what channel, and who may connect; whether Tidepool plugins run the cook, the game and the console; and what Tidepool and the studio each do. A decision record of its own comes first | M13.6 (the script API) is ticked, and Lunaferra's language server (its M9) and Tidepool's LSP client (its M6.1) both work |
+| Mods: a release build reads only its pack (ADR-0041), so a player's mods have no way in. A decision record of its own (ADR-0087) settles which files a release build reads from outside its pack, where mods live and in what order they load, what a mod may add or replace, whether a mod's scripts get caps of their own beside ADR-0075's, and whether mods become a goal in the overview | M13.8 is ticked, so a mod's scripts have a scripting budget to run under; or a game asks for mods sooner |
 | ECS change detection | A profiled need (e.g. render extract of static sprites) |
 | Lock-free audio command queue | Measured `try_lock` contention |
 | Localization pipeline (string tables, plurals) | Before the first non-English release |

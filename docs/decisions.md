@@ -8891,3 +8891,148 @@ new ADR and set the old one's status to `Superseded by ADR-NNNN`.
 - **Revisit when:** Lunaferra accepts, changes or turns down the early
   release; Lunaferra's M4 is done; or M9.7 is ticked with no Lunaferra
   release on crates.io that meets ADR-0079's requirements.
+
+## ADR-0087 — Tidepool, the user's own IDE, is the IDE integrated with Nadir for a game's scripts and for mods; it stays a program of its own, and the integration's design and mods each wait for a record of their own
+
+- **Status:** Accepted: the user chose Tidepool as the IDE on 2026-11-25,
+  asked for a record the same day, and accepted the agent's draft of
+  the rest as written: what the integration goes through, and what it
+  leaves to later records.
+- **Date:** 2026-11-25
+- **Context:**
+  - As in ADR-0085, a bare `ADR-NNNN` or `M<n>` is Nadir's. Lunaferra's
+    and Tidepool's are always called theirs.
+  - On 2026-11-25 the user asked that Nadir's docs say Tidepool will be
+    the IDE integrated with the engine, for scripting and for modding
+    games. A dated note at the top of M13 in `docs/roadmap.md` records
+    it. A mod is a player's own change or addition to a game that has
+    shipped: new levels, sprites, sounds, or scripts.
+  - Tidepool (<https://github.com/jabbott-iii/Tidepool>) is the user's
+    own integrated development environment (IDE) in Rust, with no
+    third-party crates, at version 0.1. Its roadmap plans the clients
+    an editor needs to work with outside tools:
+    - a client for the Language Server Protocol (LSP), by which an
+      editor asks a separate program, a language server, for
+      completion, errors as you type, and the like (its M6.1, first for
+      rust-analyzer);
+    - a client for the Debug Adapter Protocol (DAP), the same idea for
+      breakpoints, stepping, and variables (its M13.1);
+    - and plugins written in Lunaferra, run inside Tidepool (its M15
+      and ADR-0073).
+
+    Its roadmap does not mention Nadir.
+  - Lunaferra's roadmap plans the programs those clients would talk to:
+    - `lunaferra lsp`, a language server with completion, diagnostics as
+      you type, hover, navigation, rename, and formatting (its M9);
+    - declaration files written from a host's API, so that the type
+      checker and the language server know the functions a host such
+      as Nadir gives its scripts (its M6.12);
+    - and `lunaferra dap`, a debug adapter for scripts it launches or
+      that run inside a host (its M10).
+
+    None is built yet, and all come after the early release of the
+    crates Nadir links, which ADR-0086 asks Lunaferra for. ADR-0082
+    (Nadir's scripts are in Lunaferra's language) already recorded that
+    editor support for them waits for Lunaferra's tools.
+  - Nadir keeps "a general-purpose editor" among its non-goals in
+    `docs/00-overview.md`. ADR-0012 leaves levels to LDtk and sprites to
+    Aseprite, and ADR-0070 plans the studio (M12), Nadir's development
+    GUI, which manages assets, edits LDtk projects, and launches the
+    game as a demo. The studio reads the demo's records from the child
+    process's standard output and sends its settings on standard input,
+    in a format of Nadir's own (M12.4).
+  - Scripts are to be cooked assets (M13.5), reach the engine through
+    the script API (M13.6), and hot reload in `cargo dev`, with a
+    console command that runs a line of script (M13.7). None of M13 is
+    built.
+  - No task builds mods. A release build reads only its pack,
+    `game.kpak` (ADR-0041), and hot reload runs only in development
+    builds (ADR-0042); each record names mods as a reason to revisit
+    it. ADR-0075 (Lua scripting, sandboxed) already treats a mod's
+    scripts as untrusted code: they reach no files, OS, or clock, and
+    run under memory and time caps.
+- **Decision** (the user chose Tidepool on 2026-11-25, and accepted the
+  agent's proposal for the rest as drafted the same day):
+  - **Tidepool is the IDE.** Nadir's docs name Tidepool as the IDE for
+    writing a game's scripts and for making mods, and Nadir plans its
+    editor integration for Tidepool. Scripts stay text files that any
+    editor opens.
+  - **A program of its own.** Tidepool stays outside Nadir's workspace
+    and outside a shipped game. No Nadir crate depends on a Tidepool
+    crate, and a game ships nothing of Tidepool's, so the dependency
+    policy and `cargo xtask deps` do not change. The non-goal of a
+    general-purpose editor stands, and the studio gains no script
+    editor.
+  - **Through Lunaferra's tools and the standard protocols.** Editing
+    goes through Lunaferra's language server and debugging through its
+    debug adapter, each over the protocol Tidepool's clients speak, not
+    over a protocol of Nadir's own. Nadir's part is what only the
+    engine knows, starting with a declaration file of its script API
+    for the language server.
+  - **Left to later records.** This record decides neither how the
+    integration works nor what a mod is:
+    - The integration's record, written when its task is planned: what
+      writes the declaration file, and when (the cook, or
+      `nadir-script` from the API the engine installs); whether a
+      development build lets a debug adapter attach to its scripts, over
+      what channel, and who may connect; whether a Tidepool plugin runs
+      Nadir's commands, such as the cook, the game, and the console; and
+      what Tidepool and the studio each do.
+    - The mods' record: whether a release build reads files from
+      outside its pack, and which; where mods live and in what order
+      they load; what a mod may add or replace; whether a mod's scripts
+      get caps of their own; and whether mod support becomes a goal in
+      the overview, which is the user's to change.
+- **Consequences:**
+  - Good:
+    - Game authors and modders get one IDE named in the docs, from the
+      author of the language and its tools, so the editor, the language
+      server, and the debugger can change together.
+    - Nadir writes no editor and no editing protocol of its own. It
+      keeps its non-goal, and its own work is the declaration file and
+      whatever a debug channel needs.
+    - The protocols are standard, so another editor with an LSP or DAP
+      client can use Lunaferra's tools on Nadir's scripts too, though
+      Nadir tests only Tidepool.
+  - Bad:
+    - The plan rests on two other repositories, and nothing in it is
+      built: Tidepool's clients (its M6.1 and M13.1) and Lunaferra's
+      tools (its M6.12, M9 and M10). Until they exist, Nadir's scripts
+      have no editor support beyond plain text.
+    - Tidepool's roadmap does not mention Nadir. Its side of the plan is
+      still to be written.
+    - Debugging a script inside a running game needs a channel into a
+      development build. That channel is new input to defend, and it
+      may mean linking more of Lunaferra in `nadir-script`, each crate
+      approved and pinned as ADR-0079 requires.
+    - The docs name modding as a purpose before Nadir decides to support
+      mods. Until the mods' record, the M13 note could read as a promise.
+  - Follow-up:
+    - Nadir, done in the change that accepted this record: M13's note in
+      `docs/roadmap.md` cites it; the editor non-goal in
+      `docs/00-overview.md` names Tidepool; and the backlog in
+      `docs/roadmap.md` has a row for each of the two later records,
+      with its trigger.
+    - Tidepool, the user's: a note or a task in Tidepool's roadmap for
+      its side, if the user wants one.
+- **Alternatives considered:**
+  - An editor of Nadir's own, in the studio or on its own: the scope
+    trap ADR-0012 names, against the non-goal, and Tidepool already
+    plans the editor.
+  - No IDE named: any editor with an LSP client, once Lunaferra's
+    language server exists. Nadir would integrate and test nothing, but
+    no editor would be checked against Nadir's scripts, and the user
+    asked for Tidepool.
+  - A protocol of Nadir's own between the game and Tidepool, like the
+    studio's channel (M12.4): it could reach engine features sooner, but
+    Nadir would keep a second protocol for what LSP and DAP already
+    cover, and Lunaferra's tools would not speak it.
+  - Tidepool inside Nadir, its crates shared or its editor in the
+    studio: Nadir's crates and releases would follow Tidepool's, and the
+    studio would become the general-purpose editor the non-goal rules
+    out.
+- **Revisit when:** M13.6 (the script API) is ticked, so the declaration
+  file can be written; Lunaferra releases `lunaferra lsp` or
+  `lunaferra dap`; Tidepool or Lunaferra drops or postpones a client or
+  a tool this plan rests on; or a game needs mods before the mods'
+  record exists.

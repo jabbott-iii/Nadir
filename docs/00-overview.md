@@ -27,7 +27,9 @@ them.** A subsystem is not "done" until the sandbox uses it.
 - A general-purpose editor. Levels are authored in LDtk; sprites in Aseprite
   or any PNG tool (ADR-0012). The studio planned for M12 manages assets,
   edits LDtk projects and launches the game as a demo for bug reports
-  (ADR-0070).
+  (ADR-0070). A game's scripts, and mods of a game, are to be written in
+  Tidepool, the user's own integrated development environment, a program
+  of its own that is to be integrated with the engine (ADR-0087).
 - Networking/multiplayer. Not in scope; it would require a new ADR because it
   changes simulation determinism requirements.
 - Scripting languages other than Lunaferra's. Gameplay is Rust, scripts in
