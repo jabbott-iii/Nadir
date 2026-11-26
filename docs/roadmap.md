@@ -6860,6 +6860,20 @@ M13.3 (the virtual machine and the garbage collector) and M13.4 (the
 standard library) were removed, and their IDs are not reused. ADR-0079
 lists what Lunaferra must give Nadir.
 
+**Note (2026-11-25, the user's choice):** Tidepool
+(<https://github.com/jabbott-iii/Tidepool>), the user's own integrated
+development environment (IDE) in Rust, will be the IDE integrated with
+the engine. Nadir will use it for two things: writing a game's scripts,
+and modding games, that is, making mods (a player's own changes and
+additions to a game that has shipped). Tidepool is at version 0.1, and
+its own plugins are to run on Lunaferra too. No task in this roadmap
+builds the integration yet, and no decision record sets what it covers
+or how Tidepool and the engine connect. Mods need decisions of their own
+as well. Today a release build reads only its pack, as ADR-0041 (every
+cook writes `game.kpak`, which release builds read) decided, and hot
+reload runs only in development builds (ADR-0042); each record names
+mods as a reason to revisit it.
+
 - **The language** is Lunaferra's (ADR-0082, ADR-0085): the statements,
   values, tables, metatables, closures, coroutines, and standard library
   of Lua 5.5, with Python's operators, `in`, `is`, chained comparisons,
